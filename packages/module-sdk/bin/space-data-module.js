@@ -6,6 +6,7 @@ import { readFile, writeFile } from "node:fs/promises";
 
 import {
   compileModuleFromSource,
+  loadComplianceConfig,
   protectModuleArtifact,
   resolveManifestFiles,
   validateArtifactWithStandards,
@@ -132,6 +133,15 @@ async function runCheck(argv) {
 
   const manifestPaths = await resolveManifestFiles(options.repoRoot);
   if (manifestPaths.length === 0) {
+    const loadedConfig = await loadComplianceConfig(options.repoRoot);
+    if (loadedConfig?.config?.allowEmpty === true) {
+      if (!options.json) {
+        console.log(
+          `No manifests configured under ${options.repoRoot}; allowEmpty=true so the check passes.`,
+        );
+      }
+      return 0;
+    }
     console.error(`No manifest.json files found under ${options.repoRoot}`);
     return 1;
   }
@@ -218,4 +228,3 @@ main(process.argv.slice(2))
     console.error(error.message);
     process.exitCode = 1;
   });
-
