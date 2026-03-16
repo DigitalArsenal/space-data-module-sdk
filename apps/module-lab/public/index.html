@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Space Data Module Lab</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">DigitalArsenal Private Lab</p>
+        <h1>Compile, verify, sign, and encrypt one canonical module format.</h1>
+        <p class="lede">
+          This lab accepts source code or a compiled wasm module, validates it
+          against the shared manifest ABI, checks standards references against
+          <code>spacedatastandards.org</code>, and can package the result with a
+          signature and optional transport encryption.
+        </p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Manifest</h2>
+          <button id="load-standards" class="ghost">Load Standards Catalog</button>
+        </div>
+        <textarea id="manifest-text" spellcheck="false"></textarea>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Compile From Source</h2>
+            <select id="language">
+              <option value="c">C</option>
+              <option value="c++">C++</option>
+            </select>
+          </div>
+          <input id="source-file" type="file" accept=".c,.cc,.cpp,.cxx,.txt" />
+          <textarea id="source-code" spellcheck="false"></textarea>
+          <button id="compile-button">Compile And Verify</button>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Verify Uploaded Wasm</h2>
+          </div>
+          <input id="wasm-file" type="file" accept=".wasm" />
+          <button id="verify-button">Verify Artifact</button>
+          <div class="field">
+            <label for="recipient-public-key">Recipient X25519 Public Key</label>
+            <textarea id="recipient-public-key" spellcheck="false"></textarea>
+          </div>
+          <div class="field">
+            <label for="mnemonic">Signer Mnemonic</label>
+            <textarea id="mnemonic" spellcheck="false"></textarea>
+          </div>
+          <div class="actions">
+            <button id="generate-keypair" class="ghost">Generate Recipient Keypair</button>
+            <button id="protect-button">Sign And Encrypt</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel output-panel">
+        <div class="panel-head">
+          <h2>Output</h2>
+          <button id="clear-output" class="ghost">Clear</button>
+        </div>
+        <pre id="output"></pre>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
+

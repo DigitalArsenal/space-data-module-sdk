@@ -1,0 +1,36 @@
+{
+  "name": "@digitalarsenal/module-sdk",
+  "version": "0.1.0",
+  "description": "Canonical shared module SDK for OrbPro and the Space Data Network.",
+  "type": "module",
+  "bin": {
+    "space-data-module": "./bin/space-data-module.js"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./manifest": "./src/manifest/index.js",
+    "./compliance": "./src/compliance/index.js",
+    "./auth": "./src/auth/index.js",
+    "./transport": "./src/transport/index.js",
+    "./compiler": "./src/compiler/index.js",
+    "./standards": "./src/standards/index.js",
+    "./schemas/*": "./schemas/*"
+  },
+  "files": [
+    "bin/",
+    "schemas/",
+    "src/"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "check:compliance": "node ./bin/space-data-module.js check --repo-root ."
+  },
+  "dependencies": {
+    "flatbuffers": "^25.9.23",
+    "hd-wallet-wasm": "^1.5.4",
+    "spacedatastandards.org": "23.3.3-0.3.4"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

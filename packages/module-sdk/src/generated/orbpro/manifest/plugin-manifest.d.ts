@@ -1,0 +1,85 @@
+import * as flatbuffers from 'flatbuffers';
+import { BuildArtifact, BuildArtifactT } from '../../orbpro/manifest/build-artifact.js';
+import { HostCapability, HostCapabilityT } from '../../orbpro/manifest/host-capability.js';
+import { MethodManifest, MethodManifestT } from '../../orbpro/manifest/method-manifest.js';
+import { PluginFamily } from '../../orbpro/manifest/plugin-family.js';
+import { ProtocolSpec, ProtocolSpecT } from '../../orbpro/manifest/protocol-spec.js';
+import { TimerSpec, TimerSpecT } from '../../orbpro/manifest/timer-spec.js';
+import { FlatBufferTypeRef, FlatBufferTypeRefT } from '../../orbpro/stream/flat-buffer-type-ref.js';
+/**
+ * Canonical plugin manifest.
+ */
+export declare class PluginManifest implements flatbuffers.IUnpackableObject<PluginManifestT> {
+    bb: flatbuffers.ByteBuffer | null;
+    bb_pos: number;
+    __init(i: number, bb: flatbuffers.ByteBuffer): PluginManifest;
+    static getRootAsPluginManifest(bb: flatbuffers.ByteBuffer, obj?: PluginManifest): PluginManifest;
+    static getSizePrefixedRootAsPluginManifest(bb: flatbuffers.ByteBuffer, obj?: PluginManifest): PluginManifest;
+    static bufferHasIdentifier(bb: flatbuffers.ByteBuffer): boolean;
+    pluginId(): string | null;
+    pluginId(optionalEncoding: flatbuffers.Encoding): string | Uint8Array | null;
+    name(): string | null;
+    name(optionalEncoding: flatbuffers.Encoding): string | Uint8Array | null;
+    version(): string | null;
+    version(optionalEncoding: flatbuffers.Encoding): string | Uint8Array | null;
+    pluginFamily(): PluginFamily;
+    methods(index: number, obj?: MethodManifest): MethodManifest | null;
+    methodsLength(): number;
+    capabilities(index: number, obj?: HostCapability): HostCapability | null;
+    capabilitiesLength(): number;
+    timers(index: number, obj?: TimerSpec): TimerSpec | null;
+    timersLength(): number;
+    protocols(index: number, obj?: ProtocolSpec): ProtocolSpec | null;
+    protocolsLength(): number;
+    schemasUsed(index: number, obj?: FlatBufferTypeRef): FlatBufferTypeRef | null;
+    schemasUsedLength(): number;
+    buildArtifacts(index: number, obj?: BuildArtifact): BuildArtifact | null;
+    buildArtifactsLength(): number;
+    abiVersion(): number;
+    static startPluginManifest(builder: flatbuffers.Builder): void;
+    static addPluginId(builder: flatbuffers.Builder, pluginIdOffset: flatbuffers.Offset): void;
+    static addName(builder: flatbuffers.Builder, nameOffset: flatbuffers.Offset): void;
+    static addVersion(builder: flatbuffers.Builder, versionOffset: flatbuffers.Offset): void;
+    static addPluginFamily(builder: flatbuffers.Builder, pluginFamily: PluginFamily): void;
+    static addMethods(builder: flatbuffers.Builder, methodsOffset: flatbuffers.Offset): void;
+    static createMethodsVector(builder: flatbuffers.Builder, data: flatbuffers.Offset[]): flatbuffers.Offset;
+    static startMethodsVector(builder: flatbuffers.Builder, numElems: number): void;
+    static addCapabilities(builder: flatbuffers.Builder, capabilitiesOffset: flatbuffers.Offset): void;
+    static createCapabilitiesVector(builder: flatbuffers.Builder, data: flatbuffers.Offset[]): flatbuffers.Offset;
+    static startCapabilitiesVector(builder: flatbuffers.Builder, numElems: number): void;
+    static addTimers(builder: flatbuffers.Builder, timersOffset: flatbuffers.Offset): void;
+    static createTimersVector(builder: flatbuffers.Builder, data: flatbuffers.Offset[]): flatbuffers.Offset;
+    static startTimersVector(builder: flatbuffers.Builder, numElems: number): void;
+    static addProtocols(builder: flatbuffers.Builder, protocolsOffset: flatbuffers.Offset): void;
+    static createProtocolsVector(builder: flatbuffers.Builder, data: flatbuffers.Offset[]): flatbuffers.Offset;
+    static startProtocolsVector(builder: flatbuffers.Builder, numElems: number): void;
+    static addSchemasUsed(builder: flatbuffers.Builder, schemasUsedOffset: flatbuffers.Offset): void;
+    static createSchemasUsedVector(builder: flatbuffers.Builder, data: flatbuffers.Offset[]): flatbuffers.Offset;
+    static startSchemasUsedVector(builder: flatbuffers.Builder, numElems: number): void;
+    static addBuildArtifacts(builder: flatbuffers.Builder, buildArtifactsOffset: flatbuffers.Offset): void;
+    static createBuildArtifactsVector(builder: flatbuffers.Builder, data: flatbuffers.Offset[]): flatbuffers.Offset;
+    static startBuildArtifactsVector(builder: flatbuffers.Builder, numElems: number): void;
+    static addAbiVersion(builder: flatbuffers.Builder, abiVersion: number): void;
+    static endPluginManifest(builder: flatbuffers.Builder): flatbuffers.Offset;
+    static finishPluginManifestBuffer(builder: flatbuffers.Builder, offset: flatbuffers.Offset): void;
+    static finishSizePrefixedPluginManifestBuffer(builder: flatbuffers.Builder, offset: flatbuffers.Offset): void;
+    static createPluginManifest(builder: flatbuffers.Builder, pluginIdOffset: flatbuffers.Offset, nameOffset: flatbuffers.Offset, versionOffset: flatbuffers.Offset, pluginFamily: PluginFamily, methodsOffset: flatbuffers.Offset, capabilitiesOffset: flatbuffers.Offset, timersOffset: flatbuffers.Offset, protocolsOffset: flatbuffers.Offset, schemasUsedOffset: flatbuffers.Offset, buildArtifactsOffset: flatbuffers.Offset, abiVersion: number): flatbuffers.Offset;
+    unpack(): PluginManifestT;
+    unpackTo(_o: PluginManifestT): void;
+}
+export declare class PluginManifestT implements flatbuffers.IGeneratedObject {
+    pluginId: string | Uint8Array | null;
+    name: string | Uint8Array | null;
+    version: string | Uint8Array | null;
+    pluginFamily: PluginFamily;
+    methods: (MethodManifestT)[];
+    capabilities: (HostCapabilityT)[];
+    timers: (TimerSpecT)[];
+    protocols: (ProtocolSpecT)[];
+    schemasUsed: (FlatBufferTypeRefT)[];
+    buildArtifacts: (BuildArtifactT)[];
+    abiVersion: number;
+    constructor(pluginId?: string | Uint8Array | null, name?: string | Uint8Array | null, version?: string | Uint8Array | null, pluginFamily?: PluginFamily, methods?: (MethodManifestT)[], capabilities?: (HostCapabilityT)[], timers?: (TimerSpecT)[], protocols?: (ProtocolSpecT)[], schemasUsed?: (FlatBufferTypeRefT)[], buildArtifacts?: (BuildArtifactT)[], abiVersion?: number);
+    pack(builder: flatbuffers.Builder): flatbuffers.Offset;
+}
+//# sourceMappingURL=plugin-manifest.d.ts.map

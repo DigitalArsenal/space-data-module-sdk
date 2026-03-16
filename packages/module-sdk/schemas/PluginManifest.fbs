@@ -1,0 +1,144 @@
+// OrbPro Plugin SDK - Plugin Manifest Schema
+//
+// Canonical manifest for unified OrbPro + SDN plugins.
+
+include "TypedArenaBuffer.fbs";
+
+namespace orbpro.manifest;
+
+/// Canonical plugin family.
+enum PluginFamily : ubyte {
+  SENSOR = 0,
+  PROPAGATOR = 1,
+  RENDERER = 2,
+  ANALYSIS = 3,
+  DATA_SOURCE = 4,
+  COMMS = 5,
+  SHADER = 6,
+  SDF = 7,
+  INFRASTRUCTURE = 8,
+  FLOW = 9,
+  BRIDGE = 10
+}
+
+/// Host capability requested by a plugin.
+enum CapabilityKind : ushort {
+  CLOCK = 0,
+  RANDOM = 1,
+  LOGGING = 2,
+  TIMERS = 3,
+  PUBSUB = 4,
+  PROTOCOL_DIAL = 5,
+  PROTOCOL_HANDLE = 6,
+  STORAGE_QUERY = 7,
+  SCENE_ACCESS = 8,
+  ENTITY_ACCESS = 9,
+  RENDER_HOOKS = 10
+}
+
+/// Drain policy for methods that operate over queued stream frames.
+enum DrainPolicy : ubyte {
+  SINGLE_SHOT = 0,
+  DRAIN_UNTIL_YIELD = 1,
+  DRAIN_TO_EMPTY = 2
+}
+
+/// Accepted schema family for a port.
+table AcceptedTypeSet {
+  /// Stable type-set identifier.
+  set_id: string (required);
+
+  /// Specific FlatBuffer types accepted by the set.
+  allowed_types: [orbpro.stream.FlatBufferTypeRef];
+
+  /// Human-readable explanation of the accepted schema family.
+  description: string;
+}
+
+/// One input or output port on a method.
+table PortManifest {
+  /// Stable port identifier within the method.
+  port_id: string (required);
+
+  /// Human-readable name for UIs.
+  display_name: string;
+
+  /// Type sets accepted on this port.
+  accepted_type_sets: [AcceptedTypeSet];
+
+  /// Minimum number of streams that must be connected.
+  min_streams: uint16 = 1;
+
+  /// Maximum number of streams that may be connected.
+  max_streams: uint16 = 1;
+
+  /// Whether the port must be connected for invocation.
+  required: bool = true;
+
+  /// Optional human-readable description.
+  description: string;
+}
+
+/// One host capability dependency.
+table HostCapability {
+  capability: CapabilityKind;
+  scope: string;
+  required: bool = true;
+  description: string;
+}
+
+/// Timer entry declared by a plugin.
+table TimerSpec {
+  timer_id: string (required);
+  method_id: string (required);
+  input_port_id: string;
+  default_interval_ms: uint64;
+  description: string;
+}
+
+/// Protocol handler declared by a plugin.
+table ProtocolSpec {
+  protocol_id: string (required);
+  method_id: string (required);
+  input_port_id: string;
+  output_port_id: string;
+  description: string;
+}
+
+/// Build artifact emitted by the plugin toolchain.
+table BuildArtifact {
+  artifact_id: string (required);
+  kind: string;
+  path: string (required);
+  target: string;
+  entry_symbol: string;
+}
+
+/// Canonical method declaration.
+table MethodManifest {
+  method_id: string (required);
+  display_name: string;
+  input_ports: [PortManifest];
+  output_ports: [PortManifest];
+  max_batch: uint32 = 1;
+  drain_policy: DrainPolicy = DRAIN_UNTIL_YIELD;
+  description: string;
+}
+
+/// Canonical plugin manifest.
+table PluginManifest {
+  plugin_id: string (required, key);
+  name: string;
+  version: string;
+  plugin_family: PluginFamily = ANALYSIS;
+  methods: [MethodManifest];
+  capabilities: [HostCapability];
+  timers: [TimerSpec];
+  protocols: [ProtocolSpec];
+  schemas_used: [orbpro.stream.FlatBufferTypeRef];
+  build_artifacts: [BuildArtifact];
+  abi_version: uint32 = 1;
+}
+
+root_type PluginManifest;
+file_identifier "PMAN";

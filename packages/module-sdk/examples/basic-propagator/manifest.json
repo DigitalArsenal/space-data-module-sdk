@@ -1,0 +1,55 @@
+{
+  "pluginId": "com.digitalarsenal.examples.basic-propagator",
+  "name": "Basic Propagator",
+  "version": "0.1.0",
+  "pluginFamily": "propagator",
+  "capabilities": ["clock"],
+  "externalInterfaces": [],
+  "methods": [
+    {
+      "methodId": "propagate",
+      "displayName": "Propagate",
+      "inputPorts": [
+        {
+          "portId": "request",
+          "acceptedTypeSets": [
+            {
+              "setId": "omm",
+              "allowedTypes": [
+                {
+                  "schemaName": "OMM.fbs",
+                  "fileIdentifier": "$OMM"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "state",
+          "acceptedTypeSets": [
+            {
+              "setId": "cat",
+              "allowedTypes": [
+                {
+                  "schemaName": "CAT.fbs",
+                  "fileIdentifier": "$CAT"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "maxBatch": 32,
+      "drainPolicy": "drain-to-empty"
+    }
+  ]
+}
+
