@@ -2,17 +2,25 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 
+import { sharedModuleCatalog } from "./sharedCatalog.js";
+
 const require = createRequire(import.meta.url);
 let standardsCatalogPromise = null;
+let knownTypeCatalogPromise = null;
 
 function normalizeSchemaStem(value) {
-  return String(value ?? "")
+  const trimmed = String(value ?? "")
     .trim()
     .replace(/\\/g, "/")
     .split("/")
-    .pop()
-    .replace(/\.[^.]+$/, "")
-    .toUpperCase();
+    .pop();
+  if (!trimmed) {
+    return "";
+  }
+  const withoutExtension = /\.(bfbs|fbs|json)$/i.test(trimmed)
+    ? trimmed.replace(/\.[^.]+$/, "")
+    : trimmed;
+  return withoutExtension.split(".").pop().toUpperCase();
 }
 
 function normalizeFileIdentifier(value) {
@@ -52,6 +60,16 @@ export async function loadStandardsCatalog() {
     })();
   }
   return standardsCatalogPromise;
+}
+
+export async function loadKnownTypeCatalog() {
+  if (!knownTypeCatalogPromise) {
+    knownTypeCatalogPromise = loadStandardsCatalog().then((catalog) => [
+      ...catalog,
+      ...sharedModuleCatalog,
+    ]);
+  }
+  return knownTypeCatalogPromise;
 }
 
 export function resolveStandardsTypeRef(typeRef, catalog = []) {
@@ -108,7 +126,7 @@ export async function validateManifestAgainstStandardsCatalog(
   manifest,
   options = {},
 ) {
-  const catalog = await loadStandardsCatalog();
+  const catalog = options.catalog ?? (await loadKnownTypeCatalog());
   const sourceName = options.sourceName ?? "manifest";
   const issues = [];
   for (const { source, typeRef } of collectTypeRefs(manifest)) {
@@ -122,7 +140,8 @@ export async function validateManifestAgainstStandardsCatalog(
         code: "unresolved-standards-type",
         message:
           `Type reference from ${source} does not resolve to a known ` +
-          "`spacedatastandards.org` schema by schemaName or fileIdentifier.",
+          "shared-module or `spacedatastandards.org` schema by schemaName " +
+          "or fileIdentifier.",
         location: `${sourceName}.${source}`,
       });
     }
@@ -132,4 +151,3 @@ export async function validateManifestAgainstStandardsCatalog(
     issues,
   };
 }
-

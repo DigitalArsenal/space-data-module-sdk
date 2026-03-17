@@ -1,45 +1,84 @@
-# space-data-module-sdk
+# Space Data Module SDK
 
-Canonical shared module SDK for OrbPro and the Space Data Network.
+Shared module SDK for building, validating, signing, and deploying WebAssembly modules on the [Space Data Network](https://digitalarsenal.github.io/space-data-network/).
 
-This repo is the consolidation point for the pieces that are supposed to be the same thing across both systems:
+Part of the Space Data Network ecosystem:
 
-- canonical embedded module manifest ABI
-- standards-aware manifest validation against `spacedatastandards.org`
-- wasm ABI compliance checks
-- source-to-wasm compile harnesses
-- deployment signature and transport encryption helpers
-- a browser lab that can compile source or verify uploaded wasm modules
+- [Space Data Network](https://digitalarsenal.github.io/space-data-network/) — peer-to-peer network for space data exchange
+- [spacedatastandards.org](https://spacedatastandards.org) — canonical data standards for space operations
+- [FlatBuffers schemas](https://digitalarsenal.github.io/flatbuffers/) — binary serialization schemas used across the network
+- [OrbPro](https://orbpro.ai) — space domain awareness platform
 
-## Workspace Layout
+## Packages
 
-- `packages/module-sdk`
-  Shared contracts, manifest codec, compliance checks, standards integration, compiler harness, and signature/encryption helpers.
-- `apps/module-lab`
-  Browser-facing verification lab for compile, compliance, and packaging workflows.
+- [`@digitalarsenal/module-sdk`](packages/module-sdk) — Core SDK: manifest codec, compliance validation, compiler harness, auth, transport, and standards integration
+- [`@digitalarsenal/module-lab`](apps/module-lab) — Browser-based verification lab for compiling, validating, and packaging modules
 
-## Quick Start
+## Install
 
 ```bash
-npm install
-npm test
-npm run start:lab
+npm install @digitalarsenal/module-sdk
 ```
 
-The lab serves on `http://localhost:4318` by default.
+## Usage
+
+```js
+import {
+  encodeManifest, decodeManifest,   // manifest codec
+  checkCompliance,                   // validate against spacedatastandards.org
+  signManifest, verifyManifest,      // auth / signatures
+  encryptPayload, decryptPayload,    // transport encryption
+  compileModule,                     // source-to-wasm compilation
+} from "@digitalarsenal/module-sdk";
+```
+
+### Subpath exports
+
+```js
+import { encodeManifest } from "@digitalarsenal/module-sdk/manifest";
+import { checkCompliance } from "@digitalarsenal/module-sdk/compliance";
+import { signManifest }    from "@digitalarsenal/module-sdk/auth";
+import { encryptPayload }  from "@digitalarsenal/module-sdk/transport";
+import { compileModule }   from "@digitalarsenal/module-sdk/compiler";
+import { resolveStandard } from "@digitalarsenal/module-sdk/standards";
+```
 
 ## CLI
 
 ```bash
+# Validate a manifest + wasm pair against compliance rules
 npx space-data-module check --manifest ./manifest.json --wasm ./dist/module.wasm
+
+# Compile source to a wasm module
 npx space-data-module compile --manifest ./manifest.json --source ./src/module.c --out ./dist/module.wasm
+
+# Sign and encrypt a module for transport
 npx space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
 ```
 
-## Current Boundary
+## Module Lab
 
-The first commit extracts the canonical manifest/types from the current OrbPro plugin SDK and the compliance plus crypto helpers from `sdn-flow`, then layers a single SDK and lab on top.
+A browser-based tool for compiling, validating, and packaging modules interactively.
 
-This is intentionally the canonical shared surface, not another compatibility package.
+```bash
+npm run start:lab
+# http://localhost:4318
+```
 
-One current limitation is explicit: the embedded FlatBuffer manifest schema is still narrower than the richer JSON compliance surface. In particular, `externalInterfaces` and some coarse capability IDs are validated in JSON today but are not yet fully representable in the embedded binary manifest. The SDK reports when those fields are omitted during embedding so the remaining schema work stays visible.
+## Development
+
+```bash
+npm install   # install all workspace dependencies
+npm test      # run tests across all packages
+npm run build # build all packages
+```
+
+Requires Node.js >= 20.
+
+## Architecture
+
+Modules carry an embedded binary manifest encoded with [FlatBuffers](https://digitalarsenal.github.io/flatbuffers/) (schemas in [`packages/module-sdk/schemas/`](packages/module-sdk/schemas)). The SDK validates modules against data standards published at [spacedatastandards.org](https://spacedatastandards.org) and uses HD-wallet-derived keys via [`hd-wallet-wasm`](https://github.com/nicktj-dev/hd-wallet-wasm) for manifest signing and transport encryption.
+
+## License
+
+See [LICENSE](LICENSE).
