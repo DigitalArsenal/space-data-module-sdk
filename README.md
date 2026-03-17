@@ -90,6 +90,9 @@ npx space-data-module compile --manifest ./manifest.json --source ./src/module.c
 
 # Sign and encrypt a module package for transport
 npx space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
+
+# Emit a single-file bundled wasm with the sds.bundle custom section
+npx space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --single-file-bundle --out ./dist/module.bundle.wasm
 ```
 
 ## Module Lab

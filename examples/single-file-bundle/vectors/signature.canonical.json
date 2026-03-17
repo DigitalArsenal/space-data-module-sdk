@@ -1,0 +1,1 @@
+{"algorithm":"secp256k1-sha256","keyId":"vector-signature-0001","note":"Deterministic placeholder signature payload for bundle conformance tests.","protected":{"curve":"secp256k1","publicKeyHex":"021111111111111111111111111111111111111111111111111111111111111111"},"signatureHex":"deadbeefcafebabe00010203"}

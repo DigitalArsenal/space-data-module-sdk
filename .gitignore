@@ -5,4 +5,6 @@ coverage/
 .turbo/
 tmp/
 artifacts/
-
+.claude/
+__pycache__/
+*.pyc

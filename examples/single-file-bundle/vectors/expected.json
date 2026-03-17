@@ -1,0 +1,144 @@
+{
+  "bundleSectionName": "sds.bundle",
+  "baseModuleSha256Hex": "57f97a45655bc09f129cfdbddf5d8eeaacf8f10e1a9fe22b8b21393e1518648c",
+  "bundleSha256Hex": "d3906b3803718db72a973321635f49f8f81d8d58d1dc3276fe9bca1649d7b687",
+  "bundledModuleSha256Hex": "276784823295e5c21952c3835213ca54e088c697a9ebe8994f673890997ec1fb",
+  "canonicalModuleHashHex": "57f97a45655bc09f129cfdbddf5d8eeaacf8f10e1a9fe22b8b21393e1518648c",
+  "manifestHashHex": "c9f19430bf05e96c37c1c1545adac398ac3cff62613007b3ae43a2911f20eb50",
+  "manifestPluginId": "com.digitalarsenal.examples.single-file-vector",
+  "entryIds": [
+    "manifest",
+    "authorization",
+    "signature",
+    "transport",
+    "auxiliary-note"
+  ],
+  "entries": [
+    {
+      "entryId": "manifest",
+      "role": "manifest",
+      "payloadEncoding": "flatbuffer",
+      "sectionName": "sds.manifest",
+      "payloadLength": 528,
+      "payloadSha256Hex": "c9f19430bf05e96c37c1c1545adac398ac3cff62613007b3ae43a2911f20eb50",
+      "typeRef": {
+        "schemaName": "PluginManifest.fbs",
+        "fileIdentifier": "PMAN"
+      },
+      "decodedPayload": null,
+      "decodedManifestPluginId": "com.digitalarsenal.examples.single-file-vector"
+    },
+    {
+      "entryId": "authorization",
+      "role": "authorization",
+      "payloadEncoding": "json-utf8",
+      "sectionName": "sds.authorization",
+      "payloadLength": 467,
+      "payloadSha256Hex": "56bd4b8199d3f35a8da1ceea9c17f885d6bd91380a6c0f3dbc1232e0b2fb30b2",
+      "typeRef": null,
+      "decodedPayload": {
+        "action": "deploy-flow",
+        "artifactId": "module-vector-0001",
+        "capabilities": [
+          "clock"
+        ],
+        "constraints": {
+          "environment": "test"
+        },
+        "expiresAt": 1700000300000,
+        "graphHash": "vector-graph-hash-0001",
+        "issuedAt": 1700000000000,
+        "manifestHash": "vector-manifest-hash-0001",
+        "nonce": "vector-nonce-0001",
+        "programId": "com.digitalarsenal.examples.single-file-vector",
+        "target": {
+          "audience": "urn:sdn:test",
+          "id": "relay-demo-1",
+          "kind": "remote",
+          "url": "https://example.test/relay/demo-1"
+        },
+        "version": 1
+      },
+      "decodedManifestPluginId": null
+    },
+    {
+      "entryId": "signature",
+      "role": "signature",
+      "payloadEncoding": "json-utf8",
+      "sectionName": "sds.signature",
+      "payloadLength": 307,
+      "payloadSha256Hex": "55d467fbef75574650fe148212f4cfa568295aadc30c724fbd12ddda19ed08f6",
+      "typeRef": null,
+      "decodedPayload": {
+        "algorithm": "secp256k1-sha256",
+        "keyId": "vector-signature-0001",
+        "note": "Deterministic placeholder signature payload for bundle conformance tests.",
+        "protected": {
+          "curve": "secp256k1",
+          "publicKeyHex": "021111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "signatureHex": "deadbeefcafebabe00010203"
+      },
+      "decodedManifestPluginId": null
+    },
+    {
+      "entryId": "transport",
+      "role": "transport",
+      "payloadEncoding": "json-utf8",
+      "sectionName": "sds.transport",
+      "payloadLength": 297,
+      "payloadSha256Hex": "b741a57e65342bae6f046b815099f05ea7650691741587cd8a3c7d668300d456",
+      "typeRef": null,
+      "decodedPayload": {
+        "ciphertextBase64": "AAECAwQFBgcICQoLDA0ODw==",
+        "context": "space-data-module-sdk/package",
+        "ivBase64": "ABEiM0RVZneImaq7",
+        "saltBase64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "scheme": "x25519-hkdf-aes-256-gcm",
+        "senderPublicKeyBase64": "ESIzRFVmd4iZqrvM3e7/ABEiM0RVZneImaq7zN3u/wA=",
+        "version": 1
+      },
+      "decodedManifestPluginId": null
+    },
+    {
+      "entryId": "auxiliary-note",
+      "role": "auxiliary",
+      "payloadEncoding": "raw-bytes",
+      "sectionName": "sds.auxiliary",
+      "payloadLength": 28,
+      "payloadSha256Hex": "5419303eaebf16e9594d7b5ec71485ee8d66c8679cb942cf8d0718c24ec9f268",
+      "typeRef": null,
+      "decodedPayload": [
+        115,
+        112,
+        97,
+        99,
+        101,
+        45,
+        100,
+        97,
+        116,
+        97,
+        45,
+        98,
+        117,
+        110,
+        100,
+        108,
+        101,
+        45,
+        118,
+        101,
+        99,
+        116,
+        111,
+        114,
+        0,
+        1,
+        2,
+        3
+      ],
+      "decodedManifestPluginId": null
+    }
+  ]
+}

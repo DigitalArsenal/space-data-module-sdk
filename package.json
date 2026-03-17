@@ -13,6 +13,7 @@
     "./auth": "./src/auth/index.js",
     "./transport": "./src/transport/index.js",
     "./compiler": "./src/compiler/index.js",
+    "./bundle": "./src/bundle/index.js",
     "./standards": "./src/standards/index.js",
     "./schemas/*": "./schemas/*"
   },
@@ -24,9 +25,11 @@
   "scripts": {
     "test": "node --test",
     "start:lab": "node ./lab/server.js",
-    "check:compliance": "node ./bin/space-data-module.js check --repo-root ."
+    "check:compliance": "node ./bin/space-data-module.js check --repo-root .",
+    "generate:vectors": "node ./examples/single-file-bundle/generate-vectors.mjs"
   },
   "dependencies": {
+    "@jprendes/emception": "file:../emception",
     "flatbuffers": "^25.9.23",
     "hd-wallet-wasm": "^1.5.4",
     "spacedatastandards.org": "23.3.3-0.3.4"

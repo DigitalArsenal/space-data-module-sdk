@@ -16,6 +16,7 @@ import {
   encryptJsonForRecipient,
   generateX25519Keypair,
 } from "../transport/index.js";
+import { createSingleFileBundle } from "../bundle/index.js";
 import {
   base64ToBytes,
   bytesToBase64,
@@ -48,6 +49,120 @@ function ensureExportableMethodIds(manifest) {
   }
 }
 
+function buildCompilerArgs(compiler, exportedSymbols) {
+  const linkerExports = exportedSymbols.map(
+    (symbol) => "-Wl,--export=" + symbol,
+  );
+  return ["-O2", "--no-entry", "-s", "STANDALONE_WASM=1", ...linkerExports];
+}
+
+// ---------------------------------------------------------------------------
+// Emception — in-process WASM-based Emscripten (preferred)
+// ---------------------------------------------------------------------------
+
+let emceptionInstance = null;
+let emceptionLoadAttempted = false;
+
+async function loadEmception() {
+  if (emceptionLoadAttempted) return emceptionInstance;
+  emceptionLoadAttempted = true;
+  try {
+    const { default: Emception } = await import(
+      "@jprendes/emception/src/emception.mjs"
+    );
+    emceptionInstance = new Emception();
+    await emceptionInstance.init();
+    return emceptionInstance;
+  } catch {
+    // emception not available or init failed — fall back to system emcc
+  }
+  return null;
+}
+
+async function compileWithEmception(
+  emception,
+  compiler,
+  sourceCode,
+  manifestSource,
+  exportedSymbols,
+) {
+  const ext = compiler.extension;
+  const inputPath = `/working/module.${ext}`;
+  const manifestPath = "/working/plugin-manifest-exports.c";
+  const outputPath = "/working/module.wasm";
+
+  emception.writeFile(inputPath, sourceCode);
+  emception.writeFile(manifestPath, manifestSource);
+
+  const args = buildCompilerArgs(compiler, exportedSymbols);
+  const cmd = [
+    compiler.command,
+    inputPath,
+    manifestPath,
+    ...args,
+    "-o",
+    outputPath,
+  ].join(" ");
+
+  const result = emception.run(cmd);
+  if (result.returncode !== 0) {
+    throw new Error(
+      `Compilation failed with ${compiler.command} (emception): ${result.stderr || result.stdout}`,
+    );
+  }
+
+  const wasmBytes = emception.readFile(outputPath);
+  return new Uint8Array(wasmBytes);
+}
+
+// ---------------------------------------------------------------------------
+// System Emscripten — fallback to emcc/em++ on PATH
+// ---------------------------------------------------------------------------
+
+async function compileWithSystemEmcc(
+  compiler,
+  sourceCode,
+  manifestSource,
+  exportedSymbols,
+  outputPath,
+) {
+  const tempDir = await mkdtemp(
+    path.join(os.tmpdir(), "space-data-module-sdk-compile-"),
+  );
+  const sourcePath = path.join(tempDir, `module.${compiler.extension}`);
+  const manifestSourcePath = path.join(tempDir, "plugin-manifest-exports.c");
+  const resolvedOutputPath = path.resolve(
+    outputPath ?? path.join(tempDir, "module.wasm"),
+  );
+
+  await writeFile(sourcePath, sourceCode, "utf8");
+  await writeFile(manifestSourcePath, manifestSource, "utf8");
+
+  const args = buildCompilerArgs(compiler, exportedSymbols);
+
+  try {
+    await execFile(compiler.command, [
+      sourcePath,
+      manifestSourcePath,
+      ...args,
+      "-o",
+      resolvedOutputPath,
+    ]);
+  } catch (error) {
+    error.message =
+      `Compilation failed with ${compiler.command}: ` +
+      (error.stderr || error.message);
+    throw error;
+  }
+
+  const wasmBytes = await readFile(resolvedOutputPath);
+  return { wasmBytes, outputPath: resolvedOutputPath, tempDir };
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
 export async function compileModuleFromSource(options = {}) {
   const manifest = options.manifest ?? {};
   const sourceCode = String(options.sourceCode ?? "");
@@ -68,19 +183,9 @@ export async function compileModuleFromSource(options = {}) {
   const { manifest: embeddedManifest, warnings } = toEmbeddedPluginManifest(
     manifest,
   );
-  const tempDir = await mkdtemp(
-    path.join(os.tmpdir(), "space-data-module-sdk-compile-"),
-  );
-  const sourcePath = path.join(tempDir, `module.${compiler.extension}`);
-  const manifestSourcePath = path.join(tempDir, "plugin-manifest-exports.c");
-  const outputPath = path.resolve(options.outputPath ?? path.join(tempDir, "module.wasm"));
-
-  await writeFile(sourcePath, sourceCode, "utf8");
-  await writeFile(
-    manifestSourcePath,
-    generateEmbeddedManifestSource({ manifest: embeddedManifest }),
-    "utf8",
-  );
+  const manifestSource = generateEmbeddedManifestSource({
+    manifest: embeddedManifest,
+  });
 
   const exportedSymbols = [
     "plugin_get_manifest_flatbuffer",
@@ -91,39 +196,55 @@ export async function compileModuleFromSource(options = {}) {
         .filter(Boolean),
     ),
   ];
-  const linkerExports = exportedSymbols.flatMap((symbol) => [
-    "-Wl,--export=" + symbol,
-  ]);
 
-  try {
-    await execFile(compiler.command, [
-      sourcePath,
-      manifestSourcePath,
-      "-O2",
-      "--no-entry",
-      "-s",
-      "STANDALONE_WASM=1",
-      ...linkerExports,
-      "-o",
-      outputPath,
-    ]);
-  } catch (error) {
-    error.message =
-      `Compilation failed with ${compiler.command}: ` +
-      (error.stderr || error.message);
-    throw error;
+  // Try emception first, fall back to system emcc/em++
+  const emception = await loadEmception();
+
+  let wasmBytes;
+  let resolvedOutputPath = null;
+  let tempDir = null;
+  let compilerBackend;
+
+  if (emception) {
+    wasmBytes = await compileWithEmception(
+      emception,
+      compiler,
+      sourceCode,
+      manifestSource,
+      exportedSymbols,
+    );
+    compilerBackend = `${compiler.command} (emception)`;
+  } else {
+    const result = await compileWithSystemEmcc(
+      compiler,
+      sourceCode,
+      manifestSource,
+      exportedSymbols,
+      options.outputPath,
+    );
+    wasmBytes = result.wasmBytes;
+    resolvedOutputPath = result.outputPath;
+    tempDir = result.tempDir;
+    compilerBackend = `${compiler.command} (system)`;
   }
 
-  const wasmBytes = await readFile(outputPath);
-  const report = await validateArtifactWithStandards({
-    manifest,
-    wasmPath: outputPath,
-  });
+  // Validate the compiled artifact
+  const report = emception
+    ? await validateArtifactWithStandards({
+        manifest,
+        exportNames: WebAssembly.Module.exports(
+          new WebAssembly.Module(wasmBytes),
+        ).map((e) => e.name),
+      })
+    : await validateArtifactWithStandards({
+        manifest,
+        wasmPath: resolvedOutputPath,
+      });
 
   return {
-    compiler: compiler.command,
+    compiler: compilerBackend,
     language: compiler.language,
-    outputPath,
+    outputPath: resolvedOutputPath,
     tempDir,
     wasmBytes,
     manifestWarnings: warnings,
@@ -217,6 +338,17 @@ export async function protectModuleArtifact(options = {}) {
     });
   }
 
+  let singleFileBundle = null;
+  if (options.singleFileBundle === true) {
+    singleFileBundle = await createSingleFileBundle({
+      wasmBytes,
+      manifest,
+      authorization: signedAuthorization,
+      transportEnvelope: encryptedEnvelope,
+      entries: options.bundleEntries,
+    });
+  }
+
   return {
     mnemonic: identity.mnemonic,
     signingPublicKeyHex: bytesToHex(identity.signingKey.publicKey),
@@ -224,6 +356,8 @@ export async function protectModuleArtifact(options = {}) {
     payload,
     encrypted: Boolean(encryptedEnvelope),
     encryptedEnvelope,
+    singleFileBundle,
+    bundledWasmBytes: singleFileBundle?.wasmBytes ?? null,
   };
 }
 
@@ -234,4 +368,3 @@ export async function createRecipientKeypairHex() {
     privateKeyHex: bytesToHex(keypair.privateKey),
   };
 }
-
