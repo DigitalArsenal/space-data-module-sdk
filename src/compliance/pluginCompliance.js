@@ -6,13 +6,21 @@ import {
   DrainPolicy,
   ExternalInterfaceDirection,
   ExternalInterfaceKind,
+  RuntimeTarget,
 } from "../runtime/constants.js";
 
 export const RecommendedCapabilityIds = Object.freeze([
   "clock",
   "random",
+  "logging",
   "timers",
+  "schedule_cron",
   "http",
+  "tls",
+  "websocket",
+  "mqtt",
+  "tcp",
+  "udp",
   "network",
   "filesystem",
   "pipe",
@@ -23,18 +31,51 @@ export const RecommendedCapabilityIds = Object.freeze([
   "storage_adapter",
   "storage_query",
   "storage_write",
+  "context_read",
+  "context_write",
+  "process_exec",
+  "crypto_hash",
+  "crypto_sign",
+  "crypto_verify",
+  "crypto_encrypt",
+  "crypto_decrypt",
+  "crypto_key_agreement",
+  "crypto_kdf",
   "wallet_sign",
   "ipfs",
   "scene_access",
+  "entity_access",
   "render_hooks",
 ]);
 
 const RecommendedCapabilitySet = new Set(RecommendedCapabilityIds);
+const RecommendedRuntimeTargets = Object.freeze(Object.values(RuntimeTarget));
+const RecommendedRuntimeTargetSet = new Set(RecommendedRuntimeTargets);
 const DrainPolicySet = new Set(Object.values(DrainPolicy));
 const ExternalInterfaceDirectionSet = new Set(
   Object.values(ExternalInterfaceDirection),
 );
 const ExternalInterfaceKindSet = new Set(Object.values(ExternalInterfaceKind));
+const BrowserIncompatibleCapabilitySet = new Set([
+  "filesystem",
+  "pipe",
+  "network",
+  "tcp",
+  "udp",
+  "mqtt",
+  "tls",
+  "database",
+  "storage_adapter",
+  "storage_write",
+  "protocol_dial",
+  "protocol_handle",
+  "process_exec",
+  "wallet_sign",
+  "ipfs",
+  "scene_access",
+  "entity_access",
+  "render_hooks",
+]);
 const IgnoredDirectoryNames = new Set([
   ".git",
   ".hg",
@@ -244,6 +285,244 @@ function validateExternalInterface(externalInterface, issues, location, declared
   }
 }
 
+function validateTimer(timer, issues, location, methodLookup, declaredCapabilities) {
+  if (!timer || typeof timer !== "object" || Array.isArray(timer)) {
+    pushIssue(issues, "error", "invalid-timer", "Timer entries must be objects.", location);
+    return;
+  }
+  const timerIdValid = validateStringField(
+    issues,
+    timer.timerId,
+    `${location}.timerId`,
+    "Timer timerId",
+  );
+  const methodIdValid = validateStringField(
+    issues,
+    timer.methodId,
+    `${location}.methodId`,
+    "Timer methodId",
+  );
+  let method = null;
+  if (methodIdValid) {
+    method = methodLookup.get(timer.methodId) ?? null;
+    if (!method) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-timer-method",
+        `Timer "${timer.timerId ?? "timer"}" references unknown method "${timer.methodId}".`,
+        `${location}.methodId`,
+      );
+    }
+  }
+  if (timer.inputPortId !== undefined && timer.inputPortId !== null) {
+    if (!isNonEmptyString(timer.inputPortId)) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-timer-input-port",
+        "Timer inputPortId must be a non-empty string when present.",
+        `${location}.inputPortId`,
+      );
+    } else if (
+      method &&
+      !method.inputPorts.some((port) => port?.portId === timer.inputPortId)
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-timer-input-port",
+        `Timer "${timer.timerId ?? "timer"}" references unknown input port "${timer.inputPortId}" on method "${timer.methodId}".`,
+        `${location}.inputPortId`,
+      );
+    }
+  }
+  if (timer.defaultIntervalMs !== undefined) {
+    validateIntegerField(
+      issues,
+      timer.defaultIntervalMs,
+      `${location}.defaultIntervalMs`,
+      "Timer defaultIntervalMs",
+      { min: 0 },
+    );
+  }
+  if (
+    timerIdValid &&
+    Array.isArray(declaredCapabilities) &&
+    !declaredCapabilities.includes("timers")
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "undeclared-timer-capability",
+      `Timer "${timer.timerId}" requires the "timers" capability to be declared in manifest.capabilities.`,
+      location,
+    );
+  }
+}
+
+function validateProtocol(protocol, issues, location, methodLookup, declaredCapabilities) {
+  if (!protocol || typeof protocol !== "object" || Array.isArray(protocol)) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-protocol",
+      "Protocol entries must be objects.",
+      location,
+    );
+    return;
+  }
+  const protocolIdValid = validateStringField(
+    issues,
+    protocol.protocolId,
+    `${location}.protocolId`,
+    "Protocol protocolId",
+  );
+  const methodIdValid = validateStringField(
+    issues,
+    protocol.methodId,
+    `${location}.methodId`,
+    "Protocol methodId",
+  );
+  let method = null;
+  if (methodIdValid) {
+    method = methodLookup.get(protocol.methodId) ?? null;
+    if (!method) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-protocol-method",
+        `Protocol "${protocol.protocolId ?? "protocol"}" references unknown method "${protocol.methodId}".`,
+        `${location}.methodId`,
+      );
+    }
+  }
+  if (protocol.inputPortId !== undefined && protocol.inputPortId !== null) {
+    if (!isNonEmptyString(protocol.inputPortId)) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-protocol-input-port",
+        "Protocol inputPortId must be a non-empty string when present.",
+        `${location}.inputPortId`,
+      );
+    } else if (
+      method &&
+      !method.inputPorts.some((port) => port?.portId === protocol.inputPortId)
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-protocol-input-port",
+        `Protocol "${protocol.protocolId ?? "protocol"}" references unknown input port "${protocol.inputPortId}" on method "${protocol.methodId}".`,
+        `${location}.inputPortId`,
+      );
+    }
+  }
+  if (protocol.outputPortId !== undefined && protocol.outputPortId !== null) {
+    if (!isNonEmptyString(protocol.outputPortId)) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-protocol-output-port",
+        "Protocol outputPortId must be a non-empty string when present.",
+        `${location}.outputPortId`,
+      );
+    } else if (
+      method &&
+      !method.outputPorts.some((port) => port?.portId === protocol.outputPortId)
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-protocol-output-port",
+        `Protocol "${protocol.protocolId ?? "protocol"}" references unknown output port "${protocol.outputPortId}" on method "${protocol.methodId}".`,
+        `${location}.outputPortId`,
+      );
+    }
+  }
+  if (
+    protocolIdValid &&
+    Array.isArray(declaredCapabilities) &&
+    !declaredCapabilities.includes("protocol_handle") &&
+    !declaredCapabilities.includes("protocol_dial")
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "undeclared-protocol-capability",
+      `Protocol "${protocol.protocolId}" requires "protocol_handle" or "protocol_dial" to be declared in manifest.capabilities.`,
+      location,
+    );
+  }
+}
+
+function validateRuntimeTargets(runtimeTargets, declaredCapabilities, issues, sourceName) {
+  if (runtimeTargets === undefined) {
+    return;
+  }
+  if (!Array.isArray(runtimeTargets)) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-runtime-targets",
+      "manifest.runtimeTargets must be an array of non-empty strings when present.",
+      `${sourceName}.runtimeTargets`,
+    );
+    return;
+  }
+  const seenTargets = new Set();
+  for (const target of runtimeTargets) {
+    if (!isNonEmptyString(target)) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-runtime-target",
+        "Runtime target entries must be non-empty strings.",
+        `${sourceName}.runtimeTargets`,
+      );
+      continue;
+    }
+    if (seenTargets.has(target)) {
+      pushIssue(
+        issues,
+        "warning",
+        "duplicate-runtime-target",
+        `Runtime target "${target}" is declared more than once.`,
+        `${sourceName}.runtimeTargets`,
+      );
+      continue;
+    }
+    seenTargets.add(target);
+    if (!RecommendedRuntimeTargetSet.has(target)) {
+      pushIssue(
+        issues,
+        "warning",
+        "noncanonical-runtime-target",
+        `Runtime target "${target}" is not in the current canonical runtime target set.`,
+        `${sourceName}.runtimeTargets`,
+      );
+    }
+  }
+  if (
+    seenTargets.has(RuntimeTarget.BROWSER) &&
+    Array.isArray(declaredCapabilities)
+  ) {
+    for (const capability of declaredCapabilities) {
+      if (!BrowserIncompatibleCapabilitySet.has(capability)) {
+        continue;
+      }
+      pushIssue(
+        issues,
+        "error",
+        "capability-runtime-conflict",
+        `Capability "${capability}" is not available in the canonical browser runtime target.`,
+        `${sourceName}.capabilities`,
+      );
+    }
+  }
+}
+
 export function validatePluginManifest(manifest, options = {}) {
   const { sourceName = "manifest" } = options;
   const issues = [];
@@ -307,6 +586,12 @@ export function validatePluginManifest(manifest, options = {}) {
       }
     }
   }
+  validateRuntimeTargets(
+    manifest.runtimeTargets,
+    declaredCapabilities,
+    issues,
+    sourceName,
+  );
 
   if (!Array.isArray(manifest.externalInterfaces)) {
     pushIssue(
@@ -337,6 +622,7 @@ export function validatePluginManifest(manifest, options = {}) {
     );
   } else {
     const seenMethodIds = new Set();
+    const methodLookup = new Map();
     manifest.methods.forEach((method, index) => {
       const location = `${sourceName}.methods[${index}]`;
       if (!method || typeof method !== "object" || Array.isArray(method)) {
@@ -355,6 +641,7 @@ export function validatePluginManifest(manifest, options = {}) {
           );
         }
         seenMethodIds.add(method.methodId);
+        methodLookup.set(method.methodId, method);
       }
       if (!Array.isArray(method.inputPorts) || method.inputPorts.length === 0) {
         pushIssue(
@@ -403,6 +690,46 @@ export function validatePluginManifest(manifest, options = {}) {
         );
       }
     });
+
+    if (manifest.timers !== undefined && !Array.isArray(manifest.timers)) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-timers-array",
+        "manifest.timers must be an array when present.",
+        `${sourceName}.timers`,
+      );
+    } else if (Array.isArray(manifest.timers)) {
+      manifest.timers.forEach((timer, index) => {
+        validateTimer(
+          timer,
+          issues,
+          `${sourceName}.timers[${index}]`,
+          methodLookup,
+          declaredCapabilities,
+        );
+      });
+    }
+
+    if (manifest.protocols !== undefined && !Array.isArray(manifest.protocols)) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-protocols-array",
+        "manifest.protocols must be an array when present.",
+        `${sourceName}.protocols`,
+      );
+    } else if (Array.isArray(manifest.protocols)) {
+      manifest.protocols.forEach((protocol, index) => {
+        validateProtocol(
+          protocol,
+          issues,
+          `${sourceName}.protocols[${index}]`,
+          methodLookup,
+          declaredCapabilities,
+        );
+      });
+    }
   }
 
   return buildComplianceReport({
@@ -414,8 +741,15 @@ export function validatePluginManifest(manifest, options = {}) {
   });
 }
 
+const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
+
 export async function loadManifestFromFile(manifestPath) {
   const contents = await readFile(manifestPath, "utf8");
+  if (contents.length > MAX_MANIFEST_BYTES) {
+    throw new Error(
+      `Manifest at ${manifestPath} exceeds ${MAX_MANIFEST_BYTES} byte limit.`,
+    );
+  }
   return JSON.parse(contents);
 }
 

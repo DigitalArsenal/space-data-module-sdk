@@ -5,4 +5,11 @@ export * from "./transport/index.js";
 export * from "./compiler/index.js";
 export * from "./bundle/index.js";
 export * from "./standards/index.js";
-export { DefaultManifestExports } from "./runtime/constants.js";
+export * from "./host/index.js";
+export {
+  DefaultManifestExports,
+  DrainPolicy,
+  ExternalInterfaceDirection,
+  ExternalInterfaceKind,
+  RuntimeTarget,
+} from "./runtime/constants.js";

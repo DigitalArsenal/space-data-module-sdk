@@ -8,6 +8,7 @@ import {
   encodePluginManifest,
   loadKnownTypeCatalog,
   protectModuleArtifact,
+  toEmbeddedPluginManifest,
   validateArtifactWithStandards,
   validateManifestWithStandards,
 } from "../src/index.js";
@@ -75,6 +76,36 @@ test("plugin manifests round-trip through FlatBuffer encoding", () => {
   const decoded = decodePluginManifest(encoded);
   assert.equal(decoded.pluginId, manifest.pluginId);
   assert.equal(decoded.methods[0].methodId, "propagate");
+});
+
+test("embedded manifests preserve expanded canonical capabilities", () => {
+  const manifest = {
+    ...createTestManifest(),
+    capabilities: [
+      "http",
+      "filesystem",
+      "mqtt",
+      "process_exec",
+      "crypto_sign",
+      "schedule_cron",
+    ],
+  };
+  const embedded = toEmbeddedPluginManifest(manifest);
+  assert.deepEqual(embedded.warnings, []);
+  assert.equal(embedded.manifest.capabilities.length, 6);
+});
+
+test("runtimeTargets are validated in JSON manifests but omitted from embedded manifests", () => {
+  const manifest = {
+    ...createTestManifest(),
+    runtimeTargets: ["browser"],
+  };
+  const embedded = toEmbeddedPluginManifest(manifest);
+  assert.ok(
+    embedded.warnings.some((warning) =>
+      warning.includes("runtimeTargets are not yet representable"),
+    ),
+  );
 });
 
 test("source compile emits a compliant wasm module", async () => {

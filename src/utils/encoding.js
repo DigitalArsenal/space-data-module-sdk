@@ -48,7 +48,15 @@ export function bytesToBase64(bytes) {
   return Buffer.from(toUint8Array(bytes)).toString("base64");
 }
 
+const MAX_BASE64_LENGTH = 256 * 1024 * 1024;
+
 export function base64ToBytes(base64) {
-  return new Uint8Array(Buffer.from(String(base64 ?? "").trim(), "base64"));
+  const str = String(base64 ?? "").trim();
+  if (str.length > MAX_BASE64_LENGTH) {
+    throw new RangeError(
+      `Base64 input exceeds ${MAX_BASE64_LENGTH} character limit.`,
+    );
+  }
+  return new Uint8Array(Buffer.from(str, "base64"));
 }
 

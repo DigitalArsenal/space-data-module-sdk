@@ -1,0 +1,7 @@
+src/generated/**/*.ts
+src/generated/**/*.map
+test/
+examples/
+lab/
+docs/
+.github/

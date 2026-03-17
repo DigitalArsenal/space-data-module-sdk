@@ -49,11 +49,22 @@ function ensureExportableMethodIds(manifest) {
   }
 }
 
-function buildCompilerArgs(compiler, exportedSymbols) {
+function buildCompilerArgs(compiler, exportedSymbols, options = {}) {
   const linkerExports = exportedSymbols.map(
     (symbol) => "-Wl,--export=" + symbol,
   );
-  return ["-O2", "--no-entry", "-s", "STANDALONE_WASM=1", ...linkerExports];
+  const extraArgs = [];
+  if (options.allowUndefinedImports === true) {
+    extraArgs.push("-s", "ERROR_ON_UNDEFINED_SYMBOLS=0", "-Wl,--allow-undefined");
+  }
+  return [
+    "-O2",
+    "--no-entry",
+    "-s",
+    "STANDALONE_WASM=1",
+    ...extraArgs,
+    ...linkerExports,
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -68,7 +79,7 @@ async function loadEmception() {
   emceptionLoadAttempted = true;
   try {
     const { default: Emception } = await import(
-      "@jprendes/emception/src/emception.mjs"
+      "sdn-emception"
     );
     emceptionInstance = new Emception();
     await emceptionInstance.init();
@@ -85,6 +96,7 @@ async function compileWithEmception(
   sourceCode,
   manifestSource,
   exportedSymbols,
+  compileOptions,
 ) {
   const ext = compiler.extension;
   const inputPath = `/working/module.${ext}`;
@@ -94,7 +106,7 @@ async function compileWithEmception(
   emception.writeFile(inputPath, sourceCode);
   emception.writeFile(manifestPath, manifestSource);
 
-  const args = buildCompilerArgs(compiler, exportedSymbols);
+  const args = buildCompilerArgs(compiler, exportedSymbols, compileOptions);
   const cmd = [
     compiler.command,
     inputPath,
@@ -125,6 +137,7 @@ async function compileWithSystemEmcc(
   manifestSource,
   exportedSymbols,
   outputPath,
+  compileOptions,
 ) {
   const tempDir = await mkdtemp(
     path.join(os.tmpdir(), "space-data-module-sdk-compile-"),
@@ -138,7 +151,7 @@ async function compileWithSystemEmcc(
   await writeFile(sourcePath, sourceCode, "utf8");
   await writeFile(manifestSourcePath, manifestSource, "utf8");
 
-  const args = buildCompilerArgs(compiler, exportedSymbols);
+  const args = buildCompilerArgs(compiler, exportedSymbols, compileOptions);
 
   try {
     await execFile(compiler.command, [
@@ -147,7 +160,7 @@ async function compileWithSystemEmcc(
       ...args,
       "-o",
       resolvedOutputPath,
-    ]);
+    ], { timeout: 120_000 });
   } catch (error) {
     error.message =
       `Compilation failed with ${compiler.command}: ` +
@@ -212,6 +225,7 @@ export async function compileModuleFromSource(options = {}) {
       sourceCode,
       manifestSource,
       exportedSymbols,
+      options,
     );
     compilerBackend = `${compiler.command} (emception)`;
   } else {
@@ -221,6 +235,7 @@ export async function compileModuleFromSource(options = {}) {
       manifestSource,
       exportedSymbols,
       options.outputPath,
+      options,
     );
     wasmBytes = result.wasmBytes;
     resolvedOutputPath = result.outputPath;

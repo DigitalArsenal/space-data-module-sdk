@@ -77,6 +77,18 @@ import { compileModule }   from "space-data-module-sdk/compiler";
 import { resolveStandard } from "space-data-module-sdk/standards";
 ```
 
+### Environment Compatibility
+
+| Subpath | Node.js | Browser |
+|---|---|---|
+| `manifest` | Yes | Yes |
+| `auth` | Yes | Yes |
+| `transport` | Yes | Yes |
+| `bundle` | Yes | Yes |
+| `compliance` | Yes | No (uses `node:fs`) |
+| `compiler` | Yes | No (uses `node:child_process`) |
+| `standards` | Yes | No (uses `node:module`) |
+
 ## CLI
 
 Every SDK operation is also available from the command line:
@@ -126,7 +138,64 @@ Modules declare a `pluginFamily` that tells runtimes what role they serve:
 
 Modules request host capabilities by name. The runtime grants or denies them at load time based on the deployment authorization:
 
-`clock` `random` `timers` `http` `network` `filesystem` `pipe` `pubsub` `protocol_handle` `protocol_dial` `database` `storage_adapter` `storage_query` `storage_write` `wallet_sign` `ipfs` `scene_access` `render_hooks`
+`clock` `random` `logging` `timers` `schedule_cron` `http` `tls` `websocket` `mqtt` `tcp` `udp` `network` `filesystem` `pipe` `pubsub` `protocol_handle` `protocol_dial` `database` `storage_adapter` `storage_query` `storage_write` `context_read` `context_write` `process_exec` `crypto_hash` `crypto_sign` `crypto_verify` `crypto_encrypt` `crypto_decrypt` `crypto_key_agreement` `crypto_kdf` `wallet_sign` `ipfs` `scene_access` `entity_access` `render_hooks`
+
+## Runtime Targets
+
+Manifests may also declare coarse runtime targets for compliance and deployment planning:
+
+`node` `browser` `wasi` `server` `desktop` `edge`
+
+The current compliance rules reject obviously impossible capability mixes for the generic browser target, such as raw filesystem access, TCP/UDP sockets, process execution, or scene hooks.
+
+## Reference Node Host
+
+This SDK now includes a reference Node host surface for the first portable capability set:
+
+`clock` `random` `timers` `schedule_cron` `http` `websocket` `mqtt` `filesystem` `tcp` `udp` `tls` `context_read` `context_write` `crypto_hash` `crypto_sign` `crypto_verify` `crypto_encrypt` `crypto_decrypt` `crypto_key_agreement` `crypto_kdf` `process_exec`
+
+It is intentionally a host service layer, not a finalized wasm import ABI. Runtimes can map the same operations into imports, RPC, component-model bindings, or hostcall shims later.
+
+```js
+import { createNodeHost } from "space-data-module-sdk";
+
+const host = createNodeHost({
+  manifest: {
+    capabilities: ["clock", "http", "filesystem", "context_read", "context_write"],
+  },
+  filesystemRoot: "./runtime-data",
+  allowedHttpOrigins: ["https://api.example.com"],
+  contextFilePath: "./runtime-data/context.json",
+});
+
+const now = host.clock.now();
+const response = await host.http.request({
+  url: "https://api.example.com/status",
+  responseType: "json",
+});
+await host.filesystem.writeFile("last-status.json", JSON.stringify(response.body, null, 2));
+await host.context.set("global", "lastStatusAt", now);
+```
+
+The same host can also be driven through string operation ids such as `clock.now`, `websocket.exchange`, `mqtt.publish`, `filesystem.readFile`, `tcp.request`, `udp.request`, `tls.request`, `context.set`, and `crypto.secp256k1.signDigest` via `host.invoke(...)`.
+
+For `process_exec`, `websocket`, `mqtt`, `tcp`, `udp`, and `tls`, pass explicit allowlists such as `allowedCommands`, `allowedWebSocketOrigins`, `allowedMqttHosts`, `allowedMqttPorts`, `allowedTcpHosts`, `allowedTcpPorts`, `allowedUdpHosts`, `allowedUdpPorts`, `allowedTlsHosts`, and `allowedTlsPorts` so deployments can lock the host down to known binaries and network targets.
+
+## Sync Wasm Hostcall ABI
+
+The SDK now includes a first concrete wasm import ABI for the synchronous subset of the host surface. It uses a JSON-over-memory bridge under the import module `sdn_host`:
+
+- `call_json(operation_ptr, operation_len, payload_ptr, payload_len) -> i32`
+- `response_len() -> i32`
+- `read_response(dst_ptr, dst_len) -> i32`
+- `last_status_code() -> i32`
+- `clear_response() -> i32`
+
+Use `createNodeHostSyncHostcallBridge(...)` to expose that namespace to a wasm instance backed by the reference Node host. The current sync dispatch layer covers:
+
+`host.runtimeTarget` `host.listCapabilities` `host.listSupportedCapabilities` `host.listOperations` `host.hasCapability` `clock.now` `clock.monotonicNow` `clock.nowIso` `schedule.parse` `schedule.matches` `schedule.next` `filesystem.resolvePath`
+
+If a guest module intentionally imports host functions, compile it with `allowUndefinedImports: true` in `compileModuleFromSource(...)` so the unresolved imports stay in the wasm artifact instead of failing the link step.
 
 ## Development
 

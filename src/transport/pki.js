@@ -14,8 +14,6 @@ import {
   x25519SharedSecret,
 } from "../utils/wasmCrypto.js";
 
-const HKDF_SALT_LABEL = new TextEncoder().encode("space-data-module-sdk");
-
 function normalizePublicKey(value) {
   if (typeof value === "string") {
     return hexToBytes(value);
@@ -66,9 +64,6 @@ export async function encryptBytesForRecipient({
   }
   const sender = senderKeyPair ?? (await generateX25519Keypair());
   const salt = await randomBytes(32);
-  salt.set(
-    HKDF_SALT_LABEL.slice(0, Math.min(HKDF_SALT_LABEL.length, salt.length)),
-  );
   const iv = await randomBytes(12);
   const sharedSecret = await deriveSharedSecret(
     sender.privateKey,

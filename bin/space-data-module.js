@@ -24,6 +24,11 @@ async function main(argv) {
       return runCompile(rest);
     case "protect":
       return runProtect(rest);
+    case "help":
+    case "--help":
+    case "-h":
+      printUsage();
+      return 0;
     default:
       printUsage();
       return command ? 1 : 0;

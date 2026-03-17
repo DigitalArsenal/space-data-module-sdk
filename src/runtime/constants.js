@@ -14,15 +14,33 @@ export const ExternalInterfaceKind = Object.freeze({
   CLOCK: "clock",
   RANDOM: "random",
   TIMER: "timer",
+  SCHEDULE: "schedule",
   PUBSUB: "pubsub",
   PROTOCOL: "protocol",
   HTTP: "http",
+  WEBSOCKET: "websocket",
+  MQTT: "mqtt",
+  TCP: "tcp",
+  UDP: "udp",
+  TLS: "tls",
   FILESYSTEM: "filesystem",
   PIPE: "pipe",
   NETWORK: "network",
   DATABASE: "database",
+  EXEC: "exec",
+  CRYPTO: "crypto",
+  CONTEXT: "context",
   LOCAL_RUNTIME: "local-runtime",
   HOST_SERVICE: "host-service",
+});
+
+export const RuntimeTarget = Object.freeze({
+  NODE: "node",
+  BROWSER: "browser",
+  WASI: "wasi",
+  SERVER: "server",
+  DESKTOP: "desktop",
+  EDGE: "edge",
 });
 
 export const DefaultManifestExports = Object.freeze({
@@ -31,4 +49,3 @@ export const DefaultManifestExports = Object.freeze({
   flowBytesSymbol: "flow_get_manifest_flatbuffer",
   flowSizeSymbol: "flow_get_manifest_flatbuffer_size",
 });
-

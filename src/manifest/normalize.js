@@ -39,10 +39,37 @@ const capabilityKindByName = Object.freeze({
   random: CapabilityKind.RANDOM,
   logging: CapabilityKind.LOGGING,
   timers: CapabilityKind.TIMERS,
+  schedule_cron: CapabilityKind.SCHEDULE_CRON,
+  cron: CapabilityKind.SCHEDULE_CRON,
   pubsub: CapabilityKind.PUBSUB,
+  http: CapabilityKind.HTTP,
+  filesystem: CapabilityKind.FILESYSTEM,
+  pipe: CapabilityKind.PIPE,
+  network: CapabilityKind.NETWORK,
+  database: CapabilityKind.DATABASE,
   protocol_dial: CapabilityKind.PROTOCOL_DIAL,
   protocol_handle: CapabilityKind.PROTOCOL_HANDLE,
+  tls: CapabilityKind.TLS,
+  mqtt: CapabilityKind.MQTT,
+  websocket: CapabilityKind.WEBSOCKET,
+  tcp: CapabilityKind.TCP,
+  udp: CapabilityKind.UDP,
+  process_exec: CapabilityKind.PROCESS_EXEC,
+  exec: CapabilityKind.PROCESS_EXEC,
+  context_read: CapabilityKind.CONTEXT_READ,
+  context_write: CapabilityKind.CONTEXT_WRITE,
+  storage_adapter: CapabilityKind.STORAGE_ADAPTER,
   storage_query: CapabilityKind.STORAGE_QUERY,
+  storage_write: CapabilityKind.STORAGE_WRITE,
+  wallet_sign: CapabilityKind.WALLET_SIGN,
+  ipfs: CapabilityKind.IPFS,
+  crypto_hash: CapabilityKind.CRYPTO_HASH,
+  crypto_sign: CapabilityKind.CRYPTO_SIGN,
+  crypto_verify: CapabilityKind.CRYPTO_VERIFY,
+  crypto_encrypt: CapabilityKind.CRYPTO_ENCRYPT,
+  crypto_decrypt: CapabilityKind.CRYPTO_DECRYPT,
+  crypto_key_agreement: CapabilityKind.CRYPTO_KEY_AGREEMENT,
+  crypto_kdf: CapabilityKind.CRYPTO_KDF,
   scene_access: CapabilityKind.SCENE_ACCESS,
   entity_access: CapabilityKind.ENTITY_ACCESS,
   render_hooks: CapabilityKind.RENDER_HOOKS,
@@ -238,6 +265,11 @@ export function toEmbeddedPluginManifest(input = {}) {
       "externalInterfaces are not yet representable in the embedded FlatBuffer manifest schema and were omitted from the compiled artifact.",
     );
   }
+  if (Array.isArray(input.runtimeTargets) && input.runtimeTargets.length > 0) {
+    warnings.push(
+      "runtimeTargets are not yet representable in the embedded FlatBuffer manifest schema and were omitted from the compiled artifact.",
+    );
+  }
 
   const capabilities = Array.isArray(input.capabilities)
     ? input.capabilities
@@ -272,4 +304,3 @@ export function toEmbeddedPluginManifest(input = {}) {
     warnings,
   };
 }
-
