@@ -9,7 +9,7 @@ import {
   protectModuleArtifact,
   validateArtifactWithStandards,
   validateManifestWithStandards,
-} from "@digitalarsenal/module-sdk";
+} from "../src/index.js";
 
 function base64ToBytes(value) {
   return new Uint8Array(Buffer.from(String(value ?? ""), "base64"));

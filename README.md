@@ -1,6 +1,6 @@
 # Space Data Module SDK
 
-Shared module SDK for building, validating, signing, and deploying WebAssembly modules on the [Space Data Network](https://digitalarsenal.github.io/space-data-network/).
+SDK for building, validating, signing, and deploying WebAssembly modules on the [Space Data Network](https://digitalarsenal.github.io/space-data-network/).
 
 Part of the Space Data Network ecosystem:
 
@@ -9,15 +9,10 @@ Part of the Space Data Network ecosystem:
 - [FlatBuffers schemas](https://digitalarsenal.github.io/flatbuffers/) — binary serialization schemas used across the network
 - [OrbPro](https://orbpro.ai) — space domain awareness platform
 
-## Packages
-
-- [`@digitalarsenal/module-sdk`](packages/module-sdk) — Core SDK: manifest codec, compliance validation, compiler harness, auth, transport, and standards integration
-- [`@digitalarsenal/module-lab`](apps/module-lab) — Browser-based verification lab for compiling, validating, and packaging modules
-
 ## Install
 
 ```bash
-npm install @digitalarsenal/module-sdk
+npm install space-data-module-sdk
 ```
 
 ## Usage
@@ -29,18 +24,18 @@ import {
   signManifest, verifyManifest,      // auth / signatures
   encryptPayload, decryptPayload,    // transport encryption
   compileModule,                     // source-to-wasm compilation
-} from "@digitalarsenal/module-sdk";
+} from "space-data-module-sdk";
 ```
 
 ### Subpath exports
 
 ```js
-import { encodeManifest } from "@digitalarsenal/module-sdk/manifest";
-import { checkCompliance } from "@digitalarsenal/module-sdk/compliance";
-import { signManifest }    from "@digitalarsenal/module-sdk/auth";
-import { encryptPayload }  from "@digitalarsenal/module-sdk/transport";
-import { compileModule }   from "@digitalarsenal/module-sdk/compiler";
-import { resolveStandard } from "@digitalarsenal/module-sdk/standards";
+import { encodeManifest } from "space-data-module-sdk/manifest";
+import { checkCompliance } from "space-data-module-sdk/compliance";
+import { signManifest }    from "space-data-module-sdk/auth";
+import { encryptPayload }  from "space-data-module-sdk/transport";
+import { compileModule }   from "space-data-module-sdk/compiler";
+import { resolveStandard } from "space-data-module-sdk/standards";
 ```
 
 ## CLI
@@ -68,16 +63,15 @@ npm run start:lab
 ## Development
 
 ```bash
-npm install   # install all workspace dependencies
-npm test      # run tests across all packages
-npm run build # build all packages
+npm install
+npm test
 ```
 
 Requires Node.js >= 20.
 
 ## Architecture
 
-Modules carry an embedded binary manifest encoded with [FlatBuffers](https://digitalarsenal.github.io/flatbuffers/) (schemas in [`packages/module-sdk/schemas/`](packages/module-sdk/schemas)). The SDK validates modules against data standards published at [spacedatastandards.org](https://spacedatastandards.org) and uses HD-wallet-derived keys via [`hd-wallet-wasm`](https://github.com/nicktj-dev/hd-wallet-wasm) for manifest signing and transport encryption.
+Modules carry an embedded binary manifest encoded with [FlatBuffers](https://digitalarsenal.github.io/flatbuffers/) (schemas in [`schemas/`](schemas/)). The SDK validates modules against data standards published at [spacedatastandards.org](https://spacedatastandards.org) and uses HD-wallet-derived keys via [`hd-wallet-wasm`](https://github.com/nicktj-dev/hd-wallet-wasm) for manifest signing and transport encryption.
 
 ## License
 
