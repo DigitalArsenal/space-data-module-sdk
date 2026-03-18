@@ -135,6 +135,33 @@ The reference path lives in
 - the `go` and `python` directories show non-JS readers against the same
   bundle contract
 
+## Module Publication
+
+Packages that publish SDN modules now use the canonical `sdn-module`
+publication descriptor. That descriptor covers:
+
+- standalone module packages
+- attached module artifacts shipped inside another language library
+- discovery of bundled wasm, sidecar signatures, and encrypted transport
+  FlatBuffers
+
+The full standard is in
+[`docs/module-publication-standard.md`](./docs/module-publication-standard.md),
+with concrete examples under [`examples/publishing`](./examples/publishing).
+
+For npm packages, the simplest form is:
+
+```json
+{
+  "name": "@example/orbit-lib",
+  "version": "1.2.3",
+  "sdn-module": "./dist/orbit-lib.module.wasm"
+}
+```
+
+When signature or transport metadata is published in the same file, it belongs
+inside `sds.bundle`, not as raw bytes after the end of the wasm binary.
+
 ## Host ABI
 
 This repo also defines the module-facing capability vocabulary and the first

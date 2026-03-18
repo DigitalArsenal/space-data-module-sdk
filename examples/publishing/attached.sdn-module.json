@@ -1,0 +1,30 @@
+{
+  "specVersion": 1,
+  "publicationMode": "attached",
+  "module": {
+    "path": "./dist/orbit-lib.module.wasm",
+    "packaging": "plain-wasm",
+    "mediaType": "application/wasm",
+    "manifestExportSymbol": "plugin_get_manifest_flatbuffer",
+    "manifestSizeSymbol": "plugin_get_manifest_flatbuffer_size",
+    "pluginId": "com.example.orbit-lib",
+    "version": "1.2.3"
+  },
+  "artifacts": {
+    "signature": {
+      "storage": "package-file",
+      "path": "./dist/orbit-lib.signature.fb",
+      "schemaName": "DetachedSignature.fbs",
+      "fileIdentifier": "SIGD"
+    },
+    "transport": {
+      "storage": "package-file",
+      "path": "./dist/orbit-lib.transport.fb",
+      "schemaName": "EncryptedTransportEnvelope.fbs",
+      "fileIdentifier": "ETRN"
+    }
+  },
+  "integrity": {
+    "moduleSha256": "510c0f930a9d3c4eeb0f4a2b4f73cf6b4f8c50b8157ab671bf5f60cc533d8c6a"
+  }
+}

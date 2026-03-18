@@ -1,0 +1,30 @@
+{
+  "specVersion": 1,
+  "publicationMode": "standalone",
+  "module": {
+    "path": "./dist/catalog-query.bundle.wasm",
+    "packaging": "sds-bundled-wasm",
+    "mediaType": "application/wasm",
+    "manifestExportSymbol": "plugin_get_manifest_flatbuffer",
+    "manifestSizeSymbol": "plugin_get_manifest_flatbuffer_size",
+    "pluginId": "org.example.catalog-query",
+    "version": "0.2.0"
+  },
+  "artifacts": {
+    "signature": {
+      "storage": "embedded",
+      "bundleEntryId": "signature.primary",
+      "schemaName": "DetachedSignature.fbs",
+      "fileIdentifier": "SIGD"
+    },
+    "transport": {
+      "storage": "embedded",
+      "bundleEntryId": "transport.primary",
+      "schemaName": "EncryptedTransportEnvelope.fbs",
+      "fileIdentifier": "ETRN"
+    }
+  },
+  "integrity": {
+    "moduleSha256": "2bff0d3d8f4f5aa1d0c7be3e54e15f9f8c9f3a62d5f0a4e8a8d80de28f4f0b31"
+  }
+}
