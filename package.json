@@ -31,13 +31,14 @@
     "prepublishOnly": "npm test && npm run check:compliance"
   },
   "dependencies": {
-    "sdn-emception": "1.0.0",
     "flatbuffers": "^25.9.23",
     "hd-wallet-wasm": "1.6.0",
+    "sdn-emception": "1.0.0",
     "spacedatastandards.org": "23.3.3-0.3.4"
   },
   "devDependencies": {
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "flatsql": "^0.4.0"
   },
   "engines": {
     "node": ">=20.0.0"
