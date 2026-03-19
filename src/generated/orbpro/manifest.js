@@ -5,6 +5,7 @@ export { BuildArtifact, BuildArtifactT } from './manifest/build-artifact.js';
 export { CapabilityKind } from './manifest/capability-kind.js';
 export { DrainPolicy } from './manifest/drain-policy.js';
 export { HostCapability, HostCapabilityT } from './manifest/host-capability.js';
+export { InvokeSurface } from './manifest/invoke-surface.js';
 export { MethodManifest, MethodManifestT } from './manifest/method-manifest.js';
 export { PluginFamily } from './manifest/plugin-family.js';
 export { PluginManifest, PluginManifestT } from './manifest/plugin-manifest.js';

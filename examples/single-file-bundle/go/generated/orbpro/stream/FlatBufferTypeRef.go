@@ -6,7 +6,7 @@ import (
 	flatbuffers "github.com/google/flatbuffers/go"
 )
 
-/// FlatBuffer schema identity for a stream frame or accepted port type.
+/// Payload schema identity for a stream frame or accepted port type.
 type FlatBufferTypeRef struct {
 	_tab flatbuffers.Table
 }
@@ -112,8 +112,73 @@ func (rcv *FlatBufferTypeRef) MutateAcceptsAnyFlatbuffer(n bool) bool {
 	return rcv._tab.MutateBoolSlot(10, n)
 }
 
+/// Payload wire format. Defaults to regular FlatBuffer framing.
+func (rcv *FlatBufferTypeRef) WireFormat() PayloadWireFormat {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	if o != 0 {
+		return PayloadWireFormat(rcv._tab.GetByte(o + rcv._tab.Pos))
+	}
+	return PayloadWireFormatFLATBUFFER
+}
+
+/// Payload wire format. Defaults to regular FlatBuffer framing.
+func (rcv *FlatBufferTypeRef) MutateWireFormat(n PayloadWireFormat) bool {
+	return rcv._tab.MutateByteSlot(12, byte(n))
+}
+
+/// Root or layout type name for aligned-binary payloads.
+func (rcv *FlatBufferTypeRef) RootTypeName() []byte {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(14))
+	if o != 0 {
+		return rcv._tab.ByteVector(o + rcv._tab.Pos)
+	}
+	return nil
+}
+
+/// Fixed string length for aligned-binary schemas when required.
+func (rcv *FlatBufferTypeRef) FixedStringLength() uint16 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(16))
+	if o != 0 {
+		return rcv._tab.GetUint16(o + rcv._tab.Pos)
+	}
+	return 0
+}
+
+/// Fixed string length for aligned-binary schemas when required.
+func (rcv *FlatBufferTypeRef) MutateFixedStringLength(n uint16) bool {
+	return rcv._tab.MutateUint16Slot(16, n)
+}
+
+/// Fixed byte length for aligned-binary payloads.
+func (rcv *FlatBufferTypeRef) ByteLength() uint32 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(18))
+	if o != 0 {
+		return rcv._tab.GetUint32(o + rcv._tab.Pos)
+	}
+	return 0
+}
+
+/// Fixed byte length for aligned-binary payloads.
+func (rcv *FlatBufferTypeRef) MutateByteLength(n uint32) bool {
+	return rcv._tab.MutateUint32Slot(18, n)
+}
+
+/// Required byte alignment for aligned-binary payloads.
+func (rcv *FlatBufferTypeRef) RequiredAlignment() uint16 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(20))
+	if o != 0 {
+		return rcv._tab.GetUint16(o + rcv._tab.Pos)
+	}
+	return 0
+}
+
+/// Required byte alignment for aligned-binary payloads.
+func (rcv *FlatBufferTypeRef) MutateRequiredAlignment(n uint16) bool {
+	return rcv._tab.MutateUint16Slot(20, n)
+}
+
 func FlatBufferTypeRefStart(builder *flatbuffers.Builder) {
-	builder.StartObject(4)
+	builder.StartObject(9)
 }
 func FlatBufferTypeRefAddSchemaName(builder *flatbuffers.Builder, schemaName flatbuffers.UOffsetT) {
 	builder.PrependUOffsetTSlot(0, flatbuffers.UOffsetT(schemaName), 0)
@@ -129,6 +194,21 @@ func FlatBufferTypeRefStartSchemaHashVector(builder *flatbuffers.Builder, numEle
 }
 func FlatBufferTypeRefAddAcceptsAnyFlatbuffer(builder *flatbuffers.Builder, acceptsAnyFlatbuffer bool) {
 	builder.PrependBoolSlot(3, acceptsAnyFlatbuffer, false)
+}
+func FlatBufferTypeRefAddWireFormat(builder *flatbuffers.Builder, wireFormat PayloadWireFormat) {
+	builder.PrependByteSlot(4, byte(wireFormat), 0)
+}
+func FlatBufferTypeRefAddRootTypeName(builder *flatbuffers.Builder, rootTypeName flatbuffers.UOffsetT) {
+	builder.PrependUOffsetTSlot(5, flatbuffers.UOffsetT(rootTypeName), 0)
+}
+func FlatBufferTypeRefAddFixedStringLength(builder *flatbuffers.Builder, fixedStringLength uint16) {
+	builder.PrependUint16Slot(6, fixedStringLength, 0)
+}
+func FlatBufferTypeRefAddByteLength(builder *flatbuffers.Builder, byteLength uint32) {
+	builder.PrependUint32Slot(7, byteLength, 0)
+}
+func FlatBufferTypeRefAddRequiredAlignment(builder *flatbuffers.Builder, requiredAlignment uint16) {
+	builder.PrependUint16Slot(8, requiredAlignment, 0)
 }
 func FlatBufferTypeRefEnd(builder *flatbuffers.Builder) flatbuffers.UOffsetT {
 	return builder.EndObject()

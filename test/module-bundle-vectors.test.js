@@ -35,6 +35,53 @@ async function loadVectorInputs() {
   };
 }
 
+function normalizeWireFormat(value) {
+  if (value === 1) {
+    return "aligned-binary";
+  }
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+  return normalized === "aligned-binary" ? "aligned-binary" : "flatbuffer";
+}
+
+function toTypeRefSummary(typeRef) {
+  if (!typeRef) {
+    return null;
+  }
+  const summary = {};
+  if (typeRef.schemaName !== undefined && typeRef.schemaName !== null) {
+    summary.schemaName = typeRef.schemaName;
+  }
+  if (typeRef.fileIdentifier !== undefined && typeRef.fileIdentifier !== null) {
+    summary.fileIdentifier = typeRef.fileIdentifier;
+  }
+  if (Array.isArray(typeRef.schemaHash) && typeRef.schemaHash.length > 0) {
+    summary.schemaHashHex = bytesToHex(new Uint8Array(typeRef.schemaHash));
+  }
+  if (typeRef.acceptsAnyFlatbuffer === true) {
+    summary.acceptsAnyFlatbuffer = true;
+  }
+  const wireFormat = normalizeWireFormat(typeRef.wireFormat);
+  if (wireFormat !== "flatbuffer") {
+    summary.wireFormat = wireFormat;
+  }
+  if (typeRef.rootTypeName) {
+    summary.rootTypeName = typeRef.rootTypeName;
+  }
+  if (typeRef.fixedStringLength) {
+    summary.fixedStringLength = typeRef.fixedStringLength;
+  }
+  if (typeRef.byteLength) {
+    summary.byteLength = typeRef.byteLength;
+  }
+  if (typeRef.requiredAlignment) {
+    summary.requiredAlignment = typeRef.requiredAlignment;
+  }
+  return summary;
+}
+
 function buildParsedSummary(bundleResult, parsedBundle) {
   return {
     bundleSectionName:
@@ -53,12 +100,7 @@ function buildParsedSummary(bundleResult, parsedBundle) {
       sectionName: entry.sectionName ?? null,
       payloadLength: entry.payloadBytes.length,
       payloadSha256Hex: bytesToHex(entry.sha256Bytes),
-      typeRef: entry.typeRef
-        ? {
-            schemaName: entry.typeRef.schemaName ?? null,
-            fileIdentifier: entry.typeRef.fileIdentifier ?? null,
-          }
-        : null,
+      typeRef: toTypeRefSummary(entry.typeRef),
       decodedPayload:
         entry.payloadEncodingName === "flatbuffer"
           ? null

@@ -1,5 +1,5 @@
-import * as flatbuffers from 'flatbuffers';
-import { FlatBufferTypeRef, FlatBufferTypeRefT } from '../../orbpro/stream/flat-buffer-type-ref.js';
+import * as flatbuffers from "flatbuffers";
+import { FlatBufferTypeRef, FlatBufferTypeRefT } from "../../orbpro/stream/flat-buffer-type-ref.js";
 /**
  * Accepted schema family for a port.
  */
@@ -37,9 +37,9 @@ export declare class AcceptedTypeSet implements flatbuffers.IUnpackableObject<Ac
 }
 export declare class AcceptedTypeSetT implements flatbuffers.IGeneratedObject {
     setId: string | Uint8Array | null;
-    allowedTypes: (FlatBufferTypeRefT)[];
+    allowedTypes: FlatBufferTypeRefT[];
     description: string | Uint8Array | null;
-    constructor(setId?: string | Uint8Array | null, allowedTypes?: (FlatBufferTypeRefT)[], description?: string | Uint8Array | null);
+    constructor(setId?: string | Uint8Array | null, allowedTypes?: FlatBufferTypeRefT[], description?: string | Uint8Array | null);
     pack(builder: flatbuffers.Builder): flatbuffers.Offset;
 }
 //# sourceMappingURL=accepted-type-set.d.ts.map

@@ -21,6 +21,7 @@ import orbpro.module.ModuleBundleEntry as ModuleBundleEntry
 import orbpro.module.ModuleBundleEntryRole as ModuleBundleEntryRole
 import orbpro.module.ModulePayloadEncoding as ModulePayloadEncoding
 import orbpro.stream.FlatBufferTypeRef as FlatBufferTypeRef
+import orbpro.stream.PayloadWireFormat as PayloadWireFormat
 
 SDS_CUSTOM_SECTION_PREFIX = "sds."
 SDS_BUNDLE_SECTION_NAME = "sds.bundle"
@@ -148,13 +149,79 @@ def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def build_type_ref(builder: flatbuffers.Builder, schema_name: str, file_identifier: str):
-    schema_name_offset = builder.CreateString(schema_name)
-    file_identifier_offset = builder.CreateString(file_identifier)
+def normalize_wire_format(value) -> int:
+    if value in (PayloadWireFormat.PayloadWireFormat.ALIGNED_BINARY, 1):
+        return PayloadWireFormat.PayloadWireFormat.ALIGNED_BINARY
+    normalized = str(value or "").strip().lower().replace("_", "-")
+    if normalized == "aligned-binary":
+        return PayloadWireFormat.PayloadWireFormat.ALIGNED_BINARY
+    return PayloadWireFormat.PayloadWireFormat.FLATBUFFER
+
+
+def to_bytes(value) -> bytes:
+    if value is None:
+        return b""
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, bytearray):
+        return bytes(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized.startswith("0x"):
+            normalized = normalized[2:]
+        return bytes.fromhex(normalized)
+    return bytes(value)
+
+
+def build_type_ref(builder: flatbuffers.Builder, spec: dict):
+    schema_name_offset = (
+        builder.CreateString(spec["schema_name"])
+        if spec.get("schema_name") is not None
+        else 0
+    )
+    file_identifier_offset = (
+        builder.CreateString(spec["file_identifier"])
+        if spec.get("file_identifier") is not None
+        else 0
+    )
+    schema_hash_bytes = to_bytes(spec.get("schema_hash"))
+    schema_hash_offset = (
+        builder.CreateByteVector(schema_hash_bytes) if schema_hash_bytes else 0
+    )
+    root_type_name_offset = (
+        builder.CreateString(spec["root_type_name"])
+        if spec.get("root_type_name") is not None
+        else 0
+    )
     FlatBufferTypeRef.Start(builder)
-    FlatBufferTypeRef.AddSchemaName(builder, schema_name_offset)
-    FlatBufferTypeRef.AddFileIdentifier(builder, file_identifier_offset)
-    FlatBufferTypeRef.AddAcceptsAnyFlatbuffer(builder, False)
+    if schema_name_offset:
+        FlatBufferTypeRef.AddSchemaName(builder, schema_name_offset)
+    if file_identifier_offset:
+        FlatBufferTypeRef.AddFileIdentifier(builder, file_identifier_offset)
+    if schema_hash_offset:
+        FlatBufferTypeRef.AddSchemaHash(builder, schema_hash_offset)
+    FlatBufferTypeRef.AddAcceptsAnyFlatbuffer(
+        builder,
+        bool(spec.get("accepts_any_flatbuffer")),
+    )
+    FlatBufferTypeRef.AddWireFormat(
+        builder,
+        normalize_wire_format(spec.get("wire_format")),
+    )
+    if root_type_name_offset:
+        FlatBufferTypeRef.AddRootTypeName(builder, root_type_name_offset)
+    FlatBufferTypeRef.AddFixedStringLength(
+        builder,
+        int(spec.get("fixed_string_length") or 0),
+    )
+    FlatBufferTypeRef.AddByteLength(
+        builder,
+        int(spec.get("byte_length") or 0),
+    )
+    FlatBufferTypeRef.AddRequiredAlignment(
+        builder,
+        int(spec.get("required_alignment") or 0),
+    )
     return FlatBufferTypeRef.End(builder)
 
 
@@ -177,11 +244,7 @@ def build_entry(builder: flatbuffers.Builder, entry: dict) -> int:
     )
     type_ref_offset = 0
     if entry.get("type_ref") is not None:
-        type_ref_offset = build_type_ref(
-            builder,
-            entry["type_ref"]["schema_name"],
-            entry["type_ref"]["file_identifier"],
-        )
+        type_ref_offset = build_type_ref(builder, entry["type_ref"])
     sha256_offset = create_byte_vector(builder, entry["payload_sha256"])
     payload_offset = create_byte_vector(builder, entry["payload"])
 
@@ -361,9 +424,28 @@ def build_summary(base_wasm: bytes, bundle_bytes: bytes, bundled_wasm: bytes) ->
         type_ref = None
         if type_ref_obj is not None:
             type_ref = {
-                "schemaName": decode_text(type_ref_obj.SchemaName()),
-                "fileIdentifier": decode_text(type_ref_obj.FileIdentifier()),
             }
+            if type_ref_obj.SchemaName() is not None:
+                type_ref["schemaName"] = decode_text(type_ref_obj.SchemaName())
+            if type_ref_obj.FileIdentifier() is not None:
+                type_ref["fileIdentifier"] = decode_text(type_ref_obj.FileIdentifier())
+            if type_ref_obj.SchemaHashLength() > 0:
+                type_ref["schemaHashHex"] = bytes(
+                    type_ref_obj.SchemaHash(index)
+                    for index in range(type_ref_obj.SchemaHashLength())
+                ).hex()
+            if type_ref_obj.AcceptsAnyFlatbuffer():
+                type_ref["acceptsAnyFlatbuffer"] = True
+            if type_ref_obj.WireFormat() == PayloadWireFormat.PayloadWireFormat.ALIGNED_BINARY:
+                type_ref["wireFormat"] = "aligned-binary"
+            if type_ref_obj.RootTypeName() is not None:
+                type_ref["rootTypeName"] = decode_text(type_ref_obj.RootTypeName())
+            if type_ref_obj.FixedStringLength():
+                type_ref["fixedStringLength"] = int(type_ref_obj.FixedStringLength())
+            if type_ref_obj.ByteLength():
+                type_ref["byteLength"] = int(type_ref_obj.ByteLength())
+            if type_ref_obj.RequiredAlignment():
+                type_ref["requiredAlignment"] = int(type_ref_obj.RequiredAlignment())
 
         if entry_id == "manifest":
             manifest = PluginManifest.GetRootAs(payload, 0)

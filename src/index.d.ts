@@ -1,15 +1,25 @@
 // --- Manifest ---
 
-export interface AllowedType {
+export type PayloadWireFormat = "flatbuffer" | "aligned-binary";
+export type InvokeSurface = "direct" | "command";
+
+export interface PayloadTypeRef {
   schemaName?: string;
   fileIdentifier?: string;
-  schemaHash?: string;
+  schemaHash?: string | number[] | Uint8Array;
   acceptsAnyFlatbuffer?: boolean;
+  wireFormat?: PayloadWireFormat;
+  rootTypeName?: string;
+  fixedStringLength?: number;
+  byteLength?: number;
+  requiredAlignment?: number;
 }
+
+export type AllowedType = PayloadTypeRef;
 
 export interface AcceptedTypeSet {
   setId: string;
-  allowedTypes: AllowedType[];
+  allowedTypes: PayloadTypeRef[];
 }
 
 export interface PortManifest {
@@ -42,10 +52,11 @@ export interface PluginManifest {
   version: string;
   pluginFamily: string;
   capabilities?: string[];
+  invokeSurfaces?: InvokeSurface[];
   runtimeTargets?: string[];
   externalInterfaces?: ExternalInterface[];
   methods: MethodManifest[];
-  schemasUsed?: AllowedType[];
+  schemasUsed?: PayloadTypeRef[];
 }
 
 export function encodePluginManifest(manifest: PluginManifest): Uint8Array;
@@ -63,6 +74,61 @@ export function writeEmbeddedManifestArtifacts(options: {
   manifest: unknown;
   outputDir: string;
 }): Promise<{ sourcePath: string; headerPath: string }>;
+
+// --- Invoke ---
+
+export interface InvokeFrame {
+  portId?: string | null;
+  typeRef?: PayloadTypeRef | null;
+  alignment?: number;
+  offset?: number;
+  size?: number;
+  ownership?: number | string;
+  generation?: number;
+  mutability?: number | string;
+  traceId?: bigint | number | string;
+  streamId?: number;
+  sequence?: bigint | number | string;
+  endOfStream?: boolean;
+  payload?: Uint8Array | ArrayBuffer | ArrayBufferView | null;
+}
+
+export interface PluginInvokeRequestEnvelope {
+  methodId: string;
+  inputs?: InvokeFrame[];
+  inputFrames?: InvokeFrame[];
+  payloadArena?: Uint8Array;
+}
+
+export interface PluginInvokeResponseEnvelope {
+  statusCode?: number;
+  yielded?: boolean;
+  backlogRemaining?: number;
+  outputs?: InvokeFrame[];
+  outputFrames?: InvokeFrame[];
+  payloadArena?: Uint8Array;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+}
+
+export function encodePluginInvokeRequest(
+  request: PluginInvokeRequestEnvelope,
+): Uint8Array;
+export function decodePluginInvokeRequest(
+  data: Uint8Array | ArrayBuffer | ArrayBufferView,
+): PluginInvokeRequestEnvelope;
+export function encodePluginInvokeResponse(
+  response: PluginInvokeResponseEnvelope,
+): Uint8Array;
+export function decodePluginInvokeResponse(
+  data: Uint8Array | ArrayBuffer | ArrayBufferView,
+): PluginInvokeResponseEnvelope;
+export function normalizeInvokeSurfaceName(
+  value: InvokeSurface | number | string | null | undefined,
+): InvokeSurface | null;
+export function normalizeInvokeSurfaces(
+  value: Array<InvokeSurface | number | string> | null | undefined,
+): InvokeSurface[];
 
 // --- Compliance ---
 
@@ -356,7 +422,7 @@ export interface StandardsEntry {
 export function loadStandardsCatalog(): Promise<StandardsEntry[]>;
 export function loadKnownTypeCatalog(): Promise<StandardsEntry[]>;
 export function resolveStandardsTypeRef(
-  typeRef: AllowedType,
+  typeRef: PayloadTypeRef,
   catalog?: StandardsEntry[],
 ): StandardsEntry | null;
 export function validateManifestAgainstStandardsCatalog(
@@ -834,6 +900,13 @@ export const DefaultManifestExports: {
   flowSizeSymbol: string;
 };
 
+export const DefaultInvokeExports: {
+  invokeSymbol: string;
+  allocSymbol: string;
+  freeSymbol: string;
+  commandSymbol: string;
+};
+
 export const DrainPolicy: {
   SINGLE_SHOT: string;
   DRAIN_UNTIL_YIELD: string;
@@ -868,6 +941,11 @@ export const ExternalInterfaceKind: {
   CONTEXT: string;
   LOCAL_RUNTIME: string;
   HOST_SERVICE: string;
+};
+
+export const InvokeSurface: {
+  DIRECT: string;
+  COMMAND: string;
 };
 
 export const RuntimeTarget: {

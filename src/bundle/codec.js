@@ -66,6 +66,25 @@ function normalizeString(value, fallback = null) {
   return String(value);
 }
 
+function normalizePayloadWireFormat(value) {
+  if (value === 1) {
+    return "aligned-binary";
+  }
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+  return normalized === "aligned-binary" ? "aligned-binary" : "flatbuffer";
+}
+
+function normalizeUnsignedInteger(value, fallback = 0) {
+  const normalized = Number(value ?? fallback);
+  if (!Number.isFinite(normalized)) {
+    return fallback;
+  }
+  return Math.max(0, Math.trunc(normalized));
+}
+
 function normalizeByteArray(value, { encoding = null } = {}) {
   if (value === undefined || value === null) {
     return [];
@@ -124,6 +143,11 @@ function normalizeTypeRef(value) {
     normalizeString(value.fileIdentifier),
     normalizeByteArray(value.schemaHash),
     Boolean(value.acceptsAnyFlatbuffer),
+    normalizePayloadWireFormat(value.wireFormat),
+    normalizeString(value.rootTypeName),
+    normalizeUnsignedInteger(value.fixedStringLength),
+    normalizeUnsignedInteger(value.byteLength),
+    normalizeUnsignedInteger(value.requiredAlignment),
   );
 }
 

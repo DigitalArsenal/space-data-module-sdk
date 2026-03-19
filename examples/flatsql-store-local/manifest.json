@@ -40,7 +40,7 @@
           "acceptedTypeSets": [
             {
               "setId": "any-flatbuffer",
-              "description": "Accept any aligned FlatBuffer payload, including REC-wrapped SDS records.",
+              "description": "Accept any FlatBuffer payload, including REC-wrapped SDS records.",
               "allowedTypes": [
                 {
                   "acceptsAnyFlatbuffer": true
@@ -74,7 +74,7 @@
       ],
       "maxBatch": 4096,
       "drainPolicy": "drain-until-yield",
-      "description": "Stores arbitrary aligned FlatBuffer records in the configured FlatSQL backend."
+      "description": "Stores arbitrary FlatBuffer records in the configured FlatSQL backend."
     },
     {
       "methodId": "query_sql",

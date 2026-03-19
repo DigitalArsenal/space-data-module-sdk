@@ -15,6 +15,7 @@
     "./transport": "./src/transport/index.js",
     "./compiler": "./src/compiler/index.js",
     "./bundle": "./src/bundle/index.js",
+    "./invoke": "./src/invoke/index.js",
     "./standards": "./src/standards/index.js",
     "./schemas/*": "./schemas/*"
   },

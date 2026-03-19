@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { WASI } from "node:wasi";
 
 import {
   cleanupCompilation,
@@ -132,6 +133,7 @@ function createAbiManifest() {
     pluginFamily: "analysis",
     capabilities: ["clock", "schedule_cron"],
     externalInterfaces: [],
+    invokeSurfaces: ["direct"],
     methods: [
       createAbiMethod("guest_call_clock_now"),
       createAbiMethod("guest_call_schedule_matches"),
@@ -163,6 +165,13 @@ test("sync hostcall ABI bridges a wasm guest into the reference Node host", asyn
   });
 
   let instanceExports = null;
+  const wasi = new WASI({
+    version: "preview1",
+    args: ["host-abi"],
+    env: {},
+    preopens: {},
+    returnOnExit: true,
+  });
   const bridge = createNodeHostSyncHostcallBridge({
     host,
     getMemory: () => instanceExports.memory,
@@ -171,7 +180,10 @@ test("sync hostcall ABI bridges a wasm guest into the reference Node host", asyn
   try {
     const { instance } = await WebAssembly.instantiate(
       compilation.wasmBytes,
-      bridge.imports,
+      {
+        ...wasi.getImportObject(),
+        ...bridge.imports,
+      },
     );
     instanceExports = instance.exports;
 

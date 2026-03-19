@@ -1,0 +1,18 @@
+include "TypedArenaBuffer.fbs";
+
+namespace orbpro.invoke;
+
+/// Canonical invoke envelope consumed by direct ABI and command-mode execution.
+table PluginInvokeRequest {
+  /// Stable method identifier from PluginManifest.methods.
+  method_id: string (required);
+
+  /// Input frames for the invocation, routed by TypedArenaBuffer.port_id.
+  input_frames: [orbpro.stream.TypedArenaBuffer];
+
+  /// Arena backing all input frame payload bytes.
+  payload_arena: [ubyte];
+}
+
+root_type PluginInvokeRequest;
+file_identifier "PINQ";

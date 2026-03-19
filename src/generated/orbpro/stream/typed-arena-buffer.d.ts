@@ -1,7 +1,7 @@
-import * as flatbuffers from 'flatbuffers';
-import { BufferMutability } from '../../orbpro/stream/buffer-mutability.js';
-import { BufferOwnership } from '../../orbpro/stream/buffer-ownership.js';
-import { FlatBufferTypeRef, FlatBufferTypeRefT } from '../../orbpro/stream/flat-buffer-type-ref.js';
+import * as flatbuffers from "flatbuffers";
+import { BufferMutability } from "../../orbpro/stream/buffer-mutability.js";
+import { BufferOwnership } from "../../orbpro/stream/buffer-ownership.js";
+import { FlatBufferTypeRef, FlatBufferTypeRefT } from "../../orbpro/stream/flat-buffer-type-ref.js";
 /**
  * Runtime descriptor for one FlatBuffer frame stored in an arena.
  */

@@ -43,9 +43,21 @@ export const RuntimeTarget = Object.freeze({
   EDGE: "edge",
 });
 
+export const InvokeSurface = Object.freeze({
+  DIRECT: "direct",
+  COMMAND: "command",
+});
+
 export const DefaultManifestExports = Object.freeze({
   pluginBytesSymbol: "plugin_get_manifest_flatbuffer",
   pluginSizeSymbol: "plugin_get_manifest_flatbuffer_size",
   flowBytesSymbol: "flow_get_manifest_flatbuffer",
   flowSizeSymbol: "flow_get_manifest_flatbuffer_size",
+});
+
+export const DefaultInvokeExports = Object.freeze({
+  invokeSymbol: "plugin_invoke_stream",
+  allocSymbol: "plugin_alloc",
+  freeSymbol: "plugin_free",
+  commandSymbol: "_start",
 });

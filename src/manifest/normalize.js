@@ -4,6 +4,7 @@ import {
   CapabilityKind,
   DrainPolicy as ManifestDrainPolicy,
   HostCapabilityT,
+  InvokeSurface,
   MethodManifestT,
   PluginFamily,
   PluginManifestT,
@@ -75,6 +76,11 @@ const capabilityKindByName = Object.freeze({
   render_hooks: CapabilityKind.RENDER_HOOKS,
 });
 
+const invokeSurfaceByName = Object.freeze({
+  direct: InvokeSurface.DIRECT,
+  command: InvokeSurface.COMMAND,
+});
+
 function normalizeSchemaHash(value) {
   if (!value) {
     return [];
@@ -91,6 +97,25 @@ function normalizeSchemaHash(value) {
     bytes.push(parseInt(normalized.slice(index, index + 2), 16));
   }
   return bytes;
+}
+
+function normalizePayloadWireFormat(value) {
+  if (value === 1) {
+    return "aligned-binary";
+  }
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+  return normalized === "aligned-binary" ? "aligned-binary" : "flatbuffer";
+}
+
+function normalizeUnsignedInteger(value, fallback = 0) {
+  const normalized = Number(value ?? fallback);
+  if (!Number.isFinite(normalized)) {
+    return fallback;
+  }
+  return Math.max(0, Math.trunc(normalized));
 }
 
 function normalizePluginFamily(value) {
@@ -125,6 +150,33 @@ function normalizeCapabilityKind(value) {
   return capabilityKindByName[normalized] ?? null;
 }
 
+function normalizeInvokeSurface(value) {
+  if (typeof value === "number") {
+    return value;
+  }
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  return invokeSurfaceByName[normalized] ?? null;
+}
+
+function normalizeInvokeSurfaces(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set();
+  const normalized = [];
+  for (const entry of value) {
+    const surface = normalizeInvokeSurface(entry);
+    if (surface === null || seen.has(surface)) {
+      continue;
+    }
+    seen.add(surface);
+    normalized.push(surface);
+  }
+  return normalized;
+}
+
 function toFlatBufferTypeRefT(value = {}) {
   if (value instanceof FlatBufferTypeRefT) {
     return value;
@@ -134,6 +186,11 @@ function toFlatBufferTypeRefT(value = {}) {
     value.fileIdentifier ?? null,
     normalizeSchemaHash(value.schemaHash),
     value.acceptsAnyFlatbuffer === true,
+    normalizePayloadWireFormat(value.wireFormat),
+    value.rootTypeName ?? null,
+    normalizeUnsignedInteger(value.fixedStringLength),
+    normalizeUnsignedInteger(value.byteLength),
+    normalizeUnsignedInteger(value.requiredAlignment),
   );
 }
 
@@ -300,6 +357,7 @@ export function toEmbeddedPluginManifest(input = {}) {
         ? input.buildArtifacts.map((entry) => toBuildArtifactT(entry))
         : [],
       Number(input.abiVersion ?? 1),
+      normalizeInvokeSurfaces(input.invokeSurfaces),
     ),
     warnings,
   };

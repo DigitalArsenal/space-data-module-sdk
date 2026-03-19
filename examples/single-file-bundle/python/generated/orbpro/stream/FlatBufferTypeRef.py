@@ -6,7 +6,7 @@ import flatbuffers
 from flatbuffers.compat import import_numpy
 np = import_numpy()
 
-# FlatBuffer schema identity for a stream frame or accepted port type.
+# Payload schema identity for a stream frame or accepted port type.
 class FlatBufferTypeRef(object):
     __slots__ = ['_tab']
 
@@ -81,8 +81,48 @@ class FlatBufferTypeRef(object):
             return bool(self._tab.Get(flatbuffers.number_types.BoolFlags, o + self._tab.Pos))
         return False
 
+    # Payload wire format. Defaults to regular FlatBuffer framing.
+    # FlatBufferTypeRef
+    def WireFormat(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(12))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
+        return 0
+
+    # Root or layout type name for aligned-binary payloads.
+    # FlatBufferTypeRef
+    def RootTypeName(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(14))
+        if o != 0:
+            return self._tab.String(o + self._tab.Pos)
+        return None
+
+    # Fixed string length for aligned-binary schemas when required.
+    # FlatBufferTypeRef
+    def FixedStringLength(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(16))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint16Flags, o + self._tab.Pos)
+        return 0
+
+    # Fixed byte length for aligned-binary payloads.
+    # FlatBufferTypeRef
+    def ByteLength(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(18))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint32Flags, o + self._tab.Pos)
+        return 0
+
+    # Required byte alignment for aligned-binary payloads.
+    # FlatBufferTypeRef
+    def RequiredAlignment(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(20))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint16Flags, o + self._tab.Pos)
+        return 0
+
 def FlatBufferTypeRefStart(builder):
-    builder.StartObject(4)
+    builder.StartObject(9)
 
 def Start(builder):
     FlatBufferTypeRefStart(builder)
@@ -116,6 +156,36 @@ def FlatBufferTypeRefAddAcceptsAnyFlatbuffer(builder, acceptsAnyFlatbuffer):
 
 def AddAcceptsAnyFlatbuffer(builder, acceptsAnyFlatbuffer):
     FlatBufferTypeRefAddAcceptsAnyFlatbuffer(builder, acceptsAnyFlatbuffer)
+
+def FlatBufferTypeRefAddWireFormat(builder, wireFormat):
+    builder.PrependUint8Slot(4, wireFormat, 0)
+
+def AddWireFormat(builder, wireFormat):
+    FlatBufferTypeRefAddWireFormat(builder, wireFormat)
+
+def FlatBufferTypeRefAddRootTypeName(builder, rootTypeName):
+    builder.PrependUOffsetTRelativeSlot(5, flatbuffers.number_types.UOffsetTFlags.py_type(rootTypeName), 0)
+
+def AddRootTypeName(builder, rootTypeName):
+    FlatBufferTypeRefAddRootTypeName(builder, rootTypeName)
+
+def FlatBufferTypeRefAddFixedStringLength(builder, fixedStringLength):
+    builder.PrependUint16Slot(6, fixedStringLength, 0)
+
+def AddFixedStringLength(builder, fixedStringLength):
+    FlatBufferTypeRefAddFixedStringLength(builder, fixedStringLength)
+
+def FlatBufferTypeRefAddByteLength(builder, byteLength):
+    builder.PrependUint32Slot(7, byteLength, 0)
+
+def AddByteLength(builder, byteLength):
+    FlatBufferTypeRefAddByteLength(builder, byteLength)
+
+def FlatBufferTypeRefAddRequiredAlignment(builder, requiredAlignment):
+    builder.PrependUint16Slot(8, requiredAlignment, 0)
+
+def AddRequiredAlignment(builder, requiredAlignment):
+    FlatBufferTypeRefAddRequiredAlignment(builder, requiredAlignment)
 
 def FlatBufferTypeRefEnd(builder):
     return builder.EndObject()

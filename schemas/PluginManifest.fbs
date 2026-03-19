@@ -68,6 +68,12 @@ enum DrainPolicy : ubyte {
   DRAIN_TO_EMPTY = 2
 }
 
+/// Canonical module invocation surfaces supported by an artifact.
+enum InvokeSurface : ubyte {
+  DIRECT = 0,
+  COMMAND = 1
+}
+
 /// Accepted schema family for a port.
 table AcceptedTypeSet {
   /// Stable type-set identifier.
@@ -163,6 +169,7 @@ table PluginManifest {
   schemas_used: [orbpro.stream.FlatBufferTypeRef];
   build_artifacts: [BuildArtifact];
   abi_version: uint32 = 1;
+  invoke_surfaces: [InvokeSurface];
 }
 
 root_type PluginManifest;

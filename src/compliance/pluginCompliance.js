@@ -2,10 +2,12 @@ import { access, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  DefaultInvokeExports,
   DefaultManifestExports,
   DrainPolicy,
   ExternalInterfaceDirection,
   ExternalInterfaceKind,
+  InvokeSurface,
   RuntimeTarget,
 } from "../runtime/constants.js";
 
@@ -52,6 +54,7 @@ const RecommendedCapabilitySet = new Set(RecommendedCapabilityIds);
 const RecommendedRuntimeTargets = Object.freeze(Object.values(RuntimeTarget));
 const RecommendedRuntimeTargetSet = new Set(RecommendedRuntimeTargets);
 const DrainPolicySet = new Set(Object.values(DrainPolicy));
+const InvokeSurfaceSet = new Set(Object.values(InvokeSurface));
 const ExternalInterfaceDirectionSet = new Set(
   Object.values(ExternalInterfaceDirection),
 );
@@ -104,6 +107,42 @@ function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function hasNonEmptyByteSequence(value) {
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  if (ArrayBuffer.isView(value)) {
+    return value.byteLength > 0;
+  }
+  return false;
+}
+
+function normalizePayloadWireFormatName(value) {
+  if (value === undefined || value === null || value === "") {
+    return "flatbuffer";
+  }
+  if (value === 0) {
+    return "flatbuffer";
+  }
+  if (value === 1) {
+    return "aligned-binary";
+  }
+  const normalized = String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+  if (normalized === "flatbuffer") {
+    return "flatbuffer";
+  }
+  if (normalized === "aligned-binary") {
+    return "aligned-binary";
+  }
+  return null;
+}
+
 function validateStringField(issues, value, location, label) {
   if (!isNonEmptyString(value)) {
     pushIssue(issues, "error", "missing-string", `${label} must be a non-empty string.`, location);
@@ -130,9 +169,84 @@ function validateIntegerField(issues, value, location, label, { min = null } = {
   return true;
 }
 
+function validateOptionalIntegerField(
+  issues,
+  value,
+  location,
+  label,
+  options = {},
+) {
+  if (value === undefined || value === null) {
+    return true;
+  }
+  return validateIntegerField(issues, value, location, label, options);
+}
+
 function validateAllowedType(type, issues, location) {
   if (!type || typeof type !== "object" || Array.isArray(type)) {
     pushIssue(issues, "error", "invalid-type-record", "Allowed type entries must be objects.", location);
+    return;
+  }
+  const wireFormat = normalizePayloadWireFormatName(type.wireFormat);
+  if (wireFormat === null) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-wire-format",
+      'Allowed type wireFormat must be "flatbuffer" or "aligned-binary".',
+      `${location}.wireFormat`,
+    );
+    return;
+  }
+  if (wireFormat === "aligned-binary") {
+    if (type.acceptsAnyFlatbuffer === true) {
+      pushIssue(
+        issues,
+        "error",
+        "accepts-any-flatbuffer-format-conflict",
+        "acceptsAnyFlatbuffer can only be used with flatbuffer wireFormat.",
+        `${location}.acceptsAnyFlatbuffer`,
+      );
+    }
+    if (!isNonEmptyString(type.schemaName)) {
+      pushIssue(
+        issues,
+        "error",
+        "missing-aligned-schema-name",
+        "Aligned-binary allowed types must declare schemaName.",
+        `${location}.schemaName`,
+      );
+    }
+    if (!isNonEmptyString(type.rootTypeName)) {
+      pushIssue(
+        issues,
+        "error",
+        "missing-aligned-root-type-name",
+        "Aligned-binary allowed types must declare rootTypeName.",
+        `${location}.rootTypeName`,
+      );
+    }
+    validateOptionalIntegerField(
+      issues,
+      type.fixedStringLength,
+      `${location}.fixedStringLength`,
+      "Allowed type fixedStringLength",
+      { min: 0 },
+    );
+    validateIntegerField(
+      issues,
+      type.byteLength,
+      `${location}.byteLength`,
+      "Aligned-binary allowed type byteLength",
+      { min: 1 },
+    );
+    validateIntegerField(
+      issues,
+      type.requiredAlignment,
+      `${location}.requiredAlignment`,
+      "Aligned-binary allowed type requiredAlignment",
+      { min: 1 },
+    );
     return;
   }
   if (type.acceptsAnyFlatbuffer === true) {
@@ -141,7 +255,7 @@ function validateAllowedType(type, issues, location) {
   if (
     !isNonEmptyString(type.schemaName) &&
     !isNonEmptyString(type.fileIdentifier) &&
-    !isNonEmptyString(type.schemaHash)
+    !hasNonEmptyByteSequence(type.schemaHash)
   ) {
     pushIssue(
       issues,
@@ -151,6 +265,27 @@ function validateAllowedType(type, issues, location) {
       location,
     );
   }
+  validateOptionalIntegerField(
+    issues,
+    type.fixedStringLength,
+    `${location}.fixedStringLength`,
+    "Allowed type fixedStringLength",
+    { min: 0 },
+  );
+  validateOptionalIntegerField(
+    issues,
+    type.byteLength,
+    `${location}.byteLength`,
+    "Allowed type byteLength",
+    { min: 0 },
+  );
+  validateOptionalIntegerField(
+    issues,
+    type.requiredAlignment,
+    `${location}.requiredAlignment`,
+    "Allowed type requiredAlignment",
+    { min: 0 },
+  );
 }
 
 function validateAcceptedTypeSet(typeSet, issues, location) {
@@ -523,6 +658,60 @@ function validateRuntimeTargets(runtimeTargets, declaredCapabilities, issues, so
   }
 }
 
+function validateInvokeSurfaces(invokeSurfaces, issues, sourceName) {
+  if (invokeSurfaces === undefined) {
+    return [];
+  }
+  if (!Array.isArray(invokeSurfaces)) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-invoke-surfaces",
+      "manifest.invokeSurfaces must be an array of non-empty strings when present.",
+      `${sourceName}.invokeSurfaces`,
+    );
+    return [];
+  }
+
+  const seen = new Set();
+  const normalized = [];
+  for (const surface of invokeSurfaces) {
+    if (!isNonEmptyString(surface)) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-invoke-surface",
+        "Invoke surface entries must be non-empty strings.",
+        `${sourceName}.invokeSurfaces`,
+      );
+      continue;
+    }
+    if (!InvokeSurfaceSet.has(surface)) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-invoke-surface",
+        `Invoke surface "${surface}" is invalid.`,
+        `${sourceName}.invokeSurfaces`,
+      );
+      continue;
+    }
+    if (seen.has(surface)) {
+      pushIssue(
+        issues,
+        "warning",
+        "duplicate-invoke-surface",
+        `Invoke surface "${surface}" is declared more than once.`,
+        `${sourceName}.invokeSurfaces`,
+      );
+      continue;
+    }
+    seen.add(surface);
+    normalized.push(surface);
+  }
+  return normalized;
+}
+
 export function validatePluginManifest(manifest, options = {}) {
   const { sourceName = "manifest" } = options;
   const issues = [];
@@ -592,6 +781,7 @@ export function validatePluginManifest(manifest, options = {}) {
     issues,
     sourceName,
   );
+  validateInvokeSurfaces(manifest.invokeSurfaces, issues, sourceName);
 
   if (!Array.isArray(manifest.externalInterfaces)) {
     pushIssue(
@@ -732,6 +922,24 @@ export function validatePluginManifest(manifest, options = {}) {
     }
   }
 
+  if (manifest.schemasUsed !== undefined && !Array.isArray(manifest.schemasUsed)) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-schemas-used-array",
+      "manifest.schemasUsed must be an array when present.",
+      `${sourceName}.schemasUsed`,
+    );
+  } else if (Array.isArray(manifest.schemasUsed)) {
+    manifest.schemasUsed.forEach((typeRef, index) => {
+      validateAllowedType(
+        typeRef,
+        issues,
+        `${sourceName}.schemasUsed[${index}]`,
+      );
+    });
+  }
+
   return buildComplianceReport({
     sourceName,
     manifest,
@@ -775,6 +983,9 @@ export async function validatePluginArtifact(options) {
   const issues = [...report.issues];
   let resolvedExportNames = [];
   let checkedArtifact = false;
+  const declaredInvokeSurfaces = Array.isArray(manifest?.invokeSurfaces)
+    ? manifest.invokeSurfaces.filter((surface) => InvokeSurfaceSet.has(surface))
+    : [];
 
   if (Array.isArray(exportNames)) {
     resolvedExportNames = [...exportNames];
@@ -798,6 +1009,35 @@ export async function validatePluginArtifact(options) {
           wasmPath ?? sourceName,
         );
       }
+    }
+    if (declaredInvokeSurfaces.includes(InvokeSurface.DIRECT)) {
+      for (const symbol of [
+        DefaultInvokeExports.invokeSymbol,
+        DefaultInvokeExports.allocSymbol,
+        DefaultInvokeExports.freeSymbol,
+      ]) {
+        if (!resolvedExportNames.includes(symbol)) {
+          pushIssue(
+            issues,
+            "error",
+            "missing-plugin-invoke-export",
+            `Plugin artifact is missing required direct invoke export "${symbol}".`,
+            wasmPath ?? sourceName,
+          );
+        }
+      }
+    }
+    if (
+      declaredInvokeSurfaces.includes(InvokeSurface.COMMAND) &&
+      !resolvedExportNames.includes(DefaultInvokeExports.commandSymbol)
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "missing-plugin-command-export",
+        `Plugin artifact is missing required command export "${DefaultInvokeExports.commandSymbol}".`,
+        wasmPath ?? sourceName,
+      );
     }
   } else {
     pushIssue(

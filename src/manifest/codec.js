@@ -4,6 +4,7 @@ import {
   PluginManifest,
   PluginManifestT,
 } from "../generated/orbpro/manifest.js";
+import { normalizeInvokeSurfaceName } from "../invoke/codec.js";
 import { toUint8Array } from "../runtime/bufferLike.js";
 import { toEmbeddedPluginManifest } from "./normalize.js";
 
@@ -25,7 +26,15 @@ export function decodePluginManifest(data) {
   if (!PluginManifest.bufferHasIdentifier(bb)) {
     throw new Error("Plugin manifest buffer identifier mismatch.");
   }
-  return PluginManifest.getRootAsPluginManifest(bb).unpack();
+  const unpacked = PluginManifest.getRootAsPluginManifest(bb).unpack();
+  return {
+    ...unpacked,
+    invokeSurfaces: Array.isArray(unpacked.invokeSurfaces)
+      ? unpacked.invokeSurfaces
+          .map((value) => normalizeInvokeSurfaceName(value))
+          .filter(Boolean)
+      : [],
+  };
 }
 
 export function encodePluginManifest(manifest) {
@@ -37,4 +46,3 @@ export function encodePluginManifest(manifest) {
   PluginManifest.finishPluginManifestBuffer(builder, value.pack(builder));
   return builder.asUint8Array();
 }
-

@@ -1,5 +1,5 @@
-import * as flatbuffers from 'flatbuffers';
-import { AcceptedTypeSet, AcceptedTypeSetT } from '../../orbpro/manifest/accepted-type-set.js';
+import * as flatbuffers from "flatbuffers";
+import { AcceptedTypeSet, AcceptedTypeSetT } from "../../orbpro/manifest/accepted-type-set.js";
 /**
  * One input or output port on a method.
  */
@@ -59,12 +59,12 @@ export declare class PortManifest implements flatbuffers.IUnpackableObject<PortM
 export declare class PortManifestT implements flatbuffers.IGeneratedObject {
     portId: string | Uint8Array | null;
     displayName: string | Uint8Array | null;
-    acceptedTypeSets: (AcceptedTypeSetT)[];
+    acceptedTypeSets: AcceptedTypeSetT[];
     minStreams: number;
     maxStreams: number;
     required: boolean;
     description: string | Uint8Array | null;
-    constructor(portId?: string | Uint8Array | null, displayName?: string | Uint8Array | null, acceptedTypeSets?: (AcceptedTypeSetT)[], minStreams?: number, maxStreams?: number, required?: boolean, description?: string | Uint8Array | null);
+    constructor(portId?: string | Uint8Array | null, displayName?: string | Uint8Array | null, acceptedTypeSets?: AcceptedTypeSetT[], minStreams?: number, maxStreams?: number, required?: boolean, description?: string | Uint8Array | null);
     pack(builder: flatbuffers.Builder): flatbuffers.Offset;
 }
 //# sourceMappingURL=port-manifest.d.ts.map

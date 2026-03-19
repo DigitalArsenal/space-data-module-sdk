@@ -1,1 +1,1 @@
-{"version":3,"file":"buffer-ownership.d.ts","sourceRoot":"","sources":["../../../../../../../../Users/tj/software/OrbPro/packages/plugin-sdk/src/generated/orbpro/stream/buffer-ownership.ts"],"names":[],"mappings":"AAIA;;GAEG;AACH,oBAAY,eAAe;IACzB,QAAQ,IAAI;IACZ,cAAc,IAAI;IAClB,UAAU,IAAI;IACd,MAAM,IAAI;CACX"}
+{"version":3,"file":"buffer-ownership.d.ts","sourceRoot":"","sources":["buffer-ownership.ts"],"names":[],"mappings":"AAIA;;GAEG;AACH,oBAAY,eAAe;IACzB,QAAQ,IAAI;IACZ,cAAc,IAAI;IAClB,UAAU,IAAI;IACd,MAAM,IAAI;CACX"}

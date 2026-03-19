@@ -6,6 +6,7 @@ import {
   createRecipientKeypairHex,
   decodePluginManifest,
   encodePluginManifest,
+  generateEmbeddedManifestSource,
   loadKnownTypeCatalog,
   protectModuleArtifact,
   toEmbeddedPluginManifest,
@@ -70,12 +71,87 @@ function createTestManifest() {
   };
 }
 
+function createAlignedType(overrides = {}) {
+  return {
+    schemaName: "StateVector.fbs",
+    wireFormat: "aligned-binary",
+    rootTypeName: "StateVector",
+    byteLength: 64,
+    requiredAlignment: 8,
+    ...overrides,
+  };
+}
+
 test("plugin manifests round-trip through FlatBuffer encoding", () => {
   const manifest = createTestManifest();
   const encoded = encodePluginManifest(manifest);
   const decoded = decodePluginManifest(encoded);
   assert.equal(decoded.pluginId, manifest.pluginId);
   assert.equal(decoded.methods[0].methodId, "propagate");
+});
+
+test("plugin manifest invoke surfaces round-trip through FlatBuffer encoding", () => {
+  const manifest = {
+    ...createTestManifest(),
+    invokeSurfaces: ["direct", "command"],
+  };
+  const encoded = encodePluginManifest(manifest);
+  const decoded = decodePluginManifest(encoded);
+  assert.deepEqual(decoded.invokeSurfaces, ["direct", "command"]);
+});
+
+test("aligned payload type refs round-trip through FlatBuffer encoding", () => {
+  const manifest = {
+    ...createTestManifest(),
+    methods: [
+      {
+        ...createTestManifest().methods[0],
+        inputPorts: [
+          {
+            ...createTestManifest().methods[0].inputPorts[0],
+            acceptedTypeSets: [
+              {
+                setId: "aligned-state",
+                allowedTypes: [createAlignedType()],
+              },
+              {
+                setId: "dual-state",
+                allowedTypes: [
+                  createAlignedType({ rootTypeName: "StateVectorRecord" }),
+                  {
+                    schemaName: "StateVector.fbs",
+                    fileIdentifier: "STVC",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    schemasUsed: [
+      createAlignedType({ rootTypeName: "StateVectorRecord" }),
+      {
+        schemaName: "StateVector.fbs",
+        fileIdentifier: "STVC",
+      },
+    ],
+  };
+  const encoded = encodePluginManifest(manifest);
+  const decoded = decodePluginManifest(encoded);
+  const alignedType =
+    decoded.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes[0];
+  assert.equal(alignedType.wireFormat, "aligned-binary");
+  assert.equal(alignedType.rootTypeName, "StateVector");
+  assert.equal(alignedType.byteLength, 64);
+  assert.equal(alignedType.requiredAlignment, 8);
+  assert.equal(
+    decoded.methods[0].inputPorts[0].acceptedTypeSets[1].allowedTypes[1]
+      .wireFormat,
+    "flatbuffer",
+  );
+  assert.equal(decoded.schemasUsed[0].wireFormat, "aligned-binary");
+  assert.equal(decoded.schemasUsed[1].wireFormat, "flatbuffer");
 });
 
 test("embedded manifests preserve expanded canonical capabilities", () => {
@@ -108,6 +184,34 @@ test("runtimeTargets are validated in JSON manifests but omitted from embedded m
   );
 });
 
+test("embedded manifest source stays a raw byte buffer for c and c++ modules", () => {
+  const source = generateEmbeddedManifestSource({
+    manifest: {
+      ...createTestManifest(),
+      methods: [
+        {
+          ...createTestManifest().methods[0],
+          inputPorts: [
+            {
+              ...createTestManifest().methods[0].inputPorts[0],
+              acceptedTypeSets: [
+                {
+                  setId: "aligned-state",
+                  allowedTypes: [createAlignedType()],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  assert.match(source, /static const uint8_t g_module_manifest\[\] = \{/);
+  assert.match(source, /MODULE_MANIFEST_EXPORT const uint8_t\*/);
+  assert.match(source, /extern "C"/);
+  assert.equal(source.includes("FlatBufferBuilder"), false);
+});
+
 test("source compile emits a compliant wasm module", async () => {
   const manifest = createTestManifest();
   const result = await compileModuleFromSource({
@@ -122,6 +226,41 @@ test("source compile emits a compliant wasm module", async () => {
     wasmPath: result.outputPath,
   });
   assert.equal(validation.ok, true);
+  assert.ok(validation.exportNames.includes("plugin_invoke_stream"));
+  assert.ok(validation.exportNames.includes("plugin_alloc"));
+  assert.ok(validation.exportNames.includes("plugin_free"));
+  assert.ok(validation.exportNames.includes("_start"));
+});
+
+test("c++ source compile emits a compliant wasm module with aligned manifest metadata", async () => {
+  const manifest = {
+    ...createTestManifest(),
+    methods: [
+      {
+        ...createTestManifest().methods[0],
+        inputPorts: [
+          {
+            ...createTestManifest().methods[0].inputPorts[0],
+            acceptedTypeSets: [
+              {
+                setId: "aligned-state",
+                allowedTypes: [createAlignedType()],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    schemasUsed: [createAlignedType()],
+  };
+  const result = await compileModuleFromSource({
+    manifest,
+    sourceCode: 'extern "C" int propagate(void) { return 11; }\n',
+    language: "c++",
+  });
+  assert.equal(result.language, "c++");
+  assert.equal(result.report.ok, true);
+  assert.ok(result.wasmBytes.length > 0);
 });
 
 test("artifacts can be signed and encrypted for transport", async () => {
@@ -227,6 +366,56 @@ test("shared module and legacy OrbPro type refs resolve without warnings", async
         schemaName: "OMM.fbs",
         fileIdentifier: "$OMM",
       },
+    ],
+  };
+  const report = await validateManifestWithStandards(manifest);
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.warnings, []);
+});
+
+test("aligned OrbPro-style stream type refs resolve without standards warnings", async () => {
+  const manifest = {
+    pluginId: "com.digitalarsenal.examples.aligned-sgp4-contract",
+    name: "Aligned SGP4 Contract",
+    version: "0.1.0",
+    pluginFamily: "analysis",
+    capabilities: [],
+    externalInterfaces: [],
+    methods: [
+      {
+        methodId: "stream_invoke",
+        displayName: "Stream Invoke",
+        inputPorts: [
+          {
+            portId: "state",
+            acceptedTypeSets: [
+              {
+                setId: "aligned-state",
+                allowedTypes: [
+                  createAlignedType({
+                    schemaName: "StateVector.fbs",
+                    rootTypeName: "StateVector",
+                  }),
+                ],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        outputPorts: [],
+        maxBatch: 1,
+        drainPolicy: "single-shot",
+      },
+    ],
+    schemasUsed: [
+      createAlignedType({
+        schemaName: "CatalogQueryRequest.fbs",
+        rootTypeName: "CatalogQueryRequest",
+        byteLength: 128,
+        requiredAlignment: 8,
+      }),
     ],
   };
   const report = await validateManifestWithStandards(manifest);

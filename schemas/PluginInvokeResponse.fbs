@@ -1,0 +1,30 @@
+include "TypedArenaBuffer.fbs";
+
+namespace orbpro.invoke;
+
+/// Canonical invoke result emitted by direct ABI and command-mode execution.
+table PluginInvokeResponse {
+  /// Method-specific status code. Zero conventionally indicates success.
+  status_code: int = 0;
+
+  /// True when the method yielded before fully draining queued work.
+  yielded: bool = false;
+
+  /// Remaining backlog, if known.
+  backlog_remaining: uint32 = 0;
+
+  /// Output frames produced by the invocation, routed by port_id.
+  output_frames: [orbpro.stream.TypedArenaBuffer];
+
+  /// Arena backing all output frame payload bytes.
+  payload_arena: [ubyte];
+
+  /// Stable machine-readable error code when invocation fails.
+  error_code: string;
+
+  /// Human-readable error message when invocation fails.
+  error_message: string;
+}
+
+root_type PluginInvokeResponse;
+file_identifier "PINS";

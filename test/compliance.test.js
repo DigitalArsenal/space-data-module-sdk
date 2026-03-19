@@ -58,12 +58,39 @@ function createValidManifest() {
   };
 }
 
+function createAlignedAllowedType(overrides = {}) {
+  return {
+    schemaName: "StateVector.fbs",
+    wireFormat: "aligned-binary",
+    rootTypeName: "StateVector",
+    byteLength: 64,
+    requiredAlignment: 8,
+    ...overrides,
+  };
+}
+
 // --- Positive baseline ---
 
 test("valid manifest passes validation", () => {
   const report = validatePluginManifest(createValidManifest());
   assert.equal(report.ok, true);
   assert.equal(report.errors.length, 0);
+});
+
+test("invokeSurfaces must be an array when present", () => {
+  const m = createValidManifest();
+  m.invokeSurfaces = "direct";
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, false);
+  assert.ok(report.errors.some((e) => e.code === "invalid-invoke-surfaces"));
+});
+
+test("unknown invoke surface produces error", () => {
+  const m = createValidManifest();
+  m.invokeSurfaces = ["rpc"];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, false);
+  assert.ok(report.errors.some((e) => e.code === "unknown-invoke-surface"));
 });
 
 // --- Top-level structure errors ---
@@ -229,6 +256,111 @@ test("acceptsAnyFlatbuffer type passes without identity fields", () => {
   const m = createValidManifest();
   m.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
     { acceptsAnyFlatbuffer: true },
+  ];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, true);
+});
+
+test("aligned-binary type passes with required layout fields", () => {
+  const m = createValidManifest();
+  m.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
+    createAlignedAllowedType(),
+  ];
+  m.schemasUsed = [createAlignedAllowedType({ rootTypeName: "StateVectorRecord" })];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, true);
+});
+
+test("aligned-binary type rejects acceptsAnyFlatbuffer", () => {
+  const m = createValidManifest();
+  m.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
+    createAlignedAllowedType({ acceptsAnyFlatbuffer: true }),
+  ];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some(
+      (e) => e.code === "accepts-any-flatbuffer-format-conflict",
+    ),
+  );
+});
+
+test("aligned-binary type requires rootTypeName", () => {
+  const m = createValidManifest();
+  m.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
+    createAlignedAllowedType({ rootTypeName: undefined }),
+  ];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some((e) => e.code === "missing-aligned-root-type-name"),
+  );
+});
+
+test("aligned-binary type requires positive byteLength", () => {
+  const missing = createValidManifest();
+  missing.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
+    createAlignedAllowedType({ byteLength: undefined }),
+  ];
+  const missingReport = validatePluginManifest(missing);
+  assert.equal(missingReport.ok, false);
+  assert.ok(
+    missingReport.errors.some(
+      (e) =>
+        e.code === "invalid-integer" &&
+        e.location?.endsWith(".byteLength"),
+    ),
+  );
+
+  const zero = createValidManifest();
+  zero.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
+    createAlignedAllowedType({ byteLength: 0 }),
+  ];
+  const zeroReport = validatePluginManifest(zero);
+  assert.equal(zeroReport.ok, false);
+  assert.ok(
+    zeroReport.errors.some(
+      (e) =>
+        e.code === "integer-range" &&
+        e.location?.endsWith(".byteLength"),
+    ),
+  );
+});
+
+test("aligned-binary type requires positive requiredAlignment", () => {
+  const missing = createValidManifest();
+  missing.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
+    createAlignedAllowedType({ requiredAlignment: undefined }),
+  ];
+  const missingReport = validatePluginManifest(missing);
+  assert.equal(missingReport.ok, false);
+  assert.ok(
+    missingReport.errors.some(
+      (e) =>
+        e.code === "invalid-integer" &&
+        e.location?.endsWith(".requiredAlignment"),
+    ),
+  );
+
+  const zero = createValidManifest();
+  zero.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
+    createAlignedAllowedType({ requiredAlignment: 0 }),
+  ];
+  const zeroReport = validatePluginManifest(zero);
+  assert.equal(zeroReport.ok, false);
+  assert.ok(
+    zeroReport.errors.some(
+      (e) =>
+        e.code === "integer-range" &&
+        e.location?.endsWith(".requiredAlignment"),
+    ),
+  );
+});
+
+test("schemaHash byte arrays count as stable identity fields", () => {
+  const m = createValidManifest();
+  m.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
+    { schemaHash: [0xde, 0xad, 0xbe, 0xef] },
   ];
   const report = validatePluginManifest(m);
   assert.equal(report.ok, true);
@@ -427,6 +559,37 @@ test("missing WASM exports produce errors in artifact validation", async () => {
   assert.equal(report.ok, false);
   assert.ok(report.errors.some((e) => e.code === "missing-plugin-manifest-export"));
   assert.equal(report.checkedArtifact, true);
+});
+
+test("declared direct invoke surface requires direct ABI exports", async () => {
+  const m = createValidManifest();
+  m.invokeSurfaces = ["direct"];
+  const report = await validatePluginArtifact({
+    manifest: m,
+    exportNames: [
+      "plugin_get_manifest_flatbuffer",
+      "plugin_get_manifest_flatbuffer_size",
+    ],
+  });
+  assert.equal(report.ok, false);
+  assert.ok(report.errors.some((e) => e.code === "missing-plugin-invoke-export"));
+});
+
+test("declared command invoke surface requires _start export", async () => {
+  const m = createValidManifest();
+  m.invokeSurfaces = ["command"];
+  const report = await validatePluginArtifact({
+    manifest: m,
+    exportNames: [
+      "plugin_get_manifest_flatbuffer",
+      "plugin_get_manifest_flatbuffer_size",
+      "plugin_invoke_stream",
+      "plugin_alloc",
+      "plugin_free",
+    ],
+  });
+  assert.equal(report.ok, false);
+  assert.ok(report.errors.some((e) => e.code === "missing-plugin-command-export"));
 });
 
 test("no WASM artifact produces skipped-check warning", async () => {

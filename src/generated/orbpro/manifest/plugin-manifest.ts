@@ -2,561 +2,392 @@
 
 /* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any, @typescript-eslint/no-non-null-assertion */
 
-import * as flatbuffers from "flatbuffers";
+import * as flatbuffers from 'flatbuffers';
 
-import {
-  BuildArtifact,
-  BuildArtifactT,
-} from "../../orbpro/manifest/build-artifact.js";
-import {
-  HostCapability,
-  HostCapabilityT,
-} from "../../orbpro/manifest/host-capability.js";
-import {
-  MethodManifest,
-  MethodManifestT,
-} from "../../orbpro/manifest/method-manifest.js";
-import { PluginFamily } from "../../orbpro/manifest/plugin-family.js";
-import {
-  ProtocolSpec,
-  ProtocolSpecT,
-} from "../../orbpro/manifest/protocol-spec.js";
-import { TimerSpec, TimerSpecT } from "../../orbpro/manifest/timer-spec.js";
-import {
-  FlatBufferTypeRef,
-  FlatBufferTypeRefT,
-} from "../../orbpro/stream/flat-buffer-type-ref.js";
+import { BuildArtifact, BuildArtifactT } from '../../orbpro/manifest/build-artifact.js';
+import { HostCapability, HostCapabilityT } from '../../orbpro/manifest/host-capability.js';
+import { InvokeSurface } from '../../orbpro/manifest/invoke-surface.js';
+import { MethodManifest, MethodManifestT } from '../../orbpro/manifest/method-manifest.js';
+import { PluginFamily } from '../../orbpro/manifest/plugin-family.js';
+import { ProtocolSpec, ProtocolSpecT } from '../../orbpro/manifest/protocol-spec.js';
+import { TimerSpec, TimerSpecT } from '../../orbpro/manifest/timer-spec.js';
+import { FlatBufferTypeRef, FlatBufferTypeRefT } from '../../orbpro/stream/flat-buffer-type-ref.js';
+
 
 /**
  * Canonical plugin manifest.
  */
 export class PluginManifest implements flatbuffers.IUnpackableObject<PluginManifestT> {
-  bb: flatbuffers.ByteBuffer | null = null;
+  bb: flatbuffers.ByteBuffer|null = null;
   bb_pos = 0;
-  __init(i: number, bb: flatbuffers.ByteBuffer): PluginManifest {
-    this.bb_pos = i;
-    this.bb = bb;
-    return this;
-  }
+  __init(i:number, bb:flatbuffers.ByteBuffer):PluginManifest {
+  this.bb_pos = i;
+  this.bb = bb;
+  return this;
+}
 
-  static getRootAsPluginManifest(
-    bb: flatbuffers.ByteBuffer,
-    obj?: PluginManifest,
-  ): PluginManifest {
-    return (obj || new PluginManifest()).__init(
-      bb.readInt32(bb.position()) + bb.position(),
-      bb,
-    );
-  }
+static getRootAsPluginManifest(bb:flatbuffers.ByteBuffer, obj?:PluginManifest):PluginManifest {
+  return (obj || new PluginManifest()).__init(bb.readInt32(bb.position()) + bb.position(), bb);
+}
 
-  static getSizePrefixedRootAsPluginManifest(
-    bb: flatbuffers.ByteBuffer,
-    obj?: PluginManifest,
-  ): PluginManifest {
-    bb.setPosition(bb.position() + flatbuffers.SIZE_PREFIX_LENGTH);
-    return (obj || new PluginManifest()).__init(
-      bb.readInt32(bb.position()) + bb.position(),
-      bb,
-    );
-  }
+static getSizePrefixedRootAsPluginManifest(bb:flatbuffers.ByteBuffer, obj?:PluginManifest):PluginManifest {
+  bb.setPosition(bb.position() + flatbuffers.SIZE_PREFIX_LENGTH);
+  return (obj || new PluginManifest()).__init(bb.readInt32(bb.position()) + bb.position(), bb);
+}
 
-  static bufferHasIdentifier(bb: flatbuffers.ByteBuffer): boolean {
-    return bb.__has_identifier("PMAN");
-  }
+static bufferHasIdentifier(bb:flatbuffers.ByteBuffer):boolean {
+  return bb.__has_identifier('PMAN');
+}
 
-  pluginId(): string | null;
-  pluginId(optionalEncoding: flatbuffers.Encoding): string | Uint8Array | null;
-  pluginId(optionalEncoding?: any): string | Uint8Array | null {
-    const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset
-      ? this.bb!.__string(this.bb_pos + offset, optionalEncoding)
-      : null;
-  }
+pluginId():string|null
+pluginId(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+pluginId(optionalEncoding?:any):string|Uint8Array|null {
+  const offset = this.bb!.__offset(this.bb_pos, 4);
+  return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
+}
 
-  name(): string | null;
-  name(optionalEncoding: flatbuffers.Encoding): string | Uint8Array | null;
-  name(optionalEncoding?: any): string | Uint8Array | null {
-    const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset
-      ? this.bb!.__string(this.bb_pos + offset, optionalEncoding)
-      : null;
-  }
+name():string|null
+name(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+name(optionalEncoding?:any):string|Uint8Array|null {
+  const offset = this.bb!.__offset(this.bb_pos, 6);
+  return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
+}
 
-  version(): string | null;
-  version(optionalEncoding: flatbuffers.Encoding): string | Uint8Array | null;
-  version(optionalEncoding?: any): string | Uint8Array | null {
-    const offset = this.bb!.__offset(this.bb_pos, 8);
-    return offset
-      ? this.bb!.__string(this.bb_pos + offset, optionalEncoding)
-      : null;
-  }
+version():string|null
+version(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+version(optionalEncoding?:any):string|Uint8Array|null {
+  const offset = this.bb!.__offset(this.bb_pos, 8);
+  return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
+}
 
-  pluginFamily(): PluginFamily {
-    const offset = this.bb!.__offset(this.bb_pos, 10);
-    return offset
-      ? this.bb!.readUint8(this.bb_pos + offset)
-      : PluginFamily.ANALYSIS;
-  }
+pluginFamily():PluginFamily {
+  const offset = this.bb!.__offset(this.bb_pos, 10);
+  return offset ? this.bb!.readUint8(this.bb_pos + offset) : PluginFamily.ANALYSIS;
+}
 
-  methods(index: number, obj?: MethodManifest): MethodManifest | null {
-    const offset = this.bb!.__offset(this.bb_pos, 12);
-    return offset
-      ? (obj || new MethodManifest()).__init(
-          this.bb!.__indirect(
-            this.bb!.__vector(this.bb_pos + offset) + index * 4,
-          ),
-          this.bb!,
-        )
-      : null;
-  }
+methods(index: number, obj?:MethodManifest):MethodManifest|null {
+  const offset = this.bb!.__offset(this.bb_pos, 12);
+  return offset ? (obj || new MethodManifest()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+}
 
-  methodsLength(): number {
-    const offset = this.bb!.__offset(this.bb_pos, 12);
-    return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
-  }
+methodsLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 12);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
 
-  capabilities(index: number, obj?: HostCapability): HostCapability | null {
-    const offset = this.bb!.__offset(this.bb_pos, 14);
-    return offset
-      ? (obj || new HostCapability()).__init(
-          this.bb!.__indirect(
-            this.bb!.__vector(this.bb_pos + offset) + index * 4,
-          ),
-          this.bb!,
-        )
-      : null;
-  }
+capabilities(index: number, obj?:HostCapability):HostCapability|null {
+  const offset = this.bb!.__offset(this.bb_pos, 14);
+  return offset ? (obj || new HostCapability()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+}
 
-  capabilitiesLength(): number {
-    const offset = this.bb!.__offset(this.bb_pos, 14);
-    return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
-  }
+capabilitiesLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 14);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
 
-  timers(index: number, obj?: TimerSpec): TimerSpec | null {
-    const offset = this.bb!.__offset(this.bb_pos, 16);
-    return offset
-      ? (obj || new TimerSpec()).__init(
-          this.bb!.__indirect(
-            this.bb!.__vector(this.bb_pos + offset) + index * 4,
-          ),
-          this.bb!,
-        )
-      : null;
-  }
+timers(index: number, obj?:TimerSpec):TimerSpec|null {
+  const offset = this.bb!.__offset(this.bb_pos, 16);
+  return offset ? (obj || new TimerSpec()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+}
 
-  timersLength(): number {
-    const offset = this.bb!.__offset(this.bb_pos, 16);
-    return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
-  }
+timersLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 16);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
 
-  protocols(index: number, obj?: ProtocolSpec): ProtocolSpec | null {
-    const offset = this.bb!.__offset(this.bb_pos, 18);
-    return offset
-      ? (obj || new ProtocolSpec()).__init(
-          this.bb!.__indirect(
-            this.bb!.__vector(this.bb_pos + offset) + index * 4,
-          ),
-          this.bb!,
-        )
-      : null;
-  }
+protocols(index: number, obj?:ProtocolSpec):ProtocolSpec|null {
+  const offset = this.bb!.__offset(this.bb_pos, 18);
+  return offset ? (obj || new ProtocolSpec()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+}
 
-  protocolsLength(): number {
-    const offset = this.bb!.__offset(this.bb_pos, 18);
-    return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
-  }
+protocolsLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 18);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
 
-  schemasUsed(
-    index: number,
-    obj?: FlatBufferTypeRef,
-  ): FlatBufferTypeRef | null {
-    const offset = this.bb!.__offset(this.bb_pos, 20);
-    return offset
-      ? (obj || new FlatBufferTypeRef()).__init(
-          this.bb!.__indirect(
-            this.bb!.__vector(this.bb_pos + offset) + index * 4,
-          ),
-          this.bb!,
-        )
-      : null;
-  }
+schemasUsed(index: number, obj?:FlatBufferTypeRef):FlatBufferTypeRef|null {
+  const offset = this.bb!.__offset(this.bb_pos, 20);
+  return offset ? (obj || new FlatBufferTypeRef()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+}
 
-  schemasUsedLength(): number {
-    const offset = this.bb!.__offset(this.bb_pos, 20);
-    return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
-  }
+schemasUsedLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 20);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
 
-  buildArtifacts(index: number, obj?: BuildArtifact): BuildArtifact | null {
-    const offset = this.bb!.__offset(this.bb_pos, 22);
-    return offset
-      ? (obj || new BuildArtifact()).__init(
-          this.bb!.__indirect(
-            this.bb!.__vector(this.bb_pos + offset) + index * 4,
-          ),
-          this.bb!,
-        )
-      : null;
-  }
+buildArtifacts(index: number, obj?:BuildArtifact):BuildArtifact|null {
+  const offset = this.bb!.__offset(this.bb_pos, 22);
+  return offset ? (obj || new BuildArtifact()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+}
 
-  buildArtifactsLength(): number {
-    const offset = this.bb!.__offset(this.bb_pos, 22);
-    return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
-  }
+buildArtifactsLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 22);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
 
-  abiVersion(): number {
-    const offset = this.bb!.__offset(this.bb_pos, 24);
-    return offset ? this.bb!.readUint32(this.bb_pos + offset) : 1;
-  }
+abiVersion():number {
+  const offset = this.bb!.__offset(this.bb_pos, 24);
+  return offset ? this.bb!.readUint32(this.bb_pos + offset) : 1;
+}
 
-  static startPluginManifest(builder: flatbuffers.Builder) {
-    builder.startObject(11);
-  }
+invokeSurfaces(index: number):InvokeSurface|null {
+  const offset = this.bb!.__offset(this.bb_pos, 26);
+  return offset ? this.bb!.readUint8(this.bb!.__vector(this.bb_pos + offset) + index) : null;
+}
 
-  static addPluginId(
-    builder: flatbuffers.Builder,
-    pluginIdOffset: flatbuffers.Offset,
-  ) {
-    builder.addFieldOffset(0, pluginIdOffset, 0);
-  }
+invokeSurfacesLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 26);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
 
-  static addName(builder: flatbuffers.Builder, nameOffset: flatbuffers.Offset) {
-    builder.addFieldOffset(1, nameOffset, 0);
-  }
+invokeSurfacesArray():Uint8Array|null {
+  const offset = this.bb!.__offset(this.bb_pos, 26);
+  return offset ? new Uint8Array(this.bb!.bytes().buffer, this.bb!.bytes().byteOffset + this.bb!.__vector(this.bb_pos + offset), this.bb!.__vector_len(this.bb_pos + offset)) : null;
+}
 
-  static addVersion(
-    builder: flatbuffers.Builder,
-    versionOffset: flatbuffers.Offset,
-  ) {
-    builder.addFieldOffset(2, versionOffset, 0);
-  }
+static startPluginManifest(builder:flatbuffers.Builder) {
+  builder.startObject(12);
+}
 
-  static addPluginFamily(
-    builder: flatbuffers.Builder,
-    pluginFamily: PluginFamily,
-  ) {
-    builder.addFieldInt8(3, pluginFamily, PluginFamily.ANALYSIS);
-  }
+static addPluginId(builder:flatbuffers.Builder, pluginIdOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(0, pluginIdOffset, 0);
+}
 
-  static addMethods(
-    builder: flatbuffers.Builder,
-    methodsOffset: flatbuffers.Offset,
-  ) {
-    builder.addFieldOffset(4, methodsOffset, 0);
-  }
+static addName(builder:flatbuffers.Builder, nameOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(1, nameOffset, 0);
+}
 
-  static createMethodsVector(
-    builder: flatbuffers.Builder,
-    data: flatbuffers.Offset[],
-  ): flatbuffers.Offset {
-    builder.startVector(4, data.length, 4);
-    for (let i = data.length - 1; i >= 0; i--) {
-      builder.addOffset(data[i]!);
-    }
-    return builder.endVector();
-  }
+static addVersion(builder:flatbuffers.Builder, versionOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(2, versionOffset, 0);
+}
 
-  static startMethodsVector(builder: flatbuffers.Builder, numElems: number) {
-    builder.startVector(4, numElems, 4);
-  }
+static addPluginFamily(builder:flatbuffers.Builder, pluginFamily:PluginFamily) {
+  builder.addFieldInt8(3, pluginFamily, PluginFamily.ANALYSIS);
+}
 
-  static addCapabilities(
-    builder: flatbuffers.Builder,
-    capabilitiesOffset: flatbuffers.Offset,
-  ) {
-    builder.addFieldOffset(5, capabilitiesOffset, 0);
-  }
+static addMethods(builder:flatbuffers.Builder, methodsOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(4, methodsOffset, 0);
+}
 
-  static createCapabilitiesVector(
-    builder: flatbuffers.Builder,
-    data: flatbuffers.Offset[],
-  ): flatbuffers.Offset {
-    builder.startVector(4, data.length, 4);
-    for (let i = data.length - 1; i >= 0; i--) {
-      builder.addOffset(data[i]!);
-    }
-    return builder.endVector();
+static createMethodsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
   }
+  return builder.endVector();
+}
 
-  static startCapabilitiesVector(
-    builder: flatbuffers.Builder,
-    numElems: number,
-  ) {
-    builder.startVector(4, numElems, 4);
-  }
+static startMethodsVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
 
-  static addTimers(
-    builder: flatbuffers.Builder,
-    timersOffset: flatbuffers.Offset,
-  ) {
-    builder.addFieldOffset(6, timersOffset, 0);
-  }
+static addCapabilities(builder:flatbuffers.Builder, capabilitiesOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(5, capabilitiesOffset, 0);
+}
 
-  static createTimersVector(
-    builder: flatbuffers.Builder,
-    data: flatbuffers.Offset[],
-  ): flatbuffers.Offset {
-    builder.startVector(4, data.length, 4);
-    for (let i = data.length - 1; i >= 0; i--) {
-      builder.addOffset(data[i]!);
-    }
-    return builder.endVector();
+static createCapabilitiesVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
   }
+  return builder.endVector();
+}
 
-  static startTimersVector(builder: flatbuffers.Builder, numElems: number) {
-    builder.startVector(4, numElems, 4);
-  }
+static startCapabilitiesVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
 
-  static addProtocols(
-    builder: flatbuffers.Builder,
-    protocolsOffset: flatbuffers.Offset,
-  ) {
-    builder.addFieldOffset(7, protocolsOffset, 0);
-  }
+static addTimers(builder:flatbuffers.Builder, timersOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(6, timersOffset, 0);
+}
 
-  static createProtocolsVector(
-    builder: flatbuffers.Builder,
-    data: flatbuffers.Offset[],
-  ): flatbuffers.Offset {
-    builder.startVector(4, data.length, 4);
-    for (let i = data.length - 1; i >= 0; i--) {
-      builder.addOffset(data[i]!);
-    }
-    return builder.endVector();
+static createTimersVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
   }
+  return builder.endVector();
+}
 
-  static startProtocolsVector(builder: flatbuffers.Builder, numElems: number) {
-    builder.startVector(4, numElems, 4);
-  }
+static startTimersVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
 
-  static addSchemasUsed(
-    builder: flatbuffers.Builder,
-    schemasUsedOffset: flatbuffers.Offset,
-  ) {
-    builder.addFieldOffset(8, schemasUsedOffset, 0);
-  }
+static addProtocols(builder:flatbuffers.Builder, protocolsOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(7, protocolsOffset, 0);
+}
 
-  static createSchemasUsedVector(
-    builder: flatbuffers.Builder,
-    data: flatbuffers.Offset[],
-  ): flatbuffers.Offset {
-    builder.startVector(4, data.length, 4);
-    for (let i = data.length - 1; i >= 0; i--) {
-      builder.addOffset(data[i]!);
-    }
-    return builder.endVector();
+static createProtocolsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
   }
+  return builder.endVector();
+}
 
-  static startSchemasUsedVector(
-    builder: flatbuffers.Builder,
-    numElems: number,
-  ) {
-    builder.startVector(4, numElems, 4);
-  }
+static startProtocolsVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
 
-  static addBuildArtifacts(
-    builder: flatbuffers.Builder,
-    buildArtifactsOffset: flatbuffers.Offset,
-  ) {
-    builder.addFieldOffset(9, buildArtifactsOffset, 0);
-  }
+static addSchemasUsed(builder:flatbuffers.Builder, schemasUsedOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(8, schemasUsedOffset, 0);
+}
 
-  static createBuildArtifactsVector(
-    builder: flatbuffers.Builder,
-    data: flatbuffers.Offset[],
-  ): flatbuffers.Offset {
-    builder.startVector(4, data.length, 4);
-    for (let i = data.length - 1; i >= 0; i--) {
-      builder.addOffset(data[i]!);
-    }
-    return builder.endVector();
+static createSchemasUsedVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
   }
+  return builder.endVector();
+}
 
-  static startBuildArtifactsVector(
-    builder: flatbuffers.Builder,
-    numElems: number,
-  ) {
-    builder.startVector(4, numElems, 4);
-  }
+static startSchemasUsedVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
 
-  static addAbiVersion(builder: flatbuffers.Builder, abiVersion: number) {
-    builder.addFieldInt32(10, abiVersion, 1);
-  }
+static addBuildArtifacts(builder:flatbuffers.Builder, buildArtifactsOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(9, buildArtifactsOffset, 0);
+}
 
-  static endPluginManifest(builder: flatbuffers.Builder): flatbuffers.Offset {
-    const offset = builder.endObject();
-    builder.requiredField(offset, 4); // plugin_id
-    return offset;
+static createBuildArtifactsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
   }
+  return builder.endVector();
+}
 
-  static finishPluginManifestBuffer(
-    builder: flatbuffers.Builder,
-    offset: flatbuffers.Offset,
-  ) {
-    builder.finish(offset, "PMAN");
-  }
+static startBuildArtifactsVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
 
-  static finishSizePrefixedPluginManifestBuffer(
-    builder: flatbuffers.Builder,
-    offset: flatbuffers.Offset,
-  ) {
-    builder.finish(offset, "PMAN", true);
-  }
+static addAbiVersion(builder:flatbuffers.Builder, abiVersion:number) {
+  builder.addFieldInt32(10, abiVersion, 1);
+}
 
-  static createPluginManifest(
-    builder: flatbuffers.Builder,
-    pluginIdOffset: flatbuffers.Offset,
-    nameOffset: flatbuffers.Offset,
-    versionOffset: flatbuffers.Offset,
-    pluginFamily: PluginFamily,
-    methodsOffset: flatbuffers.Offset,
-    capabilitiesOffset: flatbuffers.Offset,
-    timersOffset: flatbuffers.Offset,
-    protocolsOffset: flatbuffers.Offset,
-    schemasUsedOffset: flatbuffers.Offset,
-    buildArtifactsOffset: flatbuffers.Offset,
-    abiVersion: number,
-  ): flatbuffers.Offset {
-    PluginManifest.startPluginManifest(builder);
-    PluginManifest.addPluginId(builder, pluginIdOffset);
-    PluginManifest.addName(builder, nameOffset);
-    PluginManifest.addVersion(builder, versionOffset);
-    PluginManifest.addPluginFamily(builder, pluginFamily);
-    PluginManifest.addMethods(builder, methodsOffset);
-    PluginManifest.addCapabilities(builder, capabilitiesOffset);
-    PluginManifest.addTimers(builder, timersOffset);
-    PluginManifest.addProtocols(builder, protocolsOffset);
-    PluginManifest.addSchemasUsed(builder, schemasUsedOffset);
-    PluginManifest.addBuildArtifacts(builder, buildArtifactsOffset);
-    PluginManifest.addAbiVersion(builder, abiVersion);
-    return PluginManifest.endPluginManifest(builder);
-  }
+static addInvokeSurfaces(builder:flatbuffers.Builder, invokeSurfacesOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(11, invokeSurfacesOffset, 0);
+}
 
-  unpack(): PluginManifestT {
-    return new PluginManifestT(
-      this.pluginId(),
-      this.name(),
-      this.version(),
-      this.pluginFamily(),
-      this.bb!.createObjList<MethodManifest, MethodManifestT>(
-        this.methods.bind(this),
-        this.methodsLength(),
-      ),
-      this.bb!.createObjList<HostCapability, HostCapabilityT>(
-        this.capabilities.bind(this),
-        this.capabilitiesLength(),
-      ),
-      this.bb!.createObjList<TimerSpec, TimerSpecT>(
-        this.timers.bind(this),
-        this.timersLength(),
-      ),
-      this.bb!.createObjList<ProtocolSpec, ProtocolSpecT>(
-        this.protocols.bind(this),
-        this.protocolsLength(),
-      ),
-      this.bb!.createObjList<FlatBufferTypeRef, FlatBufferTypeRefT>(
-        this.schemasUsed.bind(this),
-        this.schemasUsedLength(),
-      ),
-      this.bb!.createObjList<BuildArtifact, BuildArtifactT>(
-        this.buildArtifacts.bind(this),
-        this.buildArtifactsLength(),
-      ),
-      this.abiVersion(),
-    );
+static createInvokeSurfacesVector(builder:flatbuffers.Builder, data:InvokeSurface[]):flatbuffers.Offset {
+  builder.startVector(1, data.length, 1);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addInt8(data[i]!);
   }
+  return builder.endVector();
+}
 
-  unpackTo(_o: PluginManifestT): void {
-    _o.pluginId = this.pluginId();
-    _o.name = this.name();
-    _o.version = this.version();
-    _o.pluginFamily = this.pluginFamily();
-    _o.methods = this.bb!.createObjList<MethodManifest, MethodManifestT>(
-      this.methods.bind(this),
-      this.methodsLength(),
-    );
-    _o.capabilities = this.bb!.createObjList<HostCapability, HostCapabilityT>(
-      this.capabilities.bind(this),
-      this.capabilitiesLength(),
-    );
-    _o.timers = this.bb!.createObjList<TimerSpec, TimerSpecT>(
-      this.timers.bind(this),
-      this.timersLength(),
-    );
-    _o.protocols = this.bb!.createObjList<ProtocolSpec, ProtocolSpecT>(
-      this.protocols.bind(this),
-      this.protocolsLength(),
-    );
-    _o.schemasUsed = this.bb!.createObjList<
-      FlatBufferTypeRef,
-      FlatBufferTypeRefT
-    >(this.schemasUsed.bind(this), this.schemasUsedLength());
-    _o.buildArtifacts = this.bb!.createObjList<BuildArtifact, BuildArtifactT>(
-      this.buildArtifacts.bind(this),
-      this.buildArtifactsLength(),
-    );
-    _o.abiVersion = this.abiVersion();
-  }
+static startInvokeSurfacesVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(1, numElems, 1);
+}
+
+static endPluginManifest(builder:flatbuffers.Builder):flatbuffers.Offset {
+  const offset = builder.endObject();
+  builder.requiredField(offset, 4) // plugin_id
+  return offset;
+}
+
+static finishPluginManifestBuffer(builder:flatbuffers.Builder, offset:flatbuffers.Offset) {
+  builder.finish(offset, 'PMAN');
+}
+
+static finishSizePrefixedPluginManifestBuffer(builder:flatbuffers.Builder, offset:flatbuffers.Offset) {
+  builder.finish(offset, 'PMAN', true);
+}
+
+static createPluginManifest(builder:flatbuffers.Builder, pluginIdOffset:flatbuffers.Offset, nameOffset:flatbuffers.Offset, versionOffset:flatbuffers.Offset, pluginFamily:PluginFamily, methodsOffset:flatbuffers.Offset, capabilitiesOffset:flatbuffers.Offset, timersOffset:flatbuffers.Offset, protocolsOffset:flatbuffers.Offset, schemasUsedOffset:flatbuffers.Offset, buildArtifactsOffset:flatbuffers.Offset, abiVersion:number, invokeSurfacesOffset:flatbuffers.Offset):flatbuffers.Offset {
+  PluginManifest.startPluginManifest(builder);
+  PluginManifest.addPluginId(builder, pluginIdOffset);
+  PluginManifest.addName(builder, nameOffset);
+  PluginManifest.addVersion(builder, versionOffset);
+  PluginManifest.addPluginFamily(builder, pluginFamily);
+  PluginManifest.addMethods(builder, methodsOffset);
+  PluginManifest.addCapabilities(builder, capabilitiesOffset);
+  PluginManifest.addTimers(builder, timersOffset);
+  PluginManifest.addProtocols(builder, protocolsOffset);
+  PluginManifest.addSchemasUsed(builder, schemasUsedOffset);
+  PluginManifest.addBuildArtifacts(builder, buildArtifactsOffset);
+  PluginManifest.addAbiVersion(builder, abiVersion);
+  PluginManifest.addInvokeSurfaces(builder, invokeSurfacesOffset);
+  return PluginManifest.endPluginManifest(builder);
+}
+
+unpack(): PluginManifestT {
+  return new PluginManifestT(
+    this.pluginId(),
+    this.name(),
+    this.version(),
+    this.pluginFamily(),
+    this.bb!.createObjList<MethodManifest, MethodManifestT>(this.methods.bind(this), this.methodsLength()),
+    this.bb!.createObjList<HostCapability, HostCapabilityT>(this.capabilities.bind(this), this.capabilitiesLength()),
+    this.bb!.createObjList<TimerSpec, TimerSpecT>(this.timers.bind(this), this.timersLength()),
+    this.bb!.createObjList<ProtocolSpec, ProtocolSpecT>(this.protocols.bind(this), this.protocolsLength()),
+    this.bb!.createObjList<FlatBufferTypeRef, FlatBufferTypeRefT>(this.schemasUsed.bind(this), this.schemasUsedLength()),
+    this.bb!.createObjList<BuildArtifact, BuildArtifactT>(this.buildArtifacts.bind(this), this.buildArtifactsLength()),
+    this.abiVersion(),
+    this.bb!.createScalarList<InvokeSurface>(this.invokeSurfaces.bind(this), this.invokeSurfacesLength())
+  );
+}
+
+
+unpackTo(_o: PluginManifestT): void {
+  _o.pluginId = this.pluginId();
+  _o.name = this.name();
+  _o.version = this.version();
+  _o.pluginFamily = this.pluginFamily();
+  _o.methods = this.bb!.createObjList<MethodManifest, MethodManifestT>(this.methods.bind(this), this.methodsLength());
+  _o.capabilities = this.bb!.createObjList<HostCapability, HostCapabilityT>(this.capabilities.bind(this), this.capabilitiesLength());
+  _o.timers = this.bb!.createObjList<TimerSpec, TimerSpecT>(this.timers.bind(this), this.timersLength());
+  _o.protocols = this.bb!.createObjList<ProtocolSpec, ProtocolSpecT>(this.protocols.bind(this), this.protocolsLength());
+  _o.schemasUsed = this.bb!.createObjList<FlatBufferTypeRef, FlatBufferTypeRefT>(this.schemasUsed.bind(this), this.schemasUsedLength());
+  _o.buildArtifacts = this.bb!.createObjList<BuildArtifact, BuildArtifactT>(this.buildArtifacts.bind(this), this.buildArtifactsLength());
+  _o.abiVersion = this.abiVersion();
+  _o.invokeSurfaces = this.bb!.createScalarList<InvokeSurface>(this.invokeSurfaces.bind(this), this.invokeSurfacesLength());
+}
 }
 
 export class PluginManifestT implements flatbuffers.IGeneratedObject {
-  constructor(
-    public pluginId: string | Uint8Array | null = null,
-    public name: string | Uint8Array | null = null,
-    public version: string | Uint8Array | null = null,
-    public pluginFamily: PluginFamily = PluginFamily.ANALYSIS,
-    public methods: MethodManifestT[] = [],
-    public capabilities: HostCapabilityT[] = [],
-    public timers: TimerSpecT[] = [],
-    public protocols: ProtocolSpecT[] = [],
-    public schemasUsed: FlatBufferTypeRefT[] = [],
-    public buildArtifacts: BuildArtifactT[] = [],
-    public abiVersion: number = 1,
-  ) {}
+constructor(
+  public pluginId: string|Uint8Array|null = null,
+  public name: string|Uint8Array|null = null,
+  public version: string|Uint8Array|null = null,
+  public pluginFamily: PluginFamily = PluginFamily.ANALYSIS,
+  public methods: (MethodManifestT)[] = [],
+  public capabilities: (HostCapabilityT)[] = [],
+  public timers: (TimerSpecT)[] = [],
+  public protocols: (ProtocolSpecT)[] = [],
+  public schemasUsed: (FlatBufferTypeRefT)[] = [],
+  public buildArtifacts: (BuildArtifactT)[] = [],
+  public abiVersion: number = 1,
+  public invokeSurfaces: (InvokeSurface)[] = []
+){}
 
-  pack(builder: flatbuffers.Builder): flatbuffers.Offset {
-    const pluginId =
-      this.pluginId !== null ? builder.createString(this.pluginId!) : 0;
-    const name = this.name !== null ? builder.createString(this.name!) : 0;
-    const version =
-      this.version !== null ? builder.createString(this.version!) : 0;
-    const methods = PluginManifest.createMethodsVector(
-      builder,
-      builder.createObjectOffsetList(this.methods),
-    );
-    const capabilities = PluginManifest.createCapabilitiesVector(
-      builder,
-      builder.createObjectOffsetList(this.capabilities),
-    );
-    const timers = PluginManifest.createTimersVector(
-      builder,
-      builder.createObjectOffsetList(this.timers),
-    );
-    const protocols = PluginManifest.createProtocolsVector(
-      builder,
-      builder.createObjectOffsetList(this.protocols),
-    );
-    const schemasUsed = PluginManifest.createSchemasUsedVector(
-      builder,
-      builder.createObjectOffsetList(this.schemasUsed),
-    );
-    const buildArtifacts = PluginManifest.createBuildArtifactsVector(
-      builder,
-      builder.createObjectOffsetList(this.buildArtifacts),
-    );
 
-    return PluginManifest.createPluginManifest(
-      builder,
-      pluginId,
-      name,
-      version,
-      this.pluginFamily,
-      methods,
-      capabilities,
-      timers,
-      protocols,
-      schemasUsed,
-      buildArtifacts,
-      this.abiVersion,
-    );
-  }
+pack(builder:flatbuffers.Builder): flatbuffers.Offset {
+  const pluginId = (this.pluginId !== null ? builder.createString(this.pluginId!) : 0);
+  const name = (this.name !== null ? builder.createString(this.name!) : 0);
+  const version = (this.version !== null ? builder.createString(this.version!) : 0);
+  const methods = PluginManifest.createMethodsVector(builder, builder.createObjectOffsetList(this.methods));
+  const capabilities = PluginManifest.createCapabilitiesVector(builder, builder.createObjectOffsetList(this.capabilities));
+  const timers = PluginManifest.createTimersVector(builder, builder.createObjectOffsetList(this.timers));
+  const protocols = PluginManifest.createProtocolsVector(builder, builder.createObjectOffsetList(this.protocols));
+  const schemasUsed = PluginManifest.createSchemasUsedVector(builder, builder.createObjectOffsetList(this.schemasUsed));
+  const buildArtifacts = PluginManifest.createBuildArtifactsVector(builder, builder.createObjectOffsetList(this.buildArtifacts));
+  const invokeSurfaces = PluginManifest.createInvokeSurfacesVector(builder, this.invokeSurfaces);
+
+  return PluginManifest.createPluginManifest(builder,
+    pluginId,
+    name,
+    version,
+    this.pluginFamily,
+    methods,
+    capabilities,
+    timers,
+    protocols,
+    schemasUsed,
+    buildArtifacts,
+    this.abiVersion,
+    invokeSurfaces
+  );
+}
 }

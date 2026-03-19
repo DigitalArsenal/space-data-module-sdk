@@ -3,9 +3,33 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any, @typescript-eslint/no-non-null-assertion */
 
 import * as flatbuffers from "flatbuffers";
+import { PayloadWireFormat } from "../../orbpro/stream/payload-wire-format.js";
+
+function normalizePayloadWireFormat(
+  value: PayloadWireFormat | "flatbuffer" | "aligned-binary" | null | undefined,
+): PayloadWireFormat {
+  if (value === PayloadWireFormat.ALIGNED_BINARY) {
+    return PayloadWireFormat.ALIGNED_BINARY;
+  }
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+  return normalized === "aligned-binary"
+    ? PayloadWireFormat.ALIGNED_BINARY
+    : PayloadWireFormat.FLATBUFFER;
+}
+
+function payloadWireFormatToName(
+  value: PayloadWireFormat | "flatbuffer" | "aligned-binary" | null | undefined,
+): "flatbuffer" | "aligned-binary" {
+  return normalizePayloadWireFormat(value) === PayloadWireFormat.ALIGNED_BINARY
+    ? "aligned-binary"
+    : "flatbuffer";
+}
 
 /**
- * FlatBuffer schema identity for a stream frame or accepted port type.
+ * Payload schema identity for a stream frame or accepted port type.
  */
 export class FlatBufferTypeRef implements flatbuffers.IUnpackableObject<FlatBufferTypeRefT> {
   bb: flatbuffers.ByteBuffer | null = null;
@@ -99,8 +123,41 @@ export class FlatBufferTypeRef implements flatbuffers.IUnpackableObject<FlatBuff
     return offset ? !!this.bb!.readInt8(this.bb_pos + offset) : false;
   }
 
+  wireFormat(): PayloadWireFormat {
+    const offset = this.bb!.__offset(this.bb_pos, 12);
+    return offset
+      ? this.bb!.readUint8(this.bb_pos + offset)
+      : PayloadWireFormat.FLATBUFFER;
+  }
+
+  rootTypeName(): string | null;
+  rootTypeName(
+    optionalEncoding: flatbuffers.Encoding,
+  ): string | Uint8Array | null;
+  rootTypeName(optionalEncoding?: any): string | Uint8Array | null {
+    const offset = this.bb!.__offset(this.bb_pos, 14);
+    return offset
+      ? this.bb!.__string(this.bb_pos + offset, optionalEncoding)
+      : null;
+  }
+
+  fixedStringLength(): number {
+    const offset = this.bb!.__offset(this.bb_pos, 16);
+    return offset ? this.bb!.readUint16(this.bb_pos + offset) : 0;
+  }
+
+  byteLength(): number {
+    const offset = this.bb!.__offset(this.bb_pos, 18);
+    return offset ? this.bb!.readUint32(this.bb_pos + offset) : 0;
+  }
+
+  requiredAlignment(): number {
+    const offset = this.bb!.__offset(this.bb_pos, 20);
+    return offset ? this.bb!.readUint16(this.bb_pos + offset) : 0;
+  }
+
   static startFlatBufferTypeRef(builder: flatbuffers.Builder) {
-    builder.startObject(4);
+    builder.startObject(9);
   }
 
   static addSchemaName(
@@ -146,6 +203,38 @@ export class FlatBufferTypeRef implements flatbuffers.IUnpackableObject<FlatBuff
     builder.addFieldInt8(3, +acceptsAnyFlatbuffer, +false);
   }
 
+  static addWireFormat(
+    builder: flatbuffers.Builder,
+    wireFormat: PayloadWireFormat,
+  ) {
+    builder.addFieldInt8(4, wireFormat, PayloadWireFormat.FLATBUFFER);
+  }
+
+  static addRootTypeName(
+    builder: flatbuffers.Builder,
+    rootTypeNameOffset: flatbuffers.Offset,
+  ) {
+    builder.addFieldOffset(5, rootTypeNameOffset, 0);
+  }
+
+  static addFixedStringLength(
+    builder: flatbuffers.Builder,
+    fixedStringLength: number,
+  ) {
+    builder.addFieldInt16(6, fixedStringLength, 0);
+  }
+
+  static addByteLength(builder: flatbuffers.Builder, byteLength: number) {
+    builder.addFieldInt32(7, byteLength, 0);
+  }
+
+  static addRequiredAlignment(
+    builder: flatbuffers.Builder,
+    requiredAlignment: number,
+  ) {
+    builder.addFieldInt16(8, requiredAlignment, 0);
+  }
+
   static endFlatBufferTypeRef(
     builder: flatbuffers.Builder,
   ): flatbuffers.Offset {
@@ -159,12 +248,22 @@ export class FlatBufferTypeRef implements flatbuffers.IUnpackableObject<FlatBuff
     fileIdentifierOffset: flatbuffers.Offset,
     schemaHashOffset: flatbuffers.Offset,
     acceptsAnyFlatbuffer: boolean,
+    wireFormat: PayloadWireFormat,
+    rootTypeNameOffset: flatbuffers.Offset,
+    fixedStringLength: number,
+    byteLength: number,
+    requiredAlignment: number,
   ): flatbuffers.Offset {
     FlatBufferTypeRef.startFlatBufferTypeRef(builder);
     FlatBufferTypeRef.addSchemaName(builder, schemaNameOffset);
     FlatBufferTypeRef.addFileIdentifier(builder, fileIdentifierOffset);
     FlatBufferTypeRef.addSchemaHash(builder, schemaHashOffset);
     FlatBufferTypeRef.addAcceptsAnyFlatbuffer(builder, acceptsAnyFlatbuffer);
+    FlatBufferTypeRef.addWireFormat(builder, wireFormat);
+    FlatBufferTypeRef.addRootTypeName(builder, rootTypeNameOffset);
+    FlatBufferTypeRef.addFixedStringLength(builder, fixedStringLength);
+    FlatBufferTypeRef.addByteLength(builder, byteLength);
+    FlatBufferTypeRef.addRequiredAlignment(builder, requiredAlignment);
     return FlatBufferTypeRef.endFlatBufferTypeRef(builder);
   }
 
@@ -177,6 +276,11 @@ export class FlatBufferTypeRef implements flatbuffers.IUnpackableObject<FlatBuff
         this.schemaHashLength(),
       ),
       this.acceptsAnyFlatbuffer(),
+      payloadWireFormatToName(this.wireFormat()),
+      this.rootTypeName(),
+      this.fixedStringLength(),
+      this.byteLength(),
+      this.requiredAlignment(),
     );
   }
 
@@ -188,6 +292,11 @@ export class FlatBufferTypeRef implements flatbuffers.IUnpackableObject<FlatBuff
       this.schemaHashLength(),
     );
     _o.acceptsAnyFlatbuffer = this.acceptsAnyFlatbuffer();
+    _o.wireFormat = payloadWireFormatToName(this.wireFormat());
+    _o.rootTypeName = this.rootTypeName();
+    _o.fixedStringLength = this.fixedStringLength();
+    _o.byteLength = this.byteLength();
+    _o.requiredAlignment = this.requiredAlignment();
   }
 }
 
@@ -197,6 +306,14 @@ export class FlatBufferTypeRefT implements flatbuffers.IGeneratedObject {
     public fileIdentifier: string | Uint8Array | null = null,
     public schemaHash: number[] = [],
     public acceptsAnyFlatbuffer: boolean = false,
+    public wireFormat:
+      | PayloadWireFormat
+      | "flatbuffer"
+      | "aligned-binary" = "flatbuffer",
+    public rootTypeName: string | Uint8Array | null = null,
+    public fixedStringLength: number = 0,
+    public byteLength: number = 0,
+    public requiredAlignment: number = 0,
   ) {}
 
   pack(builder: flatbuffers.Builder): flatbuffers.Offset {
@@ -210,6 +327,8 @@ export class FlatBufferTypeRefT implements flatbuffers.IGeneratedObject {
       builder,
       this.schemaHash,
     );
+    const rootTypeName =
+      this.rootTypeName !== null ? builder.createString(this.rootTypeName!) : 0;
 
     return FlatBufferTypeRef.createFlatBufferTypeRef(
       builder,
@@ -217,6 +336,11 @@ export class FlatBufferTypeRefT implements flatbuffers.IGeneratedObject {
       fileIdentifier,
       schemaHash,
       this.acceptsAnyFlatbuffer,
+      normalizePayloadWireFormat(this.wireFormat),
+      rootTypeName,
+      this.fixedStringLength,
+      this.byteLength,
+      this.requiredAlignment,
     );
   }
 }

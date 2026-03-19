@@ -1,6 +1,6 @@
-import * as flatbuffers from 'flatbuffers';
-import { DrainPolicy } from '../../orbpro/manifest/drain-policy.js';
-import { PortManifest, PortManifestT } from '../../orbpro/manifest/port-manifest.js';
+import * as flatbuffers from "flatbuffers";
+import { DrainPolicy } from "../../orbpro/manifest/drain-policy.js";
+import { PortManifest, PortManifestT } from "../../orbpro/manifest/port-manifest.js";
 /**
  * Canonical method declaration.
  */
@@ -42,12 +42,12 @@ export declare class MethodManifest implements flatbuffers.IUnpackableObject<Met
 export declare class MethodManifestT implements flatbuffers.IGeneratedObject {
     methodId: string | Uint8Array | null;
     displayName: string | Uint8Array | null;
-    inputPorts: (PortManifestT)[];
-    outputPorts: (PortManifestT)[];
+    inputPorts: PortManifestT[];
+    outputPorts: PortManifestT[];
     maxBatch: number;
     drainPolicy: DrainPolicy;
     description: string | Uint8Array | null;
-    constructor(methodId?: string | Uint8Array | null, displayName?: string | Uint8Array | null, inputPorts?: (PortManifestT)[], outputPorts?: (PortManifestT)[], maxBatch?: number, drainPolicy?: DrainPolicy, description?: string | Uint8Array | null);
+    constructor(methodId?: string | Uint8Array | null, displayName?: string | Uint8Array | null, inputPorts?: PortManifestT[], outputPorts?: PortManifestT[], maxBatch?: number, drainPolicy?: DrainPolicy, description?: string | Uint8Array | null);
     pack(builder: flatbuffers.Builder): flatbuffers.Offset;
 }
 //# sourceMappingURL=method-manifest.d.ts.map

@@ -53,8 +53,15 @@ type wasmSection struct {
 }
 
 type typeRefSpec struct {
-	SchemaName     string
-	FileIdentifier string
+	SchemaName            string
+	FileIdentifier        string
+	SchemaHash            []byte
+	AcceptsAnyFlatbuffer  bool
+	WireFormat            streamfb.PayloadWireFormat
+	RootTypeName          string
+	FixedStringLength     uint16
+	ByteLength            uint32
+	RequiredAlignment     uint16
 }
 
 type entrySpec struct {
@@ -79,8 +86,15 @@ type createInputs struct {
 }
 
 type typeRefSummary struct {
-	SchemaName     string `json:"schemaName"`
-	FileIdentifier string `json:"fileIdentifier"`
+	SchemaName           string `json:"schemaName,omitempty"`
+	FileIdentifier       string `json:"fileIdentifier,omitempty"`
+	SchemaHashHex        string `json:"schemaHashHex,omitempty"`
+	AcceptsAnyFlatbuffer bool   `json:"acceptsAnyFlatbuffer,omitempty"`
+	WireFormat           string `json:"wireFormat,omitempty"`
+	RootTypeName         string `json:"rootTypeName,omitempty"`
+	FixedStringLength    uint16 `json:"fixedStringLength,omitempty"`
+	ByteLength           uint32 `json:"byteLength,omitempty"`
+	RequiredAlignment    uint16 `json:"requiredAlignment,omitempty"`
 }
 
 type entrySummary struct {
@@ -147,6 +161,13 @@ func sha256Hex(data []byte) string {
 
 func bytesHex(data []byte) string {
 	return hex.EncodeToString(data)
+}
+
+func wireFormatName(value streamfb.PayloadWireFormat) string {
+	if value == streamfb.PayloadWireFormatALIGNED_BINARY {
+		return "aligned-binary"
+	}
+	return "flatbuffer"
 }
 
 func encodeULEB128(value int) []byte {
@@ -263,12 +284,40 @@ func buildTypeRef(builder *flatbuffers.Builder, spec *typeRefSpec) flatbuffers.U
 	if spec == nil {
 		return 0
 	}
-	schemaName := builder.CreateString(spec.SchemaName)
-	fileIdentifier := builder.CreateString(spec.FileIdentifier)
+	var schemaName flatbuffers.UOffsetT
+	if spec.SchemaName != "" {
+		schemaName = builder.CreateString(spec.SchemaName)
+	}
+	var fileIdentifier flatbuffers.UOffsetT
+	if spec.FileIdentifier != "" {
+		fileIdentifier = builder.CreateString(spec.FileIdentifier)
+	}
+	var schemaHash flatbuffers.UOffsetT
+	if len(spec.SchemaHash) > 0 {
+		schemaHash = builder.CreateByteVector(spec.SchemaHash)
+	}
+	var rootTypeName flatbuffers.UOffsetT
+	if spec.RootTypeName != "" {
+		rootTypeName = builder.CreateString(spec.RootTypeName)
+	}
 	streamfb.FlatBufferTypeRefStart(builder)
-	streamfb.FlatBufferTypeRefAddSchemaName(builder, schemaName)
-	streamfb.FlatBufferTypeRefAddFileIdentifier(builder, fileIdentifier)
-	streamfb.FlatBufferTypeRefAddAcceptsAnyFlatbuffer(builder, false)
+	if schemaName != 0 {
+		streamfb.FlatBufferTypeRefAddSchemaName(builder, schemaName)
+	}
+	if fileIdentifier != 0 {
+		streamfb.FlatBufferTypeRefAddFileIdentifier(builder, fileIdentifier)
+	}
+	if schemaHash != 0 {
+		streamfb.FlatBufferTypeRefAddSchemaHash(builder, schemaHash)
+	}
+	streamfb.FlatBufferTypeRefAddAcceptsAnyFlatbuffer(builder, spec.AcceptsAnyFlatbuffer)
+	streamfb.FlatBufferTypeRefAddWireFormat(builder, spec.WireFormat)
+	if rootTypeName != 0 {
+		streamfb.FlatBufferTypeRefAddRootTypeName(builder, rootTypeName)
+	}
+	streamfb.FlatBufferTypeRefAddFixedStringLength(builder, spec.FixedStringLength)
+	streamfb.FlatBufferTypeRefAddByteLength(builder, spec.ByteLength)
+	streamfb.FlatBufferTypeRefAddRequiredAlignment(builder, spec.RequiredAlignment)
 	return streamfb.FlatBufferTypeRefEnd(builder)
 }
 
@@ -510,9 +559,33 @@ func buildSummary(baseWasm, bundleBytes, bundledWasm []byte) (*summary, error) {
 		var typeRefSummaryValue *typeRefSummary
 		var typeRef streamfb.FlatBufferTypeRef
 		if entry.TypeRef(&typeRef) != nil {
-			typeRefSummaryValue = &typeRefSummary{
-				SchemaName:     string(typeRef.SchemaName()),
-				FileIdentifier: string(typeRef.FileIdentifier()),
+			typeRefSummaryValue = &typeRefSummary{}
+			if schemaName := string(typeRef.SchemaName()); schemaName != "" {
+				typeRefSummaryValue.SchemaName = schemaName
+			}
+			if fileIdentifier := string(typeRef.FileIdentifier()); fileIdentifier != "" {
+				typeRefSummaryValue.FileIdentifier = fileIdentifier
+			}
+			if schemaHash := typeRef.SchemaHashBytes(); len(schemaHash) > 0 {
+				typeRefSummaryValue.SchemaHashHex = bytesHex(schemaHash)
+			}
+			if typeRef.AcceptsAnyFlatbuffer() {
+				typeRefSummaryValue.AcceptsAnyFlatbuffer = true
+			}
+			if typeRef.WireFormat() != streamfb.PayloadWireFormatFLATBUFFER {
+				typeRefSummaryValue.WireFormat = wireFormatName(typeRef.WireFormat())
+			}
+			if rootTypeName := string(typeRef.RootTypeName()); rootTypeName != "" {
+				typeRefSummaryValue.RootTypeName = rootTypeName
+			}
+			if fixedStringLength := typeRef.FixedStringLength(); fixedStringLength != 0 {
+				typeRefSummaryValue.FixedStringLength = fixedStringLength
+			}
+			if byteLength := typeRef.ByteLength(); byteLength != 0 {
+				typeRefSummaryValue.ByteLength = byteLength
+			}
+			if requiredAlignment := typeRef.RequiredAlignment(); requiredAlignment != 0 {
+				typeRefSummaryValue.RequiredAlignment = requiredAlignment
 			}
 		}
 

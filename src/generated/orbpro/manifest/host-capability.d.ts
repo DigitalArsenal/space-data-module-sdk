@@ -1,5 +1,5 @@
-import * as flatbuffers from 'flatbuffers';
-import { CapabilityKind } from '../../orbpro/manifest/capability-kind.js';
+import * as flatbuffers from "flatbuffers";
+import { CapabilityKind } from "../../orbpro/manifest/capability-kind.js";
 /**
  * One host capability dependency.
  */

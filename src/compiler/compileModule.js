@@ -1,7 +1,8 @@
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile as execFileCallback } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import {
@@ -11,7 +12,13 @@ import {
 } from "../auth/index.js";
 import { validateArtifactWithStandards } from "../compliance/index.js";
 import { generateEmbeddedManifestSource } from "../embeddedManifest.js";
+import {
+  generateInvokeSupportHeader,
+  generateInvokeSupportSource,
+  resolveInvokeSurfaces,
+} from "./invokeGlue.js";
 import { encodePluginManifest, toEmbeddedPluginManifest } from "../manifest/index.js";
+import { DefaultInvokeExports, InvokeSurface } from "../runtime/constants.js";
 import {
   encryptJsonForRecipient,
   generateX25519Keypair,
@@ -28,6 +35,8 @@ import { getWasmWallet } from "../utils/wasmCrypto.js";
 
 const execFile = promisify(execFileCallback);
 const C_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const SDK_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const SCHEMA_DIR = path.join(SDK_ROOT, "schemas");
 
 function selectCompiler(language) {
   const normalized = String(language ?? "c").trim().toLowerCase();
@@ -49,7 +58,7 @@ function ensureExportableMethodIds(manifest) {
   }
 }
 
-function buildCompilerArgs(compiler, exportedSymbols, options = {}) {
+function buildCompilerArgs(exportedSymbols, options = {}) {
   const linkerExports = exportedSymbols.map(
     (symbol) => "-Wl,--export=" + symbol,
   );
@@ -57,14 +66,76 @@ function buildCompilerArgs(compiler, exportedSymbols, options = {}) {
   if (options.allowUndefinedImports === true) {
     extraArgs.push("-s", "ERROR_ON_UNDEFINED_SYMBOLS=0", "-Wl,--allow-undefined");
   }
-  return [
-    "-O2",
-    "--no-entry",
-    "-s",
-    "STANDALONE_WASM=1",
-    ...extraArgs,
-    ...linkerExports,
+  const args = ["-O2", "-s", "STANDALONE_WASM=1", ...extraArgs, ...linkerExports];
+  if (options.noEntry === true) {
+    args.splice(1, 0, "--no-entry");
+  }
+  return args;
+}
+
+async function pathExists(candidatePath) {
+  try {
+    await access(candidatePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveFlatbuffersIncludeDir() {
+  const envPath = process.env.FLATBUFFERS_INCLUDE_DIR;
+  const candidates = [];
+  if (envPath) {
+    candidates.push(envPath);
+  }
+
+  try {
+    const { stdout } = await execFile("brew", ["--prefix", "flatbuffers"], {
+      timeout: 15_000,
+    });
+    candidates.push(path.join(stdout.trim(), "include"));
+  } catch {
+    // brew not available; fall through to common prefixes
+  }
+
+  candidates.push(
+    "/opt/homebrew/include",
+    "/usr/local/include",
+    "/usr/include",
+  );
+
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    if (await pathExists(path.join(candidate, "flatbuffers", "flatbuffers.h"))) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    "Unable to locate FlatBuffers C++ headers. Set FLATBUFFERS_INCLUDE_DIR or install the flatbuffers headers locally.",
+  );
+}
+
+async function generateInvokeCppHeaders(outputDir) {
+  const schemaPaths = [
+    path.join(SCHEMA_DIR, "TypedArenaBuffer.fbs"),
+    path.join(SCHEMA_DIR, "PluginInvokeRequest.fbs"),
+    path.join(SCHEMA_DIR, "PluginInvokeResponse.fbs"),
   ];
+  try {
+    await execFile(
+      "flatc",
+      ["--cpp", "--gen-object-api", "-o", outputDir, ...schemaPaths],
+      { timeout: 120_000, cwd: SDK_ROOT },
+    );
+  } catch (error) {
+    error.message =
+      "Failed to generate C++ invoke bindings with flatc: " +
+      (error.stderr || error.message);
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -100,13 +171,13 @@ async function compileWithEmception(
 ) {
   const ext = compiler.extension;
   const inputPath = `/working/module.${ext}`;
-  const manifestPath = "/working/plugin-manifest-exports.c";
+  const manifestPath = `/working/plugin-manifest-exports.${ext}`;
   const outputPath = "/working/module.wasm";
 
   emception.writeFile(inputPath, sourceCode);
   emception.writeFile(manifestPath, manifestSource);
 
-  const args = buildCompilerArgs(compiler, exportedSymbols, compileOptions);
+  const args = buildCompilerArgs(exportedSymbols, compileOptions);
   const cmd = [
     compiler.command,
     inputPath,
@@ -131,39 +202,83 @@ async function compileWithEmception(
 // System Emscripten — fallback to emcc/em++ on PATH
 // ---------------------------------------------------------------------------
 
-async function compileWithSystemEmcc(
-  compiler,
-  sourceCode,
-  manifestSource,
-  exportedSymbols,
-  outputPath,
-  compileOptions,
-) {
+async function compileWithSystemToolchain(options = {}) {
+  const {
+    compilerCommand,
+    sourceCompilerCommand,
+    sourceExtension,
+    sourceCode,
+    manifestSource,
+    invokeHeaderSource,
+    invokeSource,
+    exportedSymbols,
+    outputPath,
+    compileOptions,
+  } = options;
   const tempDir = await mkdtemp(
     path.join(os.tmpdir(), "space-data-module-sdk-compile-"),
   );
-  const sourcePath = path.join(tempDir, `module.${compiler.extension}`);
-  const manifestSourcePath = path.join(tempDir, "plugin-manifest-exports.c");
+  const sourcePath = path.join(tempDir, `module.${sourceExtension}`);
+  const manifestSourcePath = path.join(tempDir, "plugin-manifest-exports.cpp");
+  const invokeHeaderPath = path.join(tempDir, "space_data_module_invoke.h");
+  const invokeSourcePath = path.join(tempDir, "plugin-invoke-bridge.cpp");
+  const sourceObjectPath = path.join(tempDir, "module.o");
+  const manifestObjectPath = path.join(tempDir, "plugin-manifest-exports.o");
+  const invokeObjectPath = path.join(tempDir, "plugin-invoke-bridge.o");
   const resolvedOutputPath = path.resolve(
     outputPath ?? path.join(tempDir, "module.wasm"),
   );
 
   await writeFile(sourcePath, sourceCode, "utf8");
   await writeFile(manifestSourcePath, manifestSource, "utf8");
+  await writeFile(invokeHeaderPath, invokeHeaderSource, "utf8");
+  await writeFile(invokeSourcePath, invokeSource, "utf8");
+  await generateInvokeCppHeaders(tempDir);
 
-  const args = buildCompilerArgs(compiler, exportedSymbols, compileOptions);
+  const flatbuffersIncludeDir = await resolveFlatbuffersIncludeDir();
+
+  const args = buildCompilerArgs(exportedSymbols, compileOptions);
 
   try {
-    await execFile(compiler.command, [
+    await execFile(sourceCompilerCommand, [
+      "-c",
       sourcePath,
+      `-I${tempDir}`,
+      "-o",
+      sourceObjectPath,
+    ], { timeout: 120_000 });
+
+    await execFile(compilerCommand, [
+      "-c",
       manifestSourcePath,
+      "-std=c++17",
+      `-I${tempDir}`,
+      `-I${flatbuffersIncludeDir}`,
+      "-o",
+      manifestObjectPath,
+    ], { timeout: 120_000 });
+
+    await execFile(compilerCommand, [
+      "-c",
+      invokeSourcePath,
+      "-std=c++17",
+      `-I${tempDir}`,
+      `-I${flatbuffersIncludeDir}`,
+      "-o",
+      invokeObjectPath,
+    ], { timeout: 120_000 });
+
+    await execFile(compilerCommand, [
+      sourceObjectPath,
+      manifestObjectPath,
+      invokeObjectPath,
       ...args,
       "-o",
       resolvedOutputPath,
     ], { timeout: 120_000 });
   } catch (error) {
     error.message =
-      `Compilation failed with ${compiler.command}: ` +
+      `Compilation failed with ${compilerCommand}: ` +
       (error.stderr || error.message);
     throw error;
   }
@@ -193,16 +308,27 @@ export async function compileModuleFromSource(options = {}) {
   }
 
   const compiler = selectCompiler(options.language);
+  const invokeSurfaces = resolveInvokeSurfaces(manifest);
+  const includeCommandMain = invokeSurfaces.includes(InvokeSurface.COMMAND);
   const { manifest: embeddedManifest, warnings } = toEmbeddedPluginManifest(
     manifest,
   );
   const manifestSource = generateEmbeddedManifestSource({
     manifest: embeddedManifest,
   });
+  const invokeHeaderSource = generateInvokeSupportHeader();
+  const invokeSource = generateInvokeSupportSource({
+    manifest,
+    includeCommandMain,
+  });
 
   const exportedSymbols = [
     "plugin_get_manifest_flatbuffer",
     "plugin_get_manifest_flatbuffer_size",
+    DefaultInvokeExports.invokeSymbol,
+    DefaultInvokeExports.allocSymbol,
+    DefaultInvokeExports.freeSymbol,
+    ...(includeCommandMain ? [DefaultInvokeExports.commandSymbol] : []),
     ...new Set(
       (Array.isArray(manifest.methods) ? manifest.methods : [])
         .map((method) => String(method?.methodId ?? "").trim())
@@ -210,51 +336,34 @@ export async function compileModuleFromSource(options = {}) {
     ),
   ];
 
-  // Try emception first, fall back to system emcc/em++
-  const emception = await loadEmception();
-
   let wasmBytes;
   let resolvedOutputPath = null;
   let tempDir = null;
-  let compilerBackend;
-
-  if (emception) {
-    wasmBytes = await compileWithEmception(
-      emception,
-      compiler,
-      sourceCode,
-      manifestSource,
-      exportedSymbols,
-      options,
-    );
-    compilerBackend = `${compiler.command} (emception)`;
-  } else {
-    const result = await compileWithSystemEmcc(
-      compiler,
-      sourceCode,
-      manifestSource,
-      exportedSymbols,
-      options.outputPath,
-      options,
-    );
-    wasmBytes = result.wasmBytes;
-    resolvedOutputPath = result.outputPath;
-    tempDir = result.tempDir;
-    compilerBackend = `${compiler.command} (system)`;
-  }
+  const result = await compileWithSystemToolchain({
+    compilerCommand: "em++",
+    sourceCompilerCommand: compiler.command,
+    sourceExtension: compiler.extension,
+    sourceCode,
+    manifestSource,
+    invokeHeaderSource,
+    invokeSource,
+    exportedSymbols,
+    outputPath: options.outputPath,
+    compileOptions: {
+      ...options,
+      noEntry: includeCommandMain !== true,
+    },
+  });
+  wasmBytes = result.wasmBytes;
+  resolvedOutputPath = result.outputPath;
+  tempDir = result.tempDir;
+  const compilerBackend = "em++ (system)";
 
   // Validate the compiled artifact
-  const report = emception
-    ? await validateArtifactWithStandards({
-        manifest,
-        exportNames: WebAssembly.Module.exports(
-          new WebAssembly.Module(wasmBytes),
-        ).map((e) => e.name),
-      })
-    : await validateArtifactWithStandards({
-        manifest,
-        wasmPath: resolvedOutputPath,
-      });
+  const report = await validateArtifactWithStandards({
+    manifest,
+    wasmPath: resolvedOutputPath,
+  });
 
   return {
     compiler: compilerBackend,

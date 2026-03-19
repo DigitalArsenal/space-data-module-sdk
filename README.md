@@ -27,6 +27,11 @@ A module built with this SDK is a `.wasm` artifact with:
 - exported manifest accessors:
   - `plugin_get_manifest_flatbuffer`
   - `plugin_get_manifest_flatbuffer_size`
+- canonical invoke exports when the artifact supports direct in-memory calls:
+  - `plugin_invoke_stream`
+  - `plugin_alloc`
+  - `plugin_free`
+- an exported `_start` entry when the artifact supports WASI command mode
 - optional `sds.bundle` custom-section payloads for:
   - manifest bytes
   - deployment authorization
@@ -36,6 +41,45 @@ A module built with this SDK is a `.wasm` artifact with:
 
 The module contract stays the same whether the artifact is loaded directly,
 wrapped in a deployment envelope, or shipped as one bundled `.wasm` file.
+
+## Canonical Invoke ABI
+
+Modules can now declare one or both canonical invoke surfaces in
+`manifest.invokeSurfaces`:
+
+- `direct`: in-memory invocation through `plugin_invoke_stream`
+- `command`: WASI command-mode invocation through `_start`
+
+Both surfaces consume and produce the same FlatBuffer envelopes:
+
+- `PluginInvokeRequest`
+- `PluginInvokeResponse`
+
+Those envelopes route SDS payload frames by `portId` using
+`TypedArenaBuffer.fbs` and a shared payload arena. Command mode reads one
+request from `stdin` and writes one response to `stdout`. Direct mode takes the
+same request bytes from guest memory and returns response bytes in guest
+memory.
+
+For simple single-input / single-output methods, command mode also supports a
+degenerate raw shortcut:
+
+```bash
+wasmedge module.wasm --method echo < input.fb > output.fb
+```
+
+That shortcut is only valid when the method declares exactly one input port and
+at most one output port.
+
+Source-built modules can include `space_data_module_invoke.h` and use the
+generated helper functions to read the active invocation inputs and emit SDS
+outputs. The reference invoke examples live in
+[`examples/invoke-echo`](./examples/invoke-echo):
+
+- `manifest.direct.json`
+- `manifest.command.json`
+- `manifest.hybrid.json`
+- `module.c`
 
 ## Runtime Portability
 

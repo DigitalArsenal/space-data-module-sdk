@@ -1,11 +1,17 @@
 // OrbPro Plugin SDK - Typed Arena Buffer Schema
 //
-// Canonical descriptor for schema-tagged FlatBuffer frames moving through
+// Canonical descriptor for schema-tagged payload frames moving through
 // arena-backed plugin streams.
 
 namespace orbpro.stream;
 
-/// FlatBuffer schema identity for a stream frame or accepted port type.
+/// Logical payload wire format for a stream frame or accepted port type.
+enum PayloadWireFormat : ubyte {
+  Flatbuffer = 0,
+  AlignedBinary = 1
+}
+
+/// Payload schema identity for a stream frame or accepted port type.
 table FlatBufferTypeRef {
   /// Logical schema name, for example `OMM.fbs`.
   schema_name: string;
@@ -18,6 +24,21 @@ table FlatBufferTypeRef {
 
   /// True when this port/type set accepts any FlatBuffer frame.
   accepts_any_flatbuffer: bool = false;
+
+  /// Payload wire format. Defaults to regular FlatBuffer framing.
+  wire_format: PayloadWireFormat = Flatbuffer;
+
+  /// Root or layout type name for aligned-binary payloads.
+  root_type_name: string;
+
+  /// Fixed string length for aligned-binary schemas when required.
+  fixed_string_length: uint16 = 0;
+
+  /// Fixed byte length for aligned-binary payloads.
+  byte_length: uint32 = 0;
+
+  /// Required byte alignment for aligned-binary payloads.
+  required_alignment: uint16 = 0;
 }
 
 /// Ownership mode for an arena-backed frame.
