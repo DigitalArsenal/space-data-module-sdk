@@ -88,6 +88,18 @@ int32_t plugin_push_output(
   const uint8_t *payload_ptr,
   uint32_t payload_length
 );
+int32_t plugin_push_output_typed(
+  const char *port_id,
+  const char *schema_name,
+  const char *file_identifier,
+  uint32_t wire_format,
+  const char *root_type_name,
+  uint16_t fixed_string_length,
+  uint32_t byte_length,
+  uint16_t required_alignment,
+  const uint8_t *payload_ptr,
+  uint32_t payload_length
+);
 int32_t plugin_push_output_ex(
   const char *port_id,
   const char *schema_name,
@@ -652,13 +664,14 @@ extern "C" int32_t plugin_push_output(
   );
 }
 
-extern "C" int32_t plugin_push_output_ex(
+extern "C" int32_t plugin_push_output_typed(
   const char *port_id,
   const char *schema_name,
   const char *file_identifier,
   uint32_t wire_format,
   const char *root_type_name,
   uint16_t fixed_string_length,
+  uint32_t byte_length,
   uint16_t required_alignment,
   const uint8_t *payload_ptr,
   uint32_t payload_length
@@ -682,15 +695,40 @@ extern "C" int32_t plugin_push_output_ex(
   frame.root_type_name = ReadCString(root_type_name);
   frame.wire_format = wire_format;
   frame.fixed_string_length = fixed_string_length;
+  frame.byte_length = byte_length > 0u ? byte_length : payload_length;
   frame.required_alignment = required_alignment;
   frame.alignment = required_alignment > 0 ? required_alignment : 8;
-  frame.byte_length = payload_length;
   if (payload_ptr && payload_length > 0u) {
     frame.payload.insert(frame.payload.end(), payload_ptr, payload_ptr + payload_length);
   }
 
   g_invoke_context.outputs.emplace_back(std::move(frame));
   return static_cast<int32_t>(g_invoke_context.outputs.size() - 1u);
+}
+
+extern "C" int32_t plugin_push_output_ex(
+  const char *port_id,
+  const char *schema_name,
+  const char *file_identifier,
+  uint32_t wire_format,
+  const char *root_type_name,
+  uint16_t fixed_string_length,
+  uint16_t required_alignment,
+  const uint8_t *payload_ptr,
+  uint32_t payload_length
+) {
+  return plugin_push_output_typed(
+    port_id,
+    schema_name,
+    file_identifier,
+    wire_format,
+    root_type_name,
+    fixed_string_length,
+    payload_length,
+    required_alignment,
+    payload_ptr,
+    payload_length
+  );
 }
 
 extern "C" void plugin_set_yielded(int32_t yielded) {

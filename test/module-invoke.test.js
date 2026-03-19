@@ -103,13 +103,14 @@ int fanout(void) {
     if (!frame) {
       continue;
     }
-    plugin_push_output_ex(
+    plugin_push_output_typed(
       frame->port_id,
       frame->schema_name,
       frame->file_identifier,
       frame->wire_format,
       frame->root_type_name,
       frame->fixed_string_length,
+      frame->byte_length,
       frame->required_alignment,
       frame->payload,
       frame->payload_length
@@ -323,6 +324,57 @@ test("direct invoke ABI routes multi-port frames and round-trips payload bytes",
     );
     assert.deepEqual(Array.from(response.outputs[0].payload), Array.from(payloadAlpha));
     assert.deepEqual(Array.from(response.outputs[1].payload), Array.from(payloadBeta));
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
+test("direct invoke ABI preserves explicit aligned layout metadata", async () => {
+  const manifest = createInvokeManifest({
+    pluginId: "com.digitalarsenal.examples.invoke-aligned-metadata",
+    invokeSurfaces: ["direct"],
+    methodId: "fanout",
+    inputPortIds: ["state"],
+    outputPortIds: ["state"],
+  });
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: FANOUT_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    const payload = Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8]);
+    const requestBytes = encodePluginInvokeRequest({
+      methodId: "fanout",
+      inputs: [
+        {
+          portId: "state",
+          typeRef: {
+            schemaName: "StateVector.fbs",
+            fileIdentifier: "STVC",
+            wireFormat: "aligned-binary",
+            rootTypeName: "StateVector",
+            fixedStringLength: 255,
+            byteLength: 64,
+            requiredAlignment: 16,
+          },
+          payload,
+        },
+      ],
+    });
+    const { response } = invokeDirect(instance, requestBytes);
+    assert.equal(response.statusCode, 0);
+    assert.equal(response.outputs.length, 1);
+    assert.equal(response.outputs[0].portId, "state");
+    assert.deepEqual(Array.from(response.outputs[0].payload), Array.from(payload));
+    assert.equal(response.outputs[0].typeRef?.wireFormat, "aligned-binary");
+    assert.equal(response.outputs[0].typeRef?.rootTypeName, "StateVector");
+    assert.equal(response.outputs[0].typeRef?.fixedStringLength, 255);
+    assert.equal(response.outputs[0].typeRef?.byteLength, 64);
+    assert.equal(response.outputs[0].typeRef?.requiredAlignment, 16);
+    assert.equal(response.outputs[0].alignment, 16);
   } finally {
     await cleanupCompilation(compilation);
   }
