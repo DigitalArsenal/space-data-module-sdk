@@ -1,8 +1,13 @@
 import os from "node:os";
 import path from "node:path";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { execFile as execFileCallback } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import {
@@ -17,6 +22,11 @@ import {
   generateInvokeSupportSource,
   resolveInvokeSurfaces,
 } from "./invokeGlue.js";
+import {
+  getFlatbuffersCppRuntimeHeaders,
+  getInvokeCppSchemaHeaders,
+} from "./flatcSupport.js";
+import { runWithEmceptionLock } from "./emceptionNode.js";
 import { encodePluginManifest, toEmbeddedPluginManifest } from "../manifest/index.js";
 import { DefaultInvokeExports, InvokeSurface } from "../runtime/constants.js";
 import {
@@ -35,8 +45,6 @@ import { getWasmWallet } from "../utils/wasmCrypto.js";
 
 const execFile = promisify(execFileCallback);
 const C_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const SDK_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SCHEMA_DIR = path.join(SDK_ROOT, "schemas");
 
 function selectCompiler(language) {
   const normalized = String(language ?? "c").trim().toLowerCase();
@@ -73,129 +81,158 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
   return args;
 }
 
-async function pathExists(candidatePath) {
-  try {
-    await access(candidatePath);
-    return true;
-  } catch {
-    return false;
+async function getInvokeCppSupportFiles() {
+  const [runtimeHeaders, schemaHeaders] = await Promise.all([
+    getFlatbuffersCppRuntimeHeaders(),
+    getInvokeCppSchemaHeaders(),
+  ]);
+  return { runtimeHeaders, schemaHeaders };
+}
+
+async function writeFilesToDirectory(rootDir, files) {
+  for (const [relativePath, content] of Object.entries(files)) {
+    const filePath = path.join(rootDir, relativePath);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, content, "utf8");
   }
 }
 
-async function resolveFlatbuffersIncludeDir() {
-  const envPath = process.env.FLATBUFFERS_INCLUDE_DIR;
-  const candidates = [];
-  if (envPath) {
-    candidates.push(envPath);
+async function writeFilesToEmception(emception, rootDir, files) {
+  for (const [relativePath, content] of Object.entries(files)) {
+    const filePath = path.posix.join(rootDir, relativePath);
+    emception.FS.mkdirTree(path.posix.dirname(filePath));
+    emception.writeFile(filePath, content);
   }
+}
+
+function removeEmceptionDirectory(emception, directoryPath) {
+  if (!emception.FS.analyzePath(directoryPath).exists) {
+    return;
+  }
+  const entries = emception.FS.readdir(directoryPath).filter(
+    (entry) => entry !== "." && entry !== "..",
+  );
+  for (const entry of entries) {
+    const entryPath = path.posix.join(directoryPath, entry);
+    const stat = emception.FS.stat(entryPath);
+    if (emception.FS.isDir(stat.mode)) {
+      removeEmceptionDirectory(emception, entryPath);
+      emception.FS.rmdir(entryPath);
+    } else {
+      emception.FS.unlink(entryPath);
+    }
+  }
+  emception.FS.rmdir(directoryPath);
+}
+
+async function compileWithEmception(options = {}) {
+  const {
+    sourceCompilerCommand,
+    sourceExtension,
+    sourceCode,
+    manifestSource,
+    invokeHeaderSource,
+    invokeSource,
+    exportedSymbols,
+    outputPath,
+    compileOptions,
+  } = options;
+  const tempDir = await mkdtemp(
+    path.join(os.tmpdir(), "space-data-module-sdk-compile-"),
+  );
+  const resolvedOutputPath = path.resolve(
+    outputPath ?? path.join(tempDir, "module.wasm"),
+  );
 
   try {
-    const { stdout } = await execFile("brew", ["--prefix", "flatbuffers"], {
-      timeout: 15_000,
+    return await runWithEmceptionLock(async (emception) => {
+      const workDir = "/working/space-data-module-sdk-compile";
+      const runtimeIncludeDir = path.posix.join(workDir, "flatbuffers-runtime");
+      const sourcePath = path.posix.join(workDir, `module.${sourceExtension}`);
+      const manifestSourcePath = path.posix.join(workDir, "plugin-manifest-exports.cpp");
+      const invokeHeaderPath = path.posix.join(workDir, "space_data_module_invoke.h");
+      const invokeSourcePath = path.posix.join(workDir, "plugin-invoke-bridge.cpp");
+      const sourceObjectPath = path.posix.join(workDir, "module.o");
+      const manifestObjectPath = path.posix.join(workDir, "plugin-manifest-exports.o");
+      const invokeObjectPath = path.posix.join(workDir, "plugin-invoke-bridge.o");
+      const wasmOutputPath = path.posix.join(workDir, "module.wasm");
+
+      const { runtimeHeaders, schemaHeaders } = await getInvokeCppSupportFiles();
+      const args = buildCompilerArgs(exportedSymbols, compileOptions);
+
+      try {
+        emception.FS.mkdirTree(workDir);
+        await writeFilesToEmception(emception, runtimeIncludeDir, runtimeHeaders);
+        await writeFilesToEmception(emception, workDir, schemaHeaders);
+        emception.writeFile(sourcePath, sourceCode);
+        emception.writeFile(manifestSourcePath, manifestSource);
+        emception.writeFile(invokeHeaderPath, invokeHeaderSource);
+        emception.writeFile(invokeSourcePath, invokeSource);
+
+        const commands = [
+          [
+            sourceCompilerCommand,
+            "-c",
+            sourcePath,
+            `-I${workDir}`,
+            "-o",
+            sourceObjectPath,
+          ],
+          [
+            "em++",
+            "-c",
+            manifestSourcePath,
+            "-std=c++17",
+            `-I${workDir}`,
+            `-I${runtimeIncludeDir}`,
+            "-o",
+            manifestObjectPath,
+          ],
+          [
+            "em++",
+            "-c",
+            invokeSourcePath,
+            "-std=c++17",
+            `-I${workDir}`,
+            `-I${runtimeIncludeDir}`,
+            "-o",
+            invokeObjectPath,
+          ],
+          [
+            "em++",
+            sourceObjectPath,
+            manifestObjectPath,
+            invokeObjectPath,
+            ...args,
+            "-o",
+            wasmOutputPath,
+          ],
+        ];
+
+        for (const command of commands) {
+          const result = emception.run(command.join(" "));
+          if (result.returncode !== 0) {
+            throw new Error(
+              `Compilation failed with ${command[0]} (emception): ${result.stderr || result.stdout}`,
+            );
+          }
+        }
+
+        const wasmBytes = new Uint8Array(emception.readFile(wasmOutputPath));
+        await writeFile(resolvedOutputPath, wasmBytes);
+        return { wasmBytes, outputPath: resolvedOutputPath, tempDir };
+      } finally {
+        try {
+          removeEmceptionDirectory(emception, workDir);
+        } catch {
+          // Best-effort cleanup only; the shared emception instance remains usable.
+        }
+      }
     });
-    candidates.push(path.join(stdout.trim(), "include"));
-  } catch {
-    // brew not available; fall through to common prefixes
-  }
-
-  candidates.push(
-    "/opt/homebrew/include",
-    "/usr/local/include",
-    "/usr/include",
-  );
-
-  for (const candidate of candidates) {
-    if (!candidate) {
-      continue;
-    }
-    if (await pathExists(path.join(candidate, "flatbuffers", "flatbuffers.h"))) {
-      return candidate;
-    }
-  }
-
-  throw new Error(
-    "Unable to locate FlatBuffers C++ headers. Set FLATBUFFERS_INCLUDE_DIR or install the flatbuffers headers locally.",
-  );
-}
-
-async function generateInvokeCppHeaders(outputDir) {
-  const schemaPaths = [
-    path.join(SCHEMA_DIR, "TypedArenaBuffer.fbs"),
-    path.join(SCHEMA_DIR, "PluginInvokeRequest.fbs"),
-    path.join(SCHEMA_DIR, "PluginInvokeResponse.fbs"),
-  ];
-  try {
-    await execFile(
-      "flatc",
-      ["--cpp", "--gen-object-api", "-o", outputDir, ...schemaPaths],
-      { timeout: 120_000, cwd: SDK_ROOT },
-    );
   } catch (error) {
-    error.message =
-      "Failed to generate C++ invoke bindings with flatc: " +
-      (error.stderr || error.message);
+    await rm(tempDir, { recursive: true, force: true });
     throw error;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Emception — in-process WASM-based Emscripten (preferred)
-// ---------------------------------------------------------------------------
-
-let emceptionInstance = null;
-let emceptionLoadAttempted = false;
-
-async function loadEmception() {
-  if (emceptionLoadAttempted) return emceptionInstance;
-  emceptionLoadAttempted = true;
-  try {
-    const { default: Emception } = await import(
-      "sdn-emception"
-    );
-    emceptionInstance = new Emception();
-    await emceptionInstance.init();
-    return emceptionInstance;
-  } catch {
-    // emception not available or init failed — fall back to system emcc
-  }
-  return null;
-}
-
-async function compileWithEmception(
-  emception,
-  compiler,
-  sourceCode,
-  manifestSource,
-  exportedSymbols,
-  compileOptions,
-) {
-  const ext = compiler.extension;
-  const inputPath = `/working/module.${ext}`;
-  const manifestPath = `/working/plugin-manifest-exports.${ext}`;
-  const outputPath = "/working/module.wasm";
-
-  emception.writeFile(inputPath, sourceCode);
-  emception.writeFile(manifestPath, manifestSource);
-
-  const args = buildCompilerArgs(exportedSymbols, compileOptions);
-  const cmd = [
-    compiler.command,
-    inputPath,
-    manifestPath,
-    ...args,
-    "-o",
-    outputPath,
-  ].join(" ");
-
-  const result = emception.run(cmd);
-  if (result.returncode !== 0) {
-    throw new Error(
-      `Compilation failed with ${compiler.command} (emception): ${result.stderr || result.stdout}`,
-    );
-  }
-
-  const wasmBytes = emception.readFile(outputPath);
-  return new Uint8Array(wasmBytes);
 }
 
 // ---------------------------------------------------------------------------
@@ -228,14 +265,16 @@ async function compileWithSystemToolchain(options = {}) {
   const resolvedOutputPath = path.resolve(
     outputPath ?? path.join(tempDir, "module.wasm"),
   );
+  const runtimeIncludeDir = path.join(tempDir, "flatbuffers-runtime");
+
+  const { runtimeHeaders, schemaHeaders } = await getInvokeCppSupportFiles();
 
   await writeFile(sourcePath, sourceCode, "utf8");
   await writeFile(manifestSourcePath, manifestSource, "utf8");
   await writeFile(invokeHeaderPath, invokeHeaderSource, "utf8");
   await writeFile(invokeSourcePath, invokeSource, "utf8");
-  await generateInvokeCppHeaders(tempDir);
-
-  const flatbuffersIncludeDir = await resolveFlatbuffersIncludeDir();
+  await writeFilesToDirectory(tempDir, schemaHeaders);
+  await writeFilesToDirectory(runtimeIncludeDir, runtimeHeaders);
 
   const args = buildCompilerArgs(exportedSymbols, compileOptions);
 
@@ -253,7 +292,7 @@ async function compileWithSystemToolchain(options = {}) {
       manifestSourcePath,
       "-std=c++17",
       `-I${tempDir}`,
-      `-I${flatbuffersIncludeDir}`,
+      `-I${runtimeIncludeDir}`,
       "-o",
       manifestObjectPath,
     ], { timeout: 120_000 });
@@ -263,7 +302,7 @@ async function compileWithSystemToolchain(options = {}) {
       invokeSourcePath,
       "-std=c++17",
       `-I${tempDir}`,
-      `-I${flatbuffersIncludeDir}`,
+      `-I${runtimeIncludeDir}`,
       "-o",
       invokeObjectPath,
     ], { timeout: 120_000 });
@@ -339,25 +378,45 @@ export async function compileModuleFromSource(options = {}) {
   let wasmBytes;
   let resolvedOutputPath = null;
   let tempDir = null;
-  const result = await compileWithSystemToolchain({
-    compilerCommand: "em++",
-    sourceCompilerCommand: compiler.command,
-    sourceExtension: compiler.extension,
-    sourceCode,
-    manifestSource,
-    invokeHeaderSource,
-    invokeSource,
-    exportedSymbols,
-    outputPath: options.outputPath,
-    compileOptions: {
-      ...options,
-      noEntry: includeCommandMain !== true,
-    },
-  });
+  const compileOptions = {
+    ...options,
+    noEntry: includeCommandMain !== true,
+  };
+  let compilerBackend = "em++ (emception)";
+  let result;
+  try {
+    result = await compileWithEmception({
+      sourceCompilerCommand: compiler.command,
+      sourceExtension: compiler.extension,
+      sourceCode,
+      manifestSource,
+      invokeHeaderSource,
+      invokeSource,
+      exportedSymbols,
+      outputPath: options.outputPath,
+      compileOptions,
+    });
+  } catch (error) {
+    if (error?.code !== "EMCEPTION_LOAD_FAILED") {
+      throw error;
+    }
+    result = await compileWithSystemToolchain({
+      compilerCommand: "em++",
+      sourceCompilerCommand: compiler.command,
+      sourceExtension: compiler.extension,
+      sourceCode,
+      manifestSource,
+      invokeHeaderSource,
+      invokeSource,
+      exportedSymbols,
+      outputPath: options.outputPath,
+      compileOptions,
+    });
+    compilerBackend = "em++ (system)";
+  }
   wasmBytes = result.wasmBytes;
   resolvedOutputPath = result.outputPath;
   tempDir = result.tempDir;
-  const compilerBackend = "em++ (system)";
 
   // Validate the compiled artifact
   const report = await validateArtifactWithStandards({

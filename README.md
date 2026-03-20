@@ -293,8 +293,9 @@ npm test
 npm run check:compliance
 ```
 
-Node.js `>=20` is required. Native compilation paths use Emscripten
-(`emcc` / `em++`) when available.
+Node.js `>=20` is required. The compiler uses `sdn-emception` and `flatc-wasm`
+by default, with a system Emscripten fallback only if the embedded toolchain
+cannot load.
 
 ## License
 
