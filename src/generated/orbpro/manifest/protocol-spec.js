@@ -49,8 +49,54 @@ export class ProtocolSpec {
             ? this.bb.__string(this.bb_pos + offset, optionalEncoding)
             : null;
     }
+    wireId(optionalEncoding) {
+        const offset = this.bb.__offset(this.bb_pos, 14);
+        return offset
+            ? this.bb.__string(this.bb_pos + offset, optionalEncoding)
+            : null;
+    }
+    transportKind(optionalEncoding) {
+        const offset = this.bb.__offset(this.bb_pos, 16);
+        return offset
+            ? this.bb.__string(this.bb_pos + offset, optionalEncoding)
+            : null;
+    }
+    role(optionalEncoding) {
+        const offset = this.bb.__offset(this.bb_pos, 18);
+        return offset
+            ? this.bb.__string(this.bb_pos + offset, optionalEncoding)
+            : null;
+    }
+    specUri(optionalEncoding) {
+        const offset = this.bb.__offset(this.bb_pos, 20);
+        return offset
+            ? this.bb.__string(this.bb_pos + offset, optionalEncoding)
+            : null;
+    }
+    autoInstall() {
+        const offset = this.bb.__offset(this.bb_pos, 22);
+        return offset ? !!this.bb.readInt8(this.bb_pos + offset) : true;
+    }
+    advertise() {
+        const offset = this.bb.__offset(this.bb_pos, 24);
+        return offset ? !!this.bb.readInt8(this.bb_pos + offset) : false;
+    }
+    discoveryKey(optionalEncoding) {
+        const offset = this.bb.__offset(this.bb_pos, 26);
+        return offset
+            ? this.bb.__string(this.bb_pos + offset, optionalEncoding)
+            : null;
+    }
+    defaultPort() {
+        const offset = this.bb.__offset(this.bb_pos, 28);
+        return offset ? this.bb.readUint16(this.bb_pos + offset) : 0;
+    }
+    requireSecureTransport() {
+        const offset = this.bb.__offset(this.bb_pos, 30);
+        return offset ? !!this.bb.readInt8(this.bb_pos + offset) : false;
+    }
     static startProtocolSpec(builder) {
-        builder.startObject(5);
+        builder.startObject(14);
     }
     static addProtocolId(builder, protocolIdOffset) {
         builder.addFieldOffset(0, protocolIdOffset, 0);
@@ -67,23 +113,59 @@ export class ProtocolSpec {
     static addDescription(builder, descriptionOffset) {
         builder.addFieldOffset(4, descriptionOffset, 0);
     }
+    static addWireId(builder, wireIdOffset) {
+        builder.addFieldOffset(5, wireIdOffset, 0);
+    }
+    static addTransportKind(builder, transportKindOffset) {
+        builder.addFieldOffset(6, transportKindOffset, 0);
+    }
+    static addRole(builder, roleOffset) {
+        builder.addFieldOffset(7, roleOffset, 0);
+    }
+    static addSpecUri(builder, specUriOffset) {
+        builder.addFieldOffset(8, specUriOffset, 0);
+    }
+    static addAutoInstall(builder, autoInstall) {
+        builder.addFieldInt8(9, +autoInstall, +true);
+    }
+    static addAdvertise(builder, advertise) {
+        builder.addFieldInt8(10, +advertise, +false);
+    }
+    static addDiscoveryKey(builder, discoveryKeyOffset) {
+        builder.addFieldOffset(11, discoveryKeyOffset, 0);
+    }
+    static addDefaultPort(builder, defaultPort) {
+        builder.addFieldInt16(12, defaultPort, 0);
+    }
+    static addRequireSecureTransport(builder, requireSecureTransport) {
+        builder.addFieldInt8(13, +requireSecureTransport, +false);
+    }
     static endProtocolSpec(builder) {
         const offset = builder.endObject();
         builder.requiredField(offset, 4); // protocol_id
         builder.requiredField(offset, 6); // method_id
         return offset;
     }
-    static createProtocolSpec(builder, protocolIdOffset, methodIdOffset, inputPortIdOffset, outputPortIdOffset, descriptionOffset) {
+    static createProtocolSpec(builder, protocolIdOffset, methodIdOffset, inputPortIdOffset, outputPortIdOffset, descriptionOffset, wireIdOffset, transportKindOffset, roleOffset, specUriOffset, autoInstall, advertise, discoveryKeyOffset, defaultPort, requireSecureTransport) {
         ProtocolSpec.startProtocolSpec(builder);
         ProtocolSpec.addProtocolId(builder, protocolIdOffset);
         ProtocolSpec.addMethodId(builder, methodIdOffset);
         ProtocolSpec.addInputPortId(builder, inputPortIdOffset);
         ProtocolSpec.addOutputPortId(builder, outputPortIdOffset);
         ProtocolSpec.addDescription(builder, descriptionOffset);
+        ProtocolSpec.addWireId(builder, wireIdOffset);
+        ProtocolSpec.addTransportKind(builder, transportKindOffset);
+        ProtocolSpec.addRole(builder, roleOffset);
+        ProtocolSpec.addSpecUri(builder, specUriOffset);
+        ProtocolSpec.addAutoInstall(builder, autoInstall);
+        ProtocolSpec.addAdvertise(builder, advertise);
+        ProtocolSpec.addDiscoveryKey(builder, discoveryKeyOffset);
+        ProtocolSpec.addDefaultPort(builder, defaultPort);
+        ProtocolSpec.addRequireSecureTransport(builder, requireSecureTransport);
         return ProtocolSpec.endProtocolSpec(builder);
     }
     unpack() {
-        return new ProtocolSpecT(this.protocolId(), this.methodId(), this.inputPortId(), this.outputPortId(), this.description());
+        return new ProtocolSpecT(this.protocolId(), this.methodId(), this.inputPortId(), this.outputPortId(), this.description(), this.wireId(), this.transportKind(), this.role(), this.specUri(), this.autoInstall(), this.advertise(), this.discoveryKey(), this.defaultPort(), this.requireSecureTransport());
     }
     unpackTo(_o) {
         _o.protocolId = this.protocolId();
@@ -91,6 +173,15 @@ export class ProtocolSpec {
         _o.inputPortId = this.inputPortId();
         _o.outputPortId = this.outputPortId();
         _o.description = this.description();
+        _o.wireId = this.wireId();
+        _o.transportKind = this.transportKind();
+        _o.role = this.role();
+        _o.specUri = this.specUri();
+        _o.autoInstall = this.autoInstall();
+        _o.advertise = this.advertise();
+        _o.discoveryKey = this.discoveryKey();
+        _o.defaultPort = this.defaultPort();
+        _o.requireSecureTransport = this.requireSecureTransport();
     }
 }
 export class ProtocolSpecT {
@@ -99,12 +190,30 @@ export class ProtocolSpecT {
     inputPortId;
     outputPortId;
     description;
-    constructor(protocolId = null, methodId = null, inputPortId = null, outputPortId = null, description = null) {
+    wireId;
+    transportKind;
+    role;
+    specUri;
+    autoInstall;
+    advertise;
+    discoveryKey;
+    defaultPort;
+    requireSecureTransport;
+    constructor(protocolId = null, methodId = null, inputPortId = null, outputPortId = null, description = null, wireId = null, transportKind = null, role = null, specUri = null, autoInstall = true, advertise = false, discoveryKey = null, defaultPort = 0, requireSecureTransport = false) {
         this.protocolId = protocolId;
         this.methodId = methodId;
         this.inputPortId = inputPortId;
         this.outputPortId = outputPortId;
         this.description = description;
+        this.wireId = wireId;
+        this.transportKind = transportKind;
+        this.role = role;
+        this.specUri = specUri;
+        this.autoInstall = autoInstall;
+        this.advertise = advertise;
+        this.discoveryKey = discoveryKey;
+        this.defaultPort = defaultPort;
+        this.requireSecureTransport = requireSecureTransport;
     }
     pack(builder) {
         const protocolId = this.protocolId !== null ? builder.createString(this.protocolId) : 0;
@@ -112,7 +221,12 @@ export class ProtocolSpecT {
         const inputPortId = this.inputPortId !== null ? builder.createString(this.inputPortId) : 0;
         const outputPortId = this.outputPortId !== null ? builder.createString(this.outputPortId) : 0;
         const description = this.description !== null ? builder.createString(this.description) : 0;
-        return ProtocolSpec.createProtocolSpec(builder, protocolId, methodId, inputPortId, outputPortId, description);
+        const wireId = this.wireId !== null ? builder.createString(this.wireId) : 0;
+        const transportKind = this.transportKind !== null ? builder.createString(this.transportKind) : 0;
+        const role = this.role !== null ? builder.createString(this.role) : 0;
+        const specUri = this.specUri !== null ? builder.createString(this.specUri) : 0;
+        const discoveryKey = this.discoveryKey !== null ? builder.createString(this.discoveryKey) : 0;
+        return ProtocolSpec.createProtocolSpec(builder, protocolId, methodId, inputPortId, outputPortId, description, wireId, transportKind, role, specUri, this.autoInstall, this.advertise, discoveryKey, this.defaultPort, this.requireSecureTransport);
     }
 }
 //# sourceMappingURL=protocol-spec.js.map

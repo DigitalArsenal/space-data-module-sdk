@@ -48,6 +48,19 @@ export const InvokeSurface = Object.freeze({
   COMMAND: "command",
 });
 
+export const ProtocolTransportKind = Object.freeze({
+  LIBP2P: "libp2p",
+  HTTP: "http",
+  WS: "ws",
+  WASI_PIPE: "wasi-pipe",
+});
+
+export const ProtocolRole = Object.freeze({
+  HANDLE: "handle",
+  DIAL: "dial",
+  BOTH: "both",
+});
+
 export const DefaultManifestExports = Object.freeze({
   pluginBytesSymbol: "plugin_get_manifest_flatbuffer",
   pluginSizeSymbol: "plugin_get_manifest_flatbuffer_size",

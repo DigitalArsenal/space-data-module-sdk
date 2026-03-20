@@ -8,6 +8,8 @@ import {
   ExternalInterfaceDirection,
   ExternalInterfaceKind,
   InvokeSurface,
+  ProtocolRole,
+  ProtocolTransportKind,
   RuntimeTarget,
 } from "../runtime/constants.js";
 
@@ -59,6 +61,8 @@ const ExternalInterfaceDirectionSet = new Set(
   Object.values(ExternalInterfaceDirection),
 );
 const ExternalInterfaceKindSet = new Set(Object.values(ExternalInterfaceKind));
+const ProtocolRoleSet = new Set(Object.values(ProtocolRole));
+const ProtocolTransportKindSet = new Set(Object.values(ProtocolTransportKind));
 const BrowserIncompatibleCapabilitySet = new Set([
   "filesystem",
   "pipe",
@@ -151,7 +155,13 @@ function validateStringField(issues, value, location, label) {
   return true;
 }
 
-function validateIntegerField(issues, value, location, label, { min = null } = {}) {
+function validateIntegerField(
+  issues,
+  value,
+  location,
+  label,
+  { min = null, max = null } = {},
+) {
   if (!Number.isInteger(value)) {
     pushIssue(issues, "error", "invalid-integer", `${label} must be an integer.`, location);
     return false;
@@ -162,6 +172,16 @@ function validateIntegerField(issues, value, location, label, { min = null } = {
       "error",
       "integer-range",
       `${label} must be greater than or equal to ${min}.`,
+      location,
+    );
+    return false;
+  }
+  if (max !== null && value > max) {
+    pushIssue(
+      issues,
+      "error",
+      "integer-range",
+      `${label} must be less than or equal to ${max}.`,
       location,
     );
     return false;
@@ -180,6 +200,61 @@ function validateOptionalIntegerField(
     return true;
   }
   return validateIntegerField(issues, value, location, label, options);
+}
+
+function validateOptionalBooleanField(issues, value, location, label) {
+  if (value === undefined || value === null) {
+    return true;
+  }
+  if (typeof value !== "boolean") {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-boolean",
+      `${label} must be a boolean when present.`,
+      location,
+    );
+    return false;
+  }
+  return true;
+}
+
+function validateOptionalStringField(issues, value, location, label) {
+  if (value === undefined || value === null) {
+    return true;
+  }
+  return validateStringField(issues, value, location, label);
+}
+
+function normalizeProtocolTransportKind(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const normalized = String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+  if (normalized === "websocket") {
+    return ProtocolTransportKind.WS;
+  }
+  if (normalized === "pipe") {
+    return ProtocolTransportKind.WASI_PIPE;
+  }
+  return normalized;
+}
+
+function normalizeProtocolRole(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const normalized = String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+  if (normalized === "handler") {
+    return ProtocolRole.HANDLE;
+  }
+  return normalized;
 }
 
 function validateAllowedType(type, issues, location) {
@@ -576,6 +651,85 @@ function validateProtocol(protocol, issues, location, methodLookup, declaredCapa
       );
     }
   }
+  const wireIdValid = validateStringField(
+    issues,
+    protocol.wireId,
+    `${location}.wireId`,
+    "Protocol wireId",
+  );
+  const normalizedTransportKind = normalizeProtocolTransportKind(
+    protocol.transportKind,
+  );
+  if (!validateStringField(
+    issues,
+    protocol.transportKind,
+    `${location}.transportKind`,
+    "Protocol transportKind",
+  )) {
+    // already reported
+  } else if (!ProtocolTransportKindSet.has(normalizedTransportKind)) {
+    pushIssue(
+      issues,
+      "error",
+      "unknown-protocol-transport-kind",
+      `Protocol "${protocol.protocolId ?? "protocol"}" transportKind must be one of: ${Array.from(ProtocolTransportKindSet).join(", ")}.`,
+      `${location}.transportKind`,
+    );
+  }
+  const normalizedRole = normalizeProtocolRole(protocol.role);
+  if (!validateStringField(
+    issues,
+    protocol.role,
+    `${location}.role`,
+    "Protocol role",
+  )) {
+    // already reported
+  } else if (!ProtocolRoleSet.has(normalizedRole)) {
+    pushIssue(
+      issues,
+      "error",
+      "unknown-protocol-role",
+      `Protocol "${protocol.protocolId ?? "protocol"}" role must be one of: ${Array.from(ProtocolRoleSet).join(", ")}.`,
+      `${location}.role`,
+    );
+  }
+  validateOptionalStringField(
+    issues,
+    protocol.specUri,
+    `${location}.specUri`,
+    "Protocol specUri",
+  );
+  validateOptionalStringField(
+    issues,
+    protocol.discoveryKey,
+    `${location}.discoveryKey`,
+    "Protocol discoveryKey",
+  );
+  validateOptionalBooleanField(
+    issues,
+    protocol.autoInstall,
+    `${location}.autoInstall`,
+    "Protocol autoInstall",
+  );
+  validateOptionalBooleanField(
+    issues,
+    protocol.advertise,
+    `${location}.advertise`,
+    "Protocol advertise",
+  );
+  validateOptionalBooleanField(
+    issues,
+    protocol.requireSecureTransport,
+    `${location}.requireSecureTransport`,
+    "Protocol requireSecureTransport",
+  );
+  validateOptionalIntegerField(
+    issues,
+    protocol.defaultPort,
+    `${location}.defaultPort`,
+    "Protocol defaultPort",
+    { min: 0, max: 65535 },
+  );
   if (
     protocolIdValid &&
     Array.isArray(declaredCapabilities) &&
@@ -588,6 +742,77 @@ function validateProtocol(protocol, issues, location, methodLookup, declaredCapa
       "undeclared-protocol-capability",
       `Protocol "${protocol.protocolId}" requires "protocol_handle" or "protocol_dial" to be declared in manifest.capabilities.`,
       location,
+    );
+  }
+  if (
+    protocolIdValid &&
+    normalizedRole &&
+    (normalizedRole === ProtocolRole.HANDLE ||
+      normalizedRole === ProtocolRole.BOTH) &&
+    Array.isArray(declaredCapabilities) &&
+    !declaredCapabilities.includes("protocol_handle")
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "missing-handle-protocol-capability",
+      `Protocol "${protocol.protocolId}" with role "${normalizedRole}" requires the "protocol_handle" capability.`,
+      location,
+    );
+  }
+  if (
+    protocolIdValid &&
+    normalizedRole &&
+    (normalizedRole === ProtocolRole.DIAL ||
+      normalizedRole === ProtocolRole.BOTH) &&
+    Array.isArray(declaredCapabilities) &&
+    !declaredCapabilities.includes("protocol_dial")
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "missing-dial-protocol-capability",
+      `Protocol "${protocol.protocolId}" with role "${normalizedRole}" requires the "protocol_dial" capability.`,
+      location,
+    );
+  }
+  if (
+    protocol.advertise === true &&
+    normalizedRole === ProtocolRole.DIAL
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "protocol-advertise-role-conflict",
+      `Protocol "${protocol.protocolId ?? "protocol"}" cannot advertise when role is "dial".`,
+      `${location}.advertise`,
+    );
+  }
+  if (
+    normalizedTransportKind === ProtocolTransportKind.LIBP2P &&
+    Array.isArray(declaredCapabilities) &&
+    !declaredCapabilities.includes("ipfs")
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "missing-ipfs-capability",
+      `Protocol "${protocol.protocolId ?? "protocol"}" with transportKind "libp2p" requires the "ipfs" capability.`,
+      location,
+    );
+  }
+  if (
+    wireIdValid &&
+    normalizedTransportKind === ProtocolTransportKind.WS &&
+    protocol.defaultPort === 443 &&
+    protocol.requireSecureTransport !== true
+  ) {
+    pushIssue(
+      issues,
+      "warning",
+      "insecure-secure-port-hint",
+      `Protocol "${protocol.protocolId ?? "protocol"}" uses defaultPort 443 without requireSecureTransport=true.`,
+      `${location}.defaultPort`,
     );
   }
 }

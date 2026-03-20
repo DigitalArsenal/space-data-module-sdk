@@ -90,8 +90,77 @@ export class ProtocolSpec implements flatbuffers.IUnpackableObject<ProtocolSpecT
       : null;
   }
 
+  wireId(): string | null;
+  wireId(optionalEncoding: flatbuffers.Encoding): string | Uint8Array | null;
+  wireId(optionalEncoding?: any): string | Uint8Array | null {
+    const offset = this.bb!.__offset(this.bb_pos, 14);
+    return offset
+      ? this.bb!.__string(this.bb_pos + offset, optionalEncoding)
+      : null;
+  }
+
+  transportKind(): string | null;
+  transportKind(
+    optionalEncoding: flatbuffers.Encoding,
+  ): string | Uint8Array | null;
+  transportKind(optionalEncoding?: any): string | Uint8Array | null {
+    const offset = this.bb!.__offset(this.bb_pos, 16);
+    return offset
+      ? this.bb!.__string(this.bb_pos + offset, optionalEncoding)
+      : null;
+  }
+
+  role(): string | null;
+  role(optionalEncoding: flatbuffers.Encoding): string | Uint8Array | null;
+  role(optionalEncoding?: any): string | Uint8Array | null {
+    const offset = this.bb!.__offset(this.bb_pos, 18);
+    return offset
+      ? this.bb!.__string(this.bb_pos + offset, optionalEncoding)
+      : null;
+  }
+
+  specUri(): string | null;
+  specUri(optionalEncoding: flatbuffers.Encoding): string | Uint8Array | null;
+  specUri(optionalEncoding?: any): string | Uint8Array | null {
+    const offset = this.bb!.__offset(this.bb_pos, 20);
+    return offset
+      ? this.bb!.__string(this.bb_pos + offset, optionalEncoding)
+      : null;
+  }
+
+  autoInstall(): boolean {
+    const offset = this.bb!.__offset(this.bb_pos, 22);
+    return offset ? !!this.bb!.readInt8(this.bb_pos + offset) : true;
+  }
+
+  advertise(): boolean {
+    const offset = this.bb!.__offset(this.bb_pos, 24);
+    return offset ? !!this.bb!.readInt8(this.bb_pos + offset) : false;
+  }
+
+  discoveryKey(): string | null;
+  discoveryKey(
+    optionalEncoding: flatbuffers.Encoding,
+  ): string | Uint8Array | null;
+  discoveryKey(optionalEncoding?: any): string | Uint8Array | null {
+    const offset = this.bb!.__offset(this.bb_pos, 26);
+    return offset
+      ? this.bb!.__string(this.bb_pos + offset, optionalEncoding)
+      : null;
+  }
+
+  defaultPort(): number {
+    const offset = this.bb!.__offset(this.bb_pos, 28);
+    return offset ? this.bb!.readUint16(this.bb_pos + offset) : 0;
+  }
+
+  requireSecureTransport(): boolean {
+    const offset = this.bb!.__offset(this.bb_pos, 30);
+    return offset ? !!this.bb!.readInt8(this.bb_pos + offset) : false;
+  }
+
   static startProtocolSpec(builder: flatbuffers.Builder) {
-    builder.startObject(5);
+    builder.startObject(14);
   }
 
   static addProtocolId(
@@ -129,6 +198,60 @@ export class ProtocolSpec implements flatbuffers.IUnpackableObject<ProtocolSpecT
     builder.addFieldOffset(4, descriptionOffset, 0);
   }
 
+  static addWireId(
+    builder: flatbuffers.Builder,
+    wireIdOffset: flatbuffers.Offset,
+  ) {
+    builder.addFieldOffset(5, wireIdOffset, 0);
+  }
+
+  static addTransportKind(
+    builder: flatbuffers.Builder,
+    transportKindOffset: flatbuffers.Offset,
+  ) {
+    builder.addFieldOffset(6, transportKindOffset, 0);
+  }
+
+  static addRole(builder: flatbuffers.Builder, roleOffset: flatbuffers.Offset) {
+    builder.addFieldOffset(7, roleOffset, 0);
+  }
+
+  static addSpecUri(
+    builder: flatbuffers.Builder,
+    specUriOffset: flatbuffers.Offset,
+  ) {
+    builder.addFieldOffset(8, specUriOffset, 0);
+  }
+
+  static addAutoInstall(
+    builder: flatbuffers.Builder,
+    autoInstall: boolean,
+  ) {
+    builder.addFieldInt8(9, +autoInstall, +true);
+  }
+
+  static addAdvertise(builder: flatbuffers.Builder, advertise: boolean) {
+    builder.addFieldInt8(10, +advertise, +false);
+  }
+
+  static addDiscoveryKey(
+    builder: flatbuffers.Builder,
+    discoveryKeyOffset: flatbuffers.Offset,
+  ) {
+    builder.addFieldOffset(11, discoveryKeyOffset, 0);
+  }
+
+  static addDefaultPort(builder: flatbuffers.Builder, defaultPort: number) {
+    builder.addFieldInt16(12, defaultPort, 0);
+  }
+
+  static addRequireSecureTransport(
+    builder: flatbuffers.Builder,
+    requireSecureTransport: boolean,
+  ) {
+    builder.addFieldInt8(13, +requireSecureTransport, +false);
+  }
+
   static endProtocolSpec(builder: flatbuffers.Builder): flatbuffers.Offset {
     const offset = builder.endObject();
     builder.requiredField(offset, 4); // protocol_id
@@ -143,6 +266,15 @@ export class ProtocolSpec implements flatbuffers.IUnpackableObject<ProtocolSpecT
     inputPortIdOffset: flatbuffers.Offset,
     outputPortIdOffset: flatbuffers.Offset,
     descriptionOffset: flatbuffers.Offset,
+    wireIdOffset: flatbuffers.Offset,
+    transportKindOffset: flatbuffers.Offset,
+    roleOffset: flatbuffers.Offset,
+    specUriOffset: flatbuffers.Offset,
+    autoInstall: boolean,
+    advertise: boolean,
+    discoveryKeyOffset: flatbuffers.Offset,
+    defaultPort: number,
+    requireSecureTransport: boolean,
   ): flatbuffers.Offset {
     ProtocolSpec.startProtocolSpec(builder);
     ProtocolSpec.addProtocolId(builder, protocolIdOffset);
@@ -150,6 +282,15 @@ export class ProtocolSpec implements flatbuffers.IUnpackableObject<ProtocolSpecT
     ProtocolSpec.addInputPortId(builder, inputPortIdOffset);
     ProtocolSpec.addOutputPortId(builder, outputPortIdOffset);
     ProtocolSpec.addDescription(builder, descriptionOffset);
+    ProtocolSpec.addWireId(builder, wireIdOffset);
+    ProtocolSpec.addTransportKind(builder, transportKindOffset);
+    ProtocolSpec.addRole(builder, roleOffset);
+    ProtocolSpec.addSpecUri(builder, specUriOffset);
+    ProtocolSpec.addAutoInstall(builder, autoInstall);
+    ProtocolSpec.addAdvertise(builder, advertise);
+    ProtocolSpec.addDiscoveryKey(builder, discoveryKeyOffset);
+    ProtocolSpec.addDefaultPort(builder, defaultPort);
+    ProtocolSpec.addRequireSecureTransport(builder, requireSecureTransport);
     return ProtocolSpec.endProtocolSpec(builder);
   }
 
@@ -160,6 +301,15 @@ export class ProtocolSpec implements flatbuffers.IUnpackableObject<ProtocolSpecT
       this.inputPortId(),
       this.outputPortId(),
       this.description(),
+      this.wireId(),
+      this.transportKind(),
+      this.role(),
+      this.specUri(),
+      this.autoInstall(),
+      this.advertise(),
+      this.discoveryKey(),
+      this.defaultPort(),
+      this.requireSecureTransport(),
     );
   }
 
@@ -169,6 +319,15 @@ export class ProtocolSpec implements flatbuffers.IUnpackableObject<ProtocolSpecT
     _o.inputPortId = this.inputPortId();
     _o.outputPortId = this.outputPortId();
     _o.description = this.description();
+    _o.wireId = this.wireId();
+    _o.transportKind = this.transportKind();
+    _o.role = this.role();
+    _o.specUri = this.specUri();
+    _o.autoInstall = this.autoInstall();
+    _o.advertise = this.advertise();
+    _o.discoveryKey = this.discoveryKey();
+    _o.defaultPort = this.defaultPort();
+    _o.requireSecureTransport = this.requireSecureTransport();
   }
 }
 
@@ -179,6 +338,15 @@ export class ProtocolSpecT implements flatbuffers.IGeneratedObject {
     public inputPortId: string | Uint8Array | null = null,
     public outputPortId: string | Uint8Array | null = null,
     public description: string | Uint8Array | null = null,
+    public wireId: string | Uint8Array | null = null,
+    public transportKind: string | Uint8Array | null = null,
+    public role: string | Uint8Array | null = null,
+    public specUri: string | Uint8Array | null = null,
+    public autoInstall: boolean = true,
+    public advertise: boolean = false,
+    public discoveryKey: string | Uint8Array | null = null,
+    public defaultPort: number = 0,
+    public requireSecureTransport: boolean = false,
   ) {}
 
   pack(builder: flatbuffers.Builder): flatbuffers.Offset {
@@ -192,6 +360,19 @@ export class ProtocolSpecT implements flatbuffers.IGeneratedObject {
       this.outputPortId !== null ? builder.createString(this.outputPortId!) : 0;
     const description =
       this.description !== null ? builder.createString(this.description!) : 0;
+    const wireId =
+      this.wireId !== null ? builder.createString(this.wireId!) : 0;
+    const transportKind =
+      this.transportKind !== null
+        ? builder.createString(this.transportKind!)
+        : 0;
+    const role = this.role !== null ? builder.createString(this.role!) : 0;
+    const specUri =
+      this.specUri !== null ? builder.createString(this.specUri!) : 0;
+    const discoveryKey =
+      this.discoveryKey !== null
+        ? builder.createString(this.discoveryKey!)
+        : 0;
 
     return ProtocolSpec.createProtocolSpec(
       builder,
@@ -200,6 +381,15 @@ export class ProtocolSpecT implements flatbuffers.IGeneratedObject {
       inputPortId,
       outputPortId,
       description,
+      wireId,
+      transportKind,
+      role,
+      specUri,
+      this.autoInstall,
+      this.advertise,
+      discoveryKey,
+      this.defaultPort,
+      this.requireSecureTransport,
     );
   }
 }

@@ -3,11 +3,14 @@ import { decodePluginManifest, encodePluginManifest } from "../manifest/index.js
 import { toUint8Array } from "../runtime/bufferLike.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { bytesToHex } from "../utils/encoding.js";
+import { createDeploymentPlanBundleEntry } from "../deployment/index.js";
 import {
   DEFAULT_MANIFEST_EXPORT_SYMBOL,
   DEFAULT_MANIFEST_SIZE_SYMBOL,
   SDS_BUNDLE_SECTION_NAME,
   SDS_CUSTOM_SECTION_PREFIX,
+  SDS_DEPLOYMENT_ENTRY_ID,
+  SDS_DEPLOYMENT_SECTION_NAME,
 } from "./constants.js";
 import {
   decodeModuleBundle,
@@ -268,6 +271,9 @@ function normalizeStandardEntries(options = {}) {
       description: "Transport envelope metadata.",
     });
   }
+  if (options.deploymentPlan !== undefined) {
+    entries.push(createDeploymentPlanBundleEntry(options.deploymentPlan));
+  }
   return entries.filter((entry) => entry.payload !== null);
 }
 
@@ -282,7 +288,12 @@ function normalizeAdditionalEntries(entries = []) {
 }
 
 async function withSha256(entry) {
-  const payloadBytes = normalizeBytes(entry.payload, `entry "${entry.entryId}" payload`);
+  const payloadBytes =
+    toUint8Array(entry.payload) ??
+    ((entry.payloadEncoding === "json-utf8" ||
+      moduleBundleEncodingToName(entry.payloadEncoding) === "json-utf8")
+      ? canonicalBytes(entry.payload)
+      : normalizeBytes(entry.payload, `entry "${entry.entryId}" payload`));
   return {
     ...entry,
     payload: payloadBytes,
@@ -314,6 +325,17 @@ function buildParsedEntries(bundle) {
       } catch {
         parsedEntry.decodedManifest = null;
       }
+    }
+    if (
+      parsedEntry.entryId === SDS_DEPLOYMENT_ENTRY_ID ||
+      parsedEntry.sectionName === SDS_DEPLOYMENT_SECTION_NAME
+    ) {
+      parsedEntry.decodedDeploymentPlan =
+        parsedEntry.payloadEncodingName === "json-utf8" &&
+        parsedEntry.decodedPayload &&
+        typeof parsedEntry.decodedPayload === "object"
+          ? parsedEntry.decodedPayload
+          : null;
     }
     return parsedEntry;
   });
@@ -432,16 +454,22 @@ export async function parseSingleFileBundle(bytes, options = {}) {
       manifest = null;
     }
   }
+  const deploymentEntry =
+    parsedEntries.find(
+      (entry) =>
+        entry.entryId === SDS_DEPLOYMENT_ENTRY_ID ||
+        entry.sectionName === SDS_DEPLOYMENT_SECTION_NAME,
+    ) ?? null;
   return {
     wasmBytes,
     bundleBytes,
     bundle,
     entries: parsedEntries,
     manifest,
+    deploymentPlan: deploymentEntry?.decodedDeploymentPlan ?? null,
     customSections,
     canonicalWasmBytes: canonical.canonicalWasmBytes,
     canonicalModuleHash: canonical.hashBytes,
     canonicalModuleHashHex: canonical.hashHex,
   };
 }
-

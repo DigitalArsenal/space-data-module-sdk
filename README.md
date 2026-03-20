@@ -34,6 +34,7 @@ A module built with this SDK is a `.wasm` artifact with:
 - an exported `_start` entry when the artifact supports WASI command mode
 - optional `sds.bundle` custom-section payloads for:
   - manifest bytes
+  - resolved deployment plans and input bindings
   - deployment authorization
   - detached signatures
   - encrypted transport envelopes
@@ -180,8 +181,35 @@ import { createDeploymentAuthorization } from "space-data-module-sdk/auth";
 import { encryptJsonForRecipient } from "space-data-module-sdk/transport";
 import { compileModuleFromSource } from "space-data-module-sdk/compiler";
 import { createSingleFileBundle } from "space-data-module-sdk/bundle";
+import { validateDeploymentPlan } from "space-data-module-sdk/deployment";
 import { generateManifestHarnessPlan } from "space-data-module-sdk/testing";
 ```
+
+## Protocol Installation
+
+Modules can declare hosted protocol contracts in `manifest.protocols`.
+
+Those declarations are for stable artifact identity:
+
+- `wireId`
+- `transportKind`
+- `role`
+- `specUri`
+- hosting hints like `defaultPort` and `requireSecureTransport`
+
+Concrete multiaddrs, peer IDs, and producer routing do not belong in the
+canonical manifest. They belong in deployment metadata attached to the final
+package or bundle.
+
+This repo exposes that deployment surface from
+`space-data-module-sdk/deployment`. Use it to:
+
+- validate resolved protocol installations
+- describe input bindings from producers to module ports
+- attach a deployment plan to `sds.bundle`
+
+The full contract split is documented in
+[`docs/protocol-installation.md`](./docs/protocol-installation.md).
 
 ## Single-File Bundles
 
@@ -198,6 +226,9 @@ The reference path lives in
   regenerates the checked-in conformance vectors
 - the `go` and `python` directories show non-JS readers against the same
   bundle contract
+
+Standard bundle payloads now include the optional `deployment-plan` JSON entry
+for resolved protocol installations and producer input bindings.
 
 ## Module Publication
 

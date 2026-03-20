@@ -69,6 +69,25 @@ function createAlignedAllowedType(overrides = {}) {
   };
 }
 
+function createHostedProtocol(overrides = {}) {
+  return {
+    protocolId: "sgp4-stream",
+    methodId: "run",
+    inputPortId: "in",
+    outputPortId: "out",
+    wireId: "/sdn/sgp4/1.0.0",
+    transportKind: "libp2p",
+    role: "handle",
+    specUri: "https://spacedatastandards.org/#/schemas/PNM",
+    autoInstall: true,
+    advertise: true,
+    discoveryKey: "sgp4-stream",
+    defaultPort: 443,
+    requireSecureTransport: true,
+    ...overrides,
+  };
+}
+
 // --- Positive baseline ---
 
 test("valid manifest passes validation", () => {
@@ -512,14 +531,7 @@ test("timer with unknown method produces error", () => {
 test("protocol requires declared protocol capability and valid port references", () => {
   const m = createValidManifest();
   m.capabilities = ["http"];
-  m.protocols = [
-    {
-      protocolId: "relay",
-      methodId: "run",
-      inputPortId: "in",
-      outputPortId: "out",
-    },
-  ];
+  m.protocols = [createHostedProtocol()];
   const report = validatePluginManifest(m);
   assert.equal(report.ok, false);
   assert.ok(report.errors.some((e) => e.code === "undeclared-protocol-capability"));
@@ -527,7 +539,7 @@ test("protocol requires declared protocol capability and valid port references",
 
 test("valid timer and protocol declarations pass compliance", () => {
   const m = createValidManifest();
-  m.capabilities = ["timers", "protocol_handle"];
+  m.capabilities = ["timers", "protocol_handle", "ipfs"];
   m.timers = [
     {
       timerId: "tick",
@@ -536,16 +548,39 @@ test("valid timer and protocol declarations pass compliance", () => {
       defaultIntervalMs: 1000,
     },
   ];
-  m.protocols = [
-    {
-      protocolId: "relay",
-      methodId: "run",
-      inputPortId: "in",
-      outputPortId: "out",
-    },
-  ];
+  m.protocols = [createHostedProtocol()];
   const report = validatePluginManifest(m);
   assert.equal(report.ok, true);
+});
+
+test("protocol requires wireId and transportKind metadata", () => {
+  const m = createValidManifest();
+  m.capabilities = ["protocol_handle", "ipfs"];
+  m.protocols = [createHostedProtocol({ wireId: "", transportKind: "" })];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, false);
+  assert.ok(report.errors.some((e) => e.code === "missing-string"));
+});
+
+test("dial-only protocol cannot advertise and libp2p requires ipfs", () => {
+  const m = createValidManifest();
+  m.capabilities = ["protocol_dial"];
+  m.protocols = [createHostedProtocol({ role: "dial", advertise: true })];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some((e) => e.code === "protocol-advertise-role-conflict"),
+  );
+  assert.ok(report.errors.some((e) => e.code === "missing-ipfs-capability"));
+});
+
+test("unknown protocol role produces error", () => {
+  const m = createValidManifest();
+  m.capabilities = ["protocol_handle", "ipfs"];
+  m.protocols = [createHostedProtocol({ role: "listen" })];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, false);
+  assert.ok(report.errors.some((e) => e.code === "unknown-protocol-role"));
 });
 
 // --- Artifact validation ---

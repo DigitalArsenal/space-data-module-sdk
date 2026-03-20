@@ -13,6 +13,7 @@ import {
   TimerSpecT,
 } from "../generated/orbpro/manifest.js";
 import { FlatBufferTypeRefT } from "../generated/orbpro/stream/flat-buffer-type-ref.js";
+import { ProtocolRole, ProtocolTransportKind } from "../runtime/constants.js";
 
 const pluginFamilyByName = Object.freeze({
   sensor: PluginFamily.SENSOR,
@@ -80,6 +81,31 @@ const invokeSurfaceByName = Object.freeze({
   direct: InvokeSurface.DIRECT,
   command: InvokeSurface.COMMAND,
 });
+
+const protocolTransportKindByName = Object.freeze({
+  libp2p: ProtocolTransportKind.LIBP2P,
+  http: ProtocolTransportKind.HTTP,
+  ws: ProtocolTransportKind.WS,
+  websocket: ProtocolTransportKind.WS,
+  "wasi-pipe": ProtocolTransportKind.WASI_PIPE,
+  wasi_pipe: ProtocolTransportKind.WASI_PIPE,
+  pipe: ProtocolTransportKind.WASI_PIPE,
+});
+
+const protocolRoleByName = Object.freeze({
+  handle: ProtocolRole.HANDLE,
+  handler: ProtocolRole.HANDLE,
+  dial: ProtocolRole.DIAL,
+  both: ProtocolRole.BOTH,
+});
+
+function normalizeOptionalString(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const normalized = String(value).trim();
+  return normalized.length > 0 ? normalized : null;
+}
 
 function normalizeSchemaHash(value) {
   if (!value) {
@@ -175,6 +201,41 @@ function normalizeInvokeSurfaces(value) {
     normalized.push(surface);
   }
   return normalized;
+}
+
+function normalizeBoolean(value, fallback = false) {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  return value === true;
+}
+
+function normalizeProtocolTransportKind(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const normalized = String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+  if (normalized.length === 0) {
+    return null;
+  }
+  return protocolTransportKindByName[normalized] ?? normalized;
+}
+
+function normalizeProtocolRole(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const normalized = String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+  if (normalized.length === 0) {
+    return null;
+  }
+  return protocolRoleByName[normalized] ?? normalized;
 }
 
 function toFlatBufferTypeRefT(value = {}) {
@@ -274,11 +335,20 @@ function toProtocolSpecT(value = {}) {
     return value;
   }
   return new ProtocolSpecT(
-    value.protocolId ?? null,
-    value.methodId ?? null,
-    value.inputPortId ?? null,
-    value.outputPortId ?? null,
-    value.description ?? null,
+    normalizeOptionalString(value.protocolId),
+    normalizeOptionalString(value.methodId),
+    normalizeOptionalString(value.inputPortId),
+    normalizeOptionalString(value.outputPortId),
+    normalizeOptionalString(value.description),
+    normalizeOptionalString(value.wireId),
+    normalizeProtocolTransportKind(value.transportKind),
+    normalizeProtocolRole(value.role),
+    normalizeOptionalString(value.specUri),
+    normalizeBoolean(value.autoInstall, true),
+    normalizeBoolean(value.advertise, false),
+    normalizeOptionalString(value.discoveryKey),
+    normalizeUnsignedInteger(value.defaultPort),
+    normalizeBoolean(value.requireSecureTransport, false),
   );
 }
 

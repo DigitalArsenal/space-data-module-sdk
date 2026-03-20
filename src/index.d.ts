@@ -2,6 +2,12 @@
 
 export type PayloadWireFormat = "flatbuffer" | "aligned-binary";
 export type InvokeSurface = "direct" | "command";
+export type ProtocolTransportKindName =
+  | "libp2p"
+  | "http"
+  | "ws"
+  | "wasi-pipe";
+export type ProtocolRoleName = "handle" | "dial" | "both";
 
 export interface PayloadTypeRef {
   schemaName?: string;
@@ -46,17 +52,61 @@ export interface ExternalInterface {
   capability?: string;
 }
 
+export interface HostCapabilityManifest {
+  capability: string;
+  scope?: string;
+  required?: boolean;
+  description?: string;
+}
+
+export interface TimerSpec {
+  timerId: string;
+  methodId: string;
+  inputPortId?: string | null;
+  defaultIntervalMs?: number | bigint;
+  description?: string | null;
+}
+
+export interface ProtocolSpec {
+  protocolId: string;
+  methodId: string;
+  inputPortId?: string | null;
+  outputPortId?: string | null;
+  description?: string | null;
+  wireId?: string | null;
+  transportKind?: ProtocolTransportKindName | string | null;
+  role?: ProtocolRoleName | string | null;
+  specUri?: string | null;
+  autoInstall?: boolean;
+  advertise?: boolean;
+  discoveryKey?: string | null;
+  defaultPort?: number;
+  requireSecureTransport?: boolean;
+}
+
+export interface BuildArtifact {
+  artifactId: string;
+  kind?: string | null;
+  path: string;
+  target?: string | null;
+  entrySymbol?: string | null;
+}
+
 export interface PluginManifest {
   pluginId: string;
   name: string;
   version: string;
   pluginFamily: string;
-  capabilities?: string[];
+  capabilities?: Array<string | HostCapabilityManifest>;
   invokeSurfaces?: InvokeSurface[];
   runtimeTargets?: string[];
   externalInterfaces?: ExternalInterface[];
   methods: MethodManifest[];
+  timers?: TimerSpec[];
+  protocols?: ProtocolSpec[];
   schemasUsed?: PayloadTypeRef[];
+  buildArtifacts?: BuildArtifact[];
+  abiVersion?: number;
 }
 
 export function encodePluginManifest(manifest: PluginManifest): Uint8Array;
@@ -436,6 +486,28 @@ export {
   serializeHarnessPlan,
 } from "./testing/index.js";
 
+export type {
+  DeploymentPlanIssue,
+  DeploymentPlanValidationReport,
+  InputBinding,
+  InputBindingSourceKindName,
+  ModuleDeploymentPlan,
+  ResolvedProtocolInstallation,
+} from "./deployment/index.js";
+
+export {
+  DEPLOYMENT_PLAN_FORMAT_VERSION,
+  InputBindingSourceKind,
+  createDeploymentPlanBundleEntry,
+  findDeploymentPlanEntry,
+  normalizeDeploymentPlan,
+  normalizeInputBindingSourceKindName,
+  normalizeProtocolRoleName,
+  normalizeProtocolTransportKindName,
+  readDeploymentPlanFromBundle,
+  validateDeploymentPlan,
+} from "./deployment/index.js";
+
 // --- Standards ---
 
 export interface StandardsEntry {
@@ -466,9 +538,10 @@ export const DEFAULT_HASH_ALGORITHM: string;
 export function createSingleFileBundle(options: {
   wasmBytes: Uint8Array;
   manifest: PluginManifest;
-  authorization: SignedEnvelope;
+  authorization?: SignedEnvelope | unknown;
   transportEnvelope?: EncryptedEnvelope | null;
-  entries?: Record<string, unknown>;
+  deploymentPlan?: ModuleDeploymentPlan;
+  entries?: Array<Record<string, unknown>>;
 }): Promise<{ wasmBytes: Uint8Array }>;
 
 export function parseSingleFileBundle(
@@ -974,6 +1047,19 @@ export const ExternalInterfaceKind: {
 export const InvokeSurface: {
   DIRECT: string;
   COMMAND: string;
+};
+
+export const ProtocolTransportKind: {
+  LIBP2P: ProtocolTransportKindName;
+  HTTP: ProtocolTransportKindName;
+  WS: ProtocolTransportKindName;
+  WASI_PIPE: ProtocolTransportKindName;
+};
+
+export const ProtocolRole: {
+  HANDLE: ProtocolRoleName;
+  DIAL: ProtocolRoleName;
+  BOTH: ProtocolRoleName;
 };
 
 export const RuntimeTarget: {

@@ -82,6 +82,26 @@ function createAlignedType(overrides = {}) {
   };
 }
 
+function createHostedProtocol(overrides = {}) {
+  return {
+    protocolId: "sgp4-stream",
+    methodId: "propagate",
+    inputPortId: "request",
+    outputPortId: "state",
+    description: "Expose the propagator over SDN.",
+    wireId: "/sdn/sgp4/1.0.0",
+    transportKind: "libp2p",
+    role: "handle",
+    specUri: "https://spacedatastandards.org/#/schemas/PNM",
+    autoInstall: true,
+    advertise: true,
+    discoveryKey: "sgp4-stream",
+    defaultPort: 443,
+    requireSecureTransport: true,
+    ...overrides,
+  };
+}
+
 test("plugin manifests round-trip through FlatBuffer encoding", () => {
   const manifest = createTestManifest();
   const encoded = encodePluginManifest(manifest);
@@ -98,6 +118,20 @@ test("plugin manifest invoke surfaces round-trip through FlatBuffer encoding", (
   const encoded = encodePluginManifest(manifest);
   const decoded = decodePluginManifest(encoded);
   assert.deepEqual(decoded.invokeSurfaces, ["direct", "command"]);
+});
+
+test("protocol declarations round-trip through FlatBuffer encoding", () => {
+  const manifest = {
+    ...createTestManifest(),
+    capabilities: ["protocol_handle", "ipfs"],
+    protocols: [createHostedProtocol()],
+  };
+  const encoded = encodePluginManifest(manifest);
+  const decoded = decodePluginManifest(encoded);
+  assert.deepEqual(
+    decoded.protocols.map((entry) => ({ ...entry })),
+    [createHostedProtocol()],
+  );
 });
 
 test("aligned payload type refs round-trip through FlatBuffer encoding", () => {
@@ -169,6 +203,22 @@ test("embedded manifests preserve expanded canonical capabilities", () => {
   const embedded = toEmbeddedPluginManifest(manifest);
   assert.deepEqual(embedded.warnings, []);
   assert.equal(embedded.manifest.capabilities.length, 6);
+});
+
+test("embedded manifests preserve hosted protocol metadata", () => {
+  const manifest = {
+    ...createTestManifest(),
+    capabilities: ["protocol_handle", "ipfs"],
+    protocols: [createHostedProtocol()],
+  };
+  const embedded = toEmbeddedPluginManifest(manifest);
+  assert.deepEqual(embedded.warnings, []);
+  assert.equal(embedded.manifest.protocols.length, 1);
+  assert.equal(embedded.manifest.protocols[0].wireId, "/sdn/sgp4/1.0.0");
+  assert.equal(embedded.manifest.protocols[0].transportKind, "libp2p");
+  assert.equal(embedded.manifest.protocols[0].role, "handle");
+  assert.equal(embedded.manifest.protocols[0].defaultPort, 443);
+  assert.equal(embedded.manifest.protocols[0].requireSecureTransport, true);
 });
 
 test("runtimeTargets are validated in JSON manifests but omitted from embedded manifests", () => {

@@ -134,6 +134,15 @@ table ProtocolSpec {
   input_port_id: string;
   output_port_id: string;
   description: string;
+  wire_id: string;
+  transport_kind: string;
+  role: string;
+  spec_uri: string;
+  auto_install: bool = true;
+  advertise: bool = false;
+  discovery_key: string;
+  default_port: uint16;
+  require_secure_transport: bool = false;
 }
 
 /// Build artifact emitted by the plugin toolchain.

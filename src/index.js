@@ -8,6 +8,7 @@ export * from "./standards/index.js";
 export * from "./host/index.js";
 export * from "./invoke/index.js";
 export * from "./testing/index.js";
+export * from "./deployment/index.js";
 export {
   DefaultInvokeExports,
   DefaultManifestExports,
@@ -15,5 +16,7 @@ export {
   ExternalInterfaceDirection,
   ExternalInterfaceKind,
   InvokeSurface,
+  ProtocolRole,
+  ProtocolTransportKind,
   RuntimeTarget,
 } from "./runtime/constants.js";

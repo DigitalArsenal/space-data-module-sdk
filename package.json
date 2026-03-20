@@ -20,6 +20,7 @@
     "./compiler": "./src/compiler/index.js",
     "./compiler/emception": "./src/compiler/emception.js",
     "./bundle": "./src/bundle/index.js",
+    "./deployment": "./src/deployment/index.js",
     "./invoke": "./src/invoke/index.js",
     "./runtime": "./src/runtime/index.js",
     "./testing": "./src/testing/index.js",

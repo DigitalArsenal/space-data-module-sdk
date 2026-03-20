@@ -5,6 +5,8 @@ export {
   ExternalInterfaceDirection,
   ExternalInterfaceKind,
   InvokeSurface,
+  ProtocolRole,
+  ProtocolTransportKind,
   RuntimeTarget,
 } from "../index.js";
 
