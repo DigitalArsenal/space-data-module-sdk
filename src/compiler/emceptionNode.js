@@ -16,8 +16,6 @@ const FILE_URL_FETCH_PATCH_FLAG =
   "__spaceDataModuleSdkFileUrlFetchPatched";
 
 let patchedEmceptionRootPromise = null;
-let emceptionInstancePromise = null;
-let emceptionExecutionQueue = Promise.resolve();
 
 function installNodeRuntimeShims() {
   if (typeof globalThis.require !== "function") {
@@ -175,43 +173,62 @@ async function preparePatchedEmceptionRoot() {
   return patchedEmceptionRootPromise;
 }
 
-export async function loadEmception() {
-  if (!emceptionInstancePromise) {
-    emceptionInstancePromise = (async () => {
-      installNodeRuntimeShims();
-      const patchedRoot = await preparePatchedEmceptionRoot();
-      const moduleUrl = pathToFileURL(path.join(patchedRoot, "emception.mjs")).href;
-      const { default: Emception } = await import(moduleUrl);
-      const emception = new Emception({
-        baseUrl: pathToFileURL(`${patchedRoot}${path.sep}`).href,
+class EmceptionController {
+  #instancePromise = null;
+  #executionQueue = Promise.resolve();
+
+  async load() {
+    if (!this.#instancePromise) {
+      this.#instancePromise = (async () => {
+        installNodeRuntimeShims();
+        const patchedRoot = await preparePatchedEmceptionRoot();
+        const moduleUrl = pathToFileURL(path.join(patchedRoot, "emception.mjs")).href;
+        const { default: Emception } = await import(moduleUrl);
+        const emception = new Emception({
+          baseUrl: pathToFileURL(`${patchedRoot}${path.sep}`).href,
+        });
+        await emception.init();
+        return emception;
+      })().catch((error) => {
+        this.#instancePromise = null;
+        throw error;
       });
-      await emception.init();
-      return emception;
-    })().catch((error) => {
-      emceptionInstancePromise = null;
-      throw error;
-    });
+    }
+
+    return this.#instancePromise;
   }
 
-  return emceptionInstancePromise;
+  async withLock(task) {
+    const previous = this.#executionQueue;
+    let release = () => {};
+    this.#executionQueue = new Promise((resolve) => {
+      release = resolve;
+    });
+    await previous.catch(() => {});
+    try {
+      const emception = await this.load().catch((error) => {
+        if (!error.code) {
+          error.code = "EMCEPTION_LOAD_FAILED";
+        }
+        throw error;
+      });
+      return await task(emception);
+    } finally {
+      release();
+    }
+  }
+}
+
+const sharedEmceptionController = new EmceptionController();
+
+export function getSharedEmceptionController() {
+  return sharedEmceptionController;
+}
+
+export async function loadEmception() {
+  return sharedEmceptionController.load();
 }
 
 export async function runWithEmceptionLock(task) {
-  const previous = emceptionExecutionQueue;
-  let release = () => {};
-  emceptionExecutionQueue = new Promise((resolve) => {
-    release = resolve;
-  });
-  await previous.catch(() => {});
-  try {
-    const emception = await loadEmception().catch((error) => {
-      if (!error.code) {
-        error.code = "EMCEPTION_LOAD_FAILED";
-      }
-      throw error;
-    });
-    return await task(emception);
-  } finally {
-    release();
-  }
+  return sharedEmceptionController.withLock(task);
 }

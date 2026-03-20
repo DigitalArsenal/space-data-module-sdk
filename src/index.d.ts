@@ -408,6 +408,19 @@ export function createRecipientKeypairHex(): Promise<{
   privateKeyHex: string;
 }>;
 
+export type {
+  EmceptionCommandResult,
+  SharedEmceptionFileContent,
+  SharedEmceptionHandle,
+  SharedEmceptionSession,
+} from "./compiler/emception.js";
+
+export {
+  createSharedEmceptionSession,
+  loadSharedEmception,
+  withSharedEmception,
+} from "./compiler/emception.js";
+
 // --- Standards ---
 
 export interface StandardsEntry {

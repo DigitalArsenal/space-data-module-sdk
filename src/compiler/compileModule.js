@@ -1,14 +1,10 @@
 import os from "node:os";
 import path from "node:path";
 import {
-  mkdir,
   mkdtemp,
-  readFile,
   rm,
   writeFile,
 } from "node:fs/promises";
-import { execFile as execFileCallback } from "node:child_process";
-import { promisify } from "node:util";
 
 import {
   createDeploymentAuthorization,
@@ -43,7 +39,6 @@ import {
 import { sha256Bytes } from "../utils/crypto.js";
 import { getWasmWallet } from "../utils/wasmCrypto.js";
 
-const execFile = promisify(execFileCallback);
 const C_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function selectCompiler(language) {
@@ -87,14 +82,6 @@ async function getInvokeCppSupportFiles() {
     getInvokeCppSchemaHeaders(),
   ]);
   return { runtimeHeaders, schemaHeaders };
-}
-
-async function writeFilesToDirectory(rootDir, files) {
-  for (const [relativePath, content] of Object.entries(files)) {
-    const filePath = path.join(rootDir, relativePath);
-    await mkdir(path.dirname(filePath), { recursive: true });
-    await writeFile(filePath, content, "utf8");
-  }
 }
 
 async function writeFilesToEmception(emception, rootDir, files) {
@@ -235,101 +222,6 @@ async function compileWithEmception(options = {}) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// System Emscripten — fallback to emcc/em++ on PATH
-// ---------------------------------------------------------------------------
-
-async function compileWithSystemToolchain(options = {}) {
-  const {
-    compilerCommand,
-    sourceCompilerCommand,
-    sourceExtension,
-    sourceCode,
-    manifestSource,
-    invokeHeaderSource,
-    invokeSource,
-    exportedSymbols,
-    outputPath,
-    compileOptions,
-  } = options;
-  const tempDir = await mkdtemp(
-    path.join(os.tmpdir(), "space-data-module-sdk-compile-"),
-  );
-  const sourcePath = path.join(tempDir, `module.${sourceExtension}`);
-  const manifestSourcePath = path.join(tempDir, "plugin-manifest-exports.cpp");
-  const invokeHeaderPath = path.join(tempDir, "space_data_module_invoke.h");
-  const invokeSourcePath = path.join(tempDir, "plugin-invoke-bridge.cpp");
-  const sourceObjectPath = path.join(tempDir, "module.o");
-  const manifestObjectPath = path.join(tempDir, "plugin-manifest-exports.o");
-  const invokeObjectPath = path.join(tempDir, "plugin-invoke-bridge.o");
-  const resolvedOutputPath = path.resolve(
-    outputPath ?? path.join(tempDir, "module.wasm"),
-  );
-  const runtimeIncludeDir = path.join(tempDir, "flatbuffers-runtime");
-
-  const { runtimeHeaders, schemaHeaders } = await getInvokeCppSupportFiles();
-
-  await writeFile(sourcePath, sourceCode, "utf8");
-  await writeFile(manifestSourcePath, manifestSource, "utf8");
-  await writeFile(invokeHeaderPath, invokeHeaderSource, "utf8");
-  await writeFile(invokeSourcePath, invokeSource, "utf8");
-  await writeFilesToDirectory(tempDir, schemaHeaders);
-  await writeFilesToDirectory(runtimeIncludeDir, runtimeHeaders);
-
-  const args = buildCompilerArgs(exportedSymbols, compileOptions);
-
-  try {
-    await execFile(sourceCompilerCommand, [
-      "-c",
-      sourcePath,
-      `-I${tempDir}`,
-      "-o",
-      sourceObjectPath,
-    ], { timeout: 120_000 });
-
-    await execFile(compilerCommand, [
-      "-c",
-      manifestSourcePath,
-      "-std=c++17",
-      `-I${tempDir}`,
-      `-I${runtimeIncludeDir}`,
-      "-o",
-      manifestObjectPath,
-    ], { timeout: 120_000 });
-
-    await execFile(compilerCommand, [
-      "-c",
-      invokeSourcePath,
-      "-std=c++17",
-      `-I${tempDir}`,
-      `-I${runtimeIncludeDir}`,
-      "-o",
-      invokeObjectPath,
-    ], { timeout: 120_000 });
-
-    await execFile(compilerCommand, [
-      sourceObjectPath,
-      manifestObjectPath,
-      invokeObjectPath,
-      ...args,
-      "-o",
-      resolvedOutputPath,
-    ], { timeout: 120_000 });
-  } catch (error) {
-    error.message =
-      `Compilation failed with ${compilerCommand}: ` +
-      (error.stderr || error.message);
-    throw error;
-  }
-
-  const wasmBytes = await readFile(resolvedOutputPath);
-  return { wasmBytes, outputPath: resolvedOutputPath, tempDir };
-}
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
 export async function compileModuleFromSource(options = {}) {
   const manifest = options.manifest ?? {};
   const sourceCode = String(options.sourceCode ?? "");
@@ -382,38 +274,17 @@ export async function compileModuleFromSource(options = {}) {
     ...options,
     noEntry: includeCommandMain !== true,
   };
-  let compilerBackend = "em++ (emception)";
-  let result;
-  try {
-    result = await compileWithEmception({
-      sourceCompilerCommand: compiler.command,
-      sourceExtension: compiler.extension,
-      sourceCode,
-      manifestSource,
-      invokeHeaderSource,
-      invokeSource,
-      exportedSymbols,
-      outputPath: options.outputPath,
-      compileOptions,
-    });
-  } catch (error) {
-    if (error?.code !== "EMCEPTION_LOAD_FAILED") {
-      throw error;
-    }
-    result = await compileWithSystemToolchain({
-      compilerCommand: "em++",
-      sourceCompilerCommand: compiler.command,
-      sourceExtension: compiler.extension,
-      sourceCode,
-      manifestSource,
-      invokeHeaderSource,
-      invokeSource,
-      exportedSymbols,
-      outputPath: options.outputPath,
-      compileOptions,
-    });
-    compilerBackend = "em++ (system)";
-  }
+  const result = await compileWithEmception({
+    sourceCompilerCommand: compiler.command,
+    sourceExtension: compiler.extension,
+    sourceCode,
+    manifestSource,
+    invokeHeaderSource,
+    invokeSource,
+    exportedSymbols,
+    outputPath: options.outputPath,
+    compileOptions,
+  });
   wasmBytes = result.wasmBytes;
   resolvedOutputPath = result.outputPath;
   tempDir = result.tempDir;
@@ -425,7 +296,7 @@ export async function compileModuleFromSource(options = {}) {
   });
 
   return {
-    compiler: compilerBackend,
+    compiler: "em++ (emception)",
     language: compiler.language,
     outputPath: resolvedOutputPath,
     tempDir,

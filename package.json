@@ -1,6 +1,6 @@
 {
   "name": "space-data-module-sdk",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Module SDK for building, validating, signing, and deploying WebAssembly modules on the Space Data Network.",
   "type": "module",
   "types": "./src/index.d.ts",
@@ -9,7 +9,7 @@
     "url": "git+https://github.com/DigitalArsenal/space-data-module-sdk.git"
   },
   "bin": {
-    "space-data-module": "./bin/space-data-module.js"
+    "space-data-module": "bin/space-data-module.js"
   },
   "exports": {
     ".": "./src/index.js",
@@ -18,8 +18,10 @@
     "./auth": "./src/auth/index.js",
     "./transport": "./src/transport/index.js",
     "./compiler": "./src/compiler/index.js",
+    "./compiler/emception": "./src/compiler/emception.js",
     "./bundle": "./src/bundle/index.js",
     "./invoke": "./src/invoke/index.js",
+    "./runtime": "./src/runtime/index.js",
     "./standards": "./src/standards/index.js",
     "./schemas/*": "./schemas/*"
   },

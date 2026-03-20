@@ -294,8 +294,11 @@ npm run check:compliance
 ```
 
 Node.js `>=20` is required. The compiler uses `sdn-emception` and `flatc-wasm`
-by default, with a system Emscripten fallback only if the embedded toolchain
-cannot load.
+by default.
+
+If another repo needs the same compiler runtime, the package also exposes a
+shared emception session at `space-data-module-sdk/compiler/emception` with
+helpers for serialized command execution and virtual filesystem access.
 
 ## License
 
