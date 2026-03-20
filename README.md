@@ -115,6 +115,25 @@ This repo currently includes:
 - a reference Node host and sync `sdn_host` bridge for the first hostcall
   surface
 
+## Testing
+
+This repo now exposes a manifest-driven harness generator from
+`space-data-module-sdk/testing` and two complementary integration suites:
+
+- `npm run test:runtime-matrix`
+  - cross-language runtime smoke across the same WASM in Node.js, Go, Python,
+    Rust, Java, C#, and Swift
+  - covers method calling, aligned-binary envelope metadata preservation,
+    stdin/stdout/stderr, args, env, preopened filesystem access, and basic WASI
+    clock/time smoke
+- `npm run test:host-surfaces`
+  - authoritative Node-host coverage for HTTP, TCP, UDP, TLS, WebSocket, MQTT,
+    process execution, timers, filesystem, and the sync `sdn_host` ABI
+
+The detailed edge cases and the current WASI-vs-host portability boundary are
+documented in
+[`docs/testing-harness.md`](./docs/testing-harness.md).
+
 ## Install
 
 ```bash
@@ -161,6 +180,7 @@ import { createDeploymentAuthorization } from "space-data-module-sdk/auth";
 import { encryptJsonForRecipient } from "space-data-module-sdk/transport";
 import { compileModuleFromSource } from "space-data-module-sdk/compiler";
 import { createSingleFileBundle } from "space-data-module-sdk/bundle";
+import { generateManifestHarnessPlan } from "space-data-module-sdk/testing";
 ```
 
 ## Single-File Bundles

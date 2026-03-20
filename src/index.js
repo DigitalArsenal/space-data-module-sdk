@@ -7,6 +7,7 @@ export * from "./bundle/index.js";
 export * from "./standards/index.js";
 export * from "./host/index.js";
 export * from "./invoke/index.js";
+export * from "./testing/index.js";
 export {
   DefaultInvokeExports,
   DefaultManifestExports,

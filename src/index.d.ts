@@ -421,6 +421,21 @@ export {
   withSharedEmception,
 } from "./compiler/emception.js";
 
+export type {
+  CapabilityRuntimeSurface,
+  HarnessInputFrame,
+  HarnessInvokeScenario,
+  HarnessRawScenario,
+  ManifestHarnessPlan,
+} from "./testing/index.js";
+
+export {
+  describeCapabilityRuntimeSurface,
+  generateManifestHarnessPlan,
+  materializeHarnessScenario,
+  serializeHarnessPlan,
+} from "./testing/index.js";
+
 // --- Standards ---
 
 export interface StandardsEntry {
