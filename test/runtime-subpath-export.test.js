@@ -17,6 +17,7 @@ test("runtime subpath exports canonical SDK constants", () => {
   assert.equal(DrainPolicy.DRAIN_TO_EMPTY, "drain-to-empty");
   assert.equal(InvokeSurface.DIRECT, "direct");
   assert.equal(RuntimeTarget.WASI, "wasi");
+  assert.equal(RuntimeTarget.WASMEDGE, "wasmedge");
 });
 
 test("runtime subpath exports buffer helpers", () => {

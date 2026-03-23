@@ -33,6 +33,8 @@ export interface HarnessRawScenario {
 export interface CapabilityRuntimeSurface {
   capability: string;
   wasi: boolean;
+  standaloneWasi: boolean;
+  wasmedge: boolean;
   syncHostcall: boolean;
   nodeHostApi: boolean;
   notes: string[];

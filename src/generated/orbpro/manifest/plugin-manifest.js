@@ -109,8 +109,16 @@ export class PluginManifest {
         const offset = this.bb.__offset(this.bb_pos, 26);
         return offset ? new Uint8Array(this.bb.bytes().buffer, this.bb.bytes().byteOffset + this.bb.__vector(this.bb_pos + offset), this.bb.__vector_len(this.bb_pos + offset)) : null;
     }
+    runtimeTargets(index, optionalEncoding) {
+        const offset = this.bb.__offset(this.bb_pos, 28);
+        return offset ? this.bb.__string(this.bb.__vector(this.bb_pos + offset) + index * 4, optionalEncoding) : null;
+    }
+    runtimeTargetsLength() {
+        const offset = this.bb.__offset(this.bb_pos, 28);
+        return offset ? this.bb.__vector_len(this.bb_pos + offset) : 0;
+    }
     static startPluginManifest(builder) {
-        builder.startObject(12);
+        builder.startObject(13);
     }
     static addPluginId(builder, pluginIdOffset) {
         builder.addFieldOffset(0, pluginIdOffset, 0);
@@ -218,6 +226,19 @@ export class PluginManifest {
     static startInvokeSurfacesVector(builder, numElems) {
         builder.startVector(1, numElems, 1);
     }
+    static addRuntimeTargets(builder, runtimeTargetsOffset) {
+        builder.addFieldOffset(12, runtimeTargetsOffset, 0);
+    }
+    static createRuntimeTargetsVector(builder, data) {
+        builder.startVector(4, data.length, 4);
+        for (let i = data.length - 1; i >= 0; i--) {
+            builder.addOffset(data[i]);
+        }
+        return builder.endVector();
+    }
+    static startRuntimeTargetsVector(builder, numElems) {
+        builder.startVector(4, numElems, 4);
+    }
     static endPluginManifest(builder) {
         const offset = builder.endObject();
         builder.requiredField(offset, 4); // plugin_id
@@ -229,7 +250,7 @@ export class PluginManifest {
     static finishSizePrefixedPluginManifestBuffer(builder, offset) {
         builder.finish(offset, 'PMAN', true);
     }
-    static createPluginManifest(builder, pluginIdOffset, nameOffset, versionOffset, pluginFamily, methodsOffset, capabilitiesOffset, timersOffset, protocolsOffset, schemasUsedOffset, buildArtifactsOffset, abiVersion, invokeSurfacesOffset) {
+    static createPluginManifest(builder, pluginIdOffset, nameOffset, versionOffset, pluginFamily, methodsOffset, capabilitiesOffset, timersOffset, protocolsOffset, schemasUsedOffset, buildArtifactsOffset, abiVersion, invokeSurfacesOffset, runtimeTargetsOffset) {
         PluginManifest.startPluginManifest(builder);
         PluginManifest.addPluginId(builder, pluginIdOffset);
         PluginManifest.addName(builder, nameOffset);
@@ -243,10 +264,11 @@ export class PluginManifest {
         PluginManifest.addBuildArtifacts(builder, buildArtifactsOffset);
         PluginManifest.addAbiVersion(builder, abiVersion);
         PluginManifest.addInvokeSurfaces(builder, invokeSurfacesOffset);
+        PluginManifest.addRuntimeTargets(builder, runtimeTargetsOffset);
         return PluginManifest.endPluginManifest(builder);
     }
     unpack() {
-        return new PluginManifestT(this.pluginId(), this.name(), this.version(), this.pluginFamily(), this.bb.createObjList(this.methods.bind(this), this.methodsLength()), this.bb.createObjList(this.capabilities.bind(this), this.capabilitiesLength()), this.bb.createObjList(this.timers.bind(this), this.timersLength()), this.bb.createObjList(this.protocols.bind(this), this.protocolsLength()), this.bb.createObjList(this.schemasUsed.bind(this), this.schemasUsedLength()), this.bb.createObjList(this.buildArtifacts.bind(this), this.buildArtifactsLength()), this.abiVersion(), this.bb.createScalarList(this.invokeSurfaces.bind(this), this.invokeSurfacesLength()));
+        return new PluginManifestT(this.pluginId(), this.name(), this.version(), this.pluginFamily(), this.bb.createObjList(this.methods.bind(this), this.methodsLength()), this.bb.createObjList(this.capabilities.bind(this), this.capabilitiesLength()), this.bb.createObjList(this.timers.bind(this), this.timersLength()), this.bb.createObjList(this.protocols.bind(this), this.protocolsLength()), this.bb.createObjList(this.schemasUsed.bind(this), this.schemasUsedLength()), this.bb.createObjList(this.buildArtifacts.bind(this), this.buildArtifactsLength()), this.abiVersion(), this.bb.createScalarList(this.invokeSurfaces.bind(this), this.invokeSurfacesLength()), this.bb.createScalarList(this.runtimeTargets.bind(this), this.runtimeTargetsLength()));
     }
     unpackTo(_o) {
         _o.pluginId = this.pluginId();
@@ -261,6 +283,7 @@ export class PluginManifest {
         _o.buildArtifacts = this.bb.createObjList(this.buildArtifacts.bind(this), this.buildArtifactsLength());
         _o.abiVersion = this.abiVersion();
         _o.invokeSurfaces = this.bb.createScalarList(this.invokeSurfaces.bind(this), this.invokeSurfacesLength());
+        _o.runtimeTargets = this.bb.createScalarList(this.runtimeTargets.bind(this), this.runtimeTargetsLength());
     }
 }
 export class PluginManifestT {
@@ -276,7 +299,8 @@ export class PluginManifestT {
     buildArtifacts;
     abiVersion;
     invokeSurfaces;
-    constructor(pluginId = null, name = null, version = null, pluginFamily = PluginFamily.ANALYSIS, methods = [], capabilities = [], timers = [], protocols = [], schemasUsed = [], buildArtifacts = [], abiVersion = 1, invokeSurfaces = []) {
+    runtimeTargets;
+    constructor(pluginId = null, name = null, version = null, pluginFamily = PluginFamily.ANALYSIS, methods = [], capabilities = [], timers = [], protocols = [], schemasUsed = [], buildArtifacts = [], abiVersion = 1, invokeSurfaces = [], runtimeTargets = []) {
         this.pluginId = pluginId;
         this.name = name;
         this.version = version;
@@ -289,6 +313,7 @@ export class PluginManifestT {
         this.buildArtifacts = buildArtifacts;
         this.abiVersion = abiVersion;
         this.invokeSurfaces = invokeSurfaces;
+        this.runtimeTargets = runtimeTargets;
     }
     pack(builder) {
         const pluginId = (this.pluginId !== null ? builder.createString(this.pluginId) : 0);
@@ -301,7 +326,8 @@ export class PluginManifestT {
         const schemasUsed = PluginManifest.createSchemasUsedVector(builder, builder.createObjectOffsetList(this.schemasUsed));
         const buildArtifacts = PluginManifest.createBuildArtifactsVector(builder, builder.createObjectOffsetList(this.buildArtifacts));
         const invokeSurfaces = PluginManifest.createInvokeSurfacesVector(builder, this.invokeSurfaces);
-        return PluginManifest.createPluginManifest(builder, pluginId, name, version, this.pluginFamily, methods, capabilities, timers, protocols, schemasUsed, buildArtifacts, this.abiVersion, invokeSurfaces);
+        const runtimeTargets = PluginManifest.createRuntimeTargetsVector(builder, builder.createObjectOffsetList(this.runtimeTargets));
+        return PluginManifest.createPluginManifest(builder, pluginId, name, version, this.pluginFamily, methods, capabilities, timers, protocols, schemasUsed, buildArtifacts, this.abiVersion, invokeSurfaces, runtimeTargets);
     }
 }
 //# sourceMappingURL=plugin-manifest.js.map

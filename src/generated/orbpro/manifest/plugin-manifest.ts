@@ -145,8 +145,20 @@ invokeSurfacesArray():Uint8Array|null {
   return offset ? new Uint8Array(this.bb!.bytes().buffer, this.bb!.bytes().byteOffset + this.bb!.__vector(this.bb_pos + offset), this.bb!.__vector_len(this.bb_pos + offset)) : null;
 }
 
+runtimeTargets(index: number):string|null
+runtimeTargets(index: number, optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+runtimeTargets(index: number, optionalEncoding?:any):string|Uint8Array|null {
+  const offset = this.bb!.__offset(this.bb_pos, 28);
+  return offset ? this.bb!.__string(this.bb!.__vector(this.bb_pos + offset) + index * 4, optionalEncoding) : null;
+}
+
+runtimeTargetsLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 28);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
+
 static startPluginManifest(builder:flatbuffers.Builder) {
-  builder.startObject(12);
+  builder.startObject(13);
 }
 
 static addPluginId(builder:flatbuffers.Builder, pluginIdOffset:flatbuffers.Offset) {
@@ -281,6 +293,22 @@ static startInvokeSurfacesVector(builder:flatbuffers.Builder, numElems:number) {
   builder.startVector(1, numElems, 1);
 }
 
+static addRuntimeTargets(builder:flatbuffers.Builder, runtimeTargetsOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(12, runtimeTargetsOffset, 0);
+}
+
+static createRuntimeTargetsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
+  }
+  return builder.endVector();
+}
+
+static startRuntimeTargetsVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
+
 static endPluginManifest(builder:flatbuffers.Builder):flatbuffers.Offset {
   const offset = builder.endObject();
   builder.requiredField(offset, 4) // plugin_id
@@ -295,7 +323,7 @@ static finishSizePrefixedPluginManifestBuffer(builder:flatbuffers.Builder, offse
   builder.finish(offset, 'PMAN', true);
 }
 
-static createPluginManifest(builder:flatbuffers.Builder, pluginIdOffset:flatbuffers.Offset, nameOffset:flatbuffers.Offset, versionOffset:flatbuffers.Offset, pluginFamily:PluginFamily, methodsOffset:flatbuffers.Offset, capabilitiesOffset:flatbuffers.Offset, timersOffset:flatbuffers.Offset, protocolsOffset:flatbuffers.Offset, schemasUsedOffset:flatbuffers.Offset, buildArtifactsOffset:flatbuffers.Offset, abiVersion:number, invokeSurfacesOffset:flatbuffers.Offset):flatbuffers.Offset {
+static createPluginManifest(builder:flatbuffers.Builder, pluginIdOffset:flatbuffers.Offset, nameOffset:flatbuffers.Offset, versionOffset:flatbuffers.Offset, pluginFamily:PluginFamily, methodsOffset:flatbuffers.Offset, capabilitiesOffset:flatbuffers.Offset, timersOffset:flatbuffers.Offset, protocolsOffset:flatbuffers.Offset, schemasUsedOffset:flatbuffers.Offset, buildArtifactsOffset:flatbuffers.Offset, abiVersion:number, invokeSurfacesOffset:flatbuffers.Offset, runtimeTargetsOffset:flatbuffers.Offset):flatbuffers.Offset {
   PluginManifest.startPluginManifest(builder);
   PluginManifest.addPluginId(builder, pluginIdOffset);
   PluginManifest.addName(builder, nameOffset);
@@ -309,6 +337,7 @@ static createPluginManifest(builder:flatbuffers.Builder, pluginIdOffset:flatbuff
   PluginManifest.addBuildArtifacts(builder, buildArtifactsOffset);
   PluginManifest.addAbiVersion(builder, abiVersion);
   PluginManifest.addInvokeSurfaces(builder, invokeSurfacesOffset);
+  PluginManifest.addRuntimeTargets(builder, runtimeTargetsOffset);
   return PluginManifest.endPluginManifest(builder);
 }
 
@@ -325,7 +354,8 @@ unpack(): PluginManifestT {
     this.bb!.createObjList<FlatBufferTypeRef, FlatBufferTypeRefT>(this.schemasUsed.bind(this), this.schemasUsedLength()),
     this.bb!.createObjList<BuildArtifact, BuildArtifactT>(this.buildArtifacts.bind(this), this.buildArtifactsLength()),
     this.abiVersion(),
-    this.bb!.createScalarList<InvokeSurface>(this.invokeSurfaces.bind(this), this.invokeSurfacesLength())
+    this.bb!.createScalarList<InvokeSurface>(this.invokeSurfaces.bind(this), this.invokeSurfacesLength()),
+    this.bb!.createScalarList<string>(this.runtimeTargets.bind(this), this.runtimeTargetsLength())
   );
 }
 
@@ -343,6 +373,7 @@ unpackTo(_o: PluginManifestT): void {
   _o.buildArtifacts = this.bb!.createObjList<BuildArtifact, BuildArtifactT>(this.buildArtifacts.bind(this), this.buildArtifactsLength());
   _o.abiVersion = this.abiVersion();
   _o.invokeSurfaces = this.bb!.createScalarList<InvokeSurface>(this.invokeSurfaces.bind(this), this.invokeSurfacesLength());
+  _o.runtimeTargets = this.bb!.createScalarList<string>(this.runtimeTargets.bind(this), this.runtimeTargetsLength());
 }
 }
 
@@ -359,7 +390,8 @@ constructor(
   public schemasUsed: (FlatBufferTypeRefT)[] = [],
   public buildArtifacts: (BuildArtifactT)[] = [],
   public abiVersion: number = 1,
-  public invokeSurfaces: (InvokeSurface)[] = []
+  public invokeSurfaces: (InvokeSurface)[] = [],
+  public runtimeTargets: string[] = []
 ){}
 
 
@@ -374,6 +406,10 @@ pack(builder:flatbuffers.Builder): flatbuffers.Offset {
   const schemasUsed = PluginManifest.createSchemasUsedVector(builder, builder.createObjectOffsetList(this.schemasUsed));
   const buildArtifacts = PluginManifest.createBuildArtifactsVector(builder, builder.createObjectOffsetList(this.buildArtifacts));
   const invokeSurfaces = PluginManifest.createInvokeSurfacesVector(builder, this.invokeSurfaces);
+  const runtimeTargets = PluginManifest.createRuntimeTargetsVector(
+    builder,
+    builder.createObjectOffsetList(this.runtimeTargets),
+  );
 
   return PluginManifest.createPluginManifest(builder,
     pluginId,
@@ -387,7 +423,8 @@ pack(builder:flatbuffers.Builder): flatbuffers.Offset {
     schemasUsed,
     buildArtifacts,
     this.abiVersion,
-    invokeSurfaces
+    invokeSurfaces,
+    runtimeTargets
   );
 }
 }

@@ -5,6 +5,7 @@ import {
   loadManifestFromFile,
   loadComplianceConfig,
   RecommendedCapabilityIds,
+  StandaloneWasiCapabilityIds,
   resolveManifestFiles,
   validatePluginArtifact,
   validatePluginManifest,
@@ -49,8 +50,8 @@ export {
   loadManifestFromFile,
   loadComplianceConfig,
   RecommendedCapabilityIds,
+  StandaloneWasiCapabilityIds,
   resolveManifestFiles,
   validatePluginArtifact,
   validatePluginManifest,
 };
-

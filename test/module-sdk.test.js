@@ -230,17 +230,17 @@ test("embedded manifests preserve hosted protocol metadata", () => {
   assert.equal(embedded.manifest.protocols[0].requireSecureTransport, true);
 });
 
-test("runtimeTargets are validated in JSON manifests but omitted from embedded manifests", () => {
+test("runtimeTargets round-trip through FlatBuffer encoding and embedded manifests", () => {
   const manifest = {
     ...createTestManifest(),
-    runtimeTargets: ["browser"],
+    runtimeTargets: ["browser", "wasmedge"],
   };
+  const encoded = encodePluginManifest(manifest);
+  const decoded = decodePluginManifest(encoded);
+  assert.deepEqual(decoded.runtimeTargets, ["browser", "wasmedge"]);
   const embedded = toEmbeddedPluginManifest(manifest);
-  assert.ok(
-    embedded.warnings.some((warning) =>
-      warning.includes("runtimeTargets are not yet representable"),
-    ),
-  );
+  assert.deepEqual(embedded.warnings, []);
+  assert.deepEqual(embedded.manifest.runtimeTargets, ["browser", "wasmedge"]);
 });
 
 test("embedded manifest source stays a raw byte buffer for c and c++ modules", () => {

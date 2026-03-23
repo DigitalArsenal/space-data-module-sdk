@@ -52,7 +52,16 @@ export const RecommendedCapabilityIds = Object.freeze([
   "render_hooks",
 ]);
 
+export const StandaloneWasiCapabilityIds = Object.freeze([
+  "logging",
+  "clock",
+  "random",
+  "filesystem",
+  "pipe",
+]);
+
 const RecommendedCapabilitySet = new Set(RecommendedCapabilityIds);
+const StandaloneWasiCapabilitySet = new Set(StandaloneWasiCapabilityIds);
 const RecommendedRuntimeTargets = Object.freeze(Object.values(RuntimeTarget));
 const RecommendedRuntimeTargetSet = new Set(RecommendedRuntimeTargets);
 const DrainPolicySet = new Set(Object.values(DrainPolicy));
@@ -82,6 +91,9 @@ const BrowserIncompatibleCapabilitySet = new Set([
   "scene_access",
   "entity_access",
   "render_hooks",
+]);
+const StandaloneWasiProtocolTransportKindSet = new Set([
+  ProtocolTransportKind.WASI_PIPE,
 ]);
 const IgnoredDirectoryNames = new Set([
   ".git",
@@ -963,6 +975,66 @@ function validateRuntimeTargets(runtimeTargets, declaredCapabilities, issues, so
   }
 }
 
+function validateStandaloneWasiTarget(
+  manifest,
+  normalizedInvokeSurfaces,
+  declaredCapabilities,
+  issues,
+  sourceName,
+) {
+  const runtimeTargets = Array.isArray(manifest?.runtimeTargets)
+    ? manifest.runtimeTargets
+    : [];
+  if (!runtimeTargets.includes(RuntimeTarget.WASI)) {
+    return;
+  }
+
+  if (!normalizedInvokeSurfaces.includes(InvokeSurface.COMMAND)) {
+    pushIssue(
+      issues,
+      "error",
+      "missing-wasi-command-surface",
+      'Artifacts targeting the canonical "wasi" runtime must declare the "command" invoke surface so they can run as standalone WASI programs without host wrappers.',
+      `${sourceName}.invokeSurfaces`,
+    );
+  }
+
+  if (Array.isArray(declaredCapabilities)) {
+    for (const capability of declaredCapabilities) {
+      if (!StandaloneWasiCapabilitySet.has(capability)) {
+        pushIssue(
+          issues,
+          "error",
+          "capability-wasi-standalone-conflict",
+          `Capability "${capability}" is not available to a standalone WASI artifact without host wrappers.`,
+          `${sourceName}.capabilities`,
+        );
+      }
+    }
+  }
+
+  if (!Array.isArray(manifest?.protocols)) {
+    return;
+  }
+  manifest.protocols.forEach((protocol, index) => {
+    const normalizedTransportKind = normalizeProtocolTransportKind(
+      protocol?.transportKind,
+    );
+    if (
+      normalizedTransportKind &&
+      !StandaloneWasiProtocolTransportKindSet.has(normalizedTransportKind)
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "protocol-wasi-standalone-conflict",
+        `Protocol "${protocol?.protocolId ?? "protocol"}" uses transportKind "${protocol?.transportKind}", which requires a host wrapper rather than a standalone WASI runtime.`,
+        `${sourceName}.protocols[${index}].transportKind`,
+      );
+    }
+  });
+}
+
 function validateInvokeSurfaces(invokeSurfaces, issues, sourceName) {
   if (invokeSurfaces === undefined) {
     return [];
@@ -1086,7 +1158,11 @@ export function validatePluginManifest(manifest, options = {}) {
     issues,
     sourceName,
   );
-  validateInvokeSurfaces(manifest.invokeSurfaces, issues, sourceName);
+  const normalizedInvokeSurfaces = validateInvokeSurfaces(
+    manifest.invokeSurfaces,
+    issues,
+    sourceName,
+  );
 
   if (!Array.isArray(manifest.externalInterfaces)) {
     pushIssue(
@@ -1226,6 +1302,14 @@ export function validatePluginManifest(manifest, options = {}) {
       });
     }
   }
+
+  validateStandaloneWasiTarget(
+    manifest,
+    normalizedInvokeSurfaces,
+    declaredCapabilities,
+    issues,
+    sourceName,
+  );
 
   if (manifest.schemasUsed !== undefined && !Array.isArray(manifest.schemasUsed)) {
     pushIssue(

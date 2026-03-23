@@ -179,6 +179,7 @@ table PluginManifest {
   build_artifacts: [BuildArtifact];
   abi_version: uint32 = 1;
   invoke_surfaces: [InvokeSurface];
+  runtime_targets: [string];
 }
 
 root_type PluginManifest;

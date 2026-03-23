@@ -143,6 +143,20 @@ The detailed edge cases and the current WASI-vs-host portability boundary are
 documented in
 [`docs/testing-harness.md`](./docs/testing-harness.md).
 
+If a manifest declares `runtimeTargets: ["wasi"]`, this SDK now treats that as
+"standalone WASI, no host wrapper required." In practice that currently means:
+
+- the artifact must declare the `command` invoke surface
+- declared capabilities must stay within the pure WASI subset:
+  `logging`, `clock`, `random`, `filesystem`, `pipe`
+- hosted protocols may only use `wasi-pipe` transport
+
+For maximum server-side portability with guest-owned network services, use
+`runtimeTargets: ["wasmedge"]`. That target is intended for WasmEdge
+environments with socket/TLS extensions, while plain `wasi` remains the strict
+no-wrapper baseline. The Node-RED-oriented parity map lives in
+[`docs/node-red-default-node-parity.md`](./docs/node-red-default-node-parity.md).
+
 ## Install
 
 ```bash

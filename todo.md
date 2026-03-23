@@ -7,11 +7,14 @@ Detailed local working notes live under `.claude/todos/`.
 
 ## `space-data-module-sdk`
 
+- [ ] Treat `wasmedge` as the documented standard server-side deployment target
+      while keeping plain `wasi` as the strict no-wrapper baseline.
 - [ ] Add an end-to-end example package that combines:
   - hosted protocol metadata
   - deployment-plan metadata
   - mixed regular/aligned port contracts
   - signed `sds.bundle` packaging
+- [ ] Add a WasmEdge-targeted example that exercises guest-owned networking.
 - [ ] Add bundle/vector coverage for deployment plans that include:
   - `protocolInstallations`
   - `inputBindings`
@@ -26,6 +29,8 @@ Detailed local working notes live under `.claude/todos/`.
   - selected runtime profile
 - [ ] Add a concrete example of regular FlatBuffer input plus aligned-binary
       output, mirroring the OrbPro/SGP4 contract.
+- [ ] Add target-specific examples and vector coverage for embedded
+      `runtimeTargets`, especially strict `wasi` and server-side `wasmedge`.
 - [ ] Document browser-local versus delegated deployment bindings more sharply
       for:
   - filesystem
@@ -47,6 +52,11 @@ Detailed local working notes live under `.claude/todos/`.
 - [ ] Add deployment/install packaging that persists the generated deployment
       plan with compiled artifacts.
 - [ ] Enforce auth, service, schedule, and publication bindings at runtime.
+- [ ] Use the Node-RED parity matrix in
+      `docs/node-red-default-node-parity.md` as the planning contract:
+  - standalone `wasi` for pure transform/control nodes
+  - `wasmedge` for guest-owned network services
+  - delegated bindings for watchers, cron, exec, and browser-only gaps
 
 ## `OrbPro`
 

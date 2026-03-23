@@ -223,6 +223,7 @@ export interface ComplianceReport {
 }
 
 export const RecommendedCapabilityIds: readonly string[];
+export const StandaloneWasiCapabilityIds: readonly string[];
 
 export function validatePluginManifest(
   manifest: unknown,
@@ -1098,6 +1099,7 @@ export const RuntimeTarget: {
   NODE: string;
   BROWSER: string;
   WASI: string;
+  WASMEDGE: string;
   SERVER: string;
   DESKTOP: string;
   EDGE: string;

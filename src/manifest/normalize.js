@@ -392,12 +392,6 @@ export function toEmbeddedPluginManifest(input = {}) {
       "externalInterfaces are not yet representable in the embedded FlatBuffer manifest schema and were omitted from the compiled artifact.",
     );
   }
-  if (Array.isArray(input.runtimeTargets) && input.runtimeTargets.length > 0) {
-    warnings.push(
-      "runtimeTargets are not yet representable in the embedded FlatBuffer manifest schema and were omitted from the compiled artifact.",
-    );
-  }
-
   const capabilities = Array.isArray(input.capabilities)
     ? input.capabilities
         .map((entry) => toHostCapabilityT(entry, warnings))
@@ -428,6 +422,13 @@ export function toEmbeddedPluginManifest(input = {}) {
         : [],
       Number(input.abiVersion ?? 1),
       normalizeInvokeSurfaces(input.invokeSurfaces),
+      Array.isArray(input.runtimeTargets)
+        ? input.runtimeTargets
+            .map((value) =>
+              typeof value === "string" ? value.trim() : String(value ?? "").trim(),
+            )
+            .filter(Boolean)
+        : [],
     ),
     warnings,
   };

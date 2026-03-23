@@ -507,6 +507,62 @@ test("browser runtime target accepts browser-safe capabilities", () => {
   assert.equal(report.ok, true);
 });
 
+test("wasi runtime target rejects capabilities that need host wrappers", () => {
+  const m = createValidManifest();
+  m.runtimeTargets = ["wasi"];
+  m.invokeSurfaces = ["command"];
+  m.capabilities = ["clock", "filesystem", "http", "schedule_cron"];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some((e) => e.code === "capability-wasi-standalone-conflict"),
+  );
+});
+
+test("wasi runtime target requires command surface", () => {
+  const m = createValidManifest();
+  m.runtimeTargets = ["wasi"];
+  m.invokeSurfaces = ["direct"];
+  m.capabilities = ["clock", "logging"];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some((e) => e.code === "missing-wasi-command-surface"),
+  );
+});
+
+test("wasi runtime target rejects non-wasi protocol transports", () => {
+  const m = createValidManifest();
+  m.runtimeTargets = ["wasi"];
+  m.invokeSurfaces = ["command"];
+  m.capabilities = ["logging", "pipe"];
+  m.protocols = [
+    {
+      protocolId: "svc",
+      methodId: "doThing",
+      inputPortId: "in",
+      outputPortId: "out",
+      wireId: "/sdn/test/1.0.0",
+      transportKind: "libp2p",
+      role: "handle",
+    },
+  ];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some((e) => e.code === "protocol-wasi-standalone-conflict"),
+  );
+});
+
+test("wasi runtime target accepts standalone-wasi capability subset", () => {
+  const m = createValidManifest();
+  m.runtimeTargets = ["wasi"];
+  m.invokeSurfaces = ["command"];
+  m.capabilities = ["logging", "clock", "random", "filesystem", "pipe"];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, true);
+});
+
 test("invalid runtimeTargets type produces error", () => {
   const m = createValidManifest();
   m.runtimeTargets = "browser";
@@ -520,6 +576,16 @@ test("duplicate runtime target produces warning", () => {
   m.runtimeTargets = ["node", "node"];
   const report = validatePluginManifest(m);
   assert.ok(report.warnings.some((w) => w.code === "duplicate-runtime-target"));
+});
+
+test("wasmedge runtime target is canonical", () => {
+  const m = createValidManifest();
+  m.runtimeTargets = ["wasmedge"];
+  const report = validatePluginManifest(m);
+  assert.equal(
+    report.warnings.some((w) => w.code === "noncanonical-runtime-target"),
+    false,
+  );
 });
 
 // --- External interfaces ---

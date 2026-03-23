@@ -195,3 +195,43 @@ Portable-but-narrow today:
 The harness generator exposes this distinction explicitly so module authors can
 see which capabilities are portable today and which still require host-side or
 future async ABI work.
+
+## Strict Standalone WASI Target
+
+When a manifest declares `runtimeTargets: ["wasi"]`, the SDK should interpret
+that as a stricter statement than "can run inside some wrapper-managed WASM
+host." It means the artifact is expected to run as a standalone WASI program.
+
+The current SDK enforcement for that target is:
+
+- `invokeSurfaces` must include `command`
+- capabilities must stay within the current standalone-WASI subset:
+  - `logging`
+  - `clock`
+  - `random`
+  - `filesystem`
+  - `pipe`
+- hosted protocols may only use `wasi-pipe`
+
+Anything else still requires a host adapter, delegated service, or future async
+ABI expansion and therefore should not claim the canonical `wasi` runtime
+target yet.
+
+## WasmEdge Deployment Target
+
+Use `runtimeTargets: ["wasmedge"]` for the standard server-side deployment
+target when the goal is maximum WASI compatibility rather than strict
+standalone-WASI purity.
+
+That target assumes a WasmEdge environment with socket/TLS extensions
+available. In this repo’s capability matrix, these families become reasonable
+guest-side targets even though they are not plain standalone WASI:
+
+- `network`
+- `http`
+- `tcp`
+- `udp`
+- `tls`
+
+The full Node-RED parity map lives in
+[`docs/node-red-default-node-parity.md`](./node-red-default-node-parity.md).

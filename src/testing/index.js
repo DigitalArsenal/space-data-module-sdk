@@ -6,6 +6,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   logging: Object.freeze({
     capability: "logging",
     wasi: true,
+    standaloneWasi: true,
+    wasmedge: true,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
@@ -16,6 +18,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   clock: Object.freeze({
     capability: "clock",
     wasi: true,
+    standaloneWasi: true,
+    wasmedge: true,
     syncHostcall: true,
     nodeHostApi: true,
     notes: [
@@ -26,6 +30,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   random: Object.freeze({
     capability: "random",
     wasi: true,
+    standaloneWasi: true,
+    wasmedge: true,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
@@ -36,6 +42,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   timers: Object.freeze({
     capability: "timers",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
@@ -46,6 +54,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   schedule_cron: Object.freeze({
     capability: "schedule_cron",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: true,
     nodeHostApi: true,
     notes: [
@@ -55,6 +65,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   filesystem: Object.freeze({
     capability: "filesystem",
     wasi: true,
+    standaloneWasi: true,
+    wasmedge: true,
     syncHostcall: true,
     nodeHostApi: true,
     notes: [
@@ -65,6 +77,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   pipe: Object.freeze({
     capability: "pipe",
     wasi: true,
+    standaloneWasi: true,
+    wasmedge: true,
     syncHostcall: false,
     nodeHostApi: false,
     notes: [
@@ -75,71 +89,94 @@ const CapabilitySurfaceMatrix = Object.freeze({
   network: Object.freeze({
     capability: "network",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: true,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
       "The coarse network capability maps to host-side HTTP/TCP/UDP/TLS/WebSocket services today.",
       "Pure WASI guests cannot reach that surface through the current sync hostcall ABI.",
+      "WasmEdge provides non-blocking socket-oriented extensions that can serve as the standard server-side max-WASI target.",
     ],
   }),
   http: Object.freeze({
     capability: "http",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: true,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
       "HTTP is currently available from the Node host API only.",
       "Pure WASM guests cannot reach it through the current sync hostcall ABI.",
+      "Treat WasmEdge socket and TLS extensions as the no-wrapper server-side target for guest HTTP implementations.",
     ],
   }),
   websocket: Object.freeze({
     capability: "websocket",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
       "WebSocket exchange is async and host-only today.",
+      "For no-wrapper parity, target guest WebSocket libraries built on WasmEdge sockets/TLS instead of a host API.",
     ],
   }),
   mqtt: Object.freeze({
     capability: "mqtt",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
       "MQTT publish/subscribe is async and host-only today.",
+      "For no-wrapper parity, target guest MQTT libraries built on WasmEdge sockets/TLS instead of a host API.",
     ],
   }),
   tcp: Object.freeze({
     capability: "tcp",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: true,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
       "TCP request support exists in the Node host API only today.",
+      "WasmEdge socket extensions provide a viable no-wrapper server-side target for guest TCP logic.",
     ],
   }),
   udp: Object.freeze({
     capability: "udp",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: true,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
       "UDP request support exists in the Node host API only today.",
+      "WasmEdge socket extensions provide a viable no-wrapper server-side target for guest UDP logic.",
     ],
   }),
   tls: Object.freeze({
     capability: "tls",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: true,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
       "TLS request support exists in the Node host API only today.",
+      "WasmEdge TLS support provides a practical no-wrapper server-side target for guest HTTPS/TLS logic.",
     ],
   }),
   context_read: Object.freeze({
     capability: "context_read",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
@@ -149,6 +186,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   context_write: Object.freeze({
     capability: "context_write",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
@@ -158,6 +197,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   crypto_hash: Object.freeze({
     capability: "crypto_hash",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
@@ -167,6 +208,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   crypto_sign: Object.freeze({
     capability: "crypto_sign",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
@@ -176,6 +219,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   crypto_verify: Object.freeze({
     capability: "crypto_verify",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
@@ -185,6 +230,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   crypto_encrypt: Object.freeze({
     capability: "crypto_encrypt",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
@@ -194,6 +241,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   crypto_decrypt: Object.freeze({
     capability: "crypto_decrypt",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
@@ -203,6 +252,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   crypto_key_agreement: Object.freeze({
     capability: "crypto_key_agreement",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
@@ -212,6 +263,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   crypto_kdf: Object.freeze({
     capability: "crypto_kdf",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
@@ -221,6 +274,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
   process_exec: Object.freeze({
     capability: "process_exec",
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
@@ -324,6 +379,8 @@ export function describeCapabilityRuntimeSurface(capability) {
     return {
       capability: known.capability,
       wasi: known.wasi,
+      standaloneWasi: known.standaloneWasi,
+      wasmedge: known.wasmedge,
       syncHostcall: known.syncHostcall,
       nodeHostApi: known.nodeHostApi,
       notes: [...known.notes],
@@ -332,6 +389,8 @@ export function describeCapabilityRuntimeSurface(capability) {
   return {
     capability: normalized,
     wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
     syncHostcall: false,
     nodeHostApi: false,
     notes: [

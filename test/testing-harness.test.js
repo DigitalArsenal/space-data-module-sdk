@@ -94,6 +94,8 @@ test("capability runtime surface matrix distinguishes WASI, sync hostcalls, and 
     {
       capability: "clock",
       wasi: true,
+      standaloneWasi: true,
+      wasmedge: true,
       syncHostcall: true,
       nodeHostApi: true,
       notes: [
@@ -104,8 +106,14 @@ test("capability runtime surface matrix distinguishes WASI, sync hostcalls, and 
   );
 
   assert.equal(describeCapabilityRuntimeSurface("filesystem").wasi, true);
+  assert.equal(describeCapabilityRuntimeSurface("filesystem").standaloneWasi, true);
+  assert.equal(describeCapabilityRuntimeSurface("filesystem").wasmedge, true);
   assert.equal(describeCapabilityRuntimeSurface("filesystem").syncHostcall, true);
   assert.equal(describeCapabilityRuntimeSurface("pipe").wasi, true);
+  assert.equal(describeCapabilityRuntimeSurface("schedule_cron").standaloneWasi, false);
+  assert.equal(describeCapabilityRuntimeSurface("network").wasmedge, true);
+  assert.equal(describeCapabilityRuntimeSurface("http").wasmedge, true);
+  assert.equal(describeCapabilityRuntimeSurface("websocket").wasmedge, false);
   assert.equal(describeCapabilityRuntimeSurface("pipe").nodeHostApi, false);
   assert.equal(describeCapabilityRuntimeSurface("network").nodeHostApi, true);
   assert.equal(describeCapabilityRuntimeSurface("logging").wasi, true);
@@ -131,12 +139,19 @@ test("manifest harness plan treats flows as degenerate modules and derives defau
     ["direct:echo", "command:echo"],
   );
   assert.deepEqual(
-    plan.capabilities.map((entry) => [entry.capability, entry.wasi, entry.syncHostcall, entry.nodeHostApi]),
+    plan.capabilities.map((entry) => [
+      entry.capability,
+      entry.wasi,
+      entry.standaloneWasi,
+      entry.wasmedge,
+      entry.syncHostcall,
+      entry.nodeHostApi,
+    ]),
     [
-      ["clock", true, true, true],
-      ["filesystem", true, true, true],
-      ["http", false, false, true],
-      ["crypto_hash", false, false, true],
+      ["clock", true, true, true, true, true],
+      ["filesystem", true, true, true, true, true],
+      ["http", false, false, true, false, true],
+      ["crypto_hash", false, false, false, false, true],
     ],
   );
 });

@@ -40,6 +40,9 @@ export declare class PluginManifest implements flatbuffers.IUnpackableObject<Plu
     invokeSurfaces(index: number): InvokeSurface | null;
     invokeSurfacesLength(): number;
     invokeSurfacesArray(): Uint8Array | null;
+    runtimeTargets(index: number): string | null;
+    runtimeTargets(index: number, optionalEncoding: flatbuffers.Encoding): string | Uint8Array | null;
+    runtimeTargetsLength(): number;
     static startPluginManifest(builder: flatbuffers.Builder): void;
     static addPluginId(builder: flatbuffers.Builder, pluginIdOffset: flatbuffers.Offset): void;
     static addName(builder: flatbuffers.Builder, nameOffset: flatbuffers.Offset): void;
@@ -67,10 +70,13 @@ export declare class PluginManifest implements flatbuffers.IUnpackableObject<Plu
     static addInvokeSurfaces(builder: flatbuffers.Builder, invokeSurfacesOffset: flatbuffers.Offset): void;
     static createInvokeSurfacesVector(builder: flatbuffers.Builder, data: InvokeSurface[]): flatbuffers.Offset;
     static startInvokeSurfacesVector(builder: flatbuffers.Builder, numElems: number): void;
+    static addRuntimeTargets(builder: flatbuffers.Builder, runtimeTargetsOffset: flatbuffers.Offset): void;
+    static createRuntimeTargetsVector(builder: flatbuffers.Builder, data: flatbuffers.Offset[]): flatbuffers.Offset;
+    static startRuntimeTargetsVector(builder: flatbuffers.Builder, numElems: number): void;
     static endPluginManifest(builder: flatbuffers.Builder): flatbuffers.Offset;
     static finishPluginManifestBuffer(builder: flatbuffers.Builder, offset: flatbuffers.Offset): void;
     static finishSizePrefixedPluginManifestBuffer(builder: flatbuffers.Builder, offset: flatbuffers.Offset): void;
-    static createPluginManifest(builder: flatbuffers.Builder, pluginIdOffset: flatbuffers.Offset, nameOffset: flatbuffers.Offset, versionOffset: flatbuffers.Offset, pluginFamily: PluginFamily, methodsOffset: flatbuffers.Offset, capabilitiesOffset: flatbuffers.Offset, timersOffset: flatbuffers.Offset, protocolsOffset: flatbuffers.Offset, schemasUsedOffset: flatbuffers.Offset, buildArtifactsOffset: flatbuffers.Offset, abiVersion: number, invokeSurfacesOffset: flatbuffers.Offset): flatbuffers.Offset;
+    static createPluginManifest(builder: flatbuffers.Builder, pluginIdOffset: flatbuffers.Offset, nameOffset: flatbuffers.Offset, versionOffset: flatbuffers.Offset, pluginFamily: PluginFamily, methodsOffset: flatbuffers.Offset, capabilitiesOffset: flatbuffers.Offset, timersOffset: flatbuffers.Offset, protocolsOffset: flatbuffers.Offset, schemasUsedOffset: flatbuffers.Offset, buildArtifactsOffset: flatbuffers.Offset, abiVersion: number, invokeSurfacesOffset: flatbuffers.Offset, runtimeTargetsOffset: flatbuffers.Offset): flatbuffers.Offset;
     unpack(): PluginManifestT;
     unpackTo(_o: PluginManifestT): void;
 }
@@ -87,7 +93,8 @@ export declare class PluginManifestT implements flatbuffers.IGeneratedObject {
     buildArtifacts: (BuildArtifactT)[];
     abiVersion: number;
     invokeSurfaces: (InvokeSurface)[];
-    constructor(pluginId?: string | Uint8Array | null, name?: string | Uint8Array | null, version?: string | Uint8Array | null, pluginFamily?: PluginFamily, methods?: (MethodManifestT)[], capabilities?: (HostCapabilityT)[], timers?: (TimerSpecT)[], protocols?: (ProtocolSpecT)[], schemasUsed?: (FlatBufferTypeRefT)[], buildArtifacts?: (BuildArtifactT)[], abiVersion?: number, invokeSurfaces?: (InvokeSurface)[]);
+    runtimeTargets: string[];
+    constructor(pluginId?: string | Uint8Array | null, name?: string | Uint8Array | null, version?: string | Uint8Array | null, pluginFamily?: PluginFamily, methods?: (MethodManifestT)[], capabilities?: (HostCapabilityT)[], timers?: (TimerSpecT)[], protocols?: (ProtocolSpecT)[], schemasUsed?: (FlatBufferTypeRefT)[], buildArtifacts?: (BuildArtifactT)[], abiVersion?: number, invokeSurfaces?: (InvokeSurface)[], runtimeTargets?: string[]);
     pack(builder: flatbuffers.Builder): flatbuffers.Offset;
 }
 //# sourceMappingURL=plugin-manifest.d.ts.map
