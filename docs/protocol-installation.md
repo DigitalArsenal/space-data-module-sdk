@@ -39,6 +39,10 @@ Examples:
 - selected peer IDs
 - node-info URLs
 - producer-to-consumer input bindings
+- scheduler bindings
+- hosted service bindings
+- request-time auth policy
+- publication, pinning, retention, and archive policy
 
 Those values vary per environment and should not change the identity of a
 signed `.wasm` artifact.
@@ -116,6 +120,54 @@ Use `space-data-module-sdk/deployment` to work with that payload:
       "targetInputPortId": "request",
       "sourceKind": "pubsub",
       "topic": "/spacedatanetwork/sds/OMM.fbs"
+    }
+  ],
+  "scheduleBindings": [
+    {
+      "scheduleId": "poll-upstream",
+      "bindingMode": "local",
+      "targetMethodId": "propagate",
+      "targetInputPortId": "request",
+      "scheduleKind": "cron",
+      "cron": "*/15 * * * *"
+    }
+  ],
+  "serviceBindings": [
+    {
+      "serviceId": "https-query",
+      "bindingMode": "delegated",
+      "serviceKind": "http-server",
+      "routePath": "/api/sgp4",
+      "method": "GET",
+      "remoteUrl": "https://gateway.example.test/api/sgp4",
+      "authPolicyId": "approved-keys"
+    }
+  ],
+  "authPolicies": [
+    {
+      "policyId": "approved-keys",
+      "bindingMode": "delegated",
+      "targetKind": "service",
+      "targetId": "https-query",
+      "walletProfileId": "orbpro-default",
+      "trustMapId": "approved-operators",
+      "allowServerKeys": ["ed25519:..."]
+    }
+  ],
+  "publicationBindings": [
+    {
+      "publicationId": "state-catalog",
+      "bindingMode": "local",
+      "sourceKind": "method-output",
+      "sourceMethodId": "propagate",
+      "sourceOutputPortId": "state",
+      "topic": "/spacedatanetwork/sds/CAT.fbs",
+      "schemaName": "CAT.fbs",
+      "emitPnm": true,
+      "emitFlatbufferArchive": true,
+      "archivePath": "/data/catalog/cat.bin",
+      "recordRangeStartField": "startIndex",
+      "recordRangeStopField": "stopIndex"
     }
   ]
 }

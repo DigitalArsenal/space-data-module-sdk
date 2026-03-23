@@ -7,6 +7,13 @@ export {
 export { decodePluginManifest, encodePluginManifest } from "./codec.js";
 export { toEmbeddedPluginManifest } from "./normalize.js";
 export {
+  clonePayloadTypeRef,
+  getPayloadTypeWireFormat,
+  normalizePayloadWireFormatName,
+  payloadTypeRefsMatch,
+  selectPreferredPayloadTypeRef,
+} from "./typeRefs.js";
+export {
   generateEmbeddedManifestSource,
   writeEmbeddedManifestArtifacts,
 } from "../embeddedManifest.js";

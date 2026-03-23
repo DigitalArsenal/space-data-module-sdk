@@ -16,8 +16,10 @@ import {
 
 const plan = generateManifestHarnessPlan({
   manifest,
-  payloadForPort({ methodId, portId }) {
+  preferredWireFormat: "aligned-binary",
+  payloadForPort({ methodId, portId, typeRef }) {
     if (methodId === "echo" && portId === "in") {
+      console.log("selected wire format:", typeRef?.wireFormat ?? "flatbuffer");
       return "hello";
     }
     return null;
@@ -36,6 +38,14 @@ The generator does two things:
    - WASI-native
    - sync hostcall
    - Node host API only
+
+When a port advertises multiple payload wire formats, pass
+`preferredWireFormat` to select which declared type ref the generated smoke
+cases should use. This is useful for contracts that accept regular FlatBuffer
+inputs but also expose aligned-binary ports or dual-format test fixtures.
+Aligned-binary entries are expected to ship with a regular FlatBuffer fallback
+for the same schema in the same accepted type set, and the harness will choose
+between those declared type refs rather than inventing one.
 
 ## Flows
 

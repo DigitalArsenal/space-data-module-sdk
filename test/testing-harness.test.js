@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  getPayloadTypeWireFormat,
+  payloadTypeRefsMatch,
+  selectPreferredPayloadTypeRef,
   describeCapabilityRuntimeSurface,
   generateManifestHarnessPlan,
   materializeHarnessScenario,
@@ -28,6 +31,51 @@ function createManifest() {
               {
                 setId: "any",
                 allowedTypes: [{ acceptsAnyFlatbuffer: true }],
+              },
+            ],
+          },
+        ],
+        outputPorts: [],
+        maxBatch: 1,
+        drainPolicy: "single-shot",
+      },
+    ],
+  };
+}
+
+function createDualFormatManifest() {
+  return {
+    pluginId: "com.digitalarsenal.examples.testing-harness-dual",
+    name: "Testing Harness Dual Fixture",
+    version: "0.1.0",
+    pluginFamily: "analysis",
+    capabilities: [],
+    invokeSurfaces: ["command"],
+    methods: [
+      {
+        methodId: "transform",
+        displayName: "Transform",
+        inputPorts: [
+          {
+            portId: "request",
+            required: true,
+            acceptedTypeSets: [
+              {
+                setId: "state-vector",
+                allowedTypes: [
+                  {
+                    schemaName: "StateVector.fbs",
+                    fileIdentifier: "STVC",
+                  },
+                  {
+                    schemaName: "StateVector.fbs",
+                    fileIdentifier: "STVC",
+                    wireFormat: "aligned-binary",
+                    rootTypeName: "StateVector",
+                    byteLength: 64,
+                    requiredAlignment: 16,
+                  },
+                ],
               },
             ],
           },
@@ -114,5 +162,78 @@ test("materialized command scenarios encode invoke envelopes from manifest-deriv
   assert.equal(
     new TextDecoder().decode(decoded.inputs[0].payload),
     "hello from generated harness",
+  );
+});
+
+test("manifest harness plan can prefer aligned-binary type refs for mixed-format ports", () => {
+  const payloadFormats = [];
+  const plan = generateManifestHarnessPlan({
+    manifest: createDualFormatManifest(),
+    preferredWireFormat: "aligned-binary",
+    payloadForPort({ typeRef }) {
+      payloadFormats.push(typeRef.wireFormat ?? "flatbuffer");
+      return "aligned payload";
+    },
+  });
+
+  assert.equal(plan.generatedCases.length, 1);
+  assert.equal(plan.generatedCases[0].inputs.length, 1);
+  assert.equal(
+    plan.generatedCases[0].inputs[0].typeRef?.wireFormat,
+    "aligned-binary",
+  );
+  assert.equal(plan.generatedCases[0].inputs[0].typeRef?.rootTypeName, "StateVector");
+  assert.deepEqual(payloadFormats, ["aligned-binary"]);
+});
+
+test("payload type helpers distinguish aligned-binary from regular flatbuffers", () => {
+  const dualPort =
+    createDualFormatManifest().methods[0].inputPorts[0];
+  const selected = selectPreferredPayloadTypeRef(dualPort, {
+    preferredWireFormat: "aligned-binary",
+  });
+  assert.equal(getPayloadTypeWireFormat(selected), "aligned-binary");
+  assert.equal(
+    payloadTypeRefsMatch(
+      {
+        schemaName: "StateVector.fbs",
+        fileIdentifier: "STVC",
+      },
+      {
+        schemaName: "StateVector.fbs",
+        fileIdentifier: "STVC",
+        wireFormat: "aligned-binary",
+        rootTypeName: "StateVector",
+        byteLength: 64,
+        requiredAlignment: 16,
+      },
+    ),
+    false,
+  );
+  assert.equal(
+    payloadTypeRefsMatch(selected, {
+      schemaName: "StateVector.fbs",
+      fileIdentifier: "STVC",
+      wireFormat: "aligned-binary",
+      rootTypeName: "StateVector",
+      byteLength: 64,
+      requiredAlignment: 16,
+    }),
+    true,
+  );
+  assert.equal(
+    payloadTypeRefsMatch(
+      {
+        schemaName: "TimerTick.fbs",
+        fileIdentifier: "TICK",
+        schemaHash: [],
+      },
+      {
+        schemaName: "TimerTick.fbs",
+        fileIdentifier: "TICK",
+        schemaHash: [1, 2, 3, 4],
+      },
+    ),
+    true,
   );
 });

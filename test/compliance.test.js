@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { FlatcRunner } from "flatc-wasm";
 
 import {
   validatePluginManifest,
@@ -61,10 +62,66 @@ function createValidManifest() {
 function createAlignedAllowedType(overrides = {}) {
   return {
     schemaName: "StateVector.fbs",
+    fileIdentifier: "STVC",
     wireFormat: "aligned-binary",
     rootTypeName: "StateVector",
     byteLength: 64,
     requiredAlignment: 8,
+    ...overrides,
+  };
+}
+
+function createFlatbufferAllowedType(overrides = {}) {
+  return {
+    schemaName: "StateVector.fbs",
+    fileIdentifier: "STVC",
+    ...overrides,
+  };
+}
+
+let generatedAlignedFallbackTypePromise = null;
+
+async function createFlatcWasmAlignedAllowedType(overrides = {}) {
+  if (!generatedAlignedFallbackTypePromise) {
+    generatedAlignedFallbackTypePromise = (async () => {
+      const flatc = await FlatcRunner.init();
+      const { layouts } = await flatc.generateAlignedCode(
+        {
+          entry: "aligned-vector-test.fbs",
+          files: {
+            "aligned-vector-test.fbs": `
+              namespace SDS.Test;
+              file_identifier "AVEC";
+              struct Cartesian3 {
+                x:double;
+                y:double;
+                z:double;
+              }
+              table Cartesian3Envelope {
+                value:Cartesian3;
+              }
+              root_type Cartesian3Envelope;
+            `,
+          },
+        },
+        { defaultStringLength: 255 },
+      );
+      const layout = layouts.Cartesian3;
+      if (!layout) {
+        throw new Error("flatc-wasm did not return a Cartesian3 aligned layout");
+      }
+      return {
+        schemaName: "AlignedVectorTest.fbs",
+        fileIdentifier: "AVEC",
+        wireFormat: "aligned-binary",
+        rootTypeName: "Cartesian3",
+        byteLength: layout.size,
+        requiredAlignment: layout.align,
+      };
+    })();
+  }
+  return {
+    ...(await generatedAlignedFallbackTypePromise),
     ...overrides,
   };
 }
@@ -280,12 +337,27 @@ test("acceptsAnyFlatbuffer type passes without identity fields", () => {
   assert.equal(report.ok, true);
 });
 
-test("aligned-binary type passes with required layout fields", () => {
+test("aligned-binary type requires a regular flatbuffer fallback in the same type set", async () => {
   const m = createValidManifest();
   m.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
-    createAlignedAllowedType(),
+    await createFlatcWasmAlignedAllowedType(),
   ];
-  m.schemasUsed = [createAlignedAllowedType({ rootTypeName: "StateVectorRecord" })];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, false);
+  assert.ok(report.errors.some((e) => e.code === "missing-flatbuffer-fallback"));
+});
+
+test("aligned-binary type passes with required layout fields and a regular fallback", async () => {
+  const alignedType = await createFlatcWasmAlignedAllowedType();
+  const m = createValidManifest();
+  m.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
+    createFlatbufferAllowedType({
+      schemaName: alignedType.schemaName,
+      fileIdentifier: alignedType.fileIdentifier,
+    }),
+    alignedType,
+  ];
+  m.schemasUsed = [alignedType];
   const report = validatePluginManifest(m);
   assert.equal(report.ok, true);
 });

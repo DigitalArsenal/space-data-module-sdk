@@ -120,6 +120,36 @@ int fanout(void) {
 }
 `;
 
+const MIXED_FORMAT_SOURCE = `#include <stdint.h>
+#include "space_data_module_invoke.h"
+
+int propagate(void) {
+  const plugin_input_frame_t *frame = plugin_get_input_frame(0);
+  static const uint8_t state_vector_bytes[24] = {
+    0, 1, 2, 3, 4, 5, 6, 7,
+    8, 9, 10, 11, 12, 13, 14, 15,
+    16, 17, 18, 19, 20, 21, 22, 23
+  };
+  if (!frame) {
+    plugin_set_error("missing-frame", "No input frame was provided.");
+    return 3;
+  }
+  plugin_push_output_typed(
+    "state",
+    "StateVector.fbs",
+    "STVC",
+    1,
+    "StateVector",
+    0,
+    24,
+    8,
+    state_vector_bytes,
+    24
+  );
+  return 0;
+}
+`;
+
 function createWasi(args = ["module"], overrides = {}) {
   return new WASI({
     version: "preview1",
@@ -375,6 +405,110 @@ test("direct invoke ABI preserves explicit aligned layout metadata", async () =>
     assert.equal(response.outputs[0].typeRef?.byteLength, 64);
     assert.equal(response.outputs[0].typeRef?.requiredAlignment, 16);
     assert.equal(response.outputs[0].alignment, 16);
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
+test("direct invoke ABI supports regular flatbuffer inputs and aligned-binary outputs", async () => {
+  const manifest = {
+    ...createInvokeManifest({
+      pluginId: "com.digitalarsenal.examples.invoke-mixed-formats",
+      invokeSurfaces: ["direct"],
+      methodId: "propagate",
+      inputPortIds: ["request"],
+      outputPortIds: ["state"],
+    }),
+    methods: [
+      {
+        methodId: "propagate",
+        displayName: "propagate",
+        inputPorts: [
+          {
+            portId: "request",
+            acceptedTypeSets: [
+              {
+                setId: "omm",
+                allowedTypes: [
+                  {
+                    schemaName: "OMM.fbs",
+                    fileIdentifier: "$OMM",
+                  },
+                ],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        outputPorts: [
+          {
+            portId: "state",
+            acceptedTypeSets: [
+              {
+                setId: "aligned-state",
+                allowedTypes: [
+                  {
+                    schemaName: "StateVector.fbs",
+                    fileIdentifier: "STVC",
+                  },
+                  {
+                    schemaName: "StateVector.fbs",
+                    fileIdentifier: "STVC",
+                    wireFormat: "aligned-binary",
+                    rootTypeName: "StateVector",
+                    byteLength: 24,
+                    requiredAlignment: 8,
+                  },
+                ],
+              },
+            ],
+            minStreams: 0,
+            maxStreams: 1,
+            required: false,
+          },
+        ],
+        maxBatch: 1,
+        drainPolicy: "single-shot",
+      },
+    ],
+  };
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: MIXED_FORMAT_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    const requestBytes = encodePluginInvokeRequest({
+      methodId: "propagate",
+      inputs: [
+        {
+          portId: "request",
+          typeRef: {
+            schemaName: "OMM.fbs",
+            fileIdentifier: "$OMM",
+          },
+          payload: createPayload("omm-request"),
+        },
+      ],
+    });
+    const { response } = invokeDirect(instance, requestBytes);
+    assert.equal(response.statusCode, 0);
+    assert.equal(response.outputs.length, 1);
+    assert.equal(response.outputs[0].portId, "state");
+    assert.equal(response.outputs[0].typeRef?.schemaName, "StateVector.fbs");
+    assert.equal(response.outputs[0].typeRef?.fileIdentifier, "STVC");
+    assert.equal(response.outputs[0].typeRef?.wireFormat, "aligned-binary");
+    assert.equal(response.outputs[0].typeRef?.rootTypeName, "StateVector");
+    assert.equal(response.outputs[0].typeRef?.byteLength, 24);
+    assert.equal(response.outputs[0].typeRef?.requiredAlignment, 8);
+    assert.deepEqual(
+      Array.from(response.outputs[0].payload),
+      Array.from({ length: 24 }, (_, index) => index),
+    );
   } finally {
     await cleanupCompilation(compilation);
   }

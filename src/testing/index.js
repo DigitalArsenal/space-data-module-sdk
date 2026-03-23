@@ -1,7 +1,6 @@
 import { encodePluginInvokeRequest } from "../invoke/codec.js";
 import { normalizeInvokeSurfaces } from "../invoke/index.js";
-
-const DEFAULT_ANY_TYPE = Object.freeze({ acceptsAnyFlatbuffer: true });
+import { selectPreferredPayloadTypeRef } from "../manifest/typeRefs.js";
 
 const CapabilitySurfaceMatrix = Object.freeze({
   logging: Object.freeze({
@@ -230,37 +229,10 @@ const CapabilitySurfaceMatrix = Object.freeze({
   }),
 });
 
-function cloneTypeRef(value = null) {
-  if (!value || typeof value !== "object") {
-    return { ...DEFAULT_ANY_TYPE };
-  }
-  return {
-    schemaName: value.schemaName ?? value.schema_name ?? undefined,
-    fileIdentifier: value.fileIdentifier ?? value.file_identifier ?? undefined,
-    schemaHash: Array.isArray(value.schemaHash ?? value.schema_hash)
-      ? [...(value.schemaHash ?? value.schema_hash)]
-      : value.schemaHash ?? value.schema_hash ?? undefined,
-    acceptsAnyFlatbuffer: Boolean(
-      value.acceptsAnyFlatbuffer ?? value.accepts_any_flatbuffer ?? false,
-    ),
-    wireFormat: value.wireFormat ?? value.wire_format ?? undefined,
-    rootTypeName: value.rootTypeName ?? value.root_type_name ?? undefined,
-    fixedStringLength:
-      value.fixedStringLength ?? value.fixed_string_length ?? undefined,
-    byteLength: value.byteLength ?? value.byte_length ?? undefined,
-    requiredAlignment:
-      value.requiredAlignment ?? value.required_alignment ?? undefined,
-  };
-}
-
-function findDefaultTypeRef(port = {}) {
-  for (const typeSet of Array.isArray(port.acceptedTypeSets) ? port.acceptedTypeSets : []) {
-    const allowed = Array.isArray(typeSet.allowedTypes) ? typeSet.allowedTypes : [];
-    if (allowed.length > 0) {
-      return cloneTypeRef(allowed[0]);
-    }
-  }
-  return { ...DEFAULT_ANY_TYPE };
+function findDefaultTypeRef(port = {}, options = {}) {
+  return selectPreferredPayloadTypeRef(port, {
+    preferredWireFormat: options.preferredWireFormat,
+  });
 }
 
 function normalizePayloadBytes(value) {
@@ -286,17 +258,19 @@ function buildDefaultInputs(method = {}, options = {}) {
     if (!required && options.includeOptionalInputs !== true) {
       continue;
     }
+    const typeRef = findDefaultTypeRef(port, options);
     const payload = options.payloadForPort
       ? options.payloadForPort({
           methodId: method.methodId ?? null,
           portId: port.portId ?? null,
           port,
           required,
+          typeRef,
         })
       : null;
     inputs.push({
       portId: port.portId ?? null,
-      typeRef: findDefaultTypeRef(port),
+      typeRef,
       payload: normalizePayloadBytes(payload),
     });
   }

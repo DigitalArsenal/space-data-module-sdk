@@ -74,10 +74,19 @@ function createTestManifest() {
 function createAlignedType(overrides = {}) {
   return {
     schemaName: "StateVector.fbs",
+    fileIdentifier: "STVC",
     wireFormat: "aligned-binary",
     rootTypeName: "StateVector",
     byteLength: 64,
     requiredAlignment: 8,
+    ...overrides,
+  };
+}
+
+function createFlatbufferType(overrides = {}) {
+  return {
+    schemaName: "StateVector.fbs",
+    fileIdentifier: "STVC",
     ...overrides,
   };
 }
@@ -146,16 +155,16 @@ test("aligned payload type refs round-trip through FlatBuffer encoding", () => {
             acceptedTypeSets: [
               {
                 setId: "aligned-state",
-                allowedTypes: [createAlignedType()],
+                allowedTypes: [
+                  createFlatbufferType(),
+                  createAlignedType(),
+                ],
               },
               {
                 setId: "dual-state",
                 allowedTypes: [
+                  createFlatbufferType(),
                   createAlignedType({ rootTypeName: "StateVectorRecord" }),
-                  {
-                    schemaName: "StateVector.fbs",
-                    fileIdentifier: "STVC",
-                  },
                 ],
               },
             ],
@@ -174,13 +183,13 @@ test("aligned payload type refs round-trip through FlatBuffer encoding", () => {
   const encoded = encodePluginManifest(manifest);
   const decoded = decodePluginManifest(encoded);
   const alignedType =
-    decoded.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes[0];
+    decoded.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes[1];
   assert.equal(alignedType.wireFormat, "aligned-binary");
   assert.equal(alignedType.rootTypeName, "StateVector");
   assert.equal(alignedType.byteLength, 64);
   assert.equal(alignedType.requiredAlignment, 8);
   assert.equal(
-    decoded.methods[0].inputPorts[0].acceptedTypeSets[1].allowedTypes[1]
+    decoded.methods[0].inputPorts[0].acceptedTypeSets[1].allowedTypes[0]
       .wireFormat,
     "flatbuffer",
   );
@@ -247,7 +256,10 @@ test("embedded manifest source stays a raw byte buffer for c and c++ modules", (
               acceptedTypeSets: [
                 {
                   setId: "aligned-state",
-                  allowedTypes: [createAlignedType()],
+                  allowedTypes: [
+                    createFlatbufferType(),
+                    createAlignedType(),
+                  ],
                 },
               ],
             },
@@ -294,7 +306,10 @@ test("c++ source compile emits a compliant wasm module with aligned manifest met
             acceptedTypeSets: [
               {
                 setId: "aligned-state",
-                allowedTypes: [createAlignedType()],
+                allowedTypes: [
+                  createFlatbufferType(),
+                  createAlignedType(),
+                ],
               },
             ],
           },
@@ -442,8 +457,13 @@ test("aligned OrbPro-style stream type refs resolve without standards warnings",
               {
                 setId: "aligned-state",
                 allowedTypes: [
+                  createFlatbufferType({
+                    schemaName: "StateVector.fbs",
+                    fileIdentifier: "STVC",
+                  }),
                   createAlignedType({
                     schemaName: "StateVector.fbs",
+                    fileIdentifier: "STVC",
                     rootTypeName: "StateVector",
                   }),
                 ],
@@ -462,6 +482,7 @@ test("aligned OrbPro-style stream type refs resolve without standards warnings",
     schemasUsed: [
       createAlignedType({
         schemaName: "CatalogQueryRequest.fbs",
+        fileIdentifier: "CQRQ",
         rootTypeName: "CatalogQueryRequest",
         byteLength: 128,
         requiredAlignment: 8,
@@ -471,6 +492,75 @@ test("aligned OrbPro-style stream type refs resolve without standards warnings",
   const report = await validateManifestWithStandards(manifest);
   assert.equal(report.ok, true);
   assert.deepEqual(report.warnings, []);
+});
+
+test("regular input and aligned output port contracts validate together", async () => {
+  const manifest = {
+    pluginId: "com.digitalarsenal.examples.sgp4-mixed-contract",
+    name: "SGP4 Mixed Contract",
+    version: "0.1.0",
+    pluginFamily: "propagator",
+    capabilities: [],
+    externalInterfaces: [],
+    methods: [
+      {
+        methodId: "propagate",
+        displayName: "Propagate",
+        inputPorts: [
+          {
+            portId: "request",
+            acceptedTypeSets: [
+              {
+                setId: "omm",
+                allowedTypes: [
+                  {
+                    schemaName: "OMM.fbs",
+                    fileIdentifier: "$OMM",
+                  },
+                ],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        outputPorts: [
+          {
+            portId: "state",
+            acceptedTypeSets: [
+              {
+                setId: "state-vector",
+                allowedTypes: [
+                  createFlatbufferType(),
+                  createAlignedType(),
+                ],
+              },
+            ],
+            minStreams: 0,
+            maxStreams: 1,
+            required: false,
+          },
+        ],
+        maxBatch: 1,
+        drainPolicy: "single-shot",
+      },
+    ],
+  };
+  const encoded = encodePluginManifest(manifest);
+  const decoded = decodePluginManifest(encoded);
+  assert.equal(
+    decoded.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes[0].wireFormat,
+    "flatbuffer",
+  );
+  assert.equal(
+    decoded.methods[0].outputPorts[0].acceptedTypeSets[0].allowedTypes[0].wireFormat,
+    "flatbuffer",
+  );
+  assert.equal(
+    decoded.methods[0].outputPorts[0].acceptedTypeSets[0].allowedTypes[1].wireFormat,
+    "aligned-binary",
+  );
 });
 
 test("known type catalog includes shared module and SDS entries", async () => {

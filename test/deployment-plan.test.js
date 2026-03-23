@@ -129,6 +129,60 @@ function createDeploymentPlan(overrides = {}) {
         allowServerKeys: ["ed25519:test-key"],
       },
     ],
+    scheduleBindings: [
+      {
+        scheduleId: "poll-upstream",
+        bindingMode: "local",
+        targetMethodId: "propagate",
+        targetInputPortId: "request",
+        scheduleKind: "cron",
+        cron: "*/15 * * * *",
+        timezone: "UTC",
+      },
+    ],
+    serviceBindings: [
+      {
+        serviceId: "https-query",
+        bindingMode: "delegated",
+        serviceKind: "http-server",
+        routePath: "/api/sgp4",
+        method: "GET",
+        remoteUrl: "https://gateway.example.test/api/sgp4",
+        allowTransports: ["https"],
+        authPolicyId: "approved-keys",
+      },
+    ],
+    authPolicies: [
+      {
+        policyId: "approved-keys",
+        bindingMode: "delegated",
+        targetKind: "service",
+        targetId: "https-query",
+        walletProfileId: "orbpro-default",
+        trustMapId: "approved-operators",
+        allowServerKeys: ["ed25519:test-key"],
+      },
+    ],
+    publicationBindings: [
+      {
+        publicationId: "state-catalog",
+        bindingMode: "local",
+        sourceKind: "method-output",
+        sourceMethodId: "propagate",
+        sourceOutputPortId: "state",
+        topic: "/spacedatanetwork/sds/CAT.fbs",
+        schemaName: "CAT.fbs",
+        emitPnm: true,
+        emitFlatbufferArchive: true,
+        archivePath: "/data/catalog/cat.bin",
+        queryServiceId: "https-query",
+        recordRangeStartField: "startIndex",
+        recordRangeStopField: "stopIndex",
+        maxRecords: 2048,
+        maxBytes: 1048576,
+        minLivelinessSeconds: 900,
+      },
+    ],
     ...overrides,
   };
 }
@@ -138,6 +192,8 @@ test("deployment plans normalize and validate against a manifest", () => {
   const plan = createDeploymentPlan();
   const normalized = normalizeDeploymentPlan(plan);
   assert.equal(normalized.inputBindings[1].sourceKind, "protocol-stream");
+  assert.equal(normalized.scheduleBindings[0].scheduleKind, "cron");
+  assert.equal(normalized.serviceBindings[0].bindingMode, "delegated");
 
   const report = validateDeploymentPlan(plan, { manifest });
   assert.equal(report.ok, true);
@@ -166,6 +222,39 @@ test("deployment plans catch manifest mismatches", () => {
   assert.equal(report.ok, false);
   assert.ok(
     report.errors.some((issue) => issue.code === "unknown-input-binding-port"),
+  );
+});
+
+test("deployment plans catch missing auth policy and malformed schedules", () => {
+  const manifest = createManifest();
+  const plan = createDeploymentPlan({
+    serviceBindings: [
+      {
+        serviceId: "https-query",
+        bindingMode: "delegated",
+        serviceKind: "http-server",
+        routePath: "/api/sgp4",
+        authPolicyId: "missing-policy",
+      },
+    ],
+    scheduleBindings: [
+      {
+        scheduleId: "bad-schedule",
+        bindingMode: "local",
+        scheduleKind: "interval",
+        targetMethodId: "propagate",
+        targetInputPortId: "request",
+        intervalMs: 0,
+      },
+    ],
+  });
+  const report = validateDeploymentPlan(plan, { manifest });
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some((issue) => issue.code === "unknown-service-auth-policy"),
+  );
+  assert.ok(
+    report.errors.some((issue) => issue.code === "invalid-interval-ms"),
   );
 });
 

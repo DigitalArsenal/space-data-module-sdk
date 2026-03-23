@@ -111,7 +111,10 @@ int stderr_probe(void) {
 
 export function createRuntimeFixtureManifest() {
   const anyType = [{ acceptsAnyFlatbuffer: true }];
-  const alignedType = [{
+  const dualRuntimeMatrixTypes = [{
+    schemaName: "RuntimeMatrix.fbs",
+    fileIdentifier: "RTMX",
+  }, {
     schemaName: "RuntimeMatrix.fbs",
     fileIdentifier: "RTMX",
     wireFormat: "aligned-binary",
@@ -141,7 +144,7 @@ export function createRuntimeFixtureManifest() {
         inputPorts: [
           {
             portId: "in",
-            acceptedTypeSets: [{ setId: "aligned-in", allowedTypes: alignedType }],
+            acceptedTypeSets: [{ setId: "aligned-in", allowedTypes: dualRuntimeMatrixTypes }],
             minStreams: 1,
             maxStreams: 1,
             required: true,
@@ -150,7 +153,7 @@ export function createRuntimeFixtureManifest() {
         outputPorts: [
           {
             portId: "out",
-            acceptedTypeSets: [{ setId: "aligned-out", allowedTypes: alignedType }],
+            acceptedTypeSets: [{ setId: "aligned-out", allowedTypes: dualRuntimeMatrixTypes }],
             minStreams: 0,
             maxStreams: 1,
             required: false,

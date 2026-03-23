@@ -1,4 +1,9 @@
-import type { InvokeSurface, PayloadTypeRef, PluginManifest } from "../index.js";
+import type {
+  InvokeSurface,
+  PayloadTypeRef,
+  PayloadWireFormat,
+  PluginManifest,
+} from "../index.js";
 
 export interface HarnessInputFrame {
   portId?: string | null;
@@ -58,11 +63,13 @@ export function generateManifestHarnessPlan(options: {
   manifest: PluginManifest;
   includeOptionalInputs?: boolean;
   expectedStatusCode?: number;
+  preferredWireFormat?: PayloadWireFormat;
   payloadForPort?: (context: {
     methodId: string | null;
     portId: string | null;
     port: unknown;
     required: boolean;
+    typeRef: PayloadTypeRef;
   }) => Uint8Array | ArrayBuffer | ArrayBufferView | string | null | undefined;
   scenarios?: Array<HarnessInvokeScenario | HarnessRawScenario>;
 }): ManifestHarnessPlan;

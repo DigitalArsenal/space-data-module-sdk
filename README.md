@@ -82,6 +82,14 @@ outputs. The reference invoke examples live in
 - `manifest.hybrid.json`
 - `module.c`
 
+Input and output ports can independently declare regular `flatbuffer` payloads
+or `aligned-binary` layouts. Mixed contracts are valid. When a port advertises
+an `aligned-binary` layout, it must also advertise a regular `flatbuffer`
+fallback for the same schema in the same accepted type set. A module can accept
+a regular `OMM.fbs` request and emit an aligned-binary `StateVector.fbs`
+response, provided the output port also declares the regular `StateVector.fbs`
+fallback and the aligned type ref carries the correct layout metadata.
+
 ## Runtime Portability
 
 The module format is language-neutral. A host can load modules from this SDK

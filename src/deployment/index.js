@@ -17,9 +17,22 @@ export const InputBindingSourceKind = Object.freeze({
   CATALOG_SYNC: "catalog-sync",
 });
 
+export const DeploymentBindingMode = Object.freeze({
+  LOCAL: "local",
+  DELEGATED: "delegated",
+});
+
+export const ScheduleBindingKind = Object.freeze({
+  INTERVAL: "interval",
+  CRON: "cron",
+  ONCE: "once",
+});
+
 const InputBindingSourceKindSet = new Set(Object.values(InputBindingSourceKind));
+const DeploymentBindingModeSet = new Set(Object.values(DeploymentBindingMode));
 const ProtocolRoleSet = new Set(Object.values(ProtocolRole));
 const ProtocolTransportKindSet = new Set(Object.values(ProtocolTransportKind));
+const ScheduleBindingKindSet = new Set(Object.values(ScheduleBindingKind));
 
 function normalizeString(value) {
   if (value === undefined || value === null) {
@@ -51,6 +64,13 @@ function normalizeStringArray(value) {
   return value
     .map((entry) => normalizeString(entry))
     .filter((entry) => entry !== null);
+}
+
+function normalizeRecord(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return { ...value };
 }
 
 export function normalizeProtocolTransportKindName(value) {
@@ -95,6 +115,34 @@ export function normalizeInputBindingSourceKindName(value) {
   return normalized.length > 0 ? normalized : null;
 }
 
+export function normalizeDeploymentBindingModeName(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const normalized = String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+  if (normalized === "remote") {
+    return DeploymentBindingMode.DELEGATED;
+  }
+  return normalized.length > 0 ? normalized : null;
+}
+
+export function normalizeScheduleBindingKindName(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const normalized = String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+  if (normalized === "startup") {
+    return ScheduleBindingKind.ONCE;
+  }
+  return normalized.length > 0 ? normalized : null;
+}
+
 function normalizeProtocolInstallation(value = {}) {
   return {
     protocolId: normalizeString(value.protocolId),
@@ -130,6 +178,91 @@ function normalizeInputBinding(value = {}) {
   };
 }
 
+function normalizeScheduleBinding(value = {}) {
+  return {
+    scheduleId: normalizeString(value.scheduleId),
+    bindingMode: normalizeDeploymentBindingModeName(value.bindingMode),
+    triggerId: normalizeString(value.triggerId),
+    targetMethodId: normalizeString(value.targetMethodId),
+    targetInputPortId: normalizeString(value.targetInputPortId),
+    scheduleKind: normalizeScheduleBindingKindName(value.scheduleKind),
+    cron: normalizeString(value.cron),
+    intervalMs: normalizeInteger(value.intervalMs),
+    runAtStartup: normalizeBoolean(value.runAtStartup),
+    startupDelayMs: normalizeInteger(value.startupDelayMs),
+    timezone: normalizeString(value.timezone),
+    description: normalizeString(value.description),
+  };
+}
+
+function normalizeServiceBinding(value = {}) {
+  return {
+    serviceId: normalizeString(value.serviceId),
+    bindingMode: normalizeDeploymentBindingModeName(value.bindingMode),
+    serviceKind: normalizeString(value.serviceKind),
+    triggerId: normalizeString(value.triggerId),
+    protocolId: normalizeString(value.protocolId),
+    routePath: normalizeString(value.routePath),
+    method: normalizeString(value.method),
+    transportKind: normalizeProtocolTransportKindName(value.transportKind),
+    adapter: normalizeString(value.adapter),
+    listenHost: normalizeString(value.listenHost),
+    listenPort: normalizeInteger(value.listenPort),
+    remoteUrl: normalizeString(value.remoteUrl),
+    allowTransports: normalizeStringArray(value.allowTransports),
+    authPolicyId: normalizeString(value.authPolicyId),
+    description: normalizeString(value.description),
+    properties: normalizeRecord(value.properties),
+  };
+}
+
+function normalizeAuthPolicy(value = {}) {
+  return {
+    policyId: normalizeString(value.policyId),
+    bindingMode: normalizeDeploymentBindingModeName(value.bindingMode),
+    targetKind: normalizeString(value.targetKind),
+    targetId: normalizeString(value.targetId),
+    adapter: normalizeString(value.adapter),
+    walletProfileId: normalizeString(value.walletProfileId),
+    trustMapId: normalizeString(value.trustMapId),
+    allowPeerIds: normalizeStringArray(value.allowPeerIds),
+    allowServerKeys: normalizeStringArray(value.allowServerKeys),
+    allowEntityIds: normalizeStringArray(value.allowEntityIds),
+    requireSignedRequests: normalizeBoolean(value.requireSignedRequests),
+    requireEncryptedTransport: normalizeBoolean(value.requireEncryptedTransport),
+    description: normalizeString(value.description),
+    properties: normalizeRecord(value.properties),
+  };
+}
+
+function normalizePublicationBinding(value = {}) {
+  return {
+    publicationId: normalizeString(value.publicationId),
+    bindingMode: normalizeDeploymentBindingModeName(value.bindingMode),
+    sourceKind: normalizeString(value.sourceKind),
+    sourceMethodId: normalizeString(value.sourceMethodId),
+    sourceOutputPortId: normalizeString(value.sourceOutputPortId),
+    sourceNodeId: normalizeString(value.sourceNodeId),
+    sourceTriggerId: normalizeString(value.sourceTriggerId),
+    topic: normalizeString(value.topic),
+    wireId: normalizeString(value.wireId),
+    schemaName: normalizeString(value.schemaName),
+    mediaType: normalizeString(value.mediaType),
+    archivePath: normalizeString(value.archivePath),
+    queryServiceId: normalizeString(value.queryServiceId),
+    emitPnm: normalizeBoolean(value.emitPnm),
+    emitFlatbufferArchive: normalizeBoolean(value.emitFlatbufferArchive),
+    pinPolicy: normalizeString(value.pinPolicy),
+    maxRecords: normalizeInteger(value.maxRecords),
+    maxBytes: normalizeInteger(value.maxBytes),
+    minLivelinessSeconds: normalizeInteger(value.minLivelinessSeconds),
+    recordRangeStartField: normalizeString(value.recordRangeStartField),
+    recordRangeStopField: normalizeString(value.recordRangeStopField),
+    description: normalizeString(value.description),
+    properties: normalizeRecord(value.properties),
+  };
+}
+
 export function normalizeDeploymentPlan(value = {}) {
   return {
     formatVersion: normalizeInteger(
@@ -148,6 +281,20 @@ export function normalizeDeploymentPlan(value = {}) {
       : [],
     inputBindings: Array.isArray(value.inputBindings)
       ? value.inputBindings.map((entry) => normalizeInputBinding(entry))
+      : [],
+    scheduleBindings: Array.isArray(value.scheduleBindings)
+      ? value.scheduleBindings.map((entry) => normalizeScheduleBinding(entry))
+      : [],
+    serviceBindings: Array.isArray(value.serviceBindings)
+      ? value.serviceBindings.map((entry) => normalizeServiceBinding(entry))
+      : [],
+    authPolicies: Array.isArray(value.authPolicies)
+      ? value.authPolicies.map((entry) => normalizeAuthPolicy(entry))
+      : [],
+    publicationBindings: Array.isArray(value.publicationBindings)
+      ? value.publicationBindings.map((entry) =>
+          normalizePublicationBinding(entry),
+        )
       : [],
   };
 }
@@ -607,6 +754,591 @@ function validateInputBinding(
   }
 }
 
+function validateBindingModeField(issues, value, location, label) {
+  const normalized = normalizeDeploymentBindingModeName(value);
+  if (
+    validateStringField(issues, value, location, label) &&
+    !DeploymentBindingModeSet.has(normalized)
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "unknown-binding-mode",
+      `${label} must be one of: ${Array.from(DeploymentBindingModeSet).join(
+        ", ",
+      )}.`,
+      location,
+    );
+    return false;
+  }
+  return true;
+}
+
+function validateScheduleBinding(
+  binding,
+  issues,
+  location,
+  manifest,
+  manifestMethodLookup,
+) {
+  if (!binding || typeof binding !== "object" || Array.isArray(binding)) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-schedule-binding",
+      "Schedule binding entries must be objects.",
+      location,
+    );
+    return;
+  }
+  validateStringField(
+    issues,
+    binding.scheduleId,
+    `${location}.scheduleId`,
+    "Schedule binding scheduleId",
+  );
+  validateBindingModeField(
+    issues,
+    binding.bindingMode,
+    `${location}.bindingMode`,
+    "Schedule binding bindingMode",
+  );
+  const scheduleKind = normalizeScheduleBindingKindName(binding.scheduleKind);
+  if (
+    validateStringField(
+      issues,
+      binding.scheduleKind,
+      `${location}.scheduleKind`,
+      "Schedule binding scheduleKind",
+    ) &&
+    !ScheduleBindingKindSet.has(scheduleKind)
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "unknown-schedule-kind",
+      `Schedule binding scheduleKind must be one of: ${Array.from(
+        ScheduleBindingKindSet,
+      ).join(", ")}.`,
+      `${location}.scheduleKind`,
+    );
+  }
+  validateOptionalStringField(
+    issues,
+    binding.triggerId,
+    `${location}.triggerId`,
+    "Schedule binding triggerId",
+  );
+  const hasTriggerId = typeof binding.triggerId === "string" && binding.triggerId.length > 0;
+  const targetMethodIdValid =
+    validateOptionalStringField(
+      issues,
+      binding.targetMethodId,
+      `${location}.targetMethodId`,
+      "Schedule binding targetMethodId",
+    ) &&
+    typeof binding.targetMethodId === "string" &&
+    binding.targetMethodId.length > 0;
+  const targetInputPortIdPresent =
+    typeof binding.targetInputPortId === "string" &&
+    binding.targetInputPortId.length > 0;
+  validateOptionalStringField(
+    issues,
+    binding.targetInputPortId,
+    `${location}.targetInputPortId`,
+    "Schedule binding targetInputPortId",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.cron,
+    `${location}.cron`,
+    "Schedule binding cron",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.timezone,
+    `${location}.timezone`,
+    "Schedule binding timezone",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.description,
+    `${location}.description`,
+    "Schedule binding description",
+  );
+  if (!hasTriggerId && !targetMethodIdValid) {
+    pushIssue(
+      issues,
+      "error",
+      "missing-schedule-target",
+      "Schedule bindings must target either a triggerId or a targetMethodId.",
+      location,
+    );
+  }
+  if (
+    scheduleKind === ScheduleBindingKind.CRON &&
+    !validateStringField(
+      issues,
+      binding.cron,
+      `${location}.cron`,
+      "Cron schedule binding cron",
+    )
+  ) {
+    // error already recorded
+  }
+  if (
+    scheduleKind === ScheduleBindingKind.INTERVAL &&
+    (!Number.isInteger(binding.intervalMs) || binding.intervalMs <= 0)
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-interval-ms",
+      "Interval schedule bindings must define intervalMs greater than 0.",
+      `${location}.intervalMs`,
+    );
+  }
+  if (
+    scheduleKind === ScheduleBindingKind.ONCE &&
+    binding.runAtStartup !== true &&
+    (!Number.isInteger(binding.startupDelayMs) || binding.startupDelayMs <= 0)
+  ) {
+    pushIssue(
+      issues,
+      "warning",
+      "once-schedule-without-startup",
+      "Once schedule bindings should either runAtStartup or define startupDelayMs.",
+      location,
+    );
+  }
+  if (targetMethodIdValid && manifest) {
+    const method = manifestMethodLookup.get(binding.targetMethodId);
+    if (!method) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-schedule-binding-method",
+        `Schedule binding "${binding.scheduleId ?? "schedule"}" targets unknown method "${binding.targetMethodId}".`,
+        `${location}.targetMethodId`,
+      );
+    } else if (
+      targetInputPortIdPresent &&
+      !Array.isArray(method.inputPorts)
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-schedule-binding-port",
+        `Schedule binding "${binding.scheduleId ?? "schedule"}" targets method "${binding.targetMethodId}" without declared input ports.`,
+        `${location}.targetInputPortId`,
+      );
+    } else if (
+      targetInputPortIdPresent &&
+      !method.inputPorts.some((port) => port?.portId === binding.targetInputPortId)
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-schedule-binding-port",
+        `Schedule binding "${binding.scheduleId ?? "schedule"}" targets unknown input port "${binding.targetInputPortId}" on method "${binding.targetMethodId}".`,
+        `${location}.targetInputPortId`,
+      );
+    }
+  }
+}
+
+function validateServiceBinding(binding, issues, location) {
+  if (!binding || typeof binding !== "object" || Array.isArray(binding)) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-service-binding",
+      "Service binding entries must be objects.",
+      location,
+    );
+    return;
+  }
+  validateStringField(
+    issues,
+    binding.serviceId,
+    `${location}.serviceId`,
+    "Service binding serviceId",
+  );
+  validateBindingModeField(
+    issues,
+    binding.bindingMode,
+    `${location}.bindingMode`,
+    "Service binding bindingMode",
+  );
+  validateStringField(
+    issues,
+    binding.serviceKind,
+    `${location}.serviceKind`,
+    "Service binding serviceKind",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.triggerId,
+    `${location}.triggerId`,
+    "Service binding triggerId",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.protocolId,
+    `${location}.protocolId`,
+    "Service binding protocolId",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.routePath,
+    `${location}.routePath`,
+    "Service binding routePath",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.method,
+    `${location}.method`,
+    "Service binding method",
+  );
+  if (
+    binding.transportKind !== null &&
+    binding.transportKind !== undefined &&
+    !ProtocolTransportKindSet.has(
+      normalizeProtocolTransportKindName(binding.transportKind),
+    )
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "unknown-service-transport-kind",
+      `Service binding transportKind must be one of: ${Array.from(
+        ProtocolTransportKindSet,
+      ).join(", ")}.`,
+      `${location}.transportKind`,
+    );
+  }
+  validateOptionalStringField(
+    issues,
+    binding.adapter,
+    `${location}.adapter`,
+    "Service binding adapter",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.listenHost,
+    `${location}.listenHost`,
+    "Service binding listenHost",
+  );
+  validatePortField(
+    issues,
+    binding.listenPort,
+    `${location}.listenPort`,
+    "Service binding listenPort",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.remoteUrl,
+    `${location}.remoteUrl`,
+    "Service binding remoteUrl",
+  );
+  validateStringArrayField(
+    issues,
+    binding.allowTransports,
+    `${location}.allowTransports`,
+    "Service binding allowTransports",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.authPolicyId,
+    `${location}.authPolicyId`,
+    "Service binding authPolicyId",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.description,
+    `${location}.description`,
+    "Service binding description",
+  );
+}
+
+function validateAuthPolicy(binding, issues, location) {
+  if (!binding || typeof binding !== "object" || Array.isArray(binding)) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-auth-policy",
+      "Auth policy entries must be objects.",
+      location,
+    );
+    return;
+  }
+  validateStringField(
+    issues,
+    binding.policyId,
+    `${location}.policyId`,
+    "Auth policy policyId",
+  );
+  validateBindingModeField(
+    issues,
+    binding.bindingMode,
+    `${location}.bindingMode`,
+    "Auth policy bindingMode",
+  );
+  validateStringField(
+    issues,
+    binding.targetKind,
+    `${location}.targetKind`,
+    "Auth policy targetKind",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.targetId,
+    `${location}.targetId`,
+    "Auth policy targetId",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.adapter,
+    `${location}.adapter`,
+    "Auth policy adapter",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.walletProfileId,
+    `${location}.walletProfileId`,
+    "Auth policy walletProfileId",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.trustMapId,
+    `${location}.trustMapId`,
+    "Auth policy trustMapId",
+  );
+  validateStringArrayField(
+    issues,
+    binding.allowPeerIds,
+    `${location}.allowPeerIds`,
+    "Auth policy allowPeerIds",
+  );
+  validateStringArrayField(
+    issues,
+    binding.allowServerKeys,
+    `${location}.allowServerKeys`,
+    "Auth policy allowServerKeys",
+  );
+  validateStringArrayField(
+    issues,
+    binding.allowEntityIds,
+    `${location}.allowEntityIds`,
+    "Auth policy allowEntityIds",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.description,
+    `${location}.description`,
+    "Auth policy description",
+  );
+  if (
+    binding.allowPeerIds.length === 0 &&
+    binding.allowServerKeys.length === 0 &&
+    binding.allowEntityIds.length === 0 &&
+    !binding.walletProfileId &&
+    !binding.trustMapId
+  ) {
+    pushIssue(
+      issues,
+      "warning",
+      "open-auth-policy",
+      "Auth policies should declare at least one allow-list or trust map.",
+      location,
+    );
+  }
+}
+
+function validatePublicationBinding(
+  binding,
+  issues,
+  location,
+  manifest,
+  manifestMethodLookup,
+) {
+  if (!binding || typeof binding !== "object" || Array.isArray(binding)) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-publication-binding",
+      "Publication binding entries must be objects.",
+      location,
+    );
+    return;
+  }
+  validateStringField(
+    issues,
+    binding.publicationId,
+    `${location}.publicationId`,
+    "Publication binding publicationId",
+  );
+  validateBindingModeField(
+    issues,
+    binding.bindingMode,
+    `${location}.bindingMode`,
+    "Publication binding bindingMode",
+  );
+  validateStringField(
+    issues,
+    binding.sourceKind,
+    `${location}.sourceKind`,
+    "Publication binding sourceKind",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.sourceMethodId,
+    `${location}.sourceMethodId`,
+    "Publication binding sourceMethodId",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.sourceOutputPortId,
+    `${location}.sourceOutputPortId`,
+    "Publication binding sourceOutputPortId",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.sourceNodeId,
+    `${location}.sourceNodeId`,
+    "Publication binding sourceNodeId",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.sourceTriggerId,
+    `${location}.sourceTriggerId`,
+    "Publication binding sourceTriggerId",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.topic,
+    `${location}.topic`,
+    "Publication binding topic",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.wireId,
+    `${location}.wireId`,
+    "Publication binding wireId",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.schemaName,
+    `${location}.schemaName`,
+    "Publication binding schemaName",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.mediaType,
+    `${location}.mediaType`,
+    "Publication binding mediaType",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.archivePath,
+    `${location}.archivePath`,
+    "Publication binding archivePath",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.queryServiceId,
+    `${location}.queryServiceId`,
+    "Publication binding queryServiceId",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.pinPolicy,
+    `${location}.pinPolicy`,
+    "Publication binding pinPolicy",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.recordRangeStartField,
+    `${location}.recordRangeStartField`,
+    "Publication binding recordRangeStartField",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.recordRangeStopField,
+    `${location}.recordRangeStopField`,
+    "Publication binding recordRangeStopField",
+  );
+  validateOptionalStringField(
+    issues,
+    binding.description,
+    `${location}.description`,
+    "Publication binding description",
+  );
+  if (
+    !binding.sourceMethodId &&
+    !binding.sourceNodeId &&
+    !binding.sourceTriggerId
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "missing-publication-source",
+      "Publication bindings must target a sourceMethodId, sourceNodeId, or sourceTriggerId.",
+      location,
+    );
+  }
+  if (
+    binding.emitPnm === true &&
+    !binding.topic &&
+    !binding.wireId &&
+    !binding.schemaName
+  ) {
+    pushIssue(
+      issues,
+      "warning",
+      "pnm-without-routing-hint",
+      "PNM-emitting publication bindings should declare a topic, wireId, or schemaName.",
+      location,
+    );
+  }
+  if (binding.sourceMethodId && manifest) {
+    const method = manifestMethodLookup.get(binding.sourceMethodId);
+    if (!method) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-publication-binding-method",
+        `Publication binding "${binding.publicationId ?? "publication"}" targets unknown method "${binding.sourceMethodId}".`,
+        `${location}.sourceMethodId`,
+      );
+    } else if (
+      binding.sourceOutputPortId &&
+      !Array.isArray(method.outputPorts)
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-publication-binding-port",
+        `Publication binding "${binding.publicationId ?? "publication"}" targets method "${binding.sourceMethodId}" without declared output ports.`,
+        `${location}.sourceOutputPortId`,
+      );
+    } else if (
+      binding.sourceOutputPortId &&
+      !method.outputPorts.some(
+        (port) => port?.portId === binding.sourceOutputPortId,
+      )
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-publication-binding-port",
+        `Publication binding "${binding.publicationId ?? "publication"}" targets unknown output port "${binding.sourceOutputPortId}" on method "${binding.sourceMethodId}".`,
+        `${location}.sourceOutputPortId`,
+      );
+    }
+  }
+}
+
 export function validateDeploymentPlan(plan, options = {}) {
   const normalizedPlan = normalizeDeploymentPlan(plan);
   const issues = [];
@@ -673,6 +1405,71 @@ export function validateDeploymentPlan(plan, options = {}) {
       methodLookup,
     );
   });
+  normalizedPlan.scheduleBindings.forEach((binding, index) => {
+    validateScheduleBinding(
+      binding,
+      issues,
+      `deploymentPlan.scheduleBindings[${index}]`,
+      manifest,
+      methodLookup,
+    );
+  });
+  normalizedPlan.serviceBindings.forEach((binding, index) => {
+    validateServiceBinding(
+      binding,
+      issues,
+      `deploymentPlan.serviceBindings[${index}]`,
+    );
+  });
+  normalizedPlan.authPolicies.forEach((binding, index) => {
+    validateAuthPolicy(
+      binding,
+      issues,
+      `deploymentPlan.authPolicies[${index}]`,
+    );
+  });
+  normalizedPlan.publicationBindings.forEach((binding, index) => {
+    validatePublicationBinding(
+      binding,
+      issues,
+      `deploymentPlan.publicationBindings[${index}]`,
+      manifest,
+      methodLookup,
+    );
+  });
+
+  const authPolicyIds = new Set(
+    normalizedPlan.authPolicies
+      .map((entry) => entry.policyId)
+      .filter((entry) => typeof entry === "string" && entry.length > 0),
+  );
+  normalizedPlan.serviceBindings.forEach((binding, index) => {
+    if (binding.authPolicyId && !authPolicyIds.has(binding.authPolicyId)) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-service-auth-policy",
+        `Service binding "${binding.serviceId ?? "service"}" references unknown auth policy "${binding.authPolicyId}".`,
+        `deploymentPlan.serviceBindings[${index}].authPolicyId`,
+      );
+    }
+  });
+  const serviceIds = new Set(
+    normalizedPlan.serviceBindings
+      .map((entry) => entry.serviceId)
+      .filter((entry) => typeof entry === "string" && entry.length > 0),
+  );
+  normalizedPlan.publicationBindings.forEach((binding, index) => {
+    if (binding.queryServiceId && !serviceIds.has(binding.queryServiceId)) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-publication-query-service",
+        `Publication binding "${binding.publicationId ?? "publication"}" references unknown query service "${binding.queryServiceId}".`,
+        `deploymentPlan.publicationBindings[${index}].queryServiceId`,
+      );
+    }
+  });
 
   const errors = issues.filter((issue) => issue.severity === "error");
   const warnings = issues.filter((issue) => issue.severity === "warning");
@@ -696,7 +1493,7 @@ export function createDeploymentPlanBundleEntry(plan, options = {}) {
     payload: normalizedPlan,
     description:
       options.description ??
-      "Resolved deployment plan with protocol installations and input bindings.",
+      "Resolved deployment plan with protocol installations, bindings, schedules, services, auth policy, and publication policy.",
   };
 }
 
@@ -720,14 +1517,22 @@ export function findDeploymentPlanEntry(bundleLike) {
   );
 }
 
+function planHasContent(plan) {
+  return (
+    plan.protocolInstallations.length > 0 ||
+    plan.inputBindings.length > 0 ||
+    plan.scheduleBindings.length > 0 ||
+    plan.serviceBindings.length > 0 ||
+    plan.authPolicies.length > 0 ||
+    plan.publicationBindings.length > 0 ||
+    Boolean(plan.pluginId) ||
+    Boolean(plan.version)
+  );
+}
+
 export function readDeploymentPlanFromBundle(bundleLike) {
   const directPlan = normalizeDeploymentPlan(bundleLike?.deploymentPlan);
-  if (
-    directPlan.protocolInstallations.length > 0 ||
-    directPlan.inputBindings.length > 0 ||
-    directPlan.pluginId ||
-    directPlan.version
-  ) {
+  if (planHasContent(directPlan)) {
     return directPlan;
   }
   const entry = findDeploymentPlanEntry(bundleLike);

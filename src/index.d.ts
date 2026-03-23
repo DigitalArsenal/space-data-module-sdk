@@ -21,6 +21,28 @@ export interface PayloadTypeRef {
   requiredAlignment?: number;
 }
 
+export function clonePayloadTypeRef(
+  value?: PayloadTypeRef | null | Record<string, unknown>,
+): PayloadTypeRef;
+
+export function normalizePayloadWireFormatName(
+  value?: PayloadWireFormat | string | null,
+): PayloadWireFormat | null;
+
+export function getPayloadTypeWireFormat(
+  typeRef?: PayloadTypeRef | null,
+): PayloadWireFormat;
+
+export function payloadTypeRefsMatch(
+  expectedTypeRef?: PayloadTypeRef | null,
+  actualTypeRef?: PayloadTypeRef | null,
+): boolean;
+
+export function selectPreferredPayloadTypeRef(
+  port?: { acceptedTypeSets?: Array<{ allowedTypes?: PayloadTypeRef[] }> } | null,
+  options?: { preferredWireFormat?: PayloadWireFormat | string | null },
+): PayloadTypeRef;
+
 export type AllowedType = PayloadTypeRef;
 
 export interface AcceptedTypeSet {
@@ -487,23 +509,33 @@ export {
 } from "./testing/index.js";
 
 export type {
+  AuthPolicy,
   DeploymentPlanIssue,
   DeploymentPlanValidationReport,
+  DeploymentBindingModeName,
   InputBinding,
   InputBindingSourceKindName,
   ModuleDeploymentPlan,
+  PublicationBinding,
   ResolvedProtocolInstallation,
+  ScheduleBinding,
+  ScheduleBindingKindName,
+  ServiceBinding,
 } from "./deployment/index.js";
 
 export {
   DEPLOYMENT_PLAN_FORMAT_VERSION,
+  DeploymentBindingMode,
   InputBindingSourceKind,
+  ScheduleBindingKind,
   createDeploymentPlanBundleEntry,
   findDeploymentPlanEntry,
+  normalizeDeploymentBindingModeName,
   normalizeDeploymentPlan,
   normalizeInputBindingSourceKindName,
   normalizeProtocolRoleName,
   normalizeProtocolTransportKindName,
+  normalizeScheduleBindingKindName,
   readDeploymentPlanFromBundle,
   validateDeploymentPlan,
 } from "./deployment/index.js";

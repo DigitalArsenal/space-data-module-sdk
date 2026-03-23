@@ -124,6 +124,57 @@ function hasNonEmptyByteSequence(value) {
   return false;
 }
 
+function normalizeTypeIdentityString(value) {
+  if (!isNonEmptyString(value)) {
+    return null;
+  }
+  return value.trim().toLowerCase();
+}
+
+function normalizeTypeIdentityBytes(value) {
+  if (typeof value === "string") {
+    const trimmed = value.trim().toLowerCase();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  const bytes = ArrayBuffer.isView(value)
+    ? Array.from(value)
+    : Array.isArray(value)
+      ? value
+      : null;
+  if (!bytes || bytes.length === 0) {
+    return null;
+  }
+  return bytes
+    .map((entry) => Number(entry).toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function allowedTypesReferToSameLogicalSchema(left, right) {
+  const leftSchemaName = normalizeTypeIdentityString(left?.schemaName);
+  const rightSchemaName = normalizeTypeIdentityString(right?.schemaName);
+  if (leftSchemaName && rightSchemaName && leftSchemaName === rightSchemaName) {
+    return true;
+  }
+
+  const leftFileIdentifier = normalizeTypeIdentityString(left?.fileIdentifier);
+  const rightFileIdentifier = normalizeTypeIdentityString(right?.fileIdentifier);
+  if (
+    leftFileIdentifier &&
+    rightFileIdentifier &&
+    leftFileIdentifier === rightFileIdentifier
+  ) {
+    return true;
+  }
+
+  const leftSchemaHash = normalizeTypeIdentityBytes(left?.schemaHash);
+  const rightSchemaHash = normalizeTypeIdentityBytes(right?.schemaHash);
+  if (leftSchemaHash && rightSchemaHash && leftSchemaHash === rightSchemaHash) {
+    return true;
+  }
+
+  return false;
+}
+
 function normalizePayloadWireFormatName(value) {
   if (value === undefined || value === null || value === "") {
     return "flatbuffer";
@@ -381,6 +432,35 @@ function validateAcceptedTypeSet(typeSet, issues, location) {
   }
   typeSet.allowedTypes.forEach((allowedType, index) => {
     validateAllowedType(allowedType, issues, `${location}.allowedTypes[${index}]`);
+  });
+
+  const regularConcreteTypes = [];
+  const alignedTypes = [];
+
+  typeSet.allowedTypes.forEach((allowedType, index) => {
+    const wireFormat = normalizePayloadWireFormatName(allowedType?.wireFormat);
+    if (wireFormat === "aligned-binary") {
+      alignedTypes.push({ allowedType, index });
+      return;
+    }
+    if (wireFormat === "flatbuffer" && allowedType?.acceptsAnyFlatbuffer !== true) {
+      regularConcreteTypes.push({ allowedType, index });
+    }
+  });
+
+  alignedTypes.forEach(({ allowedType, index }) => {
+    const hasRegularFallback = regularConcreteTypes.some(({ allowedType: regularType }) =>
+      allowedTypesReferToSameLogicalSchema(allowedType, regularType),
+    );
+    if (!hasRegularFallback) {
+      pushIssue(
+        issues,
+        "error",
+        "missing-flatbuffer-fallback",
+        "Aligned-binary allowed types must be paired with a regular flatbuffer fallback for the same schema in the same acceptedTypeSet.",
+        `${location}.allowedTypes[${index}]`,
+      );
+    }
   });
 }
 
