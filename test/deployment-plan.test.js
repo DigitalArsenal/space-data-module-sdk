@@ -94,7 +94,6 @@ function createDeploymentPlan(overrides = {}) {
     protocolInstallations: [
       {
         protocolId: "sgp4-stream",
-        wireId: "/sdn/sgp4/1.0.0",
         transportKind: "libp2p",
         role: "handle",
         peerId: "12D3KooWTestPeer",
@@ -203,6 +202,25 @@ test("deployment plans normalize and validate against a manifest", () => {
   assert.equal(entry.entryId, "deployment-plan");
   assert.equal(entry.sectionName, "sds.deployment");
   assert.equal(entry.payloadEncoding, "json-utf8");
+});
+
+test("deployment plans only compare protocol wireId when explicitly provided", () => {
+  const manifest = createManifest();
+  const plan = createDeploymentPlan({
+    protocolInstallations: [
+      {
+        ...createDeploymentPlan().protocolInstallations[0],
+        wireId: "/sdn/sgp4/legacy-wire",
+      },
+    ],
+  });
+  const report = validateDeploymentPlan(plan, { manifest });
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some(
+      (issue) => issue.code === "installation-wire-id-mismatch",
+    ),
+  );
 });
 
 test("deployment plans catch manifest mismatches", () => {

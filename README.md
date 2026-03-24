@@ -223,6 +223,10 @@ Concrete multiaddrs, peer IDs, and producer routing do not belong in the
 canonical manifest. They belong in deployment metadata attached to the final
 package or bundle.
 
+Deployment plans should key resolved protocol installations by `protocolId`.
+They may include `wireId` as optional legacy metadata when a concrete transport
+still needs it.
+
 This repo exposes that deployment surface from
 `space-data-module-sdk/deployment`. Use it to:
 

@@ -414,7 +414,7 @@ function validateProtocolInstallation(
     `${location}.protocolId`,
     "Protocol installation protocolId",
   );
-  validateStringField(
+  validateOptionalStringField(
     issues,
     installation.wireId,
     `${location}.wireId`,

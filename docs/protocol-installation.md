@@ -49,6 +49,10 @@ signed `.wasm` artifact.
 
 Instead, attach them as a deployment-plan payload in `sds.bundle`.
 
+Deployment plans should use `protocolId` as the required identifier for a
+resolved protocol installation. `wireId` is optional deployment metadata for
+legacy transports that still expose it, not a required routing key.
+
 The standard bundle entry is:
 
 - `entryId`: `deployment-plan`
@@ -100,7 +104,6 @@ Use `space-data-module-sdk/deployment` to work with that payload:
   "protocolInstallations": [
     {
       "protocolId": "sgp4-stream",
-      "wireId": "/sdn/sgp4/1.0.0",
       "transportKind": "libp2p",
       "role": "handle",
       "peerId": "12D3KooW...",
@@ -178,5 +181,7 @@ Use `space-data-module-sdk/deployment` to work with that payload:
 - `wireId` identifies the network protocol.
 - `specUri` identifies the message or schema contract.
 - multiaddrs identify one deployment instance of that protocol.
+- deployment plans should resolve installed protocol surfaces by `protocolId`;
+  include `wireId` only when a host integration still needs that legacy hint.
 
 Do not treat those as interchangeable.

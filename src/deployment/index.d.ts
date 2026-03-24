@@ -14,7 +14,7 @@ export type ScheduleBindingKindName = "interval" | "cron" | "once";
 
 export interface ResolvedProtocolInstallation {
   protocolId: string;
-  wireId: string;
+  wireId?: string | null;
   transportKind: ProtocolTransportKindName | string;
   role: ProtocolRoleName | string;
   peerId?: string | null;
