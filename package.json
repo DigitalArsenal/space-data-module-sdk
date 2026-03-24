@@ -1,6 +1,6 @@
 {
   "name": "space-data-module-sdk",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Module SDK for building, validating, signing, and deploying WebAssembly modules on the Space Data Network.",
   "type": "module",
   "types": "./src/index.d.ts",

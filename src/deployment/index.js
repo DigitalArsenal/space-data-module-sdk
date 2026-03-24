@@ -402,6 +402,9 @@ function buildMethodLookup(manifest) {
 }
 
 function buildExternalInterfaceLookup(manifest) {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    return null;
+  }
   const lookup = new Map();
   if (!Array.isArray(manifest?.externalInterfaces)) {
     return lookup;
@@ -427,6 +430,9 @@ function validateDeclaredInterface(
   externalInterfaceLookup,
   allowedDirections,
 ) {
+  if (!externalInterfaceLookup) {
+    return;
+  }
   const normalizedInterfaceId = normalizeString(interfaceId);
   if (!normalizedInterfaceId) {
     return;

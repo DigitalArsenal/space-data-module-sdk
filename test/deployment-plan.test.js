@@ -345,6 +345,20 @@ test("deployment plans require declared interface ids for deployment bindings", 
   );
 });
 
+test("deployment plans accept interface-keyed bindings without a manifest", () => {
+  const plan = createDeploymentPlan({
+    inputBindings: [
+      {
+        ...createDeploymentPlan().inputBindings[0],
+        targetPluginId: "com.digitalarsenal.examples.protocol-deployment",
+      },
+    ],
+  });
+  const report = validateDeploymentPlan(plan);
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.errors, []);
+});
+
 test("deployment plans round-trip through sds.bundle entries", async () => {
   const manifest = createManifest();
   const compilation = await compileModuleFromSource({
