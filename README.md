@@ -231,7 +231,7 @@ This repo exposes that deployment surface from
 `space-data-module-sdk/deployment`. Use it to:
 
 - validate resolved protocol installations
-- describe input bindings from producers to module ports
+- describe input and publication bindings by declared `interfaceId`
 - attach a deployment plan to `sds.bundle`
 
 The full contract split is documented in

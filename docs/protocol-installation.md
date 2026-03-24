@@ -38,7 +38,7 @@ Examples:
 - resolved listen ports
 - selected peer IDs
 - node-info URLs
-- producer-to-consumer input bindings
+- interface-keyed input bindings
 - scheduler bindings
 - hosted service bindings
 - request-time auth policy
@@ -52,6 +52,11 @@ Instead, attach them as a deployment-plan payload in `sds.bundle`.
 Deployment plans should use `protocolId` as the required identifier for a
 resolved protocol installation. `wireId` is optional deployment metadata for
 legacy transports that still expose it, not a required routing key.
+
+Deployment input and publication bindings should reference
+`manifest.externalInterfaces[].interfaceId`. That keeps deployment routing tied
+to the declared module contract instead of transport-specific `topic` or
+`wireId` hints.
 
 The standard bundle entry is:
 
@@ -119,10 +124,10 @@ Use `space-data-module-sdk/deployment` to work with that payload:
   "inputBindings": [
     {
       "bindingId": "catalog-feed",
+      "interfaceId": "catalog-pubsub",
       "targetMethodId": "propagate",
       "targetInputPortId": "request",
-      "sourceKind": "pubsub",
-      "topic": "/spacedatanetwork/sds/OMM.fbs"
+      "sourceKind": "pubsub"
     }
   ],
   "scheduleBindings": [
@@ -160,15 +165,16 @@ Use `space-data-module-sdk/deployment` to work with that payload:
   "publicationBindings": [
     {
       "publicationId": "state-catalog",
+      "interfaceId": "state-catalog-pubsub",
       "bindingMode": "local",
       "sourceKind": "method-output",
       "sourceMethodId": "propagate",
       "sourceOutputPortId": "state",
-      "topic": "/spacedatanetwork/sds/CAT.fbs",
       "schemaName": "CAT.fbs",
       "emitPnm": true,
       "emitFlatbufferArchive": true,
       "archivePath": "/data/catalog/cat.bin",
+      "queryInterfaceId": "state-query-api",
       "recordRangeStartField": "startIndex",
       "recordRangeStopField": "stopIndex"
     }
@@ -181,6 +187,8 @@ Use `space-data-module-sdk/deployment` to work with that payload:
 - `wireId` identifies the network protocol.
 - `specUri` identifies the message or schema contract.
 - multiaddrs identify one deployment instance of that protocol.
+- `interfaceId` identifies the declared module boundary used by deployment
+  input/publication bindings.
 - deployment plans should resolve installed protocol surfaces by `protocolId`;
   include `wireId` only when a host integration still needs that legacy hint.
 

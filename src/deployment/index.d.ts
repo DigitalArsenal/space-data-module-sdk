@@ -29,13 +29,11 @@ export interface ResolvedProtocolInstallation {
 
 export interface InputBinding {
   bindingId: string;
+  interfaceId: string;
   targetPluginId?: string | null;
   targetMethodId: string;
   targetInputPortId: string;
   sourceKind: InputBindingSourceKindName | string;
-  topic?: string | null;
-  wireId?: string | null;
-  nodeInfoUrl?: string | null;
   multiaddrs?: string[];
   allowPeerIds?: string[];
   allowServerKeys?: string[];
@@ -96,18 +94,17 @@ export interface AuthPolicy {
 
 export interface PublicationBinding {
   publicationId: string;
+  interfaceId: string;
   bindingMode: DeploymentBindingModeName | string;
   sourceKind: string;
   sourceMethodId?: string | null;
   sourceOutputPortId?: string | null;
   sourceNodeId?: string | null;
   sourceTriggerId?: string | null;
-  topic?: string | null;
-  wireId?: string | null;
   schemaName?: string | null;
   mediaType?: string | null;
   archivePath?: string | null;
-  queryServiceId?: string | null;
+  queryInterfaceId?: string | null;
   emitPnm?: boolean;
   emitFlatbufferArchive?: boolean;
   pinPolicy?: string | null;

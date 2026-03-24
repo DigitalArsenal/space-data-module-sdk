@@ -7,7 +7,11 @@ import {
   SDS_DEPLOYMENT_MEDIA_TYPE,
   SDS_DEPLOYMENT_SECTION_NAME,
 } from "../bundle/constants.js";
-import { ProtocolRole, ProtocolTransportKind } from "../runtime/constants.js";
+import {
+  ExternalInterfaceDirection,
+  ProtocolRole,
+  ProtocolTransportKind,
+} from "../runtime/constants.js";
 
 export const DEPLOYMENT_PLAN_FORMAT_VERSION = 1;
 
@@ -33,6 +37,14 @@ const DeploymentBindingModeSet = new Set(Object.values(DeploymentBindingMode));
 const ProtocolRoleSet = new Set(Object.values(ProtocolRole));
 const ProtocolTransportKindSet = new Set(Object.values(ProtocolTransportKind));
 const ScheduleBindingKindSet = new Set(Object.values(ScheduleBindingKind));
+const InputBindingInterfaceDirectionSet = new Set([
+  ExternalInterfaceDirection.INPUT,
+  ExternalInterfaceDirection.BIDIRECTIONAL,
+]);
+const PublicationBindingInterfaceDirectionSet = new Set([
+  ExternalInterfaceDirection.OUTPUT,
+  ExternalInterfaceDirection.BIDIRECTIONAL,
+]);
 
 function normalizeString(value) {
   if (value === undefined || value === null) {
@@ -163,13 +175,11 @@ function normalizeProtocolInstallation(value = {}) {
 function normalizeInputBinding(value = {}) {
   return {
     bindingId: normalizeString(value.bindingId),
+    interfaceId: normalizeString(value.interfaceId),
     targetPluginId: normalizeString(value.targetPluginId),
     targetMethodId: normalizeString(value.targetMethodId),
     targetInputPortId: normalizeString(value.targetInputPortId),
     sourceKind: normalizeInputBindingSourceKindName(value.sourceKind),
-    topic: normalizeString(value.topic),
-    wireId: normalizeString(value.wireId),
-    nodeInfoUrl: normalizeString(value.nodeInfoUrl),
     multiaddrs: normalizeStringArray(value.multiaddrs),
     allowPeerIds: normalizeStringArray(value.allowPeerIds),
     allowServerKeys: normalizeStringArray(value.allowServerKeys),
@@ -238,18 +248,17 @@ function normalizeAuthPolicy(value = {}) {
 function normalizePublicationBinding(value = {}) {
   return {
     publicationId: normalizeString(value.publicationId),
+    interfaceId: normalizeString(value.interfaceId),
     bindingMode: normalizeDeploymentBindingModeName(value.bindingMode),
     sourceKind: normalizeString(value.sourceKind),
     sourceMethodId: normalizeString(value.sourceMethodId),
     sourceOutputPortId: normalizeString(value.sourceOutputPortId),
     sourceNodeId: normalizeString(value.sourceNodeId),
     sourceTriggerId: normalizeString(value.sourceTriggerId),
-    topic: normalizeString(value.topic),
-    wireId: normalizeString(value.wireId),
     schemaName: normalizeString(value.schemaName),
     mediaType: normalizeString(value.mediaType),
     archivePath: normalizeString(value.archivePath),
-    queryServiceId: normalizeString(value.queryServiceId),
+    queryInterfaceId: normalizeString(value.queryInterfaceId),
     emitPnm: normalizeBoolean(value.emitPnm),
     emitFlatbufferArchive: normalizeBoolean(value.emitFlatbufferArchive),
     pinPolicy: normalizeString(value.pinPolicy),
@@ -390,6 +399,62 @@ function buildMethodLookup(manifest) {
     }
   }
   return lookup;
+}
+
+function buildExternalInterfaceLookup(manifest) {
+  const lookup = new Map();
+  if (!Array.isArray(manifest?.externalInterfaces)) {
+    return lookup;
+  }
+  for (const externalInterface of manifest.externalInterfaces) {
+    if (
+      typeof externalInterface?.interfaceId === "string" &&
+      externalInterface.interfaceId.trim().length > 0
+    ) {
+      lookup.set(externalInterface.interfaceId, externalInterface);
+    }
+  }
+  return lookup;
+}
+
+function validateDeclaredInterface(
+  issues,
+  interfaceId,
+  location,
+  bindingLabel,
+  missingCode,
+  directionCode,
+  externalInterfaceLookup,
+  allowedDirections,
+) {
+  const normalizedInterfaceId = normalizeString(interfaceId);
+  if (!normalizedInterfaceId) {
+    return;
+  }
+  const externalInterface = externalInterfaceLookup.get(normalizedInterfaceId);
+  if (!externalInterface) {
+    pushIssue(
+      issues,
+      "error",
+      missingCode,
+      `${bindingLabel} references unknown interface "${normalizedInterfaceId}".`,
+      location,
+    );
+    return;
+  }
+  if (
+    allowedDirections &&
+    typeof externalInterface.direction === "string" &&
+    !allowedDirections.has(externalInterface.direction)
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      directionCode,
+      `${bindingLabel} references interface "${normalizedInterfaceId}" with direction "${externalInterface.direction}", which is incompatible with this binding.`,
+      location,
+    );
+  }
 }
 
 function validateProtocolInstallation(
@@ -583,6 +648,7 @@ function validateInputBinding(
   location,
   manifest,
   manifestMethodLookup,
+  externalInterfaceLookup,
 ) {
   if (!binding || typeof binding !== "object" || Array.isArray(binding)) {
     pushIssue(
@@ -599,6 +665,12 @@ function validateInputBinding(
     binding.bindingId,
     `${location}.bindingId`,
     "Input binding bindingId",
+  );
+  const interfaceIdValid = validateStringField(
+    issues,
+    binding.interfaceId,
+    `${location}.interfaceId`,
+    "Input binding interfaceId",
   );
   const targetPluginId = normalizeString(binding.targetPluginId);
   const targetMethodIdValid = validateStringField(
@@ -639,24 +711,6 @@ function validateInputBinding(
     `${location}.targetPluginId`,
     "Input binding targetPluginId",
   );
-  validateOptionalStringField(
-    issues,
-    binding.topic,
-    `${location}.topic`,
-    "Input binding topic",
-  );
-  validateOptionalStringField(
-    issues,
-    binding.wireId,
-    `${location}.wireId`,
-    "Input binding wireId",
-  );
-  validateOptionalStringField(
-    issues,
-    binding.nodeInfoUrl,
-    `${location}.nodeInfoUrl`,
-    "Input binding nodeInfoUrl",
-  );
   validateStringArrayField(
     issues,
     binding.multiaddrs,
@@ -687,27 +741,17 @@ function validateInputBinding(
     `${location}.description`,
     "Input binding description",
   );
-  if (
-    sourceKind === InputBindingSourceKind.PUBSUB &&
-    !validateStringField(
+  if (interfaceIdValid) {
+    validateDeclaredInterface(
       issues,
-      binding.topic,
-      `${location}.topic`,
-      "Pubsub input binding topic",
-    )
-  ) {
-    // error already recorded
-  }
-  if (
-    sourceKind === InputBindingSourceKind.PROTOCOL_STREAM &&
-    !validateStringField(
-      issues,
-      binding.wireId,
-      `${location}.wireId`,
-      "Protocol-stream input binding wireId",
-    )
-  ) {
-    // error already recorded
+      binding.interfaceId,
+      `${location}.interfaceId`,
+      `Input binding "${binding.bindingId ?? "binding"}"`,
+      "unknown-input-binding-interface",
+      "input-binding-interface-direction-mismatch",
+      externalInterfaceLookup,
+      InputBindingInterfaceDirectionSet,
+    );
   }
   const targetsCurrentManifest =
     !targetPluginId ||
@@ -1161,6 +1205,7 @@ function validatePublicationBinding(
   location,
   manifest,
   manifestMethodLookup,
+  externalInterfaceLookup,
 ) {
   if (!binding || typeof binding !== "object" || Array.isArray(binding)) {
     pushIssue(
@@ -1177,6 +1222,12 @@ function validatePublicationBinding(
     binding.publicationId,
     `${location}.publicationId`,
     "Publication binding publicationId",
+  );
+  const interfaceIdValid = validateStringField(
+    issues,
+    binding.interfaceId,
+    `${location}.interfaceId`,
+    "Publication binding interfaceId",
   );
   validateBindingModeField(
     issues,
@@ -1216,18 +1267,6 @@ function validatePublicationBinding(
   );
   validateOptionalStringField(
     issues,
-    binding.topic,
-    `${location}.topic`,
-    "Publication binding topic",
-  );
-  validateOptionalStringField(
-    issues,
-    binding.wireId,
-    `${location}.wireId`,
-    "Publication binding wireId",
-  );
-  validateOptionalStringField(
-    issues,
     binding.schemaName,
     `${location}.schemaName`,
     "Publication binding schemaName",
@@ -1246,9 +1285,9 @@ function validatePublicationBinding(
   );
   validateOptionalStringField(
     issues,
-    binding.queryServiceId,
-    `${location}.queryServiceId`,
-    "Publication binding queryServiceId",
+    binding.queryInterfaceId,
+    `${location}.queryInterfaceId`,
+    "Publication binding queryInterfaceId",
   );
   validateOptionalStringField(
     issues,
@@ -1287,18 +1326,28 @@ function validatePublicationBinding(
       location,
     );
   }
-  if (
-    binding.emitPnm === true &&
-    !binding.topic &&
-    !binding.wireId &&
-    !binding.schemaName
-  ) {
-    pushIssue(
+  if (interfaceIdValid) {
+    validateDeclaredInterface(
       issues,
-      "warning",
-      "pnm-without-routing-hint",
-      "PNM-emitting publication bindings should declare a topic, wireId, or schemaName.",
-      location,
+      binding.interfaceId,
+      `${location}.interfaceId`,
+      `Publication binding "${binding.publicationId ?? "publication"}"`,
+      "unknown-publication-binding-interface",
+      "publication-binding-interface-direction-mismatch",
+      externalInterfaceLookup,
+      PublicationBindingInterfaceDirectionSet,
+    );
+  }
+  if (binding.queryInterfaceId) {
+    validateDeclaredInterface(
+      issues,
+      binding.queryInterfaceId,
+      `${location}.queryInterfaceId`,
+      `Publication binding "${binding.publicationId ?? "publication"}" query interface`,
+      "unknown-publication-query-interface",
+      "publication-query-interface-direction-mismatch",
+      externalInterfaceLookup,
+      null,
     );
   }
   if (binding.sourceMethodId && manifest) {
@@ -1344,6 +1393,7 @@ export function validateDeploymentPlan(plan, options = {}) {
   const issues = [];
   const manifest = options.manifest ?? null;
   const methodLookup = buildMethodLookup(manifest);
+  const externalInterfaceLookup = buildExternalInterfaceLookup(manifest);
   const protocolLookup = new Map(
     Array.isArray(manifest?.protocols)
       ? manifest.protocols
@@ -1403,6 +1453,7 @@ export function validateDeploymentPlan(plan, options = {}) {
       `deploymentPlan.inputBindings[${index}]`,
       manifest,
       methodLookup,
+      externalInterfaceLookup,
     );
   });
   normalizedPlan.scheduleBindings.forEach((binding, index) => {
@@ -1435,6 +1486,7 @@ export function validateDeploymentPlan(plan, options = {}) {
       `deploymentPlan.publicationBindings[${index}]`,
       manifest,
       methodLookup,
+      externalInterfaceLookup,
     );
   });
 
@@ -1454,23 +1506,6 @@ export function validateDeploymentPlan(plan, options = {}) {
       );
     }
   });
-  const serviceIds = new Set(
-    normalizedPlan.serviceBindings
-      .map((entry) => entry.serviceId)
-      .filter((entry) => typeof entry === "string" && entry.length > 0),
-  );
-  normalizedPlan.publicationBindings.forEach((binding, index) => {
-    if (binding.queryServiceId && !serviceIds.has(binding.queryServiceId)) {
-      pushIssue(
-        issues,
-        "error",
-        "unknown-publication-query-service",
-        `Publication binding "${binding.publicationId ?? "publication"}" references unknown query service "${binding.queryServiceId}".`,
-        `deploymentPlan.publicationBindings[${index}].queryServiceId`,
-      );
-    }
-  });
-
   const errors = issues.filter((issue) => issue.severity === "error");
   const warnings = issues.filter((issue) => issue.severity === "warning");
   return {

@@ -17,8 +17,33 @@ function createManifest() {
     name: "Protocol Deployment Test",
     version: "0.1.0",
     pluginFamily: "propagator",
-    capabilities: ["protocol_handle", "ipfs"],
-    externalInterfaces: [],
+    capabilities: ["protocol_handle", "pubsub", "http", "ipfs"],
+    externalInterfaces: [
+      {
+        interfaceId: "catalog-pubsub",
+        kind: "pubsub",
+        direction: "input",
+        capability: "pubsub",
+      },
+      {
+        interfaceId: "upstream-protocol",
+        kind: "protocol",
+        direction: "input",
+        capability: "protocol_handle",
+      },
+      {
+        interfaceId: "state-catalog-pubsub",
+        kind: "pubsub",
+        direction: "output",
+        capability: "pubsub",
+      },
+      {
+        interfaceId: "state-query-api",
+        kind: "http",
+        direction: "output",
+        capability: "http",
+      },
+    ],
     methods: [
       {
         methodId: "propagate",
@@ -111,17 +136,17 @@ function createDeploymentPlan(overrides = {}) {
     inputBindings: [
       {
         bindingId: "catalog-feed",
+        interfaceId: "catalog-pubsub",
         targetMethodId: "propagate",
         targetInputPortId: "request",
         sourceKind: "pubsub",
-        topic: "/spacedatanetwork/sds/OMM.fbs",
       },
       {
         bindingId: "service-feed",
+        interfaceId: "upstream-protocol",
         targetMethodId: "propagate",
         targetInputPortId: "request",
         sourceKind: "protocol_stream",
-        wireId: "/sdn/upstream-catalog/1.0.0",
         multiaddrs: [
           "/dns4/upstream.example.test/tcp/443/wss/p2p/12D3KooWUpstream",
         ],
@@ -165,16 +190,16 @@ function createDeploymentPlan(overrides = {}) {
     publicationBindings: [
       {
         publicationId: "state-catalog",
+        interfaceId: "state-catalog-pubsub",
         bindingMode: "local",
         sourceKind: "method-output",
         sourceMethodId: "propagate",
         sourceOutputPortId: "state",
-        topic: "/spacedatanetwork/sds/CAT.fbs",
         schemaName: "CAT.fbs",
         emitPnm: true,
         emitFlatbufferArchive: true,
         archivePath: "/data/catalog/cat.bin",
-        queryServiceId: "https-query",
+        queryInterfaceId: "state-query-api",
         recordRangeStartField: "startIndex",
         recordRangeStopField: "stopIndex",
         maxRecords: 2048,
@@ -191,8 +216,13 @@ test("deployment plans normalize and validate against a manifest", () => {
   const plan = createDeploymentPlan();
   const normalized = normalizeDeploymentPlan(plan);
   assert.equal(normalized.inputBindings[1].sourceKind, "protocol-stream");
+  assert.equal(normalized.inputBindings[0].interfaceId, "catalog-pubsub");
   assert.equal(normalized.scheduleBindings[0].scheduleKind, "cron");
   assert.equal(normalized.serviceBindings[0].bindingMode, "delegated");
+  assert.equal(
+    normalized.publicationBindings[0].queryInterfaceId,
+    "state-query-api",
+  );
 
   const report = validateDeploymentPlan(plan, { manifest });
   assert.equal(report.ok, true);
@@ -229,10 +259,10 @@ test("deployment plans catch manifest mismatches", () => {
     inputBindings: [
       {
         bindingId: "bad-port",
+        interfaceId: "catalog-pubsub",
         targetMethodId: "propagate",
         targetInputPortId: "missing",
         sourceKind: "pubsub",
-        topic: "/spacedatanetwork/sds/OMM.fbs",
       },
     ],
   });
@@ -273,6 +303,45 @@ test("deployment plans catch missing auth policy and malformed schedules", () =>
   );
   assert.ok(
     report.errors.some((issue) => issue.code === "invalid-interval-ms"),
+  );
+});
+
+test("deployment plans require declared interface ids for deployment bindings", () => {
+  const manifest = createManifest();
+  const basePlan = createDeploymentPlan();
+  const plan = createDeploymentPlan({
+    inputBindings: [
+      {
+        ...basePlan.inputBindings[0],
+        interfaceId: null,
+      },
+    ],
+    publicationBindings: [
+      {
+        ...basePlan.publicationBindings[0],
+        interfaceId: "unknown-publication-interface",
+        queryInterfaceId: "unknown-query-interface",
+      },
+    ],
+  });
+  const report = validateDeploymentPlan(plan, { manifest });
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some(
+      (issue) =>
+        issue.location === "deploymentPlan.inputBindings[0].interfaceId" &&
+        issue.code === "missing-string",
+    ),
+  );
+  assert.ok(
+    report.errors.some(
+      (issue) => issue.code === "unknown-publication-binding-interface",
+    ),
+  );
+  assert.ok(
+    report.errors.some(
+      (issue) => issue.code === "unknown-publication-query-interface",
+    ),
   );
 });
 
