@@ -1,5 +1,4 @@
 import { toUint8Array } from "./encoding.js";
-import { createCipheriv, createDecipheriv } from "node:crypto";
 
 let walletPromise = null;
 
@@ -128,28 +127,35 @@ function normalizeCtrIv(nonceStart) {
   return iv;
 }
 
+async function getAesCtrApi() {
+  const wallet = await getWasmWallet();
+  const aesCtr = wallet?.aesCtr;
+  if (
+    !aesCtr ||
+    typeof aesCtr.encrypt !== "function" ||
+    typeof aesCtr.decrypt !== "function"
+  ) {
+    throw new Error(
+      "hd-wallet-wasm aesCtr API is unavailable; cannot process ENC payloads.",
+    );
+  }
+  return aesCtr;
+}
+
 export async function aesCtrEncrypt(key, plaintext, nonceStart) {
-  const cipher = createCipheriv(
-    "aes-256-ctr",
-    Buffer.from(toUint8Array(key)),
-    Buffer.from(normalizeCtrIv(nonceStart)),
+  const aesCtr = await getAesCtrApi();
+  return aesCtr.encrypt(
+    toUint8Array(key),
+    toUint8Array(plaintext),
+    normalizeCtrIv(nonceStart),
   );
-  const encrypted = Buffer.concat([
-    cipher.update(Buffer.from(toUint8Array(plaintext))),
-    cipher.final(),
-  ]);
-  return new Uint8Array(encrypted);
 }
 
 export async function aesCtrDecrypt(key, ciphertext, nonceStart) {
-  const decipher = createDecipheriv(
-    "aes-256-ctr",
-    Buffer.from(toUint8Array(key)),
-    Buffer.from(normalizeCtrIv(nonceStart)),
+  const aesCtr = await getAesCtrApi();
+  return aesCtr.decrypt(
+    toUint8Array(key),
+    toUint8Array(ciphertext),
+    normalizeCtrIv(nonceStart),
   );
-  const decrypted = Buffer.concat([
-    decipher.update(Buffer.from(toUint8Array(ciphertext))),
-    decipher.final(),
-  ]);
-  return new Uint8Array(decrypted);
 }

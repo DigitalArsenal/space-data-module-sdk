@@ -1,6 +1,6 @@
 {
   "name": "space-data-module-sdk",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Module SDK for building, validating, signing, and deploying WebAssembly modules on the Space Data Network.",
   "type": "module",
   "types": "./src/index.d.ts",
@@ -12,8 +12,15 @@
     "space-data-module": "bin/space-data-module.js"
   },
   "exports": {
-    ".": "./src/index.js",
-    "./manifest": "./src/manifest/index.js",
+    ".": {
+      "browser": "./src/browser.js",
+      "default": "./src/index.js"
+    },
+    "./manifest": {
+      "browser": "./src/manifest/browser.js",
+      "default": "./src/manifest/index.js"
+    },
+    "./embedded-manifest": "./src/embeddedManifest.js",
     "./compliance": "./src/compliance/index.js",
     "./auth": "./src/auth/index.js",
     "./transport": "./src/transport/index.js",
