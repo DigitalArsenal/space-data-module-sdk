@@ -14,14 +14,14 @@
     "signature": {
       "storage": "package-file",
       "path": "./dist/orbit-lib.signature.fb",
-      "schemaName": "DetachedSignature.fbs",
-      "fileIdentifier": "SIGD"
+      "schemaName": "PNM.fbs",
+      "fileIdentifier": "$PNM"
     },
     "transport": {
       "storage": "package-file",
       "path": "./dist/orbit-lib.transport.fb",
-      "schemaName": "EncryptedTransportEnvelope.fbs",
-      "fileIdentifier": "ETRN"
+      "schemaName": "ENC.fbs",
+      "fileIdentifier": "$ENC"
     }
   },
   "integrity": {

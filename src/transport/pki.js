@@ -6,6 +6,8 @@ import {
   toUint8Array,
 } from "../utils/encoding.js";
 import {
+  aesCtrDecrypt,
+  aesCtrEncrypt,
   aesGcmDecrypt,
   aesGcmEncrypt,
   hkdfBytes,
@@ -13,6 +15,13 @@ import {
   x25519PublicKey,
   x25519SharedSecret,
 } from "../utils/wasmCrypto.js";
+import {
+  appendPublicationRecordCollection,
+  createEncryptedEnvelopePayload,
+  decodeEncRecord,
+  encodePublicationRecordCollection,
+  extractPublicationRecordCollection,
+} from "./records.js";
 
 function normalizePublicKey(value) {
   if (typeof value === "string") {
@@ -53,15 +62,12 @@ export async function generateX25519Keypair() {
   };
 }
 
-export async function encryptBytesForRecipient({
+async function encryptBytesLegacy({
   plaintext,
   recipientPublicKey,
   context = "space-data-module-sdk/package",
   senderKeyPair = null,
 } = {}) {
-  if (!recipientPublicKey) {
-    throw new Error("encryptBytesForRecipient requires recipientPublicKey.");
-  }
   const sender = senderKeyPair ?? (await generateX25519Keypair());
   const salt = await randomBytes(32);
   const iv = await randomBytes(12);
@@ -89,6 +95,77 @@ export async function encryptBytesForRecipient({
   };
 }
 
+export async function decryptProtectedBytes({
+  protectedBytes,
+  recipientPrivateKey,
+} = {}) {
+  const parsed = extractPublicationRecordCollection(protectedBytes);
+  if (!parsed?.enc) {
+    return toUint8Array(protectedBytes);
+  }
+  const sharedSecret = await deriveSharedSecret(
+    recipientPrivateKey,
+    parsed.enc.ephemeralPublicKey,
+  );
+  const aesKey = await deriveAesKey(
+    sharedSecret,
+    new Uint8Array(0),
+    parsed.enc.context ?? "",
+  );
+  return aesCtrDecrypt(aesKey, parsed.payloadBytes, parsed.enc.nonceStart);
+}
+
+export async function encryptBytesForRecipient({
+  plaintext,
+  recipientPublicKey,
+  context = "space-data-module-sdk/package",
+  senderKeyPair = null,
+  recipientKeyId = null,
+  schemaHash = null,
+  rootType = null,
+} = {}) {
+  if (!recipientPublicKey) {
+    throw new Error("encryptBytesForRecipient requires recipientPublicKey.");
+  }
+  const sender = senderKeyPair ?? (await generateX25519Keypair());
+  const nonceStart = await randomBytes(12);
+  const sharedSecret = await deriveSharedSecret(
+    sender.privateKey,
+    recipientPublicKey,
+  );
+  const aesKey = await deriveAesKey(sharedSecret, new Uint8Array(0), context);
+  const ciphertext = await aesCtrEncrypt(aesKey, toUint8Array(plaintext), nonceStart);
+  const enc = {
+    version: 1,
+    keyExchange: "X25519",
+    symmetric: "AES_256_CTR",
+    keyDerivation: "HKDF_SHA256",
+    ephemeralPublicKey: sender.publicKey,
+    nonceStart,
+    recipientKeyId,
+    context,
+    schemaHash,
+    rootType,
+    timestamp: Date.now(),
+  };
+  const recordCollectionBytes = encodePublicationRecordCollection({ enc });
+  const protectedBlobBytes = appendPublicationRecordCollection(
+    ciphertext,
+    recordCollectionBytes,
+  );
+  return createEncryptedEnvelopePayload({
+    protectedBlobBytes,
+    parsedProtectedBlob: {
+      payloadBytes: ciphertext,
+      recordCollectionBytes,
+      enc,
+      pnm: null,
+    },
+    enc,
+    context,
+  });
+}
+
 export async function decryptBytesFromEnvelope({
   envelope,
   recipientPrivateKey,
@@ -96,6 +173,29 @@ export async function decryptBytesFromEnvelope({
   if (!envelope || !recipientPrivateKey) {
     throw new Error(
       "decryptBytesFromEnvelope requires envelope and recipientPrivateKey.",
+    );
+  }
+  if (envelope.protectedBlobBase64) {
+    return decryptProtectedBytes({
+      protectedBytes: base64ToBytes(envelope.protectedBlobBase64),
+      recipientPrivateKey,
+    });
+  }
+  if (envelope.ciphertextBase64 && envelope.encRecordBase64) {
+    const enc = decodeEncRecord(base64ToBytes(envelope.encRecordBase64));
+    const sharedSecret = await deriveSharedSecret(
+      recipientPrivateKey,
+      enc.ephemeralPublicKey,
+    );
+    const aesKey = await deriveAesKey(
+      sharedSecret,
+      new Uint8Array(0),
+      enc.context ?? envelope.context ?? "",
+    );
+    return aesCtrDecrypt(
+      aesKey,
+      base64ToBytes(envelope.ciphertextBase64),
+      enc.nonceStart,
     );
   }
   const sharedSecret = await deriveSharedSecret(
@@ -133,3 +233,24 @@ export async function decryptJsonFromEnvelope(options = {}) {
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 
+export async function decryptPublicationRecordCollection({
+  protectedBytes,
+  recipientPrivateKey,
+} = {}) {
+  const parsed = extractPublicationRecordCollection(protectedBytes);
+  if (!parsed) {
+    return {
+      payloadBytes: toUint8Array(protectedBytes),
+      decryptedBytes: toUint8Array(protectedBytes),
+      publication: null,
+    };
+  }
+  const decryptedBytes = parsed.enc
+    ? await decryptProtectedBytes({ protectedBytes, recipientPrivateKey })
+    : parsed.payloadBytes;
+  return {
+    payloadBytes: parsed.payloadBytes,
+    decryptedBytes,
+    publication: parsed,
+  };
+}

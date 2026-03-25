@@ -13,7 +13,8 @@ language package ecosystems used around the SDK runtime surface:
 
 The goal is simple: a loader should be able to inspect a package, locate the
 module artifact, and determine whether signatures or encrypted transport
-metadata are embedded in the module file or shipped as sidecar FlatBuffers.
+metadata are appended as SDS publication records after the module bytes or
+shipped as sidecar FlatBuffers.
 
 ## Scope
 
@@ -26,23 +27,27 @@ This publication standard covers two release modes:
 In both cases the module artifact remains the same canonical format already
 defined by this repo:
 
-- valid WebAssembly bytes
+- a runtime payload that is valid WebAssembly bytes once any SDS publication
+  trailer has been stripped
 - embedded `PluginManifest.fbs`
 - manifest accessors
   - `plugin_get_manifest_flatbuffer`
   - `plugin_get_manifest_flatbuffer_size`
 - optional `sds.bundle` custom-section metadata
+- optional appended SDS `REC` trailer carrying `PNM` and optional `ENC`
 
 ## Core Rules
 
-1. The published module artifact MUST remain valid `.wasm`.
-2. If signatures, authorization metadata, transport metadata, or attestations
-   are carried in the same file, they MUST be embedded as `sds.bundle` entries.
-3. Raw trailer bytes appended after the end of the WebAssembly binary are not
-   part of this standard.
-4. Sidecar FlatBuffers are allowed when a package chooses not to embed those
-   metadata payloads into `sds.bundle`.
-5. Paths in publication metadata are package-relative, never absolute.
+1. The runtime payload before any publication trailer MUST remain valid `.wasm`.
+2. If signatures or encrypted-delivery metadata are carried in the same file,
+   they MUST be appended after the wasm bytes as an SDS `REC` trailer.
+3. `REC` trailers MUST carry standards-sourced `PNM` and optional `ENC`
+   records.
+4. `sds.bundle` remains the in-wasm container for bundle metadata and does not
+   replace the `REC` trailer for publication protection records.
+5. Sidecar FlatBuffers are allowed when a package chooses not to append those
+   metadata payloads to the module artifact.
+6. Paths in publication metadata are package-relative, never absolute.
 
 ## Canonical Descriptor
 
@@ -68,16 +73,14 @@ The full object form is:
   },
   "artifacts": {
     "signature": {
-      "storage": "embedded",
-      "bundleEntryId": "signature.primary",
-      "schemaName": "DetachedSignature.fbs",
-      "fileIdentifier": "SIGD"
+      "storage": "module-trailer",
+      "schemaName": "PNM.fbs",
+      "fileIdentifier": "$PNM"
     },
     "transport": {
-      "storage": "embedded",
-      "bundleEntryId": "transport.primary",
-      "schemaName": "EncryptedTransportEnvelope.fbs",
-      "fileIdentifier": "ETRN"
+      "storage": "module-trailer",
+      "schemaName": "ENC.fbs",
+      "fileIdentifier": "$ENC"
     }
   },
   "integrity": {
@@ -116,18 +119,18 @@ An artifact descriptor has this shape:
 
 ```json
 {
-  "storage": "embedded",
-  "bundleEntryId": "signature.primary",
+  "storage": "module-trailer",
   "path": "./dist/orbit-lib.signature.fb",
-  "schemaName": "DetachedSignature.fbs",
-  "fileIdentifier": "SIGD"
+  "schemaName": "PNM.fbs",
+  "fileIdentifier": "$PNM"
 }
 ```
 
 Rules:
 
-- `storage` MUST be `embedded` or `package-file`
-- `bundleEntryId` MUST be present when `storage` is `embedded`
+- `storage` MUST be `module-trailer` or `package-file`
+- `module-trailer` means the loader scans the end of `module.path` for an
+  appended `REC` trailer and resolves the matching record from there
 - `path` MUST be present when `storage` is `package-file`
 - `schemaName` SHOULD name the SDS FlatBuffer schema
 - `fileIdentifier` SHOULD name the FlatBuffer file identifier
@@ -139,8 +142,8 @@ when all of the following are true:
 
 - the package only needs to point to one module file
 - the module uses the default manifest accessor exports
-- all signature and transport metadata are either absent or embedded in
-  `sds.bundle`
+- all signature and transport metadata are either absent or appended through a
+  `REC` trailer
 
 Example:
 
@@ -297,10 +300,9 @@ resources or through a binary-target wrapper.
   },
   "artifacts": {
     "signature": {
-      "storage": "embedded",
-      "bundleEntryId": "signature.primary",
-      "schemaName": "DetachedSignature.fbs",
-      "fileIdentifier": "SIGD"
+      "storage": "module-trailer",
+      "schemaName": "PNM.fbs",
+      "fileIdentifier": "$PNM"
     }
   }
 }
@@ -327,14 +329,14 @@ resources or through a binary-target wrapper.
     "signature": {
       "storage": "package-file",
       "path": "./dist/orbit-lib.signature.fb",
-      "schemaName": "DetachedSignature.fbs",
-      "fileIdentifier": "SIGD"
+      "schemaName": "PNM.fbs",
+      "fileIdentifier": "$PNM"
     },
     "transport": {
       "storage": "package-file",
       "path": "./dist/orbit-lib.transport.fb",
-      "schemaName": "EncryptedTransportEnvelope.fbs",
-      "fileIdentifier": "ETRN"
+      "schemaName": "ENC.fbs",
+      "fileIdentifier": "$ENC"
     }
   }
 }
@@ -346,21 +348,27 @@ A loader consuming this standard SHOULD:
 
 1. locate the publication descriptor
 2. read `module.path`
-3. inspect the wasm for `sds.bundle`
-4. resolve any `embedded` metadata through bundle entries
-5. resolve any `package-file` metadata through relative paths
-6. validate manifest exports and any declared integrity hashes
+3. scan the artifact from the end for an appended SDS `REC` trailer
+4. resolve `PNM` / `ENC` from that trailer before runtime startup
+5. if `ENC` is present, decrypt and strip the trailer before passing bytes to
+   WasmEdge or any other runtime
+6. inspect the stripped wasm for `sds.bundle`
+7. resolve any `package-file` metadata through relative paths
+8. validate manifest exports and any declared integrity hashes
 
-If `module.packaging` is `sds-bundled-wasm`, loaders SHOULD prefer embedded
-entries over sidecar files.
+If `module.packaging` is `sds-bundled-wasm`, loaders SHOULD treat the stripped
+wasm payload as the artifact to inspect for `sds.bundle`.
 
 ## Relationship To Existing Bundle Format
 
 This standard does not replace `sds.bundle`. It explains how a package publishes
-and points to the module artifact.
+and points to the module artifact plus any appended SDS publication trailer.
 
 - `sds.bundle` stays the single-file in-wasm container
+- `REC` stays the appended publication record container for `PNM` / `ENC`
 - `sdn-module` is the package-discovery descriptor
 
-Use `sds.bundle` when you want one deployable `.wasm` file. Use `sdn-module`
-when you want package managers and loaders to discover that file reliably.
+Use `sds.bundle` when you want one self-describing wasm payload. Use the
+appended `REC` trailer when you need sign/encrypt publication metadata. Use
+`sdn-module` when you want package managers and loaders to discover that file
+reliably.

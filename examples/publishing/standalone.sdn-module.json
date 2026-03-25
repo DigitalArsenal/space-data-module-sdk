@@ -12,16 +12,14 @@
   },
   "artifacts": {
     "signature": {
-      "storage": "embedded",
-      "bundleEntryId": "signature.primary",
-      "schemaName": "DetachedSignature.fbs",
-      "fileIdentifier": "SIGD"
+      "storage": "module-trailer",
+      "schemaName": "PNM.fbs",
+      "fileIdentifier": "$PNM"
     },
     "transport": {
-      "storage": "embedded",
-      "bundleEntryId": "transport.primary",
-      "schemaName": "EncryptedTransportEnvelope.fbs",
-      "fileIdentifier": "ETRN"
+      "storage": "module-trailer",
+      "schemaName": "ENC.fbs",
+      "fileIdentifier": "$ENC"
     }
   },
   "integrity": {

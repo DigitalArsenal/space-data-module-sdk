@@ -1,4 +1,5 @@
 import { toUint8Array } from "./encoding.js";
+import { createCipheriv, createDecipheriv } from "node:crypto";
 
 let walletPromise = null;
 
@@ -115,4 +116,40 @@ export async function aesGcmDecrypt(key, ciphertext, tag, iv, aad = null) {
     toUint8Array(iv),
     aad ? toUint8Array(aad) : undefined,
   );
+}
+
+function normalizeCtrIv(nonceStart) {
+  const nonce = toUint8Array(nonceStart);
+  if (nonce.length !== 12) {
+    throw new Error("AES-256-CTR expects a 12-byte NONCE_START value.");
+  }
+  const iv = new Uint8Array(16);
+  iv.set(nonce, 0);
+  return iv;
+}
+
+export async function aesCtrEncrypt(key, plaintext, nonceStart) {
+  const cipher = createCipheriv(
+    "aes-256-ctr",
+    Buffer.from(toUint8Array(key)),
+    Buffer.from(normalizeCtrIv(nonceStart)),
+  );
+  const encrypted = Buffer.concat([
+    cipher.update(Buffer.from(toUint8Array(plaintext))),
+    cipher.final(),
+  ]);
+  return new Uint8Array(encrypted);
+}
+
+export async function aesCtrDecrypt(key, ciphertext, nonceStart) {
+  const decipher = createDecipheriv(
+    "aes-256-ctr",
+    Buffer.from(toUint8Array(key)),
+    Buffer.from(normalizeCtrIv(nonceStart)),
+  );
+  const decrypted = Buffer.concat([
+    decipher.update(Buffer.from(toUint8Array(ciphertext))),
+    decipher.final(),
+  ]);
+  return new Uint8Array(decrypted);
 }

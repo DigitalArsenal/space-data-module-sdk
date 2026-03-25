@@ -12,7 +12,7 @@ This repository is the source of truth for module-level concerns:
 - standards-aware compliance and capability validation
 - module compilation and protection
 - the `sds.bundle` single-file custom section
-- deployment authorization and encrypted transport envelopes
+- deployment authorization plus SDS publication records (`REC`, `PNM`, `ENC`)
 - the first canonical module hostcall/import ABI surface
 
 <p align="center">
@@ -36,9 +36,11 @@ A module built with this SDK is a `.wasm` artifact with:
   - manifest bytes
   - resolved deployment plans and input bindings
   - deployment authorization
-  - detached signatures
-  - encrypted transport envelopes
   - auxiliary FlatBuffer or raw payloads
+- optional appended SDS `REC` publication trailers carrying:
+  - `PNM` digital-signature/publication metadata
+  - `ENC` encrypted-delivery metadata
+- auxiliary FlatBuffer or raw payloads
 
 The module contract stays the same whether the artifact is loaded directly,
 wrapped in a deployment envelope, or shipped as one bundled `.wasm` file.
@@ -240,8 +242,11 @@ The full contract split is documented in
 ## Single-File Bundles
 
 `sds.bundle` keeps module delivery to one file without changing WebAssembly
-loadability. The SDK appends a standard custom section, not raw trailer bytes,
-so the bundled artifact still compiles as a normal `.wasm` module.
+loadability for the runtime payload itself. The SDK writes the bundle as a
+standard custom section inside the wasm module and, when the artifact is
+signed or encrypted for publication, appends an SDS `REC` trailer after the
+wasm bytes. Loaders must scan and strip that trailer before handing bytes to a
+runtime such as WasmEdge.
 
 The reference path lives in
 [`examples/single-file-bundle`](./examples/single-file-bundle):
@@ -263,8 +268,9 @@ publication descriptor. That descriptor covers:
 
 - standalone module packages
 - attached module artifacts shipped inside another language library
-- discovery of bundled wasm, sidecar signatures, and encrypted transport
-  FlatBuffers
+- discovery of bundled wasm
+- appended `REC` trailers carrying `PNM` and optional `ENC`
+- sidecar `PNM` / `ENC` FlatBuffers when a package does not embed the trailer
 
 The full standard is in
 [`docs/module-publication-standard.md`](./docs/module-publication-standard.md),
@@ -280,8 +286,10 @@ For npm packages, the simplest form is:
 }
 ```
 
-When signature or transport metadata is published in the same file, it belongs
-inside `sds.bundle`, not as raw bytes after the end of the wasm binary.
+When publication metadata is published in the same file, it belongs in an
+appended SDS `REC` trailer. Loaders scan from the end of the protected blob,
+resolve `PNM` / `ENC`, strip or decrypt as needed, and only then instantiate
+the remaining raw wasm bytes.
 
 ## Host ABI
 

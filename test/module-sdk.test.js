@@ -350,7 +350,11 @@ test("artifacts can be signed and encrypted for transport", async () => {
   });
   assert.equal(protectedArtifact.encrypted, true);
   assert.ok(protectedArtifact.payload.authorization.signatureHex.length > 0);
-  assert.ok(protectedArtifact.encryptedEnvelope.ciphertextBase64.length > 0);
+  assert.ok(protectedArtifact.protectedArtifactBytes.length > 0);
+  assert.ok(protectedArtifact.publicationNotice.cid.length > 0);
+  assert.ok(protectedArtifact.encryptedEnvelope.protectedBlobBase64.length > 0);
+  assert.ok(protectedArtifact.encryptedEnvelope.encRecordBase64.length > 0);
+  assert.ok(protectedArtifact.encryptedEnvelope.pnmRecordBase64.length > 0);
 });
 
 test("shared module and legacy OrbPro type refs resolve without warnings", async () => {

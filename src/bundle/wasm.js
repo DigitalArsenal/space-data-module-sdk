@@ -20,6 +20,7 @@ import {
   moduleBundleEncodingToName,
   moduleBundleRoleToName,
 } from "./codec.js";
+import { extractPublicationRecordCollection } from "../transport/records.js";
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -86,7 +87,11 @@ export function decodeUnsignedLeb128(bytes, offset = 0) {
 }
 
 export function parseWasmModuleSections(bytes) {
-  const wasmBytes = normalizeBytes(bytes, "wasm bytes");
+  const protectedArtifact = extractPublicationRecordCollection(bytes);
+  const wasmBytes = normalizeBytes(
+    protectedArtifact?.payloadBytes ?? bytes,
+    "wasm bytes",
+  );
   if (wasmBytes.length < 8) {
     throw new Error("WASM module is truncated.");
   }
@@ -345,10 +350,12 @@ export async function computeCanonicalModuleHash(
   bytes,
   options = {},
 ) {
+  const protectedArtifact = extractPublicationRecordCollection(bytes);
+  const candidateBytes = protectedArtifact?.payloadBytes ?? bytes;
   const prefix = String(
     options.customSectionPrefix ?? SDS_CUSTOM_SECTION_PREFIX,
   );
-  const canonicalWasmBytes = stripWasmCustomSections(bytes, (section) =>
+  const canonicalWasmBytes = stripWasmCustomSections(candidateBytes, (section) =>
     section.name.startsWith(prefix),
   );
   const hashBytes = await sha256Bytes(canonicalWasmBytes);
@@ -360,7 +367,11 @@ export async function computeCanonicalModuleHash(
 }
 
 export async function createSingleFileBundle(options = {}) {
-  const wasmBytes = normalizeBytes(options.wasmBytes, "wasmBytes");
+  const protectedArtifact = extractPublicationRecordCollection(options.wasmBytes);
+  const wasmBytes = normalizeBytes(
+    protectedArtifact?.payloadBytes ?? options.wasmBytes,
+    "wasmBytes",
+  );
   const manifestBytes =
     options.manifestBytes !== undefined
       ? normalizeBytes(options.manifestBytes, "manifestBytes")
@@ -422,7 +433,11 @@ export async function createSingleFileBundle(options = {}) {
 }
 
 export async function parseSingleFileBundle(bytes, options = {}) {
-  const wasmBytes = normalizeBytes(bytes, "wasm bytes");
+  const protectedArtifact = extractPublicationRecordCollection(bytes);
+  const wasmBytes = normalizeBytes(
+    protectedArtifact?.payloadBytes ?? bytes,
+    "wasm bytes",
+  );
   const customSections = listWasmCustomSections(wasmBytes);
   const bundleSectionName = String(
     options.bundleSectionName ?? SDS_BUNDLE_SECTION_NAME,
@@ -462,6 +477,8 @@ export async function parseSingleFileBundle(bytes, options = {}) {
     ) ?? null;
   return {
     wasmBytes,
+    protectedArtifactBytes: protectedArtifact?.protectedBytes ?? null,
+    publicationRecords: protectedArtifact ?? null,
     bundleBytes,
     bundle,
     entries: parsedEntries,

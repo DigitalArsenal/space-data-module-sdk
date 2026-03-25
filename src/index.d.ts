@@ -380,14 +380,69 @@ export interface X25519Keypair {
   privateKey: Uint8Array;
 }
 
+export interface EncRecord {
+  version: number;
+  keyExchange: string;
+  symmetric: string;
+  keyDerivation: string;
+  ephemeralPublicKey: Uint8Array | null;
+  nonceStart: Uint8Array | null;
+  recipientKeyId: Uint8Array | null;
+  context: string | null;
+  schemaHash: Uint8Array | null;
+  rootType: string | null;
+  timestamp: number;
+}
+
+export interface PublicationNotice {
+  multiformatAddress: string | null;
+  publishTimestamp: string | null;
+  cid: string | null;
+  fileName: string | null;
+  fileId: string | null;
+  signature: string | null;
+  timestampSignature: string | null;
+  signatureType: string | null;
+  timestampSignatureType: string | null;
+}
+
+export interface PublicationRecordEntry {
+  standard: string | null;
+  recordType: number;
+  value: EncRecord | PublicationNotice | unknown;
+}
+
+export interface PublicationRecordCollection {
+  version: string;
+  records: PublicationRecordEntry[];
+  enc: EncRecord | null;
+  pnm: PublicationNotice | null;
+  recordCollectionBytes: Uint8Array;
+}
+
+export interface ExtractedPublicationRecordCollection
+  extends PublicationRecordCollection {
+  payloadBytes: Uint8Array;
+  protectedBytes: Uint8Array;
+  footerBytes: Uint8Array;
+  footerMagic: string;
+  recordCollectionLength: number;
+}
+
 export interface EncryptedEnvelope {
   version: number;
   scheme: string;
   context: string;
-  senderPublicKeyBase64: string;
-  saltBase64: string;
-  ivBase64: string;
-  ciphertextBase64: string;
+  protectedBlobBase64?: string | null;
+  recordCollectionBase64?: string | null;
+  ciphertextBase64?: string | null;
+  senderPublicKeyBase64?: string | null;
+  nonceStartBase64?: string | null;
+  recipientKeyIdBase64?: string | null;
+  encRecordBase64?: string | null;
+  pnmRecordBase64?: string | null;
+  saltBase64?: string | null;
+  ivBase64?: string | null;
 }
 
 export function generateX25519Keypair(): Promise<X25519Keypair>;
@@ -397,7 +452,15 @@ export function encryptBytesForRecipient(options: {
   recipientPublicKey: Uint8Array | string;
   context?: string;
   senderKeyPair?: X25519Keypair;
+  recipientKeyId?: Uint8Array | ArrayBuffer | string | null;
+  schemaHash?: Uint8Array | ArrayBuffer | string | null;
+  rootType?: string | null;
 }): Promise<EncryptedEnvelope>;
+
+export function decryptProtectedBytes(options: {
+  protectedBytes: Uint8Array | ArrayBuffer;
+  recipientPrivateKey: Uint8Array | string;
+}): Promise<Uint8Array>;
 
 export function decryptBytesFromEnvelope(options: {
   envelope: EncryptedEnvelope;
@@ -415,6 +478,78 @@ export function decryptJsonFromEnvelope(options: {
   envelope: EncryptedEnvelope;
   recipientPrivateKey: Uint8Array | string;
 }): Promise<unknown>;
+
+export function decryptPublicationRecordCollection(options: {
+  protectedBytes: Uint8Array | ArrayBuffer;
+  recipientPrivateKey: Uint8Array | string;
+}): Promise<{
+  payloadBytes: Uint8Array;
+  decryptedBytes: Uint8Array;
+  publication: ExtractedPublicationRecordCollection | null;
+}>;
+
+export const TRAILER_MAGIC_TEXT: string;
+export const TRAILER_FOOTER_LENGTH: number;
+
+export function createCidV1Raw(
+  payloadBytes: Uint8Array | ArrayBuffer,
+): Promise<string>;
+
+export function encodeEncRecord(record?: Partial<EncRecord>): Uint8Array;
+export function decodeEncRecord(
+  bytes: Uint8Array | ArrayBuffer | ArrayBufferView,
+): EncRecord;
+export function encodePnmRecord(
+  record?: Partial<PublicationNotice>,
+): Uint8Array;
+export function decodePnmRecord(
+  bytes: Uint8Array | ArrayBuffer | ArrayBufferView,
+): PublicationNotice;
+export function encodePublicationRecordCollection(options: {
+  version?: string;
+  enc?: Partial<EncRecord> | null;
+  pnm?: Partial<PublicationNotice> | null;
+}): Uint8Array;
+export function decodePublicationRecordCollection(
+  bytes: Uint8Array | ArrayBuffer | ArrayBufferView,
+): PublicationRecordCollection;
+export function appendPublicationRecordCollection(
+  payloadBytes: Uint8Array | ArrayBuffer,
+  recordCollectionBytes: Uint8Array | ArrayBuffer,
+): Uint8Array;
+export function extractPublicationRecordCollection(
+  bytes: Uint8Array | ArrayBuffer | ArrayBufferView,
+): ExtractedPublicationRecordCollection | null;
+export function stripPublicationRecordCollection(
+  bytes: Uint8Array | ArrayBuffer | ArrayBufferView,
+): Uint8Array;
+export function createPublicationNotice(options: {
+  payloadBytes: Uint8Array | ArrayBuffer;
+  cid?: string | null;
+  publishTimestamp?: string | null;
+  publishTimestampMs?: number;
+  fileName?: string | null;
+  fileId?: string | null;
+  artifactId?: string | null;
+  programId?: string | null;
+  multiformatAddress?: string | null;
+  signature?: string | null;
+  timestampSignature?: string | null;
+  signatureType?: string | null;
+  timestampSignatureType?: string | null;
+  signer?: Signer | null;
+}): Promise<PublicationNotice>;
+export function createEncryptedEnvelopePayload(options: {
+  protectedBlobBytes: Uint8Array | ArrayBuffer;
+  parsedProtectedBlob?: ExtractedPublicationRecordCollection | null;
+  enc?: EncRecord | null;
+  context?: string | null;
+  scheme?: string | null;
+  version?: number;
+}): EncryptedEnvelope;
+export function decodeProtectedBlobBase64(
+  base64: string,
+): ExtractedPublicationRecordCollection | null;
 
 // --- Compiler ---
 
@@ -453,6 +588,10 @@ export interface ProtectedArtifact {
     manifestHashHex: string;
     authorization: SignedEnvelope;
   };
+  publicationNotice: PublicationNotice | null;
+  publicationRecordsBytes: Uint8Array | null;
+  protectedArtifactBytes: Uint8Array;
+  protectedArtifactBase64: string;
   encrypted: boolean;
   encryptedEnvelope: EncryptedEnvelope | null;
   singleFileBundle: { wasmBytes: Uint8Array } | null;
@@ -591,9 +730,24 @@ export function createSingleFileBundle(options: {
   entries?: Array<Record<string, unknown>>;
 }): Promise<{ wasmBytes: Uint8Array }>;
 
+export interface ParsedSingleFileBundle {
+  wasmBytes: Uint8Array;
+  protectedArtifactBytes: Uint8Array | null;
+  publicationRecords: ExtractedPublicationRecordCollection | null;
+  bundleBytes: Uint8Array;
+  bundle: unknown;
+  entries: Array<Record<string, unknown>>;
+  manifest: PluginManifest | null;
+  deploymentPlan: ModuleDeploymentPlan | null;
+  customSections: Array<Record<string, unknown>>;
+  canonicalWasmBytes: Uint8Array;
+  canonicalModuleHash: Uint8Array;
+  canonicalModuleHashHex: string;
+}
+
 export function parseSingleFileBundle(
   wasmBytes: Uint8Array,
-): unknown;
+): Promise<ParsedSingleFileBundle>;
 
 export function parseWasmModuleSections(
   bytes: Uint8Array,

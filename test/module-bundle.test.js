@@ -5,6 +5,7 @@ import {
   compileModuleFromSource,
   computeCanonicalModuleHash,
   createSingleFileBundle,
+  extractPublicationRecordCollection,
   getWasmCustomSections,
   parseSingleFileBundle,
   protectModuleArtifact,
@@ -88,10 +89,11 @@ test("single-file bundles round-trip through wasm custom sections", async () => 
   });
 
   assert.ok(protectedArtifact.singleFileBundle);
-  assert.equal(
-    WebAssembly.validate(protectedArtifact.singleFileBundle.wasmBytes),
-    true,
+  const protectedBundle = extractPublicationRecordCollection(
+    protectedArtifact.singleFileBundle.wasmBytes,
   );
+  assert.ok(protectedBundle);
+  assert.equal(WebAssembly.validate(protectedBundle.payloadBytes), true);
   assert.equal(
     getWasmCustomSections(
       protectedArtifact.singleFileBundle.wasmBytes,
@@ -104,6 +106,7 @@ test("single-file bundles round-trip through wasm custom sections", async () => 
     protectedArtifact.singleFileBundle.wasmBytes,
   );
   assert.equal(parsed.manifest?.pluginId, manifest.pluginId);
+  assert.equal(parsed.publicationRecords?.pnm?.fileId, manifest.pluginId);
 
   const manifestEntry = parsed.entries.find((entry) => entry.entryId === "manifest");
   assert.ok(manifestEntry?.decodedManifest);

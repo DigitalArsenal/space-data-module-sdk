@@ -26,7 +26,12 @@ import { runWithEmceptionLock } from "./emceptionNode.js";
 import { encodePluginManifest, toEmbeddedPluginManifest } from "../manifest/index.js";
 import { DefaultInvokeExports, InvokeSurface } from "../runtime/constants.js";
 import {
-  encryptJsonForRecipient,
+  appendPublicationRecordCollection,
+  createEncryptedEnvelopePayload,
+  createPublicationNotice,
+  encodePublicationRecordCollection,
+  encryptBytesForRecipient,
+  extractPublicationRecordCollection,
   generateX25519Keypair,
 } from "../transport/index.js";
 import { createSingleFileBundle } from "../bundle/index.js";
@@ -642,15 +647,6 @@ export async function protectModuleArtifact(options = {}) {
     authorization: signedAuthorization,
   };
 
-  let encryptedEnvelope = null;
-  if (options.recipientPublicKeyHex) {
-    encryptedEnvelope = await encryptJsonForRecipient({
-      payload,
-      recipientPublicKey: hexToBytes(options.recipientPublicKeyHex),
-      context: "space-data-module-sdk/package",
-    });
-  }
-
   let singleFileBundle = null;
   if (options.singleFileBundle === true) {
     const additionalEntries = [
@@ -661,9 +657,75 @@ export async function protectModuleArtifact(options = {}) {
       wasmBytes,
       manifest,
       authorization: signedAuthorization,
-      transportEnvelope: encryptedEnvelope,
       entries: additionalEntries,
     });
+  }
+
+  const bundleBytes = singleFileBundle?.wasmBytes ?? wasmBytes;
+  let publicationNotice = null;
+  let publicationRecordsBytes = null;
+  let protectedArtifactBytes = null;
+  let encryptedEnvelope = null;
+
+  if (options.recipientPublicKeyHex) {
+    const encryptedBase = await encryptBytesForRecipient({
+      plaintext: bundleBytes,
+      recipientPublicKey: hexToBytes(options.recipientPublicKeyHex),
+      context: "space-data-module-sdk/package",
+      rootType: "WASM",
+    });
+    const encryptedBaseBytes = base64ToBytes(encryptedBase.protectedBlobBase64);
+    const parsedEncryptedBase = extractPublicationRecordCollection(encryptedBaseBytes);
+    publicationNotice = await createPublicationNotice({
+      payloadBytes: parsedEncryptedBase.payloadBytes,
+      artifactId,
+      programId,
+      fileName: `${artifactId}.wasm`,
+      fileId: programId,
+      signer,
+    });
+    publicationRecordsBytes = encodePublicationRecordCollection({
+      enc: parsedEncryptedBase.enc,
+      pnm: publicationNotice,
+    });
+    protectedArtifactBytes = appendPublicationRecordCollection(
+      parsedEncryptedBase.payloadBytes,
+      publicationRecordsBytes,
+    );
+    encryptedEnvelope = createEncryptedEnvelopePayload({
+      protectedBlobBytes: protectedArtifactBytes,
+      parsedProtectedBlob: {
+        payloadBytes: parsedEncryptedBase.payloadBytes,
+        recordCollectionBytes: publicationRecordsBytes,
+        enc: parsedEncryptedBase.enc,
+        pnm: publicationNotice,
+      },
+      enc: parsedEncryptedBase.enc,
+      context: parsedEncryptedBase.enc?.context,
+    });
+  } else {
+    publicationNotice = await createPublicationNotice({
+      payloadBytes: bundleBytes,
+      artifactId,
+      programId,
+      fileName: `${artifactId}.wasm`,
+      fileId: programId,
+      signer,
+    });
+    publicationRecordsBytes = encodePublicationRecordCollection({
+      pnm: publicationNotice,
+    });
+    protectedArtifactBytes = appendPublicationRecordCollection(
+      bundleBytes,
+      publicationRecordsBytes,
+    );
+  }
+
+  if (singleFileBundle) {
+    singleFileBundle = {
+      ...singleFileBundle,
+      wasmBytes: protectedArtifactBytes,
+    };
   }
 
   return {
@@ -671,10 +733,14 @@ export async function protectModuleArtifact(options = {}) {
     signingPublicKeyHex: bytesToHex(identity.signingKey.publicKey),
     signingPath: identity.signingKey.path,
     payload,
-    encrypted: Boolean(encryptedEnvelope),
+    publicationNotice,
+    publicationRecordsBytes,
+    protectedArtifactBytes,
+    protectedArtifactBase64: bytesToBase64(protectedArtifactBytes),
+    encrypted: Boolean(options.recipientPublicKeyHex),
     encryptedEnvelope,
     singleFileBundle,
-    bundledWasmBytes: singleFileBundle?.wasmBytes ?? null,
+    bundledWasmBytes: singleFileBundle?.wasmBytes ?? protectedArtifactBytes,
   };
 }
 

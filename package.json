@@ -1,6 +1,6 @@
 {
   "name": "space-data-module-sdk",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Module SDK for building, validating, signing, and deploying WebAssembly modules on the Space Data Network.",
   "type": "module",
   "types": "./src/index.d.ts",
@@ -46,7 +46,7 @@
     "flatbuffers": "^25.9.23",
     "hd-wallet-wasm": "1.6.0",
     "sdn-emception": "1.0.0",
-    "spacedatastandards.org": "23.3.3-0.3.4"
+    "spacedatastandards.org": "git+https://github.com/DigitalArsenal/spacedatastandards.org.git#09af351a1"
   },
   "devDependencies": {
     "express": "^4.21.2",
