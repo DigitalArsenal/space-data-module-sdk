@@ -3,7 +3,7 @@ import * as flatbuffers from "flatbuffers";
 import { ENC, ENCT, KDF, KeyExchange, SymmetricAlgo } from "spacedatastandards.org/lib/js/ENC/main.js";
 import { PNM, PNMT } from "spacedatastandards.org/lib/js/PNM/main.js";
 import { REC, RECT } from "spacedatastandards.org/lib/js/REC/REC.js";
-import { RecordT } from "spacedatastandards.org/lib/js/REC/Record.js";
+import { Record, RecordT } from "spacedatastandards.org/lib/js/REC/Record.js";
 import { RecordType } from "spacedatastandards.org/lib/js/REC/RecordType.js";
 
 import {
@@ -58,6 +58,281 @@ const STANDARD_BY_RECORD_TYPE = Object.freeze(
 );
 const textEncoder = new TextEncoder();
 
+function assertBounds(buffer, offset, length, label) {
+  if (
+    !Number.isSafeInteger(offset) ||
+    !Number.isSafeInteger(length) ||
+    offset < 0 ||
+    length < 0 ||
+    offset + length > buffer.length
+  ) {
+    throw new Error(`${label} is out of bounds.`);
+  }
+}
+
+function readUint16LE(buffer, offset, label) {
+  assertBounds(buffer, offset, 2, label);
+  return buffer[offset] | (buffer[offset + 1] << 8);
+}
+
+function readUint32LE(buffer, offset, label) {
+  assertBounds(buffer, offset, 4, label);
+  return (
+    buffer[offset] |
+    (buffer[offset + 1] << 8) |
+    (buffer[offset + 2] << 16) |
+    (buffer[offset + 3] << 24)
+  ) >>> 0;
+}
+
+function readInt32LE(buffer, offset, label) {
+  return readUint32LE(buffer, offset, label) | 0;
+}
+
+function readTableFieldOffset(buffer, tableMeta, vtableFieldOffset) {
+  const fieldEntryOffset = tableMeta.vtableStart + vtableFieldOffset;
+  if (fieldEntryOffset + 2 > tableMeta.vtableEnd) {
+    return 0;
+  }
+  return readUint16LE(buffer, fieldEntryOffset, `${tableMeta.label} field offset`);
+}
+
+function resolveRelativeOffset(buffer, offset, label) {
+  const relativeOffset = readInt32LE(buffer, offset, label);
+  const target = offset + relativeOffset;
+  if (!Number.isSafeInteger(target) || target < 0 || target > buffer.length - 4) {
+    throw new Error(`${label} points outside the FlatBuffer.`);
+  }
+  return target;
+}
+
+function assertFlatbufferIdentifier(buffer, identifier, label) {
+  if (identifier.length !== flatbuffers.FILE_IDENTIFIER_LENGTH) {
+    throw new Error(`FlatBuffer identifier "${identifier}" must be 4 bytes.`);
+  }
+  assertBounds(
+    buffer,
+    flatbuffers.SIZEOF_INT,
+    flatbuffers.FILE_IDENTIFIER_LENGTH,
+    `${label} identifier`,
+  );
+  for (let index = 0; index < identifier.length; index += 1) {
+    if (buffer[flatbuffers.SIZEOF_INT + index] !== identifier.charCodeAt(index)) {
+      throw new Error(`${label} is missing the ${identifier} file identifier.`);
+    }
+  }
+}
+
+function assertFlatbufferTable(buffer, tableStart, label) {
+  assertBounds(buffer, tableStart, 4, `${label} table header`);
+  const vtableDistance = readInt32LE(buffer, tableStart, `${label} vtable offset`);
+  const vtableStart = tableStart - vtableDistance;
+  if (
+    !Number.isSafeInteger(vtableStart) ||
+    vtableStart < 0 ||
+    vtableStart > buffer.length - 4
+  ) {
+    throw new Error(`${label} vtable offset is invalid.`);
+  }
+  const vtableLength = readUint16LE(buffer, vtableStart, `${label} vtable length`);
+  const objectLength = readUint16LE(
+    buffer,
+    vtableStart + 2,
+    `${label} object length`,
+  );
+  if (vtableLength < 4 || (vtableLength & 1) !== 0) {
+    throw new Error(`${label} vtable length is invalid.`);
+  }
+  if (objectLength < 4) {
+    throw new Error(`${label} object length is invalid.`);
+  }
+  assertBounds(buffer, vtableStart, vtableLength, `${label} vtable`);
+  assertBounds(buffer, tableStart, objectLength, `${label} object`);
+  for (let entryOffset = vtableStart + 4; entryOffset < vtableStart + vtableLength; entryOffset += 2) {
+    const fieldOffset = readUint16LE(buffer, entryOffset, `${label} field entry`);
+    if (fieldOffset !== 0 && (fieldOffset < 4 || fieldOffset >= objectLength)) {
+      throw new Error(`${label} field offset is invalid.`);
+    }
+  }
+  return {
+    label,
+    tableStart,
+    tableEnd: tableStart + objectLength,
+    objectLength,
+    vtableStart,
+    vtableEnd: vtableStart + vtableLength,
+    vtableLength,
+  };
+}
+
+function assertRootFlatbufferTable(buffer, identifier, label) {
+  assertFlatbufferIdentifier(buffer, identifier, label);
+  const rootTableStart = readUint32LE(buffer, 0, `${label} root offset`);
+  if (
+    !Number.isSafeInteger(rootTableStart) ||
+    rootTableStart < flatbuffers.SIZEOF_INT + flatbuffers.FILE_IDENTIFIER_LENGTH ||
+    rootTableStart > buffer.length - 4
+  ) {
+    throw new Error(`${label} root offset is invalid.`);
+  }
+  return assertFlatbufferTable(buffer, rootTableStart, label);
+}
+
+function assertOptionalStringField(buffer, tableMeta, vtableFieldOffset, label) {
+  const fieldOffset = readTableFieldOffset(buffer, tableMeta, vtableFieldOffset);
+  if (fieldOffset === 0) {
+    return null;
+  }
+  const fieldStart = tableMeta.tableStart + fieldOffset;
+  const stringStart = resolveRelativeOffset(buffer, fieldStart, label);
+  const stringLength = readUint32LE(buffer, stringStart, `${label} length`);
+  assertBounds(buffer, stringStart + 4, stringLength, `${label} data`);
+  return {
+    fieldStart,
+    stringStart,
+    stringLength,
+  };
+}
+
+function assertOptionalByteVectorField(
+  buffer,
+  tableMeta,
+  vtableFieldOffset,
+  label,
+  { minLength = 0, maxLength = Number.MAX_SAFE_INTEGER } = {},
+) {
+  const fieldOffset = readTableFieldOffset(buffer, tableMeta, vtableFieldOffset);
+  if (fieldOffset === 0) {
+    return null;
+  }
+  const fieldStart = tableMeta.tableStart + fieldOffset;
+  const vectorStart = resolveRelativeOffset(buffer, fieldStart, label);
+  const vectorLength = readUint32LE(buffer, vectorStart, `${label} length`);
+  if (vectorLength < minLength || vectorLength > maxLength) {
+    throw new Error(`${label} length is invalid.`);
+  }
+  assertBounds(buffer, vectorStart + 4, vectorLength, `${label} data`);
+  return {
+    fieldStart,
+    vectorStart,
+    vectorLength,
+  };
+}
+
+function assertTableVectorField(buffer, tableMeta, vtableFieldOffset, label) {
+  const fieldOffset = readTableFieldOffset(buffer, tableMeta, vtableFieldOffset);
+  if (fieldOffset === 0) {
+    return [];
+  }
+  const fieldStart = tableMeta.tableStart + fieldOffset;
+  const vectorStart = resolveRelativeOffset(buffer, fieldStart, label);
+  const vectorLength = readUint32LE(buffer, vectorStart, `${label} length`);
+  const vectorDataStart = vectorStart + 4;
+  assertBounds(
+    buffer,
+    vectorDataStart,
+    vectorLength * 4,
+    `${label} offsets`,
+  );
+  const elements = [];
+  for (let index = 0; index < vectorLength; index += 1) {
+    const elementOffset = vectorDataStart + index * 4;
+    const tableStart = resolveRelativeOffset(
+      buffer,
+      elementOffset,
+      `${label}[${index}]`,
+    );
+    elements.push(
+      assertFlatbufferTable(buffer, tableStart, `${label}[${index}]`),
+    );
+  }
+  return elements;
+}
+
+function assertUnionTableField(buffer, tableMeta, vtableFieldOffset, label) {
+  const fieldOffset = readTableFieldOffset(buffer, tableMeta, vtableFieldOffset);
+  if (fieldOffset === 0) {
+    return null;
+  }
+  const fieldStart = tableMeta.tableStart + fieldOffset;
+  const tableStart = resolveRelativeOffset(buffer, fieldStart, label);
+  return assertFlatbufferTable(buffer, tableStart, label);
+}
+
+function validateEncTable(table, buffer, label) {
+  const tableMeta = assertFlatbufferTable(buffer, table.bb_pos, label);
+  assertOptionalByteVectorField(buffer, tableMeta, 12, `${label} ephemeral public key`, {
+    minLength: 1,
+    maxLength: 65,
+  });
+  assertOptionalByteVectorField(buffer, tableMeta, 14, `${label} nonce start`, {
+    minLength: 12,
+    maxLength: 12,
+  });
+  assertOptionalByteVectorField(buffer, tableMeta, 16, `${label} recipient key id`, {
+    maxLength: 32,
+  });
+  assertOptionalStringField(buffer, tableMeta, 18, `${label} context`);
+  assertOptionalByteVectorField(buffer, tableMeta, 20, `${label} schema hash`, {
+    maxLength: 32,
+  });
+  assertOptionalStringField(buffer, tableMeta, 22, `${label} root type`);
+  const record = normalizeEncTable(table.unpack());
+  if (!record.ephemeralPublicKey?.length) {
+    throw new Error(`${label} is missing the ephemeral public key.`);
+  }
+  if (!record.nonceStart || record.nonceStart.length !== 12) {
+    throw new Error(`${label} nonce start must be 12 bytes.`);
+  }
+  if (
+    record.keyExchange === "X25519" &&
+    record.ephemeralPublicKey.length !== 32
+  ) {
+    throw new Error(`${label} X25519 ephemeral public key must be 32 bytes.`);
+  }
+  if (
+    record.keyExchange !== "X25519" &&
+    (record.ephemeralPublicKey.length < 32 || record.ephemeralPublicKey.length > 65)
+  ) {
+    throw new Error(`${label} ephemeral public key length is invalid.`);
+  }
+  if (record.recipientKeyId && record.recipientKeyId.length > 32) {
+    throw new Error(`${label} recipient key id is too large.`);
+  }
+  if (record.schemaHash && record.schemaHash.length !== 32) {
+    throw new Error(`${label} schema hash must be 32 bytes when present.`);
+  }
+  return record;
+}
+
+function validatePnmTable(table, buffer, label) {
+  const tableMeta = assertFlatbufferTable(buffer, table.bb_pos, label);
+  assertOptionalStringField(buffer, tableMeta, 4, `${label} multiformat address`);
+  assertOptionalStringField(buffer, tableMeta, 6, `${label} publish timestamp`);
+  assertOptionalStringField(buffer, tableMeta, 8, `${label} cid`);
+  assertOptionalStringField(buffer, tableMeta, 10, `${label} file name`);
+  assertOptionalStringField(buffer, tableMeta, 12, `${label} file id`);
+  assertOptionalStringField(buffer, tableMeta, 14, `${label} signature`);
+  assertOptionalStringField(buffer, tableMeta, 16, `${label} timestamp signature`);
+  assertOptionalStringField(buffer, tableMeta, 18, `${label} signature type`);
+  assertOptionalStringField(buffer, tableMeta, 20, `${label} timestamp signature type`);
+  const record = normalizePnmTable(table.unpack());
+  if (
+    !record.multiformatAddress &&
+    !record.publishTimestamp &&
+    !record.cid &&
+    !record.fileName &&
+    !record.fileId &&
+    !record.signature &&
+    !record.timestampSignature &&
+    !record.signatureType &&
+    !record.timestampSignatureType
+  ) {
+    throw new Error(`${label} must contain at least one populated field.`);
+  }
+  return record;
+}
+
 function concatBytes(chunks) {
   const totalLength = chunks.reduce((total, chunk) => total + chunk.length, 0);
   const out = new Uint8Array(totalLength);
@@ -73,7 +348,8 @@ function normalizeByteField(value) {
   if (value === undefined || value === null) {
     return null;
   }
-  return toUint8Array(value);
+  const normalized = toUint8Array(value);
+  return normalized.length > 0 ? normalized : null;
 }
 
 function normalizeStringField(value) {
@@ -264,12 +540,10 @@ export function encodeEncRecord(record = {}) {
 }
 
 export function decodeEncRecord(bytes) {
-  const bb = new flatbuffers.ByteBuffer(toUint8Array(bytes));
-  if (!ENC.bufferHasIdentifier(bb)) {
-    throw new Error("ENC record is missing the $ENC file identifier.");
-  }
-  const record = ENC.getRootAsENC(bb).unpack();
-  return normalizeEncTable(record);
+  const buffer = toUint8Array(bytes);
+  assertRootFlatbufferTable(buffer, "$ENC", "ENC record");
+  const bb = new flatbuffers.ByteBuffer(buffer);
+  return validateEncTable(ENC.getRootAsENC(bb), buffer, "ENC record");
 }
 
 export function encodePnmRecord(record = {}) {
@@ -281,12 +555,10 @@ export function encodePnmRecord(record = {}) {
 }
 
 export function decodePnmRecord(bytes) {
-  const bb = new flatbuffers.ByteBuffer(toUint8Array(bytes));
-  if (!PNM.bufferHasIdentifier(bb)) {
-    throw new Error("PNM record is missing the $PNM file identifier.");
-  }
-  const record = PNM.getRootAsPNM(bb).unpack();
-  return normalizePnmTable(record);
+  const buffer = toUint8Array(bytes);
+  assertRootFlatbufferTable(buffer, "$PNM", "PNM record");
+  const bb = new flatbuffers.ByteBuffer(buffer);
+  return validatePnmTable(PNM.getRootAsPNM(bb), buffer, "PNM record");
 }
 
 export function encodePublicationRecordCollection(options = {}) {
@@ -311,33 +583,104 @@ export function encodePublicationRecordCollection(options = {}) {
 
 export function decodePublicationRecordCollection(bytes) {
   const buffer = toUint8Array(bytes);
+  assertRootFlatbufferTable(buffer, "$REC", "REC trailer");
   const bb = new flatbuffers.ByteBuffer(buffer);
-  if (!REC.bufferHasIdentifier(bb)) {
-    throw new Error("REC trailer is missing the $REC file identifier.");
+  const collectionTable = REC.getRootAsREC(bb);
+  const collectionMeta = assertFlatbufferTable(
+    buffer,
+    collectionTable.bb_pos,
+    "REC trailer",
+  );
+  assertOptionalStringField(buffer, collectionMeta, 4, "REC trailer version");
+  const recordTables = assertTableVectorField(
+    buffer,
+    collectionMeta,
+    6,
+    "REC trailer records",
+  );
+  if (recordTables.length === 0) {
+    throw new Error("REC trailer does not contain any records.");
   }
-  const collection = REC.getRootAsREC(bb).unpack();
+  const collection = collectionTable.unpack();
   const records = [];
   let enc = null;
   let pnm = null;
-  for (const unpackedRecord of Array.isArray(collection.RECORDS) ? collection.RECORDS : []) {
+  for (let index = 0; index < recordTables.length; index += 1) {
+    const recordTable =
+      collectionTable.RECORDS(index, new Record()) ?? null;
+    if (!recordTable) {
+      throw new Error(`REC trailer record ${index} could not be loaded.`);
+    }
+    const recordMeta = assertFlatbufferTable(
+      buffer,
+      recordTable.bb_pos,
+      `REC trailer record ${index}`,
+    );
+    assertOptionalStringField(
+      buffer,
+      recordMeta,
+      8,
+      `REC trailer record ${index} standard`,
+    );
+    const unpackedRecord = collection.RECORDS[index];
+    const recordType = recordTable.value_type();
     const standard =
-      normalizeStringField(unpackedRecord.standard) ??
-      STANDARD_BY_RECORD_TYPE[unpackedRecord.value_type] ??
+      normalizeStringField(unpackedRecord?.standard) ??
+      STANDARD_BY_RECORD_TYPE[recordType] ??
       null;
+    const expectedStandard =
+      STANDARD_BY_RECORD_TYPE[recordType] ?? null;
+    if (standard && expectedStandard && standard !== expectedStandard) {
+      throw new Error(
+        `REC trailer record ${index} standard/type mismatch (${standard} vs ${expectedStandard}).`,
+      );
+    }
+    const valueMeta = assertUnionTableField(
+      buffer,
+      recordMeta,
+      6,
+      `REC trailer record ${index} value`,
+    );
+    if (!valueMeta) {
+      throw new Error(`REC trailer record ${index} is missing a value.`);
+    }
+    let value =
+      standard === "ENC" || standard === "PNM"
+        ? null
+        : unpackedRecord?.value ?? null;
     if (standard === "ENC") {
-      enc = normalizeEncTable(unpackedRecord.value);
+      const encTable = recordTable.value(new ENC());
+      if (!encTable) {
+        throw new Error(`REC trailer record ${index} ENC payload is missing.`);
+      }
+      if (enc) {
+        throw new Error("REC trailer contains multiple ENC records.");
+      }
+      enc = validateEncTable(
+        encTable,
+        buffer,
+        `REC trailer record ${index} ENC payload`,
+      );
+      value = enc;
     } else if (standard === "PNM") {
-      pnm = normalizePnmTable(unpackedRecord.value);
+      const pnmTable = recordTable.value(new PNM());
+      if (!pnmTable) {
+        throw new Error(`REC trailer record ${index} PNM payload is missing.`);
+      }
+      if (pnm) {
+        throw new Error("REC trailer contains multiple PNM records.");
+      }
+      pnm = validatePnmTable(
+        pnmTable,
+        buffer,
+        `REC trailer record ${index} PNM payload`,
+      );
+      value = pnm;
     }
     records.push({
       standard,
-      recordType: unpackedRecord.value_type,
-      value:
-        standard === "ENC"
-          ? enc
-          : standard === "PNM"
-            ? pnm
-            : unpackedRecord.value,
+      recordType,
+      value,
     });
   }
   return {
