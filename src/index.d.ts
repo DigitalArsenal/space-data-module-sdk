@@ -424,8 +424,17 @@ export interface CompilationResult {
   outputPath: string | null;
   tempDir: string | null;
   wasmBytes: Uint8Array;
+  guestLink: GuestLinkArtifact | null;
   manifestWarnings: string[];
   report: ComplianceReport;
+}
+
+export interface GuestLinkArtifact {
+  format: "wasm-object";
+  language: string;
+  symbolPrefix: string;
+  methodSymbols: Record<string, string>;
+  objectBytes: Uint8Array;
 }
 
 export interface ProtectedArtifact {
@@ -473,7 +482,8 @@ export function protectModuleArtifact(options: {
   targetUrl?: string;
   capabilities?: string[];
   singleFileBundle?: boolean;
-  bundleEntries?: Record<string, unknown>;
+  bundleEntries?: Array<Record<string, unknown>>;
+  guestLink?: GuestLinkArtifact | null;
 }): Promise<ProtectedArtifact>;
 
 export function createRecipientKeypairHex(): Promise<{
@@ -567,6 +577,10 @@ export function validateManifestAgainstStandardsCatalog(
 
 export const SDS_BUNDLE_SECTION_NAME: string;
 export const DEFAULT_HASH_ALGORITHM: string;
+export const SDS_GUEST_LINK_OBJECT_ENTRY_ID: string;
+export const SDS_GUEST_LINK_METADATA_ENTRY_ID: string;
+export const SDS_GUEST_LINK_SECTION_NAME: string;
+export const SDS_GUEST_LINK_MEDIA_TYPE: string;
 
 export function createSingleFileBundle(options: {
   wasmBytes: Uint8Array;

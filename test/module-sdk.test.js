@@ -292,6 +292,11 @@ test("source compile emits a compliant wasm module", async () => {
   assert.ok(validation.exportNames.includes("plugin_alloc"));
   assert.ok(validation.exportNames.includes("plugin_free"));
   assert.ok(validation.exportNames.includes("_start"));
+  assert.ok(result.guestLink?.objectBytes.length > 0);
+  assert.equal(
+    result.guestLink?.methodSymbols?.propagate?.endsWith("propagate"),
+    true,
+  );
 });
 
 test("c++ source compile emits a compliant wasm module with aligned manifest metadata", async () => {
@@ -326,6 +331,8 @@ test("c++ source compile emits a compliant wasm module with aligned manifest met
   assert.equal(result.language, "c++");
   assert.equal(result.report.ok, true);
   assert.ok(result.wasmBytes.length > 0);
+  assert.ok(result.guestLink?.objectBytes.length > 0);
+  assert.ok(result.guestLink?.methodSymbols?.propagate);
 });
 
 test("artifacts can be signed and encrypted for transport", async () => {

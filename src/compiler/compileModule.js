@@ -1,5 +1,11 @@
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import {
   mkdtemp,
   rm,
@@ -30,6 +36,12 @@ import {
   generateX25519Keypair,
 } from "../transport/index.js";
 import { createSingleFileBundle } from "../bundle/index.js";
+import {
+  SDS_GUEST_LINK_MEDIA_TYPE,
+  SDS_GUEST_LINK_METADATA_ENTRY_ID,
+  SDS_GUEST_LINK_OBJECT_ENTRY_ID,
+  SDS_GUEST_LINK_SECTION_NAME,
+} from "../bundle/constants.js";
 import {
   base64ToBytes,
   bytesToBase64,
@@ -76,6 +88,119 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
   return args;
 }
 
+function guestLinkSymbolPrefix(pluginId) {
+  const normalized = String(pluginId ?? "module");
+  const ascii = Array.from(new TextEncoder().encode(normalized))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 24);
+  return `sdm_guest_${ascii}_`;
+}
+
+function parseStrongDefinedIdentifiers(nmOutput = "") {
+  const identifiers = new Set();
+  for (const line of String(nmOutput).split(/\r?\n/)) {
+    const match = line.match(/^\S+\s+([A-Za-z])\s+(.+)$/);
+    if (!match) {
+      continue;
+    }
+    const symbolType = match[1];
+    if (!"TDBCGRSV".includes(symbolType)) {
+      continue;
+    }
+    const demangled = match[2].trim();
+    const baseName = demangled
+      .replace(/\(.*$/, "")
+      .split("::")
+      .at(-1)
+      ?.trim();
+    if (!C_IDENTIFIER.test(baseName ?? "")) {
+      continue;
+    }
+    identifiers.add(baseName);
+  }
+  return Array.from(identifiers).sort();
+}
+
+function deriveGuestLinkRenameArgs({
+  objectBytes,
+  pluginId,
+  methodIds = [],
+} = {}) {
+  const tempDir = mkdtempSync(
+    path.join(os.tmpdir(), "space-data-module-sdk-link-symbols-"),
+  );
+  try {
+    const objectPath = path.join(tempDir, "module.o");
+    writeFileSync(objectPath, objectBytes);
+    const nm = spawnSync(
+      "llvm-nm",
+      ["-C", "--defined-only", objectPath],
+      {
+        encoding: "utf8",
+      },
+    );
+    if (nm.error) {
+      throw new Error(`failed to run llvm-nm: ${nm.error.message}`);
+    }
+    if ((nm.status ?? 1) !== 0) {
+      throw new Error(
+        `llvm-nm failed while deriving guest-link symbols:\n${nm.stderr ?? nm.stdout ?? ""}`.trim(),
+      );
+    }
+    const identifiers = parseStrongDefinedIdentifiers(nm.stdout);
+    const prefix = guestLinkSymbolPrefix(pluginId);
+    const renamedIdentifiers = Array.from(
+      new Set([...identifiers, ...methodIds.filter((value) => C_IDENTIFIER.test(value))]),
+    ).sort();
+    return {
+      prefix,
+      identifiers: renamedIdentifiers,
+      renameArgs: renamedIdentifiers.map(
+        (identifier) => `-D${identifier}=${prefix}${identifier}`,
+      ),
+      methodSymbols: Object.fromEntries(
+        methodIds.map((methodId) => [methodId, `${prefix}${methodId}`]),
+      ),
+    };
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function createGuestLinkBundleEntries(guestLink) {
+  if (!guestLink?.objectBytes || guestLink.objectBytes.length === 0) {
+    return [];
+  }
+  return [
+    {
+      entryId: SDS_GUEST_LINK_OBJECT_ENTRY_ID,
+      role: "auxiliary",
+      sectionName: SDS_GUEST_LINK_SECTION_NAME,
+      payloadEncoding: "raw-bytes",
+      mediaType: "application/wasm",
+      payload: guestLink.objectBytes,
+      description: "Prefixed guest-link wasm object for monolithic flow linking.",
+    },
+    {
+      entryId: SDS_GUEST_LINK_METADATA_ENTRY_ID,
+      role: "auxiliary",
+      sectionName: SDS_GUEST_LINK_SECTION_NAME,
+      payloadEncoding: "json-utf8",
+      mediaType: SDS_GUEST_LINK_MEDIA_TYPE,
+      payload: {
+        version: 1,
+        format: "wasm-object",
+        symbolPrefix: guestLink.symbolPrefix,
+        methodSymbols: guestLink.methodSymbols,
+        methodIds: Object.keys(guestLink.methodSymbols ?? {}),
+        language: guestLink.language,
+      },
+      description: "Guest-link metadata for monolithic flow linking.",
+    },
+  ];
+}
+
 async function getInvokeCppSupportFiles() {
   const [runtimeHeaders, schemaHeaders] = await Promise.all([
     getFlatbuffersCppRuntimeHeaders(),
@@ -114,6 +239,8 @@ function removeEmceptionDirectory(emception, directoryPath) {
 
 async function compileWithEmception(options = {}) {
   const {
+    manifest,
+    language,
     sourceCompilerCommand,
     sourceExtension,
     sourceCode,
@@ -140,6 +267,7 @@ async function compileWithEmception(options = {}) {
       const invokeHeaderPath = path.posix.join(workDir, "space_data_module_invoke.h");
       const invokeSourcePath = path.posix.join(workDir, "plugin-invoke-bridge.cpp");
       const sourceObjectPath = path.posix.join(workDir, "module.o");
+      const linkObjectPath = path.posix.join(workDir, "module-link.o");
       const manifestObjectPath = path.posix.join(workDir, "plugin-manifest-exports.o");
       const invokeObjectPath = path.posix.join(workDir, "plugin-invoke-bridge.o");
       const wasmOutputPath = path.posix.join(workDir, "module.wasm");
@@ -165,6 +293,43 @@ async function compileWithEmception(options = {}) {
             "-o",
             sourceObjectPath,
           ],
+        ];
+
+        for (const command of commands) {
+          const result = emception.run(command.join(" "));
+          if (result.returncode !== 0) {
+            throw new Error(
+              `Compilation failed with ${command[0]} (emception): ${result.stderr || result.stdout}`,
+            );
+          }
+        }
+
+        const sourceObjectBytes = new Uint8Array(emception.readFile(sourceObjectPath));
+        const guestLink = deriveGuestLinkRenameArgs({
+          objectBytes: sourceObjectBytes,
+          pluginId: manifest?.pluginId,
+          methodIds: Array.isArray(manifest?.methods)
+            ? manifest.methods.map((method) => String(method?.methodId ?? ""))
+            : [],
+        });
+
+        const linkCompileCommand = [
+          sourceCompilerCommand,
+          "-c",
+          sourcePath,
+          `-I${workDir}`,
+          ...guestLink.renameArgs,
+          "-o",
+          linkObjectPath,
+        ];
+        const linkCompileResult = emception.run(linkCompileCommand.join(" "));
+        if (linkCompileResult.returncode !== 0) {
+          throw new Error(
+            `Compilation failed with ${linkCompileCommand[0]} (emception): ${linkCompileResult.stderr || linkCompileResult.stdout}`,
+          );
+        }
+
+        const remainingCommands = [
           [
             "em++",
             "-c",
@@ -195,8 +360,7 @@ async function compileWithEmception(options = {}) {
             wasmOutputPath,
           ],
         ];
-
-        for (const command of commands) {
+        for (const command of remainingCommands) {
           const result = emception.run(command.join(" "));
           if (result.returncode !== 0) {
             throw new Error(
@@ -206,8 +370,20 @@ async function compileWithEmception(options = {}) {
         }
 
         const wasmBytes = new Uint8Array(emception.readFile(wasmOutputPath));
+        const linkObjectBytes = new Uint8Array(emception.readFile(linkObjectPath));
         await writeFile(resolvedOutputPath, wasmBytes);
-        return { wasmBytes, outputPath: resolvedOutputPath, tempDir };
+        return {
+          wasmBytes,
+          outputPath: resolvedOutputPath,
+          tempDir,
+          guestLink: {
+            format: "wasm-object",
+            language,
+            symbolPrefix: guestLink.prefix,
+            methodSymbols: guestLink.methodSymbols,
+            objectBytes: linkObjectBytes,
+          },
+        };
       } finally {
         try {
           removeEmceptionDirectory(emception, workDir);
@@ -275,6 +451,8 @@ export async function compileModuleFromSource(options = {}) {
     noEntry: includeCommandMain !== true,
   };
   const result = await compileWithEmception({
+    manifest,
+    language: compiler.language,
     sourceCompilerCommand: compiler.command,
     sourceExtension: compiler.extension,
     sourceCode,
@@ -301,6 +479,7 @@ export async function compileModuleFromSource(options = {}) {
     outputPath: resolvedOutputPath,
     tempDir,
     wasmBytes,
+    guestLink: result.guestLink,
     manifestWarnings: warnings,
     report,
   };
@@ -394,12 +573,16 @@ export async function protectModuleArtifact(options = {}) {
 
   let singleFileBundle = null;
   if (options.singleFileBundle === true) {
+    const additionalEntries = [
+      ...(Array.isArray(options.bundleEntries) ? options.bundleEntries : []),
+      ...createGuestLinkBundleEntries(options.guestLink),
+    ];
     singleFileBundle = await createSingleFileBundle({
       wasmBytes,
       manifest,
       authorization: signedAuthorization,
       transportEnvelope: encryptedEnvelope,
-      entries: options.bundleEntries,
+      entries: additionalEntries,
     });
   }
 

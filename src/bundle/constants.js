@@ -9,3 +9,8 @@ export const SDS_DEPLOYMENT_SECTION_NAME = "sds.deployment";
 export const SDS_DEPLOYMENT_ENTRY_ID = "deployment-plan";
 export const SDS_DEPLOYMENT_MEDIA_TYPE =
   "application/vnd.space-data.module.deployment+json";
+export const SDS_GUEST_LINK_OBJECT_ENTRY_ID = "guest-link-object";
+export const SDS_GUEST_LINK_METADATA_ENTRY_ID = "guest-link-metadata";
+export const SDS_GUEST_LINK_SECTION_NAME = "sds.guest-link";
+export const SDS_GUEST_LINK_MEDIA_TYPE =
+  "application/vnd.space-data.module.guest-link+json";

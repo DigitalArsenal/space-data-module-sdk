@@ -8,6 +8,8 @@ import {
   getWasmCustomSections,
   parseSingleFileBundle,
   protectModuleArtifact,
+  SDS_GUEST_LINK_METADATA_ENTRY_ID,
+  SDS_GUEST_LINK_OBJECT_ENTRY_ID,
 } from "../src/index.js";
 
 function createTestManifest() {
@@ -81,6 +83,7 @@ test("single-file bundles round-trip through wasm custom sections", async () => 
   const protectedArtifact = await protectModuleArtifact({
     manifest,
     wasmBytes: compilation.wasmBytes,
+    guestLink: compilation.guestLink,
     singleFileBundle: true,
   });
 
@@ -110,6 +113,14 @@ test("single-file bundles round-trip through wasm custom sections", async () => 
     (entry) => entry.entryId === "authorization",
   );
   assert.equal(authorizationEntry?.decodedPayload?.payload?.action, "deploy-flow");
+  const guestLinkEntry = parsed.entries.find(
+    (entry) => entry.entryId === SDS_GUEST_LINK_OBJECT_ENTRY_ID,
+  );
+  assert.ok(guestLinkEntry?.payloadBytes?.length > 0);
+  const guestLinkMetadataEntry = parsed.entries.find(
+    (entry) => entry.entryId === SDS_GUEST_LINK_METADATA_ENTRY_ID,
+  );
+  assert.equal(guestLinkMetadataEntry?.decodedPayload?.methodSymbols?.propagate.length > 0, true);
 });
 
 test("rebundling replaces prior sds sections and preserves canonical hash", async () => {
