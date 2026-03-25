@@ -1,11 +1,5 @@
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
-import {
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
 import {
   mkdtemp,
   rm,
@@ -42,6 +36,10 @@ import {
   SDS_GUEST_LINK_OBJECT_ENTRY_ID,
   SDS_GUEST_LINK_SECTION_NAME,
 } from "../bundle/constants.js";
+import {
+  decodeUnsignedLeb128,
+  parseWasmModuleSections,
+} from "../bundle/wasm.js";
 import {
   base64ToBytes,
   bytesToBase64,
@@ -122,50 +120,132 @@ function parseStrongDefinedIdentifiers(nmOutput = "") {
   return Array.from(identifiers).sort();
 }
 
+const WASM_SYM_BINDING_WEAK = 0x01;
+const WASM_SYM_BINDING_LOCAL = 0x02;
+const WASM_SYM_UNDEFINED = 0x10;
+const WASM_SYM_EXPLICIT_NAME = 0x40;
+const WASM_SYMBOL_KIND_FUNCTION = 0;
+const WASM_SYMBOL_KIND_DATA = 1;
+const WASM_SYMBOL_KIND_GLOBAL = 2;
+const WASM_SYMBOL_KIND_SECTION = 3;
+const WASM_SYMBOL_KIND_EVENT = 4;
+const WASM_SYMBOL_KIND_TABLE = 5;
+const LINKING_SYMBOL_TABLE_SUBSECTION_ID = 8;
+const textDecoder = new TextDecoder();
+
+function decodeWasmName(bytes, offset) {
+  const lengthInfo = decodeUnsignedLeb128(bytes, offset);
+  const nameStart = lengthInfo.nextOffset;
+  const nameEnd = nameStart + lengthInfo.value;
+  if (nameEnd > bytes.length) {
+    throw new Error("WASM name extends past end of symbol payload.");
+  }
+  return {
+    value: textDecoder.decode(bytes.subarray(nameStart, nameEnd)),
+    nextOffset: nameEnd,
+  };
+}
+
+function parseDefinedLinkSymbolsFromObjectBytes(objectBytes) {
+  const parsed = parseWasmModuleSections(objectBytes);
+  const linkingSection = parsed.sections.find(
+    (section) => section.id === 0 && section.name === "linking",
+  );
+  if (!linkingSection) {
+    throw new Error("Guest-link object is missing a linking custom section.");
+  }
+  const payload = linkingSection.dataBytes;
+  let offset = decodeUnsignedLeb128(payload, 0).nextOffset;
+  const identifiers = new Set();
+  while (offset < payload.length) {
+    const subsectionId = payload[offset++];
+    const sizeInfo = decodeUnsignedLeb128(payload, offset);
+    offset = sizeInfo.nextOffset;
+    const subsectionEnd = offset + sizeInfo.value;
+    if (subsectionEnd > payload.length) {
+      throw new Error("Linking subsection extends past end of payload.");
+    }
+    if (subsectionId !== LINKING_SYMBOL_TABLE_SUBSECTION_ID) {
+      offset = subsectionEnd;
+      continue;
+    }
+    let cursor = offset;
+    const countInfo = decodeUnsignedLeb128(payload, cursor);
+    cursor = countInfo.nextOffset;
+    for (let symbolIndex = 0; symbolIndex < countInfo.value; symbolIndex += 1) {
+      const kind = payload[cursor++];
+      const flagsInfo = decodeUnsignedLeb128(payload, cursor);
+      const flags = flagsInfo.value;
+      cursor = flagsInfo.nextOffset;
+      let name = "";
+      if (
+        kind === WASM_SYMBOL_KIND_FUNCTION ||
+        kind === WASM_SYMBOL_KIND_GLOBAL ||
+        kind === WASM_SYMBOL_KIND_EVENT ||
+        kind === WASM_SYMBOL_KIND_TABLE
+      ) {
+        cursor = decodeUnsignedLeb128(payload, cursor).nextOffset;
+        if (
+          (flags & WASM_SYM_UNDEFINED) === 0 ||
+          (flags & WASM_SYM_EXPLICIT_NAME) !== 0
+        ) {
+          const nameInfo = decodeWasmName(payload, cursor);
+          name = nameInfo.value;
+          cursor = nameInfo.nextOffset;
+        }
+      } else if (kind === WASM_SYMBOL_KIND_DATA) {
+        const nameInfo = decodeWasmName(payload, cursor);
+        name = nameInfo.value;
+        cursor = nameInfo.nextOffset;
+        if ((flags & WASM_SYM_UNDEFINED) === 0) {
+          cursor = decodeUnsignedLeb128(payload, cursor).nextOffset;
+          cursor = decodeUnsignedLeb128(payload, cursor).nextOffset;
+          cursor = decodeUnsignedLeb128(payload, cursor).nextOffset;
+        }
+      } else if (kind === WASM_SYMBOL_KIND_SECTION) {
+        cursor = decodeUnsignedLeb128(payload, cursor).nextOffset;
+      } else {
+        throw new Error(`Unsupported WASM linking symbol kind: ${kind}`);
+      }
+      if ((flags & WASM_SYM_UNDEFINED) !== 0) {
+        continue;
+      }
+      if ((flags & WASM_SYM_BINDING_LOCAL) !== 0) {
+        continue;
+      }
+      if ((flags & WASM_SYM_BINDING_WEAK) !== 0) {
+        continue;
+      }
+      if (!C_IDENTIFIER.test(name)) {
+        continue;
+      }
+      identifiers.add(name);
+    }
+    return Array.from(identifiers).sort();
+  }
+  throw new Error("Guest-link object is missing a symbol table subsection.");
+}
+
 function deriveGuestLinkRenameArgs({
   objectBytes,
   pluginId,
   methodIds = [],
 } = {}) {
-  const tempDir = mkdtempSync(
-    path.join(os.tmpdir(), "space-data-module-sdk-link-symbols-"),
-  );
-  try {
-    const objectPath = path.join(tempDir, "module.o");
-    writeFileSync(objectPath, objectBytes);
-    const nm = spawnSync(
-      "llvm-nm",
-      ["-C", "--defined-only", objectPath],
-      {
-        encoding: "utf8",
-      },
-    );
-    if (nm.error) {
-      throw new Error(`failed to run llvm-nm: ${nm.error.message}`);
-    }
-    if ((nm.status ?? 1) !== 0) {
-      throw new Error(
-        `llvm-nm failed while deriving guest-link symbols:\n${nm.stderr ?? nm.stdout ?? ""}`.trim(),
-      );
-    }
-    const identifiers = parseStrongDefinedIdentifiers(nm.stdout);
-    const prefix = guestLinkSymbolPrefix(pluginId);
-    const renamedIdentifiers = Array.from(
-      new Set([...identifiers, ...methodIds.filter((value) => C_IDENTIFIER.test(value))]),
-    ).sort();
-    return {
-      prefix,
-      identifiers: renamedIdentifiers,
-      renameArgs: renamedIdentifiers.map(
-        (identifier) => `-D${identifier}=${prefix}${identifier}`,
-      ),
-      methodSymbols: Object.fromEntries(
-        methodIds.map((methodId) => [methodId, `${prefix}${methodId}`]),
-      ),
-    };
-  } finally {
-    rmSync(tempDir, { recursive: true, force: true });
-  }
+  const identifiers = parseDefinedLinkSymbolsFromObjectBytes(objectBytes);
+  const prefix = guestLinkSymbolPrefix(pluginId);
+  const renamedIdentifiers = Array.from(
+    new Set([...identifiers, ...methodIds.filter((value) => C_IDENTIFIER.test(value))]),
+  ).sort();
+  return {
+    prefix,
+    identifiers: renamedIdentifiers,
+    renameArgs: renamedIdentifiers.map(
+      (identifier) => `-D${identifier}=${prefix}${identifier}`,
+    ),
+    methodSymbols: Object.fromEntries(
+      methodIds.map((methodId) => [methodId, `${prefix}${methodId}`]),
+    ),
+  };
 }
 
 function createGuestLinkBundleEntries(guestLink) {
