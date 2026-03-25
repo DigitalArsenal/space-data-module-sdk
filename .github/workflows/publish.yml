@@ -23,9 +23,6 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-
-      - name: Update npm for trusted publishing
-        run: npm install -g npm@latest
       - run: npm ci
       - run: npm test
       - run: npm run check:compliance
