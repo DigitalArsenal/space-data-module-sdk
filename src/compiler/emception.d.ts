@@ -54,6 +54,7 @@ export interface SharedEmceptionSession {
 }
 
 export function createSharedEmceptionSession(): SharedEmceptionSession;
+export function createIsolatedEmceptionSession(): SharedEmceptionSession;
 export function loadSharedEmception(): Promise<unknown>;
 export function withSharedEmception<T>(
   task: (handle: SharedEmceptionHandle) => T | Promise<T>,

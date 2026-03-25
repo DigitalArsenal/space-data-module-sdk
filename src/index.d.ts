@@ -638,6 +638,7 @@ export type {
 } from "./compiler/emception.js";
 
 export {
+  createIsolatedEmceptionSession,
   createSharedEmceptionSession,
   loadSharedEmception,
   withSharedEmception,

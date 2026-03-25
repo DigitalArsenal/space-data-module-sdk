@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  createIsolatedEmceptionSession,
   createSharedEmceptionSession,
   loadSharedEmception,
   withSharedEmception,
@@ -10,6 +11,7 @@ import { createSharedEmceptionSession as createFromCompilerIndex } from "space-d
 
 test("compiler emception helpers are exported from compiler surfaces", () => {
   assert.equal(typeof createSharedEmceptionSession, "function");
+  assert.equal(typeof createIsolatedEmceptionSession, "function");
   assert.equal(typeof loadSharedEmception, "function");
   assert.equal(typeof withSharedEmception, "function");
   assert.equal(createFromCompilerIndex, createSharedEmceptionSession);
@@ -35,4 +37,19 @@ test("shared emception session exposes stable locked filesystem helpers", async 
     handle.removeTree(rootDir);
     assert.equal(handle.exists(rootDir), false);
   });
+});
+
+test("isolated emception sessions use distinct compiler instances", async () => {
+  const sharedSession = createSharedEmceptionSession();
+  const isolatedSessionA = createIsolatedEmceptionSession();
+  const isolatedSessionB = createIsolatedEmceptionSession();
+
+  const [sharedRaw, isolatedRawA, isolatedRawB] = await Promise.all([
+    sharedSession.load(),
+    isolatedSessionA.load(),
+    isolatedSessionB.load(),
+  ]);
+
+  assert.notEqual(sharedRaw, isolatedRawA);
+  assert.notEqual(isolatedRawA, isolatedRawB);
 });

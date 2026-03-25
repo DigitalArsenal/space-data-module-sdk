@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import {
+  createEmceptionController,
   getSharedEmceptionController,
   loadEmception,
   runWithEmceptionLock,
@@ -178,6 +179,10 @@ class SharedEmceptionSession {
 
 export function createSharedEmceptionSession() {
   return new SharedEmceptionSession();
+}
+
+export function createIsolatedEmceptionSession() {
+  return new SharedEmceptionSession(createEmceptionController());
 }
 
 export async function loadSharedEmception() {

@@ -6,6 +6,7 @@ export {
 } from "./compileModule.js";
 
 export {
+  createIsolatedEmceptionSession,
   createSharedEmceptionSession,
   loadSharedEmception,
   withSharedEmception,

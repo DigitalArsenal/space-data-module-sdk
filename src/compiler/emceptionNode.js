@@ -225,6 +225,10 @@ export function getSharedEmceptionController() {
   return sharedEmceptionController;
 }
 
+export function createEmceptionController() {
+  return new EmceptionController();
+}
+
 export async function loadEmception() {
   return sharedEmceptionController.load();
 }

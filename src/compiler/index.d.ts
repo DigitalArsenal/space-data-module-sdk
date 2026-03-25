@@ -18,6 +18,7 @@ export type {
 } from "./emception.js";
 
 export {
+  createIsolatedEmceptionSession,
   createSharedEmceptionSession,
   loadSharedEmception,
   withSharedEmception,
