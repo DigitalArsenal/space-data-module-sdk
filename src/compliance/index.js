@@ -4,12 +4,14 @@ import {
   getWasmExportNamesFromFile,
   loadManifestFromFile,
   loadComplianceConfig,
-  RecommendedCapabilityIds,
-  StandaloneWasiCapabilityIds,
   resolveManifestFiles,
   validatePluginArtifact,
   validatePluginManifest,
 } from "./pluginCompliance.js";
+import {
+  RecommendedCapabilityIds,
+  StandaloneWasiCapabilityIds,
+} from "../capabilities.js";
 import { validateManifestAgainstStandardsCatalog } from "../standards/index.js";
 
 function mergeReport(baseReport, issues) {

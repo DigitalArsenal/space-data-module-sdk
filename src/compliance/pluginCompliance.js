@@ -12,53 +12,10 @@ import {
   ProtocolTransportKind,
   RuntimeTarget,
 } from "../runtime/constants.js";
-
-export const RecommendedCapabilityIds = Object.freeze([
-  "clock",
-  "random",
-  "logging",
-  "timers",
-  "schedule_cron",
-  "http",
-  "tls",
-  "websocket",
-  "mqtt",
-  "tcp",
-  "udp",
-  "network",
-  "filesystem",
-  "pipe",
-  "pubsub",
-  "protocol_handle",
-  "protocol_dial",
-  "database",
-  "storage_adapter",
-  "storage_query",
-  "storage_write",
-  "context_read",
-  "context_write",
-  "process_exec",
-  "crypto_hash",
-  "crypto_sign",
-  "crypto_verify",
-  "crypto_encrypt",
-  "crypto_decrypt",
-  "crypto_key_agreement",
-  "crypto_kdf",
-  "wallet_sign",
-  "ipfs",
-  "scene_access",
-  "entity_access",
-  "render_hooks",
-]);
-
-export const StandaloneWasiCapabilityIds = Object.freeze([
-  "logging",
-  "clock",
-  "random",
-  "filesystem",
-  "pipe",
-]);
+import {
+  RecommendedCapabilityIds,
+  StandaloneWasiCapabilityIds,
+} from "../capabilities.js";
 
 const RecommendedCapabilitySet = new Set(RecommendedCapabilityIds);
 const StandaloneWasiCapabilitySet = new Set(StandaloneWasiCapabilityIds);
