@@ -175,6 +175,44 @@ function validateStringField(issues, value, location, label) {
   return true;
 }
 
+function validateCapabilityEntry(capability, issues, location) {
+  if (isNonEmptyString(capability)) {
+    return capability;
+  }
+  if (!capability || typeof capability !== "object" || Array.isArray(capability)) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-capability",
+      "Capability entries must be non-empty strings or host capability records.",
+      location,
+    );
+    return null;
+  }
+  if (!validateStringField(issues, capability.capability, `${location}.capability`, "Capability id")) {
+    return null;
+  }
+  validateOptionalStringField(
+    issues,
+    capability.scope,
+    `${location}.scope`,
+    "Capability scope",
+  );
+  validateOptionalBooleanField(
+    issues,
+    capability.required,
+    `${location}.required`,
+    "Capability required",
+  );
+  validateOptionalStringField(
+    issues,
+    capability.description,
+    `${location}.description`,
+    "Capability description",
+  );
+  return capability.capability;
+}
+
 function validateIntegerField(
   issues,
   value,
@@ -1066,8 +1104,9 @@ export function validatePluginManifest(manifest, options = {}) {
   validateStringField(issues, manifest.version, `${sourceName}.version`, "version");
   validateStringField(issues, manifest.pluginFamily, `${sourceName}.pluginFamily`, "pluginFamily");
 
-  const declaredCapabilities = manifest.capabilities;
-  if (!Array.isArray(declaredCapabilities)) {
+  const rawDeclaredCapabilities = manifest.capabilities;
+  let declaredCapabilities = null;
+  if (!Array.isArray(rawDeclaredCapabilities)) {
     pushIssue(
       issues,
       "warning",
@@ -1076,38 +1115,39 @@ export function validatePluginManifest(manifest, options = {}) {
       `${sourceName}.capabilities`,
     );
   } else {
+    declaredCapabilities = [];
     const seenCapabilities = new Set();
-    for (const capability of declaredCapabilities) {
-      if (!isNonEmptyString(capability)) {
-        pushIssue(
-          issues,
-          "error",
-          "invalid-capability",
-          "Capability entries must be non-empty strings.",
-          `${sourceName}.capabilities`,
-        );
-        continue;
+    rawDeclaredCapabilities.forEach((capability, index) => {
+      const normalizedCapability = validateCapabilityEntry(
+        capability,
+        issues,
+        `${sourceName}.capabilities[${index}]`,
+      );
+      if (!normalizedCapability) {
+        return;
       }
-      if (seenCapabilities.has(capability)) {
+      declaredCapabilities.push(normalizedCapability);
+      if (seenCapabilities.has(normalizedCapability)) {
         pushIssue(
           issues,
           "warning",
           "duplicate-capability",
-          `Capability "${capability}" is declared more than once.`,
+          `Capability "${normalizedCapability}" is declared more than once.`,
           `${sourceName}.capabilities`,
         );
+        return;
       }
-      seenCapabilities.add(capability);
-      if (!RecommendedCapabilitySet.has(capability)) {
+      seenCapabilities.add(normalizedCapability);
+      if (!RecommendedCapabilitySet.has(normalizedCapability)) {
         pushIssue(
           issues,
           "warning",
           "noncanonical-capability",
-          `Capability "${capability}" is not in the current canonical SDN coarse capability set.`,
+          `Capability "${normalizedCapability}" is not in the current canonical SDN coarse capability set.`,
           `${sourceName}.capabilities`,
         );
       }
-    }
+    });
   }
   validateRuntimeTargets(
     manifest.runtimeTargets,

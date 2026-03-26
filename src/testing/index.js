@@ -32,11 +32,11 @@ const CapabilitySurfaceMatrix = Object.freeze({
     wasi: true,
     standaloneWasi: true,
     wasmedge: true,
-    syncHostcall: false,
+    syncHostcall: true,
     nodeHostApi: true,
     notes: [
       "WASI random_get is available to standalone guests.",
-      "The current sync hostcall ABI does not expose random.bytes.",
+      "The sync hostcall ABI exposes random.bytes through a canonical base64 byte envelope.",
     ],
   }),
   timers: Object.freeze({

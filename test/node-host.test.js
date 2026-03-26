@@ -536,11 +536,12 @@ test("node host exposes random, timer, crypto, and invoke helpers", async () => 
   const before = host.clock.monotonicNow();
   await host.timers.delay(20);
   const after = host.clock.monotonicNow();
-  const random = await host.random.bytes(16);
+  const random = host.random.bytes(16);
   const digest = await host.invoke("crypto.sha256", {
     bytes: new TextEncoder().encode("abc"),
   });
 
+  assert.equal(random instanceof Uint8Array, true);
   assert.equal(random.length, 16);
   assert.equal(after >= before, true);
   assert.equal(bytesToHex(digest), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");

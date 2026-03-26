@@ -20,9 +20,11 @@ __attribute__((import_module("sdn_host"), import_name("read_response")))
 extern int sdn_host_read_response(char *dst_ptr, int dst_len);
 
 static const char OP_CLOCK_NOW[] = "clock.now";
+static const char OP_RANDOM_BYTES[] = "random.bytes";
 static const char OP_SCHEDULE_MATCHES[] = "schedule.matches";
 static const char OP_FILESYSTEM_RESOLVE[] = "filesystem.resolvePath";
 static const char EMPTY_JSON[] = "{}";
+static const char RANDOM_BYTES_JSON[] = "{\\"length\\":16}";
 static const char SCHEDULE_MATCHES_JSON[] = "{\\"expression\\":\\"*/15 9-17 * * MON-FRI\\",\\"date\\":\\"2026-03-16T09:15:00\\"}";
 static const char FILESYSTEM_JSON[] = "{\\"path\\":\\"demo.txt\\"}";
 
@@ -63,6 +65,17 @@ int guest_call_schedule_matches(void) {
     (int)(sizeof(OP_SCHEDULE_MATCHES) - 1),
     SCHEDULE_MATCHES_JSON,
     (int)(sizeof(SCHEDULE_MATCHES_JSON) - 1)
+  );
+  copy_last_response();
+  return status;
+}
+
+int guest_call_random_bytes(void) {
+  int status = sdn_host_call_json(
+    OP_RANDOM_BYTES,
+    (int)(sizeof(OP_RANDOM_BYTES) - 1),
+    RANDOM_BYTES_JSON,
+    (int)(sizeof(RANDOM_BYTES_JSON) - 1)
   );
   copy_last_response();
   return status;
@@ -131,11 +144,12 @@ function createAbiManifest() {
     name: "Hostcall ABI Guest",
     version: "0.1.0",
     pluginFamily: "analysis",
-    capabilities: ["clock", "schedule_cron"],
+    capabilities: ["clock", "random", "schedule_cron"],
     externalInterfaces: [],
     invokeSurfaces: ["direct"],
     methods: [
       createAbiMethod("guest_call_clock_now"),
+      createAbiMethod("guest_call_random_bytes"),
       createAbiMethod("guest_call_schedule_matches"),
       createAbiMethod("guest_call_denied_filesystem"),
       createAbiMethod("guest_response_ptr"),
@@ -154,7 +168,7 @@ function decodeGuestResponse(instance) {
 
 test("sync hostcall ABI bridges a wasm guest into the reference Node host", async () => {
   const host = createNodeHost({
-    capabilities: ["clock", "schedule_cron"],
+    capabilities: ["clock", "random", "schedule_cron"],
   });
 
   const compilation = await compileModuleFromSource({
@@ -191,6 +205,15 @@ test("sync hostcall ABI bridges a wasm guest into the reference Node host", asyn
     const clockEnvelope = decodeGuestResponse(instance);
     assert.equal(clockEnvelope.ok, true);
     assert.equal(typeof clockEnvelope.result, "number");
+
+    assert.equal(instance.exports.guest_call_random_bytes(), 0);
+    const randomEnvelope = decodeGuestResponse(instance);
+    assert.equal(randomEnvelope.ok, true);
+    assert.equal(randomEnvelope.result.__type, "bytes");
+    assert.equal(
+      Buffer.from(randomEnvelope.result.base64, "base64").length,
+      16,
+    );
 
     assert.equal(instance.exports.guest_call_schedule_matches(), 0);
     const scheduleEnvelope = decodeGuestResponse(instance);

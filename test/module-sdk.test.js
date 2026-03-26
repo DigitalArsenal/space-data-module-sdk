@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { WASI } from "node:wasi";
 
 import {
   compileModuleFromSource,
@@ -116,7 +117,13 @@ test("plugin manifests round-trip through FlatBuffer encoding", () => {
   const encoded = encodePluginManifest(manifest);
   const decoded = decodePluginManifest(encoded);
   assert.equal(decoded.pluginId, manifest.pluginId);
+  assert.equal(decoded.pluginFamily, manifest.pluginFamily);
+  assert.deepEqual(decoded.capabilities, manifest.capabilities);
   assert.equal(decoded.methods[0].methodId, "propagate");
+  assert.equal(
+    decoded.methods[0].drainPolicy,
+    manifest.methods[0].drainPolicy,
+  );
 });
 
 test("plugin manifest invoke surfaces round-trip through FlatBuffer encoding", () => {
@@ -297,6 +304,50 @@ test("source compile emits a compliant wasm module", async () => {
     result.guestLink?.methodSymbols?.propagate?.endsWith("propagate"),
     true,
   );
+});
+
+test("artifact compliance can validate a built module from its embedded manifest bytes", async () => {
+  const manifest = {
+    ...createTestManifest(),
+    capabilities: ["clock", "random"],
+  };
+  const result = await compileModuleFromSource({
+    manifest,
+    sourceCode: "int propagate(void) { return 7; }\n",
+    language: "c",
+  });
+  const wasi = new WASI({
+    version: "preview1",
+    args: ["embedded-manifest"],
+    env: {},
+    preopens: {},
+    returnOnExit: true,
+  });
+  const { instance } = await WebAssembly.instantiate(
+    result.wasmBytes,
+    wasi.getImportObject(),
+  );
+  const memory = instance.exports.memory;
+  const manifestPtr = Number(instance.exports.plugin_get_manifest_flatbuffer());
+  const manifestSize = Number(
+    instance.exports.plugin_get_manifest_flatbuffer_size(),
+  );
+  const embeddedManifest = decodePluginManifest(
+    new Uint8Array(memory.buffer, manifestPtr, manifestSize).slice(),
+  );
+
+  assert.equal(embeddedManifest.pluginFamily, manifest.pluginFamily);
+  assert.deepEqual(embeddedManifest.capabilities, manifest.capabilities);
+  assert.equal(
+    embeddedManifest.methods[0].drainPolicy,
+    manifest.methods[0].drainPolicy,
+  );
+
+  const validation = await validateArtifactWithStandards({
+    manifest: embeddedManifest,
+    wasmPath: result.outputPath,
+  });
+  assert.equal(validation.ok, true);
 });
 
 test("c++ source compile emits a compliant wasm module with aligned manifest metadata", async () => {

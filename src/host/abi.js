@@ -1,3 +1,5 @@
+import { bytesToBase64 } from "../utils/encoding.js";
+
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
 
@@ -14,6 +16,7 @@ export const NodeHostSyncHostcallOperations = Object.freeze([
   "clock.now",
   "clock.monotonicNow",
   "clock.nowIso",
+  "random.bytes",
   "schedule.parse",
   "schedule.matches",
   "schedule.next",
@@ -105,6 +108,47 @@ function isPromiseLike(value) {
   );
 }
 
+function encodeHostcallValue(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (
+    value instanceof Uint8Array ||
+    value instanceof ArrayBuffer ||
+    ArrayBuffer.isView(value)
+  ) {
+    const bytes =
+      value instanceof Uint8Array
+        ? value
+        : new Uint8Array(
+            value.buffer ?? value,
+            value.byteOffset ?? 0,
+            value.byteLength ?? value.byteLength,
+          );
+    return {
+      __type: "bytes",
+      base64: bytesToBase64(bytes),
+    };
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => encodeHostcallValue(entry));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, entry]) => entry !== undefined)
+        .map(([key, entry]) => [key, encodeHostcallValue(entry)]),
+    );
+  }
+  return value;
+}
+
 export function dispatchNodeHostSyncOperation(host, operation, params = null) {
   const normalized = assertNonEmptyString(operation, "Hostcall operation");
   switch (normalized) {
@@ -124,6 +168,8 @@ export function dispatchNodeHostSyncOperation(host, operation, params = null) {
       return host.clock.monotonicNow();
     case "clock.nowIso":
       return host.clock.nowIso();
+    case "random.bytes":
+      return host.random.bytes(params?.length);
     case "schedule.parse":
       return host.schedule.parse(params?.expression);
     case "schedule.matches":
@@ -202,7 +248,7 @@ export function createJsonHostcallBridge(options = {}) {
       }
       setEnvelope(HOSTCALL_STATUS_OK, {
         ok: true,
-        result,
+        result: encodeHostcallValue(result),
       });
       return HOSTCALL_STATUS_OK;
     } catch (error) {

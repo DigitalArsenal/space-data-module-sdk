@@ -1,6 +1,7 @@
 import dgram from "node:dgram";
 import net from "node:net";
 import path from "node:path";
+import { randomBytes as nodeRandomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
@@ -21,7 +22,6 @@ import {
   ed25519Sign,
   ed25519Verify,
   hkdfBytes,
-  randomBytes,
   secp256k1PublicKey,
   secp256k1SignDigest,
   secp256k1VerifyDigest,
@@ -1422,10 +1422,10 @@ export class NodeHost {
     });
 
     this.random = Object.freeze({
-      bytes: async (length) =>
-        this.#withCapability("random", "random.bytes", async () => {
+      bytes: (length) =>
+        this.#withCapability("random", "random.bytes", () => {
           const size = assertNonNegativeInteger(length, "Random byte length");
-          return randomBytes(size);
+          return nodeRandomBytes(size);
         }),
     });
 

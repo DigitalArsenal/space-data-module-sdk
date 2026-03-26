@@ -925,7 +925,7 @@ export class NodeHost {
     nowIso(): string;
   };
   random: {
-    bytes(length: number): Promise<Uint8Array>;
+    bytes(length: number): Uint8Array;
   };
   timers: {
     delay(ms: number, options?: { signal?: unknown }): Promise<void>;

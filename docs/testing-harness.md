@@ -94,6 +94,7 @@ The matrix and the existing Node host tests together cover:
 - args and environment wiring
 - filesystem path smoke through WASI/preopen setup
 - WASI clock/time smoke
+- sync `sdn_host` byte-envelope coverage for `random.bytes`
 - host capability surface classification
 - the Node host API suite for HTTP, TCP, UDP, TLS, WebSocket, MQTT, exec,
   context, crypto, timers, and filesystem semantics
