@@ -1,5 +1,7 @@
 export type {
   CompilationResult,
+  GuestLinkArtifact,
+  ModuleThreadModelName,
   ProtectedArtifact,
 } from "../index.js";
 
@@ -7,6 +9,7 @@ export {
   cleanupCompilation,
   compileModuleFromSource,
   createRecipientKeypairHex,
+  ModuleThreadModel,
   protectModuleArtifact,
 } from "../index.js";
 

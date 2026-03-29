@@ -556,6 +556,7 @@ export function decodeProtectedBlobBase64(
 export interface CompilationResult {
   compiler: string;
   language: string;
+  threadModel: ModuleThreadModelName;
   outputPath: string | null;
   tempDir: string | null;
   wasmBytes: Uint8Array;
@@ -569,8 +570,18 @@ export interface GuestLinkArtifact {
   language: string;
   symbolPrefix: string;
   methodSymbols: Record<string, string>;
+  threadModel: ModuleThreadModelName;
   objectBytes: Uint8Array;
 }
+
+export type ModuleThreadModelName =
+  | "single-thread"
+  | "emscripten-pthreads";
+
+export const ModuleThreadModel: {
+  readonly SINGLE_THREAD: "single-thread";
+  readonly EMSCRIPTEN_PTHREADS: "emscripten-pthreads";
+};
 
 export interface ProtectedArtifact {
   mnemonic: string;
@@ -602,6 +613,7 @@ export function compileModuleFromSource(options: {
   manifest: PluginManifest;
   sourceCode: string;
   language?: string;
+  threadModel?: ModuleThreadModelName;
   outputPath?: string;
   allowUndefinedImports?: boolean;
 }): Promise<CompilationResult>;

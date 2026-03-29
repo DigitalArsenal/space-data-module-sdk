@@ -1,7 +1,11 @@
 import os from "node:os";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import {
   mkdtemp,
+  mkdir,
+  readFile,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -24,7 +28,11 @@ import {
 } from "./flatcSupport.js";
 import { runWithEmceptionLock } from "./emceptionNode.js";
 import { encodePluginManifest, toEmbeddedPluginManifest } from "../manifest/index.js";
-import { DefaultInvokeExports, InvokeSurface } from "../runtime/constants.js";
+import {
+  DefaultInvokeExports,
+  InvokeSurface,
+  RuntimeTarget,
+} from "../runtime/constants.js";
 import {
   appendPublicationRecordCollection,
   createEncryptedEnvelopePayload,
@@ -55,6 +63,12 @@ import { sha256Bytes } from "../utils/crypto.js";
 import { getWasmWallet } from "../utils/wasmCrypto.js";
 
 const C_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const execFileAsync = promisify(execFile);
+
+export const ModuleThreadModel = Object.freeze({
+  SINGLE_THREAD: "single-thread",
+  EMSCRIPTEN_PTHREADS: "emscripten-pthreads",
+});
 
 function selectCompiler(language) {
   const normalized = String(language ?? "c").trim().toLowerCase();
@@ -81,14 +95,61 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
     (symbol) => "-Wl,--export=" + symbol,
   );
   const extraArgs = [];
+  const threadArgs = [];
+  if (options.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS) {
+    threadArgs.push("-pthread");
+  }
   if (options.allowUndefinedImports === true) {
     extraArgs.push("-s", "ERROR_ON_UNDEFINED_SYMBOLS=0", "-Wl,--allow-undefined");
   }
-  const args = ["-O2", "-s", "STANDALONE_WASM=1", ...extraArgs, ...linkerExports];
+  const args = [
+    "-O2",
+    ...threadArgs,
+    "-s",
+    "STANDALONE_WASM=1",
+    ...extraArgs,
+    ...linkerExports,
+  ];
   if (options.noEntry === true) {
     args.splice(1, 0, "--no-entry");
   }
   return args;
+}
+
+function normalizeThreadModel(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === ModuleThreadModel.SINGLE_THREAD) {
+    return ModuleThreadModel.SINGLE_THREAD;
+  }
+  if (normalized === ModuleThreadModel.EMSCRIPTEN_PTHREADS) {
+    return ModuleThreadModel.EMSCRIPTEN_PTHREADS;
+  }
+  throw new Error(
+    `Unsupported threadModel "${value}". Expected "${ModuleThreadModel.SINGLE_THREAD}" or "${ModuleThreadModel.EMSCRIPTEN_PTHREADS}".`,
+  );
+}
+
+function resolveThreadModel({ manifest, threadModel } = {}) {
+  const explicit = normalizeThreadModel(threadModel);
+  if (explicit) {
+    return explicit;
+  }
+  const runtimeTargets = Array.isArray(manifest?.runtimeTargets)
+    ? manifest.runtimeTargets
+        .map((target) => String(target ?? "").trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+  if (runtimeTargets.includes(RuntimeTarget.WASMEDGE)) {
+    return ModuleThreadModel.EMSCRIPTEN_PTHREADS;
+  }
+  return ModuleThreadModel.SINGLE_THREAD;
+}
+
+function requiresSystemEmscripten(threadModel) {
+  return threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS;
 }
 
 function guestLinkSymbolPrefix(pluginId) {
@@ -280,6 +341,7 @@ function createGuestLinkBundleEntries(guestLink) {
         methodSymbols: guestLink.methodSymbols,
         methodIds: Object.keys(guestLink.methodSymbols ?? {}),
         language: guestLink.language,
+        threadModel: guestLink.threadModel ?? ModuleThreadModel.SINGLE_THREAD,
       },
       description: "Guest-link metadata for monolithic flow linking.",
     },
@@ -299,6 +361,14 @@ async function writeFilesToEmception(emception, rootDir, files) {
     const filePath = path.posix.join(rootDir, relativePath);
     emception.FS.mkdirTree(path.posix.dirname(filePath));
     emception.writeFile(filePath, content);
+  }
+}
+
+async function writeFilesToDirectory(rootDir, files) {
+  for (const [relativePath, content] of Object.entries(files)) {
+    const filePath = path.join(rootDir, relativePath);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, content);
   }
 }
 
@@ -466,6 +536,8 @@ async function compileWithEmception(options = {}) {
             language,
             symbolPrefix: guestLink.prefix,
             methodSymbols: guestLink.methodSymbols,
+            threadModel:
+              compileOptions.threadModel ?? ModuleThreadModel.SINGLE_THREAD,
             objectBytes: linkObjectBytes,
           },
         };
@@ -477,6 +549,166 @@ async function compileWithEmception(options = {}) {
         }
       }
     });
+  } catch (error) {
+    await rm(tempDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+async function ensureSystemCompilerAvailable(command) {
+  try {
+    await execFileAsync(command, ["--version"]);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new Error(
+        `System Emscripten toolchain is required for "${ModuleThreadModel.EMSCRIPTEN_PTHREADS}" builds, but "${command}" was not found on PATH.`,
+      );
+    }
+    throw error;
+  }
+}
+
+async function runSystemCompiler(command, args, options = {}) {
+  try {
+    await execFileAsync(command, args, {
+      cwd: options.cwd,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+  } catch (error) {
+    const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
+    const stdout = typeof error?.stdout === "string" ? error.stdout.trim() : "";
+    const detail = stderr || stdout || error?.message || "unknown error";
+    throw new Error(
+      `Compilation failed with ${command} (system emscripten): ${detail}`,
+    );
+  }
+}
+
+async function compileWithSystemEmscripten(options = {}) {
+  const {
+    manifest,
+    language,
+    sourceCompilerCommand,
+    sourceExtension,
+    sourceCode,
+    manifestSource,
+    invokeHeaderSource,
+    invokeSource,
+    exportedSymbols,
+    outputPath,
+    compileOptions,
+  } = options;
+  const tempDir = await mkdtemp(
+    path.join(os.tmpdir(), "space-data-module-sdk-compile-"),
+  );
+  const resolvedOutputPath = path.resolve(
+    outputPath ?? path.join(tempDir, "module.wasm"),
+  );
+  const runtimeIncludeDir = path.join(tempDir, "flatbuffers-runtime");
+  const sourcePath = path.join(tempDir, `module.${sourceExtension}`);
+  const manifestSourcePath = path.join(tempDir, "plugin-manifest-exports.cpp");
+  const invokeHeaderPath = path.join(tempDir, "space_data_module_invoke.h");
+  const invokeSourcePath = path.join(tempDir, "plugin-invoke-bridge.cpp");
+  const sourceObjectPath = path.join(tempDir, "module.o");
+  const linkObjectPath = path.join(tempDir, "module-link.o");
+  const manifestObjectPath = path.join(tempDir, "plugin-manifest-exports.o");
+  const invokeObjectPath = path.join(tempDir, "plugin-invoke-bridge.o");
+  const wasmOutputPath = path.join(tempDir, "module.wasm");
+
+  try {
+    await ensureSystemCompilerAvailable(sourceCompilerCommand);
+    await ensureSystemCompilerAvailable("em++");
+    const { runtimeHeaders, schemaHeaders } = await getInvokeCppSupportFiles();
+    const args = buildCompilerArgs(exportedSymbols, compileOptions);
+    await writeFilesToDirectory(runtimeIncludeDir, runtimeHeaders);
+    await writeFilesToDirectory(tempDir, schemaHeaders);
+    await writeFile(sourcePath, sourceCode);
+    await writeFile(manifestSourcePath, manifestSource);
+    await writeFile(invokeHeaderPath, invokeHeaderSource);
+    await writeFile(invokeSourcePath, invokeSource);
+
+    const sourceCompileArgs = [
+      "-c",
+      sourcePath,
+      `-I${tempDir}`,
+      ...(compileOptions.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS
+        ? ["-pthread"]
+        : []),
+      "-o",
+      sourceObjectPath,
+    ];
+    await runSystemCompiler(sourceCompilerCommand, sourceCompileArgs);
+
+    const sourceObjectBytes = new Uint8Array(await readFile(sourceObjectPath));
+    const guestLink = deriveGuestLinkRenameArgs({
+      objectBytes: sourceObjectBytes,
+      pluginId: manifest?.pluginId,
+      methodIds: Array.isArray(manifest?.methods)
+        ? manifest.methods.map((method) => String(method?.methodId ?? ""))
+        : [],
+    });
+
+    const linkCompileArgs = [
+      "-c",
+      sourcePath,
+      `-I${tempDir}`,
+      ...(compileOptions.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS
+        ? ["-pthread"]
+        : []),
+      ...guestLink.renameArgs,
+      "-o",
+      linkObjectPath,
+    ];
+    await runSystemCompiler(sourceCompilerCommand, linkCompileArgs);
+    await runSystemCompiler("em++", [
+      "-c",
+      manifestSourcePath,
+      "-std=c++17",
+      `-I${tempDir}`,
+      `-I${runtimeIncludeDir}`,
+      ...(compileOptions.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS
+        ? ["-pthread"]
+        : []),
+      "-o",
+      manifestObjectPath,
+    ]);
+    await runSystemCompiler("em++", [
+      "-c",
+      invokeSourcePath,
+      "-std=c++17",
+      `-I${tempDir}`,
+      `-I${runtimeIncludeDir}`,
+      ...(compileOptions.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS
+        ? ["-pthread"]
+        : []),
+      "-o",
+      invokeObjectPath,
+    ]);
+    await runSystemCompiler("em++", [
+      sourceObjectPath,
+      manifestObjectPath,
+      invokeObjectPath,
+      ...args,
+      "-o",
+      wasmOutputPath,
+    ]);
+
+    const wasmBytes = new Uint8Array(await readFile(wasmOutputPath));
+    const linkObjectBytes = new Uint8Array(await readFile(linkObjectPath));
+    await writeFile(resolvedOutputPath, wasmBytes);
+    return {
+      wasmBytes,
+      outputPath: resolvedOutputPath,
+      tempDir,
+      guestLink: {
+        format: "wasm-object",
+        language,
+        symbolPrefix: guestLink.prefix,
+        methodSymbols: guestLink.methodSymbols,
+        threadModel: compileOptions.threadModel,
+        objectBytes: linkObjectBytes,
+      },
+    };
   } catch (error) {
     await rm(tempDir, { recursive: true, force: true });
     throw error;
@@ -531,11 +763,19 @@ export async function compileModuleFromSource(options = {}) {
   let wasmBytes;
   let resolvedOutputPath = null;
   let tempDir = null;
+  const threadModel = resolveThreadModel({
+    manifest,
+    threadModel: options.threadModel,
+  });
   const compileOptions = {
     ...options,
     noEntry: includeCommandMain !== true,
+    threadModel,
   };
-  const result = await compileWithEmception({
+  const compileFunction = requiresSystemEmscripten(threadModel)
+    ? compileWithSystemEmscripten
+    : compileWithEmception;
+  const result = await compileFunction({
     manifest,
     language: compiler.language,
     sourceCompilerCommand: compiler.command,
@@ -559,8 +799,11 @@ export async function compileModuleFromSource(options = {}) {
   });
 
   return {
-    compiler: "em++ (emception)",
+    compiler: requiresSystemEmscripten(threadModel)
+      ? "em++ (system emscripten pthreads)"
+      : "em++ (emception)",
     language: compiler.language,
+    threadModel,
     outputPath: resolvedOutputPath,
     tempDir,
     wasmBytes,

@@ -4,6 +4,7 @@ import { WASI } from "node:wasi";
 
 import {
   compileModuleFromSource,
+  ModuleThreadModel,
   createRecipientKeypairHex,
   decodePluginManifest,
   encodePluginManifest,
@@ -384,6 +385,44 @@ test("c++ source compile emits a compliant wasm module with aligned manifest met
   assert.ok(result.wasmBytes.length > 0);
   assert.ok(result.guestLink?.objectBytes.length > 0);
   assert.ok(result.guestLink?.methodSymbols?.propagate);
+});
+
+test("wasmedge-targeted compile resolves to the pthread thread model", async () => {
+  const manifest = {
+    ...createTestManifest(),
+    runtimeTargets: ["wasmedge"],
+  };
+  const result = await compileModuleFromSource({
+    manifest,
+    sourceCode: "int propagate(void) { return 13; }\n",
+    language: "c",
+  });
+
+  assert.equal(result.threadModel, ModuleThreadModel.EMSCRIPTEN_PTHREADS);
+  assert.equal(
+    result.guestLink?.threadModel,
+    ModuleThreadModel.EMSCRIPTEN_PTHREADS,
+  );
+  assert.match(result.compiler, /system emscripten pthreads/i);
+  assert.equal(result.report.ok, true);
+});
+
+test("explicit threadModel overrides runtime-target inference", async () => {
+  const manifest = {
+    ...createTestManifest(),
+    runtimeTargets: ["wasmedge"],
+  };
+  const result = await compileModuleFromSource({
+    manifest,
+    sourceCode: "int propagate(void) { return 21; }\n",
+    language: "c",
+    threadModel: ModuleThreadModel.SINGLE_THREAD,
+  });
+
+  assert.equal(result.threadModel, ModuleThreadModel.SINGLE_THREAD);
+  assert.equal(result.guestLink?.threadModel, ModuleThreadModel.SINGLE_THREAD);
+  assert.equal(result.compiler, "em++ (emception)");
+  assert.equal(result.report.ok, true);
 });
 
 test("artifacts can be signed and encrypted for transport", async () => {

@@ -124,6 +124,10 @@ test("single-file bundles round-trip through wasm custom sections", async () => 
     (entry) => entry.entryId === SDS_GUEST_LINK_METADATA_ENTRY_ID,
   );
   assert.equal(guestLinkMetadataEntry?.decodedPayload?.methodSymbols?.propagate.length > 0, true);
+  assert.equal(
+    guestLinkMetadataEntry?.decodedPayload?.threadModel,
+    compilation.threadModel,
+  );
 });
 
 test("rebundling replaces prior sds sections and preserves canonical hash", async () => {

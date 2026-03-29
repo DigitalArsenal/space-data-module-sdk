@@ -159,6 +159,26 @@ environments with socket/TLS extensions, while plain `wasi` remains the strict
 no-wrapper baseline. The Node-RED-oriented parity map lives in
 [`docs/node-red-default-node-parity.md`](./docs/node-red-default-node-parity.md).
 
+## WasmEdge Pthreads
+
+`space-data-module-sdk` is the source of truth for module thread-model
+selection.
+
+- `compileModuleFromSource({ threadModel })` accepts an explicit thread model.
+- If `threadModel` is omitted, the SDK resolves it from `manifest.runtimeTargets`.
+- `runtimeTargets: ["wasmedge"]` defaults to `emscripten-pthreads`.
+- Other targets currently default to `single-thread`.
+
+WasmEdge-targeted pthread builds do not use the embedded `sdn-emception`
+toolchain. They require a real system Emscripten installation on `PATH`, and
+the compiler result plus guest-link bundle metadata preserve the selected
+`threadModel`.
+
+This SDK does not treat Cesium `TaskProcessor`, ad hoc JS worker pools, or
+host-side fake orchestration as a substitute for guest pthread support. If a
+runtime cannot interoperate with the guest contract directly, document that as a
+wrapper requirement instead of changing the guest artifact semantics.
+
 ## Install
 
 ```bash
@@ -186,6 +206,8 @@ const compilation = await compileModuleFromSource({
   manifest,
   sourceCode,
   language: "c",
+  // Optional. Defaults from manifest.runtimeTargets.
+  // threadModel: "emscripten-pthreads",
 });
 
 const bundle = await createSingleFileBundle({
