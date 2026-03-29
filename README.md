@@ -1,9 +1,9 @@
 # Space Data Module SDK
 
-`space-data-module-sdk` defines the canonical module artifact for the Space Data
-stack: WebAssembly code, an embedded FlatBuffer manifest, a stable capability
-vocabulary, a single-file bundle format, and the signing and transport records
-used to move modules between hosts.
+`space-data-module-sdk` defines the canonical Space Data module architecture for
+WebAssembly artifacts: an embedded FlatBuffer manifest, canonical ABI exports,
+a stable capability vocabulary, single-file packaging, and the signing and
+transport records used to move modules between hosts.
 
 This repository is the source of truth for module-level concerns:
 
@@ -11,7 +11,7 @@ This repository is the source of truth for module-level concerns:
 - embedded manifest exports inside `.wasm` modules
 - standards-aware compliance and capability validation
 - module compilation and protection
-- the `sds.bundle` single-file custom section
+- the `sds.bundle` single-file container
 - deployment authorization plus SDS publication records (`REC`, `PNM`, `ENC`)
 - the first canonical module hostcall/import ABI surface
 
@@ -19,9 +19,9 @@ This repository is the source of truth for module-level concerns:
   <img src="docs/architecture.svg" alt="Module architecture overview" width="820" />
 </p>
 
-## Artifact Model
+## Module Artifact Model
 
-A module built with this SDK is a `.wasm` artifact with:
+A compliant module built with this SDK is always a valid `.wasm` artifact with:
 
 - an embedded `PluginManifest.fbs`
 - exported manifest accessors:
@@ -37,10 +37,15 @@ A module built with this SDK is a `.wasm` artifact with:
   - resolved deployment plans and input bindings
   - deployment authorization
   - auxiliary FlatBuffer or raw payloads
-- optional appended SDS `REC` publication trailers carrying:
+- optional appended SDS FlatBuffer publication records in a trailing `REC`
+  container carrying:
   - `PNM` digital-signature/publication metadata
   - `ENC` encrypted-delivery metadata
-- auxiliary FlatBuffer or raw payloads
+
+Single-file bundling does not append arbitrary bytes to the end of the wasm
+module. The one-file module container is `sds.bundle`, stored as a standard
+wasm custom section. Appended bytes are reserved for SDS publication records
+such as `PNM` and `ENC`, wrapped in a trailing `REC` FlatBuffer collection.
 
 The module contract stays the same whether the artifact is loaded directly,
 wrapped in a deployment envelope, or shipped as one bundled `.wasm` file.
@@ -65,7 +70,7 @@ same request bytes from guest memory and returns response bytes in guest
 memory.
 
 For simple single-input / single-output methods, command mode also supports a
-degenerate raw shortcut:
+raw shortcut:
 
 ```bash
 wasmedge module.wasm --method echo < input.fb > output.fb
@@ -101,8 +106,8 @@ anywhere it can:
 - read FlatBuffers
 - honor the module capability and host ABI contract
 
-That target set matches the WebAssembly and FlatBuffers runtime families already
-used in the companion `flatbuffers/wasm` work:
+That architecture is intended to stay portable across the common WebAssembly
+and FlatBuffer host environments:
 
 - browser
 - Node.js
@@ -126,6 +131,48 @@ This repo currently includes:
 - a reference Node host and sync `sdn_host` bridge for the first hostcall
   surface
 
+## Runtime Targets
+
+Manifests can declare coarse runtime targets in `manifest.runtimeTargets`.
+
+If a manifest declares `runtimeTargets: ["wasi"]`, this SDK treats that as
+"standalone WASI, no host wrapper required." In practice that currently means:
+
+- the artifact must declare the `command` invoke surface
+- declared capabilities must stay within the pure WASI subset:
+  `logging`, `clock`, `random`, `filesystem`, `pipe`
+- hosted protocols may only use `wasi-pipe` transport
+
+If a manifest declares `runtimeTargets: ["wasmedge"]`, this SDK treats that as
+the preferred server-side target when the guest needs network-oriented runtime
+features such as sockets or TLS. Plain `wasi` remains the strict portability
+baseline; `wasmedge` is the practical higher-capability target.
+
+## WasmEdge Pthreads
+
+`space-data-module-sdk` is also the source of truth for module thread-model
+selection.
+
+- `compileModuleFromSource({ threadModel })` accepts an explicit thread model.
+- If `threadModel` is omitted, the SDK resolves it from `manifest.runtimeTargets`.
+- `runtimeTargets: ["wasmedge"]` defaults to `emscripten-pthreads`.
+- Other targets currently default to `single-thread`.
+
+WasmEdge-targeted pthread builds do not use the embedded `sdn-emception`
+toolchain. They require a real system Emscripten installation on `PATH`, and
+the compiler result plus guest-link bundle metadata preserve the selected
+`threadModel`.
+
+As emitted by current Emscripten, these pthread artifacts still import
+Emscripten `env.*` host functions plus imported shared memory. That means a
+bare `wasmedge` CLI invocation is not yet the direct execution path for them;
+they currently require a WasmEdge-side host shim that satisfies the Emscripten
+pthread contract.
+
+If a runtime cannot interoperate with the guest pthread contract directly,
+document that as a wrapper requirement instead of changing the guest artifact
+semantics.
+
 ## Testing
 
 This repo now exposes a manifest-driven harness generator from
@@ -145,46 +192,6 @@ The detailed edge cases and the current WASI-vs-host portability boundary are
 documented in
 [`docs/testing-harness.md`](./docs/testing-harness.md).
 
-If a manifest declares `runtimeTargets: ["wasi"]`, this SDK now treats that as
-"standalone WASI, no host wrapper required." In practice that currently means:
-
-- the artifact must declare the `command` invoke surface
-- declared capabilities must stay within the pure WASI subset:
-  `logging`, `clock`, `random`, `filesystem`, `pipe`
-- hosted protocols may only use `wasi-pipe` transport
-
-For maximum server-side portability with guest-owned network services, use
-`runtimeTargets: ["wasmedge"]`. That target is intended for WasmEdge
-environments with socket/TLS extensions, while plain `wasi` remains the strict
-no-wrapper baseline. The Node-RED-oriented parity map lives in
-[`docs/node-red-default-node-parity.md`](./docs/node-red-default-node-parity.md).
-
-## WasmEdge Pthreads
-
-`space-data-module-sdk` is the source of truth for module thread-model
-selection.
-
-- `compileModuleFromSource({ threadModel })` accepts an explicit thread model.
-- If `threadModel` is omitted, the SDK resolves it from `manifest.runtimeTargets`.
-- `runtimeTargets: ["wasmedge"]` defaults to `emscripten-pthreads`.
-- Other targets currently default to `single-thread`.
-
-WasmEdge-targeted pthread builds do not use the embedded `sdn-emception`
-toolchain. They require a real system Emscripten installation on `PATH`, and
-the compiler result plus guest-link bundle metadata preserve the selected
-`threadModel`.
-
-As emitted by current Emscripten, these pthread artifacts still import
-Emscripten `env.*` host functions plus imported shared memory. That means a
-bare `wasmedge` CLI invocation is not yet the direct execution path for them;
-they currently require a WasmEdge-side host shim that satisfies the Emscripten
-pthread contract.
-
-This SDK does not treat Cesium `TaskProcessor`, ad hoc JS worker pools, or
-host-side fake orchestration as a substitute for guest pthread support. If a
-runtime cannot interoperate with the guest contract directly, document that as a
-wrapper requirement instead of changing the guest artifact semantics.
-
 ## Install
 
 ```bash
@@ -201,6 +208,8 @@ import {
   parseSingleFileBundle,
   validateManifestWithStandards,
 } from "space-data-module-sdk";
+
+manifest.runtimeTargets = ["wasmedge"];
 
 const manifestBytes = encodePluginManifest(manifest);
 const validation = await validateManifestWithStandards(manifest);
@@ -271,10 +280,11 @@ The full contract split is documented in
 
 `sds.bundle` keeps module delivery to one file without changing WebAssembly
 loadability for the runtime payload itself. The SDK writes the bundle as a
-standard custom section inside the wasm module and, when the artifact is
-signed or encrypted for publication, appends an SDS `REC` trailer after the
-wasm bytes. Loaders must scan and strip that trailer before handing bytes to a
-runtime such as WasmEdge.
+standard custom section inside the wasm module. When the artifact is signed or
+encrypted for publication, SDS appends FlatBuffer publication records after the
+wasm bytes in a trailing `REC` container. Loaders must scan from the end,
+resolve `PNM` / `ENC`, strip or decrypt as needed, and only then hand the
+remaining raw wasm bytes to a runtime such as WasmEdge.
 
 The reference path lives in
 [`examples/single-file-bundle`](./examples/single-file-bundle):
@@ -291,7 +301,7 @@ for resolved protocol installations and producer input bindings.
 
 ## Module Publication
 
-Packages that publish SDN modules now use the canonical `sdn-module`
+Packages that publish Space Data modules use the canonical `sdn-module`
 publication descriptor. That descriptor covers:
 
 - standalone module packages
@@ -351,7 +361,7 @@ includes:
 
 Manifests can also declare coarse runtime targets for planning and compliance:
 
-`node` `browser` `wasi` `server` `desktop` `edge`
+`node` `browser` `wasi` `wasmedge` `server` `desktop` `edge`
 
 ## Environment Notes
 
@@ -407,7 +417,8 @@ npm run check:compliance
 ```
 
 Node.js `>=20` is required. The compiler uses `sdn-emception` and `flatc-wasm`
-by default.
+by default for the embedded toolchain path. WasmEdge pthread builds require a
+system Emscripten toolchain on `PATH`.
 
 If another repo needs the same compiler runtime, the package also exposes a
 shared emception session at `space-data-module-sdk/compiler/emception` with
