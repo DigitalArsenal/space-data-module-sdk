@@ -24,5 +24,7 @@ Use this skill when touching module compilation for `runtimeTargets: ["wasmedge"
 5. For npm release work in this repo, do not treat `npm whoami` as the publish
    gate. Trusted publishing uses OIDC here, so tagging/publishing may still work
    without an interactive npm login.
-6. Record any WasmEdge runtime limitation honestly if the artifact only compiles
+6. GitHub Actions must install a real emsdk toolchain before running `npm test`
+   for WasmEdge pthread coverage. The stock runner environment is not enough.
+7. Record any WasmEdge runtime limitation honestly if the artifact only compiles
    but does not instantiate.

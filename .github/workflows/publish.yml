@@ -23,7 +23,14 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - run: npm ci
-      - run: npm test
-      - run: npm run check:compliance
-      - run: npm publish
+      - name: Install latest emsdk
+        run: |
+          git clone https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          cd "$RUNNER_TEMP/emsdk"
+          ./emsdk update
+          ./emsdk install latest
+          ./emsdk activate latest
+      - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm ci
+      - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm test
+      - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm run check:compliance
+      - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm publish
