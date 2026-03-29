@@ -26,7 +26,6 @@ jobs:
         run: |
           git clone https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
           cd "$RUNNER_TEMP/emsdk"
-          ./emsdk update
           ./emsdk install latest
           ./emsdk activate latest
       - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm ci
