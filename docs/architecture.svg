@@ -29,7 +29,7 @@
   <rect width="900" height="520" rx="12" fill="url(#bg)"/>
 
   <!-- Title -->
-  <text x="450" y="40" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="700" fill="#e6edf3">Unified Module Architecture</text>
+  <text x="450" y="40" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="700" fill="#e6edf3">Space Data Module Architecture</text>
 
   <!-- Source Layer -->
   <rect x="30" y="70" width="180" height="170" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
@@ -113,21 +113,21 @@
   <rect x="30" y="380" width="840" height="30" rx="10" fill="#238636" fill-opacity="0.1"/>
   <text x="450" y="401" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="#3fb950">Deployment Targets</text>
 
-  <rect x="60" y="420" width="180" height="60" rx="8" fill="#1c2128" stroke="#3fb950" stroke-width="1"/>
-  <text x="150" y="447" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#e6edf3">OrbPro</text>
-  <text x="150" y="465" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#8b949e">Space Domain Awareness</text>
+  <rect x="54" y="420" width="180" height="60" rx="8" fill="#1c2128" stroke="#3fb950" stroke-width="1"/>
+  <text x="144" y="447" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#e6edf3">Mission Systems</text>
+  <text x="144" y="465" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#8b949e">Analysis / Planning / Ops</text>
 
-  <rect x="270" y="420" width="180" height="60" rx="8" fill="#1c2128" stroke="#3fb950" stroke-width="1"/>
-  <text x="360" y="447" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#e6edf3">SDN Nodes</text>
-  <text x="360" y="465" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#8b949e">Peer-to-Peer Data Network</text>
+  <rect x="258" y="420" width="180" height="60" rx="8" fill="#1c2128" stroke="#3fb950" stroke-width="1"/>
+  <text x="348" y="447" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#e6edf3">SDN Nodes</text>
+  <text x="348" y="465" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#8b949e">Peer-to-Peer Data Network</text>
 
-  <rect x="480" y="420" width="180" height="60" rx="8" fill="#1c2128" stroke="#3fb950" stroke-width="1"/>
-  <text x="570" y="447" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#e6edf3">Edge Runtimes</text>
-  <text x="570" y="465" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#8b949e">Satellite / Ground Station</text>
+  <rect x="462" y="420" width="180" height="60" rx="8" fill="#1c2128" stroke="#3fb950" stroke-width="1"/>
+  <text x="552" y="447" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#e6edf3">Edge Runtimes</text>
+  <text x="552" y="465" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#8b949e">Satellite / Ground Station</text>
 
-  <rect x="690" y="420" width="180" height="60" rx="8" fill="#1c2128" stroke="#3fb950" stroke-width="1"/>
-  <text x="780" y="447" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#e6edf3">Browser</text>
-  <text x="780" y="465" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#8b949e">Module Lab / WebAssembly</text>
+  <rect x="666" y="420" width="180" height="60" rx="8" fill="#1c2128" stroke="#3fb950" stroke-width="1"/>
+  <text x="756" y="447" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#e6edf3">Browser</text>
+  <text x="756" y="465" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#8b949e">Module Lab / WebAssembly</text>
 
   <!-- Arrows down to deployment -->
   <line x1="450" y1="350" x2="450" y2="380" stroke="#484f58" stroke-width="2" marker-end="url(#arrowGray)"/>
