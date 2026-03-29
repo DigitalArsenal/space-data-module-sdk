@@ -407,6 +407,46 @@ test("wasmedge-targeted compile resolves to the pthread thread model", async () 
   assert.equal(result.report.ok, true);
 });
 
+test("wasmedge-targeted pthread command builds retain emscripten host imports", async () => {
+  const manifest = {
+    ...createTestManifest(),
+    runtimeTargets: ["wasmedge"],
+    invokeSurfaces: ["command"],
+  };
+  const result = await compileModuleFromSource({
+    manifest,
+    sourceCode: "int propagate(void) { return 34; }\n",
+    language: "c",
+  });
+
+  const imports = WebAssembly.Module.imports(
+    new WebAssembly.Module(result.wasmBytes),
+  );
+  const modules = Array.from(
+    new Set(imports.map((entry) => entry.module)),
+  ).sort();
+
+  assert.equal(result.threadModel, ModuleThreadModel.EMSCRIPTEN_PTHREADS);
+  assert.deepEqual(modules, ["env", "wasi_snapshot_preview1"]);
+  assert.ok(
+    imports.some(
+      (entry) =>
+        entry.module === "env" &&
+        entry.name === "emscripten_check_blocking_allowed",
+    ),
+  );
+  assert.ok(
+    imports.some(
+      (entry) => entry.module === "env" && entry.name === "__indirect_function_table",
+    ) === false,
+  );
+  assert.ok(
+    imports.some(
+      (entry) => entry.module === "env" && entry.name === "memory",
+    ),
+  );
+});
+
 test("explicit threadModel overrides runtime-target inference", async () => {
   const manifest = {
     ...createTestManifest(),

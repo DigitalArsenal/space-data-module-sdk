@@ -174,6 +174,12 @@ toolchain. They require a real system Emscripten installation on `PATH`, and
 the compiler result plus guest-link bundle metadata preserve the selected
 `threadModel`.
 
+As emitted by current Emscripten, these pthread artifacts still import
+Emscripten `env.*` host functions plus imported shared memory. That means a
+bare `wasmedge` CLI invocation is not yet the direct execution path for them;
+they currently require a WasmEdge-side host shim that satisfies the Emscripten
+pthread contract.
+
 This SDK does not treat Cesium `TaskProcessor`, ad hoc JS worker pools, or
 host-side fake orchestration as a substitute for guest pthread support. If a
 runtime cannot interoperate with the guest contract directly, document that as a
