@@ -277,7 +277,27 @@ function validateEncTable(table, buffer, label) {
     maxLength: 32,
   });
   assertOptionalStringField(buffer, tableMeta, 22, `${label} root type`);
-  const record = normalizeEncTable(table.unpack());
+  const timestamp = table.TIMESTAMP();
+  const record = {
+    version: Number(table.VERSION()),
+    keyExchange:
+      KEY_EXCHANGE_NAME_BY_VALUE[table.KEY_EXCHANGE()] ??
+      String(table.KEY_EXCHANGE()),
+    symmetric:
+      SYMMETRIC_ALGO_NAME_BY_VALUE[table.SYMMETRIC()] ??
+      String(table.SYMMETRIC()),
+    keyDerivation:
+      KDF_NAME_BY_VALUE[table.KEY_DERIVATION()] ??
+      String(table.KEY_DERIVATION()),
+    ephemeralPublicKey: normalizeByteField(table.ephemeralPublicKeyArray()),
+    nonceStart: normalizeByteField(table.nonceStartArray()),
+    recipientKeyId: normalizeByteField(table.recipientKeyIdArray()),
+    context: normalizeStringField(table.CONTEXT()),
+    schemaHash: normalizeByteField(table.schemaHashArray()),
+    rootType: normalizeStringField(table.ROOT_TYPE()),
+    timestamp:
+      timestamp === undefined || timestamp === null ? 0 : Number(timestamp),
+  };
   if (!record.ephemeralPublicKey?.length) {
     throw new Error(`${label} is missing the ephemeral public key.`);
   }
@@ -316,7 +336,17 @@ function validatePnmTable(table, buffer, label) {
   assertOptionalStringField(buffer, tableMeta, 16, `${label} timestamp signature`);
   assertOptionalStringField(buffer, tableMeta, 18, `${label} signature type`);
   assertOptionalStringField(buffer, tableMeta, 20, `${label} timestamp signature type`);
-  const record = normalizePnmTable(table.unpack());
+  const record = {
+    multiformatAddress: normalizeStringField(table.MULTIFORMAT_ADDRESS()),
+    publishTimestamp: normalizeStringField(table.PUBLISH_TIMESTAMP()),
+    cid: normalizeStringField(table.CID()),
+    fileName: normalizeStringField(table.FILE_NAME()),
+    fileId: normalizeStringField(table.FILE_ID()),
+    signature: normalizeStringField(table.SIGNATURE()),
+    timestampSignature: normalizeStringField(table.TIMESTAMP_SIGNATURE()),
+    signatureType: normalizeStringField(table.SIGNATURE_TYPE()),
+    timestampSignatureType: normalizeStringField(table.TIMESTAMP_SIGNATURE_TYPE()),
+  };
   if (
     !record.multiformatAddress &&
     !record.publishTimestamp &&
@@ -424,48 +454,6 @@ function pnmTableFromObject(record = {}) {
     normalizeStringField(record.signatureType),
     normalizeStringField(record.timestampSignatureType),
   );
-}
-
-function normalizeEncTable(table) {
-  if (!table) {
-    return null;
-  }
-  return {
-    version: Number(table.VERSION ?? 1),
-    keyExchange:
-      KEY_EXCHANGE_NAME_BY_VALUE[table.KEY_EXCHANGE] ?? String(table.KEY_EXCHANGE),
-    symmetric:
-      SYMMETRIC_ALGO_NAME_BY_VALUE[table.SYMMETRIC] ?? String(table.SYMMETRIC),
-    keyDerivation:
-      KDF_NAME_BY_VALUE[table.KEY_DERIVATION] ?? String(table.KEY_DERIVATION),
-    ephemeralPublicKey: normalizeByteField(table.EPHEMERAL_PUBLIC_KEY),
-    nonceStart: normalizeByteField(table.NONCE_START),
-    recipientKeyId: normalizeByteField(table.RECIPIENT_KEY_ID),
-    context: normalizeStringField(table.CONTEXT),
-    schemaHash: normalizeByteField(table.SCHEMA_HASH),
-    rootType: normalizeStringField(table.ROOT_TYPE),
-    timestamp:
-      table.TIMESTAMP === undefined || table.TIMESTAMP === null
-        ? 0
-        : Number(table.TIMESTAMP),
-  };
-}
-
-function normalizePnmTable(table) {
-  if (!table) {
-    return null;
-  }
-  return {
-    multiformatAddress: normalizeStringField(table.MULTIFORMAT_ADDRESS),
-    publishTimestamp: normalizeStringField(table.PUBLISH_TIMESTAMP),
-    cid: normalizeStringField(table.CID),
-    fileName: normalizeStringField(table.FILE_NAME),
-    fileId: normalizeStringField(table.FILE_ID),
-    signature: normalizeStringField(table.SIGNATURE),
-    timestampSignature: normalizeStringField(table.TIMESTAMP_SIGNATURE),
-    signatureType: normalizeStringField(table.SIGNATURE_TYPE),
-    timestampSignatureType: normalizeStringField(table.TIMESTAMP_SIGNATURE_TYPE),
-  };
 }
 
 function readFooterLength(bytes) {
@@ -601,7 +589,6 @@ export function decodePublicationRecordCollection(bytes) {
   if (recordTables.length === 0) {
     throw new Error("REC trailer does not contain any records.");
   }
-  const collection = collectionTable.unpack();
   const records = [];
   let enc = null;
   let pnm = null;
@@ -622,10 +609,9 @@ export function decodePublicationRecordCollection(bytes) {
       8,
       `REC trailer record ${index} standard`,
     );
-    const unpackedRecord = collection.RECORDS[index];
     const recordType = recordTable.value_type();
     const standard =
-      normalizeStringField(unpackedRecord?.standard) ??
+      normalizeStringField(recordTable.standard()) ??
       STANDARD_BY_RECORD_TYPE[recordType] ??
       null;
     const expectedStandard =
@@ -644,10 +630,7 @@ export function decodePublicationRecordCollection(bytes) {
     if (!valueMeta) {
       throw new Error(`REC trailer record ${index} is missing a value.`);
     }
-    let value =
-      standard === "ENC" || standard === "PNM"
-        ? null
-        : unpackedRecord?.value ?? null;
+    let value = null;
     if (standard === "ENC") {
       const encTable = recordTable.value(new ENC());
       if (!encTable) {
@@ -684,7 +667,9 @@ export function decodePublicationRecordCollection(bytes) {
     });
   }
   return {
-    version: normalizeStringField(collection.version) ?? DEFAULT_RECORD_COLLECTION_VERSION,
+    version:
+      normalizeStringField(collectionTable.version()) ??
+      DEFAULT_RECORD_COLLECTION_VERSION,
     records,
     enc,
     pnm,

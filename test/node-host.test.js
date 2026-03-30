@@ -759,39 +759,48 @@ test("node host tls request helper validates certificates and allowlists", async
   });
 });
 
-test("node host websocket exchange helper honors origin allowlists", async () => {
-  await withWebSocketServer((socket, frame) => {
-    assert.equal(frame.opcode, 1);
-    socket.write(
-      encodeWebSocketFrame(Buffer.from(`ws:${frame.payload.toString("utf8")}`)),
-    );
-    socket.end(encodeWebSocketFrame(Buffer.alloc(0), 8));
-  }, async (websocketAddress) => {
-    const host = createNodeHost({
-      capabilities: ["websocket"],
-      allowedWebSocketOrigins: [websocketAddress.origin],
+test(
+  "node host websocket exchange helper honors origin allowlists",
+  {
+    skip:
+      typeof globalThis.WebSocket !== "function"
+        ? "WebSocket is not available in this Node runtime."
+        : false,
+  },
+  async () => {
+    await withWebSocketServer((socket, frame) => {
+      assert.equal(frame.opcode, 1);
+      socket.write(
+        encodeWebSocketFrame(Buffer.from(`ws:${frame.payload.toString("utf8")}`)),
+      );
+      socket.end(encodeWebSocketFrame(Buffer.alloc(0), 8));
+    }, async (websocketAddress) => {
+      const host = createNodeHost({
+        capabilities: ["websocket"],
+        allowedWebSocketOrigins: [websocketAddress.origin],
+      });
+
+      const response = await host.websocket.exchange({
+        url: websocketAddress.url,
+        message: "hello",
+        responseType: "utf8",
+        timeoutMs: 500,
+      });
+
+      assert.equal(response.url, websocketAddress.url);
+      assert.equal(response.body, "ws:hello");
+
+      await assert.rejects(
+        () =>
+          host.invoke("websocket.exchange", {
+            url: "ws://127.0.0.1:9/blocked",
+            message: "blocked",
+          }),
+        /not permitted by this host/,
+      );
     });
-
-    const response = await host.websocket.exchange({
-      url: websocketAddress.url,
-      message: "hello",
-      responseType: "utf8",
-      timeoutMs: 500,
-    });
-
-    assert.equal(response.url, websocketAddress.url);
-    assert.equal(response.body, "ws:hello");
-
-    await assert.rejects(
-      () =>
-        host.invoke("websocket.exchange", {
-          url: "ws://127.0.0.1:9/blocked",
-          message: "blocked",
-        }),
-      /not permitted by this host/,
-    );
-  });
-});
+  },
+);
 
 test("node host mqtt helpers honor broker allowlists", async () => {
   let published = null;
