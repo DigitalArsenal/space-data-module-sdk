@@ -14,10 +14,27 @@ This repository is the source of truth for module-level concerns:
 - the `sds.bundle` single-file container
 - deployment authorization plus SDS publication records (`REC`, `PNM`, `ENC`)
 - the first canonical module hostcall/import ABI surface
+- shared module-level testing/runtime harnesses, including the WasmEdge
+  process runner used by package-level validation suites
 
 <p align="center">
   <img src="docs/architecture.svg" alt="Module architecture overview" width="820" />
 </p>
+
+## Shared Harness Ownership
+
+This repo owns the generic module-side runtime harnesses used across the stack:
+
+- `createModuleHarness(...)` for process and WasmEdge-backed module invocation
+- `resolveModuleHarnessLaunchPlan(...)` for portable launch planning
+- `buildWasmEdgeEmscriptenPthreadRunner(...)` plus the shared native runner
+  source and runner-level pthread smoke test
+
+Flow-specific standalone harnessing lives in `sdn-flow`, which layers flow
+enqueue/drain behavior on top of its compiled standalone runtime host. Package-
+specific validation suites, including conjunction replay/V&V, are expected to
+sit on top of these shared harnesses instead of defining their own runtime
+process model.
 
 ## Module Artifact Model
 
@@ -177,6 +194,11 @@ semantics.
 
 This repo now exposes a manifest-driven harness generator from
 `space-data-module-sdk/testing` and two complementary integration suites:
+
+- shared process-level helpers for command-surface runtimes:
+  - `createPluginInvokeProcessClient(...)`
+  - `resolveWasmEdgePluginLaunchPlan(...)`
+  - `buildWasmEdgeEmscriptenPthreadRunner(...)`
 
 - `npm run test:runtime-matrix`
   - cross-language runtime smoke across the same WASM in Node.js, Go, Python,

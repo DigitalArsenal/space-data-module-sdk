@@ -283,6 +283,61 @@ test("plugin invoke request and response round-trip through FlatBuffer encoding"
   assert.deepEqual(Array.from(decodedResponse.outputs[0].payload), Array.from(payloadAlpha));
 });
 
+test("plugin invoke envelopes round-trip large payload arenas without stack overflow", () => {
+  const payload = Uint8Array.from(
+    { length: 200000 },
+    (_, index) => index & 0xff,
+  );
+
+  const encodedRequest = encodePluginInvokeRequest({
+    methodId: "large-payload",
+    inputs: [
+      {
+        portId: "blob",
+        typeRef: {
+          schemaName: "Blob.fbs",
+          fileIdentifier: "BLOB",
+          wireFormat: "aligned-binary",
+          rootTypeName: "Blob",
+          requiredAlignment: 16,
+          byteLength: payload.length,
+        },
+        payload,
+      },
+    ],
+  });
+  const decodedRequest = decodePluginInvokeRequest(encodedRequest);
+  assert.equal(decodedRequest.inputs.length, 1);
+  assert.deepEqual(
+    Array.from(decodedRequest.inputs[0].payload),
+    Array.from(payload),
+  );
+
+  const encodedResponse = encodePluginInvokeResponse({
+    statusCode: 0,
+    outputs: [
+      {
+        portId: "blob",
+        typeRef: {
+          schemaName: "Blob.fbs",
+          fileIdentifier: "BLOB",
+          wireFormat: "aligned-binary",
+          rootTypeName: "Blob",
+          requiredAlignment: 16,
+          byteLength: payload.length,
+        },
+        payload,
+      },
+    ],
+  });
+  const decodedResponse = decodePluginInvokeResponse(encodedResponse);
+  assert.equal(decodedResponse.outputs.length, 1);
+  assert.deepEqual(
+    Array.from(decodedResponse.outputs[0].payload),
+    Array.from(payload),
+  );
+});
+
 test("source compile exports canonical direct invoke ABI", async () => {
   const manifest = createInvokeManifest({ invokeSurfaces: ["direct"] });
   const compilation = await compileModuleFromSource({

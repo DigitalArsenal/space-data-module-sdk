@@ -662,12 +662,25 @@ export type {
   HarnessInvokeScenario,
   HarnessRawScenario,
   ManifestHarnessPlan,
+  ModuleHarness,
+  ModuleHarnessRuntimeDescriptor,
+  PluginInvokeProcessClient,
+  PluginInvokeProcessLaunchPlan,
+  WasmEdgeRunnerBuildPlan,
 } from "./testing/index.js";
 
 export {
+  buildWasmEdgeEmscriptenPthreadRunner,
+  buildWasmEdgeSpawnEnv,
+  createModuleHarness,
+  createPluginInvokeProcessClient,
   describeCapabilityRuntimeSurface,
   generateManifestHarnessPlan,
   materializeHarnessScenario,
+  resolveModuleHarnessLaunchPlan,
+  resolveWasmEdgeRunnerBuildPlan,
+  resolveWasmEdgeRunnerSourcePath,
+  resolveWasmEdgePluginLaunchPlan,
   serializeHarnessPlan,
 } from "./testing/index.js";
 

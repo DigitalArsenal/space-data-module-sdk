@@ -1,6 +1,22 @@
+import { Buffer } from "node:buffer";
+
 import { encodePluginInvokeRequest } from "../invoke/codec.js";
 import { normalizeInvokeSurfaces } from "../invoke/index.js";
 import { selectPreferredPayloadTypeRef } from "../manifest/typeRefs.js";
+export {
+  buildWasmEdgeSpawnEnv,
+  createPluginInvokeProcessClient,
+  resolveWasmEdgePluginLaunchPlan,
+} from "./processInvoke.js";
+export {
+  buildWasmEdgeEmscriptenPthreadRunner,
+  resolveWasmEdgeRunnerBuildPlan,
+  resolveWasmEdgeRunnerSourcePath,
+} from "./buildWasmEdgeRunner.js";
+export {
+  createModuleHarness,
+  resolveModuleHarnessLaunchPlan,
+} from "./moduleHarness.js";
 
 const CapabilitySurfaceMatrix = Object.freeze({
   logging: Object.freeze({

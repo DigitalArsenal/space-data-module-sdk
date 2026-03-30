@@ -12,7 +12,7 @@ import { InvokeSurface } from "../generated/orbpro/manifest/invoke-surface.js";
 import { BufferMutability } from "../generated/orbpro/stream/buffer-mutability.js";
 import { BufferOwnership } from "../generated/orbpro/stream/buffer-ownership.js";
 import { FlatBufferTypeRefT } from "../generated/orbpro/stream/flat-buffer-type-ref.js";
-import { TypedArenaBuffer, TypedArenaBufferT } from "../generated/orbpro/stream/typed-arena-buffer.js";
+import { TypedArenaBufferT } from "../generated/orbpro/stream/typed-arena-buffer.js";
 import { toUint8Array } from "../runtime/bufferLike.js";
 
 function toByteBuffer(data) {
@@ -149,20 +149,22 @@ function normalizeArenaFrame(frame = {}, offset) {
 
 function packArenaFrames(frames = []) {
   const packedFrames = [];
-  const arena = [];
+  const normalizedFrames = [];
   let offset = 0;
   for (const frame of frames) {
     const normalized = normalizeArenaFrame(frame, offset);
-    for (let index = 0; index < normalized.padding; index += 1) {
-      arena.push(0);
-    }
-    arena.push(...normalized.payload);
     offset = normalized.buffer.offset + normalized.buffer.size;
     packedFrames.push(normalized.buffer);
+    normalizedFrames.push(normalized);
+  }
+
+  const arena = new Uint8Array(offset);
+  for (const normalized of normalizedFrames) {
+    arena.set(normalized.payload, normalized.buffer.offset);
   }
   return {
     frames: packedFrames,
-    arena: Uint8Array.from(arena),
+    arena,
   };
 }
 

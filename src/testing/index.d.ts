@@ -57,6 +57,69 @@ export interface ManifestHarnessPlan {
   scenarios: Array<HarnessInvokeScenario | HarnessRawScenario>;
 }
 
+export interface PluginInvokeProcessLaunchPlan {
+  command: string;
+  args: string[];
+  env?: Record<string, string | undefined>;
+  cwd?: string;
+  wasmPath?: string;
+}
+
+export interface PluginInvokeProcessClient {
+  launchPlan: PluginInvokeProcessLaunchPlan;
+  invokeRaw(requestBytes: Uint8Array | ArrayBuffer | ArrayBufferView): Promise<Uint8Array>;
+  invoke(request: {
+    methodId?: string | null;
+    inputs?: HarnessInputFrame[];
+  }): Promise<{
+    statusCode: number;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    outputs: HarnessInputFrame[];
+  }>;
+  destroy(): Promise<void>;
+}
+
+export interface ModuleHarnessRuntimeDescriptor {
+  kind?: "process" | "wasmedge";
+  launchPlan?: PluginInvokeProcessLaunchPlan;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string | undefined>;
+  cwd?: string;
+  wasmPath?: string;
+  wasmEdgeBinary?: string;
+  wasmEdgeRunnerBinary?: string;
+  enableThreads?: boolean;
+}
+
+export interface ModuleHarness {
+  runtime: ModuleHarnessRuntimeDescriptor & { kind: "process" | "wasmedge" };
+  launchPlan: PluginInvokeProcessLaunchPlan;
+  invokeRaw(requestBytes: Uint8Array | ArrayBuffer | ArrayBufferView): Promise<Uint8Array>;
+  invoke(request: {
+    methodId?: string | null;
+    inputs?: HarnessInputFrame[];
+  }): Promise<{
+    statusCode: number;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    outputs: HarnessInputFrame[];
+  }>;
+  destroy(): Promise<void>;
+}
+
+export interface WasmEdgeRunnerBuildPlan {
+  runnerSourcePath: string;
+  requestedIncludeDir: string;
+  wasmedgeIncludeDir: string;
+  wasmedgeLibDir: string;
+  wasmedgeSharedLibraryPath: string;
+  outputPath: string;
+  compilerCommand: string;
+  compilerArgs: string[];
+}
+
 export function describeCapabilityRuntimeSurface(
   capability: string,
 ): CapabilityRuntimeSurface;
@@ -84,3 +147,49 @@ export function materializeHarnessScenario(
 };
 
 export function serializeHarnessPlan(plan: ManifestHarnessPlan): unknown;
+
+export function buildWasmEdgeSpawnEnv(
+  baseEnv?: Record<string, string | undefined>,
+): Record<string, string | undefined>;
+
+export function resolveWasmEdgePluginLaunchPlan(options: {
+  wasmPath: string;
+  wasmEdgeBinary?: string;
+  wasmEdgeRunnerBinary?: string;
+  enableThreads?: boolean;
+  invokeArgs?: string[];
+  env?: Record<string, string | undefined>;
+}): PluginInvokeProcessLaunchPlan;
+
+export function createPluginInvokeProcessClient(options: {
+  launchPlan?: PluginInvokeProcessLaunchPlan;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string | undefined>;
+  cwd?: string;
+}): Promise<PluginInvokeProcessClient>;
+
+export function resolveModuleHarnessLaunchPlan(options: {
+  runtime?: ModuleHarnessRuntimeDescriptor;
+} | ModuleHarnessRuntimeDescriptor): PluginInvokeProcessLaunchPlan;
+
+export function createModuleHarness(options: {
+  runtime?: ModuleHarnessRuntimeDescriptor;
+} | ModuleHarnessRuntimeDescriptor): Promise<ModuleHarness>;
+
+export function resolveWasmEdgeRunnerSourcePath(): string;
+
+export function resolveWasmEdgeRunnerBuildPlan(options: {
+  outputPath: string;
+  wasmedgeIncludeDir?: string;
+  wasmedgeLibDir?: string;
+  output?: string;
+}): WasmEdgeRunnerBuildPlan;
+
+export function buildWasmEdgeEmscriptenPthreadRunner(options: {
+  outputPath: string;
+  wasmedgeIncludeDir?: string;
+  wasmedgeLibDir?: string;
+  output?: string;
+  cwd?: string;
+}): Promise<string>;
