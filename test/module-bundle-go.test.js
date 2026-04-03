@@ -26,6 +26,10 @@ const runnerDir = path.resolve(
   "go",
   "generated",
 );
+const goExecEnv = {
+  ...process.env,
+  GOCACHE: path.join(os.tmpdir(), "space-data-module-sdk-go-build-cache"),
+};
 
 function normalizeSummary(summary) {
   return {
@@ -46,7 +50,7 @@ test("Go reference runner parses the checked-in bundled module", async () => {
   const { stdout } = await execFileAsync(
     "go",
     ["run", "./cmd/reference_bundle", "parse", "../../vectors/single-file-module.wasm"],
-    { cwd: runnerDir },
+    { cwd: runnerDir, env: goExecEnv },
   );
   assert.deepEqual(JSON.parse(stdout), expected);
 });
@@ -65,7 +69,7 @@ test("Go reference runner recreates semantically equivalent bundle artifacts", a
   const { stdout } = await execFileAsync(
     "go",
     ["run", "./cmd/reference_bundle", "create", tempDir],
-    { cwd: runnerDir },
+    { cwd: runnerDir, env: goExecEnv },
   );
 
   const createdBundle = new Uint8Array(

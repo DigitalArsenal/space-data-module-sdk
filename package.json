@@ -1,6 +1,6 @@
 {
   "name": "space-data-module-sdk",
-  "version": "0.5.10",
+  "version": "0.5.11",
   "description": "Module SDK for building, validating, signing, and deploying WebAssembly modules on the Space Data Network.",
   "type": "module",
   "types": "./src/index.d.ts",
@@ -40,6 +40,9 @@
     "schemas/",
     "src/"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "test": "node --test",
     "test:host-surfaces": "node --test test/node-host.test.js test/host-abi.test.js",

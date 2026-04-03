@@ -1,5 +1,5 @@
 import path from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import { FlatcRunner } from "flatc-wasm";
@@ -16,6 +16,48 @@ function loadFlatcRunner() {
     flatcRunnerPromise = FlatcRunner.init();
   }
   return flatcRunnerPromise;
+}
+
+const FLATBUFFERS_INCLUDE_ROOT_CANDIDATES = [
+  process.env.FLATBUFFERS_INCLUDE_DIR,
+  "/opt/homebrew/include",
+  "/usr/local/include",
+  "/usr/include",
+].filter(Boolean);
+
+async function findFlatbuffersIncludeRoot() {
+  for (const candidate of FLATBUFFERS_INCLUDE_ROOT_CANDIDATES) {
+    const headerPath = path.join(candidate, "flatbuffers", "flatbuffers.h");
+    try {
+      const headerStat = await stat(headerPath);
+      if (headerStat.isFile()) {
+        return candidate;
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  throw new Error(
+    "Unable to locate the installed flatbuffers C++ headers. Set FLATBUFFERS_INCLUDE_DIR to the directory containing flatbuffers/flatbuffers.h.",
+  );
+}
+
+async function readDirectoryTree(rootDir, currentDir = rootDir) {
+  const entries = await readdir(currentDir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const fullPath = path.join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await readDirectoryTree(rootDir, fullPath)));
+      continue;
+    }
+    if (!entry.isFile()) {
+      continue;
+    }
+    const relativePath = path.relative(rootDir, fullPath).split(path.sep).join("/");
+    files.push([`/${relativePath}`, await readFile(fullPath, "utf8")]);
+  }
+  return files;
 }
 
 async function loadInvokeSchemaFiles() {
@@ -36,8 +78,10 @@ async function loadInvokeSchemaFiles() {
 export async function getFlatbuffersCppRuntimeHeaders() {
   if (!flatbuffersCppRuntimeHeadersPromise) {
     flatbuffersCppRuntimeHeadersPromise = (async () => {
-      const flatc = await loadFlatcRunner();
-      return flatc.getEmbeddedRuntime("cpp");
+      const includeRoot = await findFlatbuffersIncludeRoot();
+      return Object.fromEntries(
+        await readDirectoryTree(includeRoot, path.join(includeRoot, "flatbuffers")),
+      );
     })();
   }
   return flatbuffersCppRuntimeHeadersPromise;

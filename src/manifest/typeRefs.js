@@ -1,37 +1,74 @@
 function cloneSchemaHash(value) {
   if (value instanceof Uint8Array) {
-    return new Uint8Array(value);
+    return value.byteLength > 0 ? new Uint8Array(value) : undefined;
   }
   if (Array.isArray(value)) {
-    return [...value];
+    return value.length > 0 ? [...value] : undefined;
   }
   return value ?? undefined;
 }
 
+function normalizeNullableString(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const normalized = String(value).trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeAlignedMetadataScalar(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    return numeric === 0 ? undefined : numeric;
+  }
+  return value;
+}
+
 export function clonePayloadTypeRef(value = null) {
   if (!value || typeof value !== "object") {
-    return { acceptsAnyFlatbuffer: true };
+    return { acceptsAnyFlatbuffer: true, fileIdentifier: null };
   }
   return {
-    schemaName: value.schemaName ?? value.schema_name ?? undefined,
-    fileIdentifier: value.fileIdentifier ?? value.file_identifier ?? undefined,
+    schemaName: normalizeNullableString(
+      value.schemaName ?? value.schema_name,
+    ),
+    fileIdentifier: normalizeNullableString(
+      value.fileIdentifier ?? value.file_identifier,
+    ),
     schemaHash: cloneSchemaHash(value.schemaHash ?? value.schema_hash),
     acceptsAnyFlatbuffer: Boolean(
       value.acceptsAnyFlatbuffer ?? value.accepts_any_flatbuffer ?? false,
     ),
-    wireFormat: value.wireFormat ?? value.wire_format ?? undefined,
-    rootTypeName: value.rootTypeName ?? value.root_type_name ?? undefined,
-    fixedStringLength:
-      value.fixedStringLength ?? value.fixed_string_length ?? undefined,
-    byteLength: value.byteLength ?? value.byte_length ?? undefined,
-    requiredAlignment:
-      value.requiredAlignment ?? value.required_alignment ?? undefined,
+    wireFormat: normalizePayloadWireFormatName(
+      value.wireFormat ?? value.wire_format,
+    ),
+    rootTypeName: normalizeNullableString(
+      value.rootTypeName ?? value.root_type_name,
+    ),
+    fixedStringLength: normalizeAlignedMetadataScalar(
+      value.fixedStringLength ?? value.fixed_string_length,
+    ),
+    byteLength: normalizeAlignedMetadataScalar(
+      value.byteLength ?? value.byte_length,
+    ),
+    requiredAlignment: normalizeAlignedMetadataScalar(
+      value.requiredAlignment ?? value.required_alignment,
+    ),
   };
 }
 
 export function normalizePayloadWireFormatName(value) {
   if (value === undefined || value === null || value === "") {
     return null;
+  }
+  if (value === 1 || value === "1") {
+    return "aligned-binary";
+  }
+  if (value === 0 || value === "0") {
+    return "flatbuffer";
   }
   const normalized = String(value).trim().toLowerCase().replace(/_/g, "-");
   if (normalized === "aligned-binary") {

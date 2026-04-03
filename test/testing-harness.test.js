@@ -252,3 +252,55 @@ test("payload type helpers distinguish aligned-binary from regular flatbuffers",
     true,
   );
 });
+
+test("aligned-binary payload type matching tolerates decoded flatbuffer default values", () => {
+  assert.equal(
+    payloadTypeRefsMatch(
+      {
+        schemaName: "orbpro.propagator.PropagatorDescribeSourcesBatchResult",
+        wireFormat: "aligned-binary",
+        rootTypeName: "PropagatorDescribeSourcesBatchResult",
+        schemaHash: [],
+        fixedStringLength: 0,
+        byteLength: 0,
+        requiredAlignment: 8,
+      },
+      {
+        schemaName: "orbpro.propagator.PropagatorDescribeSourcesBatchResult",
+        wireFormat: "aligned-binary",
+        rootTypeName: "PropagatorDescribeSourcesBatchResult",
+        requiredAlignment: 8,
+      },
+    ),
+    true,
+  );
+});
+
+test("selectPreferredPayloadTypeRef canonicalizes numeric wire-format enums and aligned defaults", () => {
+  const selected = selectPreferredPayloadTypeRef(
+    {
+      acceptedTypeSets: [
+        {
+          setId: "describe-result",
+          allowedTypes: [
+            {
+              schemaName: "orbpro.propagator.PropagatorDescribeSourcesBatchResult",
+              wireFormat: 1,
+              rootTypeName: "PropagatorDescribeSourcesBatchResult",
+              schemaHash: [],
+              fixedStringLength: 0,
+              byteLength: 0,
+              requiredAlignment: 8,
+            },
+          ],
+        },
+      ],
+    },
+    { preferredWireFormat: "aligned-binary" },
+  );
+  assert.equal(selected.wireFormat, "aligned-binary");
+  assert.equal(selected.schemaHash, undefined);
+  assert.equal(selected.fixedStringLength, undefined);
+  assert.equal(selected.byteLength, undefined);
+  assert.equal(selected.requiredAlignment, 8);
+});

@@ -9,11 +9,25 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_NAME="${GITHUB_REF_NAME#refs/tags/}"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if [[ "v${PACKAGE_VERSION}" != "${TAG_NAME}" ]]; then
+            echo "Tag ${TAG_NAME} does not match package version v${PACKAGE_VERSION}" >&2
+            exit 1
+          fi
       - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
@@ -32,4 +46,4 @@ jobs:
       - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm ci
       - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm test
       - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm run check:compliance
-      - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm publish
+      - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm publish --provenance --access public

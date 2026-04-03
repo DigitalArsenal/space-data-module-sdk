@@ -1,7 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FlatcRunner } from "flatc-wasm";
-
 import {
   validatePluginManifest,
   validatePluginArtifact,
@@ -79,49 +77,28 @@ function createFlatbufferAllowedType(overrides = {}) {
   };
 }
 
-let generatedAlignedFallbackTypePromise = null;
+function createDualFormatTypeSet(alignedOverrides = {}) {
+  const alignedType = createAlignedAllowedType(alignedOverrides);
+  return {
+    setId: "state-vector",
+    allowedTypes: [
+      createFlatbufferAllowedType({
+        schemaName: alignedType.schemaName,
+        fileIdentifier: alignedType.fileIdentifier,
+      }),
+      alignedType,
+    ],
+  };
+}
 
 async function createFlatcWasmAlignedAllowedType(overrides = {}) {
-  if (!generatedAlignedFallbackTypePromise) {
-    generatedAlignedFallbackTypePromise = (async () => {
-      const flatc = await FlatcRunner.init();
-      const { layouts } = await flatc.generateAlignedCode(
-        {
-          entry: "aligned-vector-test.fbs",
-          files: {
-            "aligned-vector-test.fbs": `
-              namespace SDS.Test;
-              file_identifier "AVEC";
-              struct Cartesian3 {
-                x:double;
-                y:double;
-                z:double;
-              }
-              table Cartesian3Envelope {
-                value:Cartesian3;
-              }
-              root_type Cartesian3Envelope;
-            `,
-          },
-        },
-        { defaultStringLength: 255 },
-      );
-      const layout = layouts.Cartesian3;
-      if (!layout) {
-        throw new Error("flatc-wasm did not return a Cartesian3 aligned layout");
-      }
-      return {
-        schemaName: "AlignedVectorTest.fbs",
-        fileIdentifier: "AVEC",
-        wireFormat: "aligned-binary",
-        rootTypeName: "Cartesian3",
-        byteLength: layout.size,
-        requiredAlignment: layout.align,
-      };
-    })();
-  }
   return {
-    ...(await generatedAlignedFallbackTypePromise),
+    schemaName: "AlignedVectorTest.fbs",
+    fileIdentifier: "AVEC",
+    wireFormat: "aligned-binary",
+    rootTypeName: "Cartesian3",
+    byteLength: 24,
+    requiredAlignment: 8,
     ...overrides,
   };
 }
@@ -388,25 +365,19 @@ test("aligned-binary type requires rootTypeName", () => {
   );
 });
 
-test("aligned-binary type requires positive byteLength", () => {
+test("aligned-binary type allows omitted byteLength for variable-length layouts", () => {
   const missing = createValidManifest();
-  missing.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
-    createAlignedAllowedType({ byteLength: undefined }),
-  ];
+  missing.methods[0].inputPorts[0].acceptedTypeSets[0] = createDualFormatTypeSet({
+    byteLength: undefined,
+  });
   const missingReport = validatePluginManifest(missing);
-  assert.equal(missingReport.ok, false);
-  assert.ok(
-    missingReport.errors.some(
-      (e) =>
-        e.code === "invalid-integer" &&
-        e.location?.endsWith(".byteLength"),
-    ),
-  );
+  assert.equal(missingReport.ok, true);
+  assert.equal(missingReport.errors.length, 0);
 
   const zero = createValidManifest();
-  zero.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
-    createAlignedAllowedType({ byteLength: 0 }),
-  ];
+  zero.methods[0].inputPorts[0].acceptedTypeSets[0] = createDualFormatTypeSet({
+    byteLength: 0,
+  });
   const zeroReport = validatePluginManifest(zero);
   assert.equal(zeroReport.ok, false);
   assert.ok(
