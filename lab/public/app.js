@@ -7,18 +7,120 @@ const sampleManifest = {
   externalInterfaces: [],
   methods: [
     {
-      methodId: "propagate",
-      displayName: "Propagate",
+      methodId: "ingest_omm",
+      displayName: "Ingest OMM",
+      inputPorts: [
+        {
+          portId: "omm",
+          acceptedTypeSets: [
+            {
+              setId: "omm-ingest",
+              allowedTypes: [
+                {
+                  schemaName: "OMM.fbs",
+                  fileIdentifier: "$OMM",
+                },
+                {
+                  schemaName: "OMM.fbs",
+                  fileIdentifier: "$OMM",
+                  wireFormat: "aligned-binary",
+                  rootTypeName: "OMM",
+                  byteLength: 160,
+                  requiredAlignment: 8,
+                },
+              ],
+            },
+          ],
+          minStreams: 1,
+          maxStreams: 1,
+          required: true,
+        },
+      ],
+      outputPorts: [],
+      maxBatch: 1,
+      drainPolicy: "single-shot",
+    },
+    {
+      methodId: "describe_sources_batch",
+      displayName: "Describe Sources",
       inputPorts: [
         {
           portId: "request",
           acceptedTypeSets: [
             {
-              setId: "omm",
+              setId: "describe-request",
               allowedTypes: [
                 {
-                  schemaName: "OMM.fbs",
-                  fileIdentifier: "$OMM",
+                  schemaName: "StateVector.fbs",
+                  fileIdentifier: null,
+                },
+                {
+                  schemaName: "StateVector.fbs",
+                  fileIdentifier: null,
+                  wireFormat: "aligned-binary",
+                  rootTypeName: "StateVector",
+                  byteLength: 64,
+                  requiredAlignment: 8,
+                },
+              ],
+            },
+          ],
+          minStreams: 1,
+          maxStreams: 1,
+          required: true,
+        },
+      ],
+      outputPorts: [
+        {
+          portId: "result",
+          acceptedTypeSets: [
+            {
+              setId: "describe-result",
+              allowedTypes: [
+                {
+                  schemaName: "StateVector.fbs",
+                  fileIdentifier: null,
+                },
+                {
+                  schemaName: "StateVector.fbs",
+                  fileIdentifier: null,
+                  wireFormat: "aligned-binary",
+                  rootTypeName: "StateVector",
+                  byteLength: 64,
+                  requiredAlignment: 8,
+                },
+              ],
+            },
+          ],
+          minStreams: 0,
+          maxStreams: 1,
+          required: false,
+        },
+      ],
+      maxBatch: 1,
+      drainPolicy: "single-shot",
+    },
+    {
+      methodId: "propagate_state",
+      displayName: "Propagate State",
+      inputPorts: [
+        {
+          portId: "request",
+          acceptedTypeSets: [
+            {
+              setId: "propagate-request",
+              allowedTypes: [
+                {
+                  schemaName: "StateVector.fbs",
+                  fileIdentifier: "STVC",
+                },
+                {
+                  schemaName: "StateVector.fbs",
+                  fileIdentifier: "STVC",
+                  wireFormat: "aligned-binary",
+                  rootTypeName: "StateVector",
+                  byteLength: 64,
+                  requiredAlignment: 8,
                 },
               ],
             },
@@ -33,27 +135,43 @@ const sampleManifest = {
           portId: "state",
           acceptedTypeSets: [
             {
-              setId: "cat",
+              setId: "propagate-state",
               allowedTypes: [
                 {
-                  schemaName: "CAT.fbs",
-                  fileIdentifier: "$CAT",
+                  schemaName: "StateVector.fbs",
+                  fileIdentifier: "STVC",
+                },
+                {
+                  schemaName: "StateVector.fbs",
+                  fileIdentifier: "STVC",
+                  wireFormat: "aligned-binary",
+                  rootTypeName: "StateVector",
+                  byteLength: 64,
+                  requiredAlignment: 8,
                 },
               ],
             },
           ],
-          minStreams: 1,
+          minStreams: 0,
           maxStreams: 1,
-          required: true,
+          required: false,
         },
       ],
-      maxBatch: 32,
-      drainPolicy: "drain-to-empty",
+      maxBatch: 1,
+      drainPolicy: "single-shot",
     },
   ],
 };
 
-const sampleSource = `int propagate(void) {
+const sampleSource = `int ingest_omm(void) {
+  return 0;
+}
+
+int describe_sources_batch(void) {
+  return 0;
+}
+
+int propagate_state(void) {
   return 42;
 }
 `;
@@ -187,4 +305,3 @@ document.querySelector("#load-standards").addEventListener("click", async () => 
 document.querySelector("#clear-output").addEventListener("click", () => {
   writeOutput("");
 });
-

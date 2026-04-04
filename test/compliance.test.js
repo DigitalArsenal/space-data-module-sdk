@@ -7,6 +7,7 @@ import {
   validatePluginArtifact,
 } from "../src/compliance/pluginCompliance.js";
 import { validateManifestWithStandards } from "../src/compliance/index.js";
+import { decodePluginManifest, encodePluginManifest } from "../src/index.js";
 
 function createValidManifest() {
   return {
@@ -76,6 +77,136 @@ function createFlatbufferAllowedType(overrides = {}) {
     schemaName: "StateVector.fbs",
     fileIdentifier: "STVC",
     ...overrides,
+  };
+}
+
+function createDualFormatTypeSet({
+  setId = "dual-format",
+  schemaName = "StateVector.fbs",
+  fileIdentifier = "STVC",
+  rootTypeName = "StateVector",
+  byteLength = 64,
+  requiredAlignment = 8,
+} = {}) {
+  return {
+    setId,
+    allowedTypes: [
+      {
+        schemaName,
+        fileIdentifier,
+      },
+      {
+        schemaName,
+        fileIdentifier,
+        wireFormat: "aligned-binary",
+        rootTypeName,
+        byteLength,
+        requiredAlignment,
+      },
+    ],
+  };
+}
+
+function createCanonicalPropagatorManifest() {
+  return {
+    pluginId: "com.test.propagator",
+    name: "Canonical Propagator Test",
+    version: "1.0.0",
+    pluginFamily: "propagator",
+    capabilities: [],
+    externalInterfaces: [],
+    methods: [
+      {
+        methodId: "ingest_omm",
+        displayName: "Ingest OMM",
+        inputPorts: [
+          {
+            portId: "omm",
+            acceptedTypeSets: [
+              createDualFormatTypeSet({
+                setId: "omm-ingest",
+                schemaName: "OMM.fbs",
+                fileIdentifier: "$OMM",
+                rootTypeName: "OMM",
+                byteLength: 160,
+              }),
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        outputPorts: [],
+        maxBatch: 1,
+        drainPolicy: "single-shot",
+      },
+      {
+        methodId: "describe_sources_batch",
+        displayName: "Describe Sources",
+        inputPorts: [
+          {
+            portId: "request",
+            acceptedTypeSets: [
+              createDualFormatTypeSet({
+                setId: "describe-request",
+                fileIdentifier: null,
+              }),
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        outputPorts: [
+          {
+            portId: "result",
+            acceptedTypeSets: [
+              createDualFormatTypeSet({
+                setId: "describe-result",
+                fileIdentifier: null,
+              }),
+            ],
+            minStreams: 0,
+            maxStreams: 1,
+            required: false,
+          },
+        ],
+        maxBatch: 1,
+        drainPolicy: "single-shot",
+      },
+      {
+        methodId: "propagate_state",
+        displayName: "Propagate State",
+        inputPorts: [
+          {
+            portId: "request",
+            acceptedTypeSets: [
+              createDualFormatTypeSet({
+                setId: "propagate-request",
+              }),
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        outputPorts: [
+          {
+            portId: "state",
+            acceptedTypeSets: [
+              createDualFormatTypeSet({
+                setId: "propagate-state",
+              }),
+            ],
+            minStreams: 0,
+            maxStreams: 1,
+            required: false,
+          },
+        ],
+        maxBatch: 1,
+        drainPolicy: "single-shot",
+      },
+    ],
   };
 }
 
@@ -151,6 +282,102 @@ test("valid manifest passes validation", () => {
   const report = validatePluginManifest(createValidManifest());
   assert.equal(report.ok, true);
   assert.equal(report.errors.length, 0);
+});
+
+test("canonical propagator manifest passes validation", () => {
+  const report = validatePluginManifest(createCanonicalPropagatorManifest());
+  assert.equal(report.ok, true);
+  assert.equal(report.errors.length, 0);
+});
+
+test("propagator manifest missing describe_sources_batch fails validation", () => {
+  const manifest = createCanonicalPropagatorManifest();
+  manifest.methods = manifest.methods.filter(
+    (method) => method.methodId !== "describe_sources_batch",
+  );
+  const report = validatePluginManifest(manifest);
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some(
+      (issue) =>
+        issue.code === "propagator-missing-canonical-method" &&
+        issue.message.includes("describe_sources_batch"),
+    ),
+  );
+});
+
+test("propagator manifest missing ingest_omm fails validation", () => {
+  const manifest = createCanonicalPropagatorManifest();
+  manifest.methods = manifest.methods.filter((method) => method.methodId !== "ingest_omm");
+  const report = validatePluginManifest(manifest);
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some(
+      (issue) =>
+        issue.code === "propagator-missing-canonical-method" &&
+        issue.message.includes("ingest_omm"),
+    ),
+  );
+});
+
+test("propagator manifest missing propagate_state fails validation", () => {
+  const manifest = createCanonicalPropagatorManifest();
+  manifest.methods = manifest.methods.filter(
+    (method) => method.methodId !== "propagate_state",
+  );
+  const report = validatePluginManifest(manifest);
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some(
+      (issue) =>
+        issue.code === "propagator-missing-canonical-method" &&
+        issue.message.includes("propagate_state"),
+    ),
+  );
+});
+
+test("propagator canonical ports require both flatbuffer and aligned-binary formats", () => {
+  const manifest = createCanonicalPropagatorManifest();
+  manifest.methods[2].outputPorts[0].acceptedTypeSets = [
+    {
+      setId: "propagate-state",
+      allowedTypes: [
+        {
+          schemaName: "StateVector.fbs",
+          fileIdentifier: "STVC",
+        },
+      ],
+    },
+  ];
+  const report = validatePluginManifest(manifest);
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some(
+      (issue) => issue.code === "canonical-port-missing-dual-wire-format",
+    ),
+  );
+});
+
+test("propagator schemas without file identifiers preserve null identifiers through encoding", () => {
+  const manifest = createCanonicalPropagatorManifest();
+  const encoded = encodePluginManifest(manifest);
+  const decoded = decodePluginManifest(encoded);
+  assert.equal(
+    decoded.methods[1].inputPorts[0].acceptedTypeSets[0].allowedTypes[0].fileIdentifier,
+    null,
+  );
+  assert.equal(
+    decoded.methods[1].inputPorts[0].acceptedTypeSets[0].allowedTypes[1].fileIdentifier,
+    null,
+  );
+  assert.equal(
+    decoded.methods[1].outputPorts[0].acceptedTypeSets[0].allowedTypes[0].fileIdentifier,
+    null,
+  );
+  assert.equal(
+    decoded.methods[1].outputPorts[0].acceptedTypeSets[0].allowedTypes[1].fileIdentifier,
+    null,
+  );
 });
 
 test("invokeSurfaces must be an array when present", () => {
@@ -388,25 +615,19 @@ test("aligned-binary type requires rootTypeName", () => {
   );
 });
 
-test("aligned-binary type requires positive byteLength", () => {
+test("aligned-binary type allows omitted byteLength for variable-length layouts", () => {
   const missing = createValidManifest();
-  missing.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
-    createAlignedAllowedType({ byteLength: undefined }),
-  ];
+  missing.methods[0].inputPorts[0].acceptedTypeSets[0] = createDualFormatTypeSet({
+    byteLength: undefined,
+  });
   const missingReport = validatePluginManifest(missing);
-  assert.equal(missingReport.ok, false);
-  assert.ok(
-    missingReport.errors.some(
-      (e) =>
-        e.code === "invalid-integer" &&
-        e.location?.endsWith(".byteLength"),
-    ),
-  );
+  assert.equal(missingReport.ok, true);
+  assert.equal(missingReport.errors.length, 0);
 
   const zero = createValidManifest();
-  zero.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
-    createAlignedAllowedType({ byteLength: 0 }),
-  ];
+  zero.methods[0].inputPorts[0].acceptedTypeSets[0] = createDualFormatTypeSet({
+    byteLength: 0,
+  });
   const zeroReport = validatePluginManifest(zero);
   assert.equal(zeroReport.ok, false);
   assert.ok(

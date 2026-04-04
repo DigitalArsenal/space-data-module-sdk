@@ -16,7 +16,7 @@ function createManifest() {
     pluginId: "com.digitalarsenal.examples.protocol-deployment",
     name: "Protocol Deployment Test",
     version: "0.1.0",
-    pluginFamily: "propagator",
+    pluginFamily: "analysis",
     capabilities: ["protocol_handle", "pubsub", "http", "ipfs"],
     externalInterfaces: [
       {

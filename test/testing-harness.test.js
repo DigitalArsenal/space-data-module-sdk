@@ -88,6 +88,51 @@ function createDualFormatManifest() {
   };
 }
 
+function createSchemaWithoutFileIdentifierManifest() {
+  return {
+    pluginId: "com.digitalarsenal.examples.testing-harness-no-file-id",
+    name: "Testing Harness No File Identifier Fixture",
+    version: "0.1.0",
+    pluginFamily: "analysis",
+    capabilities: [],
+    invokeSurfaces: ["command"],
+    methods: [
+      {
+        methodId: "transform",
+        displayName: "Transform",
+        inputPorts: [
+          {
+            portId: "request",
+            required: true,
+            acceptedTypeSets: [
+              {
+                setId: "state-vector",
+                allowedTypes: [
+                  {
+                    schemaName: "StateVector.fbs",
+                    fileIdentifier: null,
+                  },
+                  {
+                    schemaName: "StateVector.fbs",
+                    fileIdentifier: null,
+                    wireFormat: "aligned-binary",
+                    rootTypeName: "StateVector",
+                    byteLength: 64,
+                    requiredAlignment: 16,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        outputPorts: [],
+        maxBatch: 1,
+        drainPolicy: "single-shot",
+      },
+    ],
+  };
+}
+
 test("capability runtime surface matrix distinguishes WASI, sync hostcalls, and host-only APIs", () => {
   assert.deepEqual(
     describeCapabilityRuntimeSurface("clock"),
@@ -251,4 +296,66 @@ test("payload type helpers distinguish aligned-binary from regular flatbuffers",
     ),
     true,
   );
+});
+
+test("selectPreferredPayloadTypeRef preserves null file identifiers for schemas without identifiers", () => {
+  const port = createSchemaWithoutFileIdentifierManifest().methods[0].inputPorts[0];
+  const selected = selectPreferredPayloadTypeRef(port, {
+    preferredWireFormat: "aligned-binary",
+  });
+  assert.equal(selected.fileIdentifier, null);
+  assert.equal(selected.schemaName, "StateVector.fbs");
+  assert.equal(selected.wireFormat, "aligned-binary");
+});
+
+test("aligned-binary payload type matching tolerates decoded flatbuffer default values", () => {
+  assert.equal(
+    payloadTypeRefsMatch(
+      {
+        schemaName: "orbpro.propagator.PropagatorDescribeSourcesBatchResult",
+        wireFormat: "aligned-binary",
+        rootTypeName: "PropagatorDescribeSourcesBatchResult",
+        schemaHash: [],
+        fixedStringLength: 0,
+        byteLength: 0,
+        requiredAlignment: 8,
+      },
+      {
+        schemaName: "orbpro.propagator.PropagatorDescribeSourcesBatchResult",
+        wireFormat: "aligned-binary",
+        rootTypeName: "PropagatorDescribeSourcesBatchResult",
+        requiredAlignment: 8,
+      },
+    ),
+    true,
+  );
+});
+
+test("selectPreferredPayloadTypeRef canonicalizes numeric wire-format enums and aligned defaults", () => {
+  const selected = selectPreferredPayloadTypeRef(
+    {
+      acceptedTypeSets: [
+        {
+          setId: "describe-result",
+          allowedTypes: [
+            {
+              schemaName: "orbpro.propagator.PropagatorDescribeSourcesBatchResult",
+              wireFormat: 1,
+              rootTypeName: "PropagatorDescribeSourcesBatchResult",
+              schemaHash: [],
+              fixedStringLength: 0,
+              byteLength: 0,
+              requiredAlignment: 8,
+            },
+          ],
+        },
+      ],
+    },
+    { preferredWireFormat: "aligned-binary" },
+  );
+  assert.equal(selected.wireFormat, "aligned-binary");
+  assert.equal(selected.schemaHash, undefined);
+  assert.equal(selected.fixedStringLength, undefined);
+  assert.equal(selected.byteLength, undefined);
+  assert.equal(selected.requiredAlignment, 8);
 });

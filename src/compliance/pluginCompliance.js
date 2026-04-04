@@ -167,6 +167,134 @@ function normalizePayloadWireFormatName(value) {
   return null;
 }
 
+function normalizedPluginFamilyName(value) {
+  if (!isNonEmptyString(value)) {
+    return null;
+  }
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+}
+
+function typeSetHasDualWireFormats(typeSet) {
+  if (!Array.isArray(typeSet?.allowedTypes) || typeSet.allowedTypes.length === 0) {
+    return false;
+  }
+  let hasFlatbuffer = false;
+  let hasAlignedBinary = false;
+  for (const allowedType of typeSet.allowedTypes) {
+    const wireFormat = normalizePayloadWireFormatName(allowedType?.wireFormat);
+    if (wireFormat === "flatbuffer") {
+      hasFlatbuffer = true;
+    } else if (wireFormat === "aligned-binary") {
+      hasAlignedBinary = true;
+    }
+  }
+  return hasFlatbuffer && hasAlignedBinary;
+}
+
+function validateCanonicalDualFormatPort(port, issues, location, methodId, portId) {
+  if (!port) {
+    pushIssue(
+      issues,
+      "error",
+      "propagator-missing-canonical-port",
+      `Canonical propagator method "${methodId}" must declare port "${portId}".`,
+      location,
+    );
+    return;
+  }
+  if (!Array.isArray(port.acceptedTypeSets) || port.acceptedTypeSets.length === 0) {
+    pushIssue(
+      issues,
+      "error",
+      "propagator-missing-canonical-port",
+      `Canonical propagator method "${methodId}" port "${portId}" must declare acceptedTypeSets.`,
+      `${location}.acceptedTypeSets`,
+    );
+    return;
+  }
+  port.acceptedTypeSets.forEach((typeSet, index) => {
+    if (!typeSetHasDualWireFormats(typeSet)) {
+      pushIssue(
+        issues,
+        "error",
+        "canonical-port-missing-dual-wire-format",
+        `Canonical propagator method "${methodId}" port "${portId}" acceptedTypeSet "${typeSet?.setId ?? index}" must accept both regular flatbuffer and aligned-binary payloads.`,
+        `${location}.acceptedTypeSets[${index}]`,
+      );
+    }
+  });
+}
+
+function validateCanonicalPropagatorContract(manifest, issues, sourceName) {
+  if (normalizedPluginFamilyName(manifest?.pluginFamily) !== "propagator") {
+    return;
+  }
+
+  const methods = Array.isArray(manifest?.methods) ? manifest.methods : [];
+  const methodRequirements = [
+    {
+      methodId: "ingest_omm",
+      inputPorts: ["omm"],
+      outputPorts: [],
+    },
+    {
+      methodId: "describe_sources_batch",
+      inputPorts: ["request"],
+      outputPorts: ["result"],
+    },
+    {
+      methodId: "propagate_state",
+      inputPorts: ["request"],
+      outputPorts: ["state"],
+    },
+  ];
+
+  for (const requirement of methodRequirements) {
+    const methodIndex = methods.findIndex(
+      (method) => method?.methodId === requirement.methodId,
+    );
+    if (methodIndex === -1) {
+      pushIssue(
+        issues,
+        "error",
+        "propagator-missing-canonical-method",
+        `Propagator plugins must declare canonical method "${requirement.methodId}".`,
+        `${sourceName}.methods`,
+      );
+      continue;
+    }
+    const method = methods[methodIndex];
+    const location = `${sourceName}.methods[${methodIndex}]`;
+    for (const portId of requirement.inputPorts) {
+      const port = Array.isArray(method.inputPorts)
+        ? method.inputPorts.find((entry) => entry?.portId === portId)
+        : null;
+      validateCanonicalDualFormatPort(
+        port,
+        issues,
+        `${location}.inputPorts`,
+        requirement.methodId,
+        portId,
+      );
+    }
+    for (const portId of requirement.outputPorts) {
+      const port = Array.isArray(method.outputPorts)
+        ? method.outputPorts.find((entry) => entry?.portId === portId)
+        : null;
+      validateCanonicalDualFormatPort(
+        port,
+        issues,
+        `${location}.outputPorts`,
+        requirement.methodId,
+        portId,
+      );
+    }
+  }
+}
+
 function validateStringField(issues, value, location, label) {
   if (!isNonEmptyString(value)) {
     pushIssue(issues, "error", "missing-string", `${label} must be a non-empty string.`, location);
@@ -366,7 +494,7 @@ function validateAllowedType(type, issues, location) {
       "Allowed type fixedStringLength",
       { min: 0 },
     );
-    validateIntegerField(
+    validateOptionalIntegerField(
       issues,
       type.byteLength,
       `${location}.byteLength`,
@@ -1258,6 +1386,8 @@ export function validatePluginManifest(manifest, options = {}) {
         );
       }
     });
+
+    validateCanonicalPropagatorContract(manifest, issues, sourceName);
 
     if (manifest.timers !== undefined && !Array.isArray(manifest.timers)) {
       pushIssue(

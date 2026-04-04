@@ -11,7 +11,7 @@ export type ProtocolRoleName = "handle" | "dial" | "both";
 
 export interface PayloadTypeRef {
   schemaName?: string;
-  fileIdentifier?: string;
+  fileIdentifier?: string | null;
   schemaHash?: string | number[] | Uint8Array;
   acceptsAnyFlatbuffer?: boolean;
   wireFormat?: PayloadWireFormat;

@@ -18,10 +18,10 @@ import {
 
 function createTestManifest() {
   return {
-    pluginId: "com.digitalarsenal.examples.basic-propagator",
-    name: "Basic Propagator",
+    pluginId: "com.digitalarsenal.examples.basic-module",
+    name: "Basic Module",
     version: "0.1.0",
-    pluginFamily: "propagator",
+    pluginFamily: "analysis",
     capabilities: ["clock"],
     externalInterfaces: [],
     methods: [
