@@ -15,14 +15,19 @@
           This lab accepts source code or a compiled wasm module, validates it
           against the shared manifest ABI, checks standards references against
           <code>spacedatastandards.org</code>, and can package the result with a
-          signature and optional transport encryption.
+          signature and optional transport encryption. The publication demo
+          parses real <code>REC</code>, <code>PNM</code>, and <code>ENC</code>
+          FlatBuffers generated from <code>spacedatastandards.org</code>.
         </p>
       </section>
 
       <section class="panel">
         <div class="panel-head">
           <h2>Manifest</h2>
-          <button id="load-standards" class="ghost">Load Standards Catalog</button>
+          <div class="actions">
+            <button id="load-standards" class="ghost">Load Standards Catalog</button>
+            <button id="run-publication-demo" class="ghost">Run Publication Demo</button>
+          </div>
         </div>
         <textarea id="manifest-text" spellcheck="false"></textarea>
       </section>
@@ -74,4 +79,3 @@
     <script type="module" src="./app.js"></script>
   </body>
 </html>
-

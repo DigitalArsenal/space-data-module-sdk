@@ -33,11 +33,19 @@ const sampleManifest = {
           portId: "state",
           acceptedTypeSets: [
             {
-              setId: "cat",
+              setId: "state-vector",
               allowedTypes: [
                 {
-                  schemaName: "CAT.fbs",
-                  fileIdentifier: "$CAT",
+                  schemaName: "StateVector.fbs",
+                  fileIdentifier: "STVC",
+                },
+                {
+                  schemaName: "StateVector.fbs",
+                  fileIdentifier: "STVC",
+                  wireFormat: "aligned-binary",
+                  rootTypeName: "StateVector",
+                  byteLength: 72,
+                  requiredAlignment: 8,
                 },
               ],
             },
@@ -184,7 +192,15 @@ document.querySelector("#load-standards").addEventListener("click", async () => 
   }
 });
 
+document.querySelector("#run-publication-demo").addEventListener("click", async () => {
+  try {
+    const data = await postJson("/api/demo/publication-protection", {});
+    writeOutput(data.summary);
+  } catch (error) {
+    writeOutput({ error: error.message });
+  }
+});
+
 document.querySelector("#clear-output").addEventListener("click", () => {
   writeOutput("");
 });
-
