@@ -664,6 +664,8 @@ export type {
   ManifestHarnessPlan,
   ModuleHarness,
   ModuleHarnessRuntimeDescriptor,
+  PublicationProtectionDemoAlignedType,
+  PublicationProtectionDemoSummary,
   PluginInvokeProcessClient,
   PluginInvokeProcessLaunchPlan,
   WasmEdgeRunnerBuildPlan,
@@ -672,6 +674,8 @@ export type {
 export {
   buildWasmEdgeEmscriptenPthreadRunner,
   buildWasmEdgeSpawnEnv,
+  createPublicationProtectionDemoManifest,
+  createPublicationProtectionDemoSummary,
   createModuleHarness,
   createPluginInvokeProcessClient,
   describeCapabilityRuntimeSurface,

@@ -57,6 +57,75 @@ export interface ManifestHarnessPlan {
   scenarios: Array<HarnessInvokeScenario | HarnessRawScenario>;
 }
 
+export interface PublicationProtectionDemoAlignedType {
+  methodId: string | null;
+  portId: string | null;
+  setId: string | null;
+  schemaName: string | null;
+  fileIdentifier: string | null;
+  rootTypeName: string | null;
+  byteLength: number | null;
+  requiredAlignment: number | null;
+  hasFlatbufferFallback: boolean;
+}
+
+export interface PublicationProtectionDemoSummary {
+  manifest: PluginManifest;
+  recTrailer: {
+    fileIdentifier: string;
+    version: string | null;
+    recordCount: number;
+    recordStandards: Array<string | null>;
+    usesStandardsFlatbuffers: boolean;
+    records: Array<Record<string, unknown>>;
+  };
+  alignedBinaryContract: PublicationProtectionDemoAlignedType[];
+  signedOnly: {
+    artifactId: string;
+    encrypted: boolean;
+    trailer: PublicationProtectionDemoSummary["recTrailer"];
+    recordStandards: Array<string | null>;
+    pnm: {
+      fileName: string | null;
+      fileId: string | null;
+      cid: string | null;
+      hasSignature: boolean;
+      signatureType: string | null;
+      publishTimestamp: string | null;
+    } | null;
+    enc: null;
+    envelope: null;
+  };
+  encryptedDelivery: {
+    artifactId: string;
+    encrypted: boolean;
+    trailer: PublicationProtectionDemoSummary["recTrailer"];
+    recordStandards: Array<string | null>;
+    pnm: {
+      fileName: string | null;
+      fileId: string | null;
+      cid: string | null;
+      hasSignature: boolean;
+      signatureType: string | null;
+      publishTimestamp: string | null;
+    } | null;
+    enc: {
+      context: string | null;
+      rootType: string | null;
+      keyExchange: string | null;
+      symmetric: string | null;
+      keyDerivation: string | null;
+      nonceLength: number;
+      ephemeralPublicKeyLength: number;
+    } | null;
+    envelope: {
+      scheme: string | null;
+      hasEncRecord: boolean;
+      hasPnmRecord: boolean;
+    } | null;
+  };
+}
+
 export interface PluginInvokeProcessLaunchPlan {
   command: string;
   args: string[];
@@ -123,6 +192,18 @@ export interface WasmEdgeRunnerBuildPlan {
 export function describeCapabilityRuntimeSurface(
   capability: string,
 ): CapabilityRuntimeSurface;
+
+export function createPublicationProtectionDemoManifest(): PluginManifest;
+
+export function createPublicationProtectionDemoSummary(options?: {
+  manifest?: PluginManifest;
+  wasmBytes?: Uint8Array;
+  mnemonic?: string | null;
+  recipient?: {
+    publicKeyHex: string;
+    privateKeyHex: string;
+  };
+}): Promise<PublicationProtectionDemoSummary>;
 
 export function generateManifestHarnessPlan(options: {
   manifest: PluginManifest;

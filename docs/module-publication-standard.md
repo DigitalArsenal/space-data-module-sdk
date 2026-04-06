@@ -49,6 +49,75 @@ defined by this repo:
    metadata payloads to the module artifact.
 6. Paths in publication metadata are package-relative, never absolute.
 
+## Publication Record Extensions
+
+Publication protection metadata is expressed as standards-backed FlatBuffer
+extensions layered on top of the canonical module artifact.
+
+- `REC.fbs` is the trailing collection wrapper with file identifier `$REC`
+- `PNM.fbs` is the signature/publication notice record
+- `ENC.fbs` is the encrypted-delivery record
+
+These records are not arbitrary bytes. Loaders and publishers are expected to
+use the generated message classes from `spacedatastandards.org` and preserve the
+standard file identifiers:
+
+- `REC` => `$REC`
+- `PNM` => `$PNM`
+- `ENC` => `$ENC`
+
+The runtime-facing rule stays strict:
+
+1. Strip or decrypt the publication layer first.
+2. Instantiate the remaining raw wasm module.
+3. Read the embedded `PluginManifest.fbs`.
+
+`PNM` and `ENC` extend publication and transport handling only. They do not
+change the canonical module ABI, manifest exports, or `sds.bundle` layout.
+
+### `PNM` digital-signature extension
+
+`PNM` carries the publication notice for the module:
+
+- file identity (`FILE_NAME`, `FILE_ID`)
+- content identity (`CID`)
+- publish timestamp
+- signature and signature-type metadata
+
+In practice this is the record a host inspects to determine what artifact was
+published and which signer attested to it.
+
+### `ENC` encrypted-delivery extension
+
+`ENC` carries the decryption parameters for a transport-protected module:
+
+- key exchange algorithm
+- symmetric algorithm
+- key-derivation function
+- ephemeral public key
+- nonce start
+- optional context and root type
+
+It describes how to decrypt the protected delivery payload. It does not imply a
+different module file format after decryption.
+
+## Aligned-Binary Type Refs
+
+Aligned-binary payloads use the same schema identity as the canonical
+FlatBuffer payload. They are advertised through the `FlatBufferTypeRef`
+extension fields:
+
+- `wireFormat: "aligned-binary"`
+- `rootTypeName`
+- `byteLength`
+- `requiredAlignment`
+
+Every aligned-binary declaration must be paired with the regular
+`wireFormat: "flatbuffer"` type for the same schema and file identifier in the
+same accepted type set. Publication protection applies to the artifact as a
+whole; aligned-binary is an invoke/payload optimization layered inside the
+manifest contract.
+
 ## Canonical Descriptor
 
 The canonical publication descriptor is named `sdn-module`.

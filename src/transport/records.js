@@ -609,7 +609,10 @@ export function decodePublicationRecordCollection(bytes) {
       8,
       `REC trailer record ${index} standard`,
     );
-    const recordType = recordTable.value_type();
+    const recordType =
+      typeof recordTable.valueType === "function"
+        ? recordTable.valueType()
+        : recordTable.value_type();
     const standard =
       normalizeStringField(recordTable.standard()) ??
       STANDARD_BY_RECORD_TYPE[recordType] ??
