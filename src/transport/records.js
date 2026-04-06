@@ -6,11 +6,11 @@ import {
   KDF,
   KeyExchange,
   SymmetricAlgo,
-} from "../../../spacedatastandards.org/lib/js/ENC/main.js";
-import { PNM, PNMT } from "../../../spacedatastandards.org/lib/js/PNM/main.js";
-import { REC, RECT } from "../../../spacedatastandards.org/lib/js/REC/REC.js";
-import { Record, RecordT } from "../../../spacedatastandards.org/lib/js/REC/Record.js";
-import { RecordType } from "../../../spacedatastandards.org/lib/js/REC/RecordType.js";
+} from "spacedatastandards.org/lib/js/ENC/main.js";
+import { PNM, PNMT } from "spacedatastandards.org/lib/js/PNM/main.js";
+import { REC, RECT } from "spacedatastandards.org/lib/js/REC/REC.js";
+import { Record, RecordT } from "spacedatastandards.org/lib/js/REC/Record.js";
+import { RecordType } from "spacedatastandards.org/lib/js/REC/RecordType.js";
 
 import {
   base64ToBytes,
@@ -79,6 +79,16 @@ function assertBounds(buffer, offset, length, label) {
 function readUint16LE(buffer, offset, label) {
   assertBounds(buffer, offset, 2, label);
   return buffer[offset] | (buffer[offset + 1] << 8);
+}
+
+function getRecordValueType(recordTable) {
+  if (typeof recordTable.valueType === "function") {
+    return recordTable.valueType();
+  }
+  if (typeof recordTable.value_type === "function") {
+    return recordTable.value_type();
+  }
+  throw new TypeError("REC record table does not expose a value type accessor.");
 }
 
 function readUint32LE(buffer, offset, label) {
@@ -615,7 +625,7 @@ export function decodePublicationRecordCollection(bytes) {
       8,
       `REC trailer record ${index} standard`,
     );
-    const recordType = recordTable.valueType();
+    const recordType = getRecordValueType(recordTable);
     const standard =
       normalizeStringField(recordTable.standard()) ??
       STANDARD_BY_RECORD_TYPE[recordType] ??

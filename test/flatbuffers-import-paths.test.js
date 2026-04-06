@@ -32,3 +32,17 @@ test("sdk source never imports flatbuffers through relative node_modules paths",
   }
   assert.deepEqual(offenders, []);
 });
+
+test("sdk source never imports workspace dependencies through relative paths", async () => {
+  const offenders = [];
+  for await (const file of walk(SRC_ROOT)) {
+    if (!file.endsWith(".js") && !file.endsWith(".ts")) {
+      continue;
+    }
+    const source = await readFile(file, "utf8");
+    if (source.includes("../../../spacedatastandards.org/")) {
+      offenders.push(path.relative(SDK_ROOT, file));
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
