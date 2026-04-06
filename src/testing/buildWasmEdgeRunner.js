@@ -1,5 +1,6 @@
 import { accessSync, existsSync } from "node:fs";
 import { execFile } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
@@ -63,12 +64,50 @@ export function resolveWasmEdgeRunnerSourcePath() {
   );
 }
 
+function resolveDefaultWasmEdgeInstall() {
+  const home = os.homedir();
+  const candidates = [
+    {
+      includeDir: path.join(home, ".wasmedge", "include"),
+      libDir: path.join(home, ".wasmedge", "lib"),
+    },
+    {
+      includeDir: "/opt/homebrew/include",
+      libDir: "/opt/homebrew/opt/wasmedge/lib",
+    },
+    {
+      includeDir: "/usr/local/include",
+      libDir: "/usr/local/lib",
+    },
+  ];
+  for (const candidate of candidates) {
+    const header = path.join(
+      candidate.includeDir,
+      "wasmedge",
+      "enum_configure.h",
+    );
+    const library = path.join(
+      candidate.libDir,
+      resolveWasmEdgeSharedLibraryFilename(),
+    );
+    if (existsSync(header) && existsSync(library)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 export function resolveWasmEdgeRunnerBuildPlan(options = {}) {
+  const detectedInstall = resolveDefaultWasmEdgeInstall();
   const requestedIncludeDir = normalizeResolvedPath(
-    options.wasmedgeIncludeDir ?? process.env.WASMEDGE_INCLUDE_DIR,
+    options.wasmedgeIncludeDir ??
+      process.env.WASMEDGE_INCLUDE_DIR ??
+      detectedInstall?.includeDir,
   );
   const wasmedgeLibDir = normalizeResolvedPath(
-    options.wasmedgeLibDir ?? process.env.WASMEDGE_LIB_DIR,
+    options.wasmedgeLibDir ??
+      process.env.WASMEDGE_LIB_DIR ??
+      detectedInstall?.libDir,
   );
   const outputPath = normalizeResolvedPath(
     options.outputPath ?? options.output,

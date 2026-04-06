@@ -1,10 +1,16 @@
-import * as flatbuffers from "flatbuffers";
+import * as flatbuffers from "../../../../node_modules/flatbuffers/mjs/flatbuffers.js";
 
-import { ENC, ENCT, KDF, KeyExchange, SymmetricAlgo } from "spacedatastandards.org/lib/js/ENC/main.js";
-import { PNM, PNMT } from "spacedatastandards.org/lib/js/PNM/main.js";
-import { REC, RECT } from "spacedatastandards.org/lib/js/REC/REC.js";
-import { Record, RecordT } from "spacedatastandards.org/lib/js/REC/Record.js";
-import { RecordType } from "spacedatastandards.org/lib/js/REC/RecordType.js";
+import {
+  ENC,
+  ENCT,
+  KDF,
+  KeyExchange,
+  SymmetricAlgo,
+} from "../../../spacedatastandards.org/lib/js/ENC/main.js";
+import { PNM, PNMT } from "../../../spacedatastandards.org/lib/js/PNM/main.js";
+import { REC, RECT } from "../../../spacedatastandards.org/lib/js/REC/REC.js";
+import { Record, RecordT } from "../../../spacedatastandards.org/lib/js/REC/Record.js";
+import { RecordType } from "../../../spacedatastandards.org/lib/js/REC/RecordType.js";
 
 import {
   base64ToBytes,
@@ -609,7 +615,7 @@ export function decodePublicationRecordCollection(bytes) {
       8,
       `REC trailer record ${index} standard`,
     );
-    const recordType = recordTable.value_type();
+    const recordType = recordTable.valueType();
     const standard =
       normalizeStringField(recordTable.standard()) ??
       STANDARD_BY_RECORD_TYPE[recordType] ??

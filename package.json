@@ -31,6 +31,10 @@
     "./deployment": "./src/deployment/index.js",
     "./invoke": "./src/invoke/index.js",
     "./runtime": "./src/runtime/index.js",
+    "./runtime-host": {
+      "types": "./src/index.d.ts",
+      "default": "./src/runtime-host/index.js"
+    },
     "./testing": "./src/testing/index.js",
     "./standards": "./src/standards/index.js",
     "./schemas/*": "./schemas/*"

@@ -1,0 +1,53 @@
+namespace orbpro.hoststorage;
+
+table RowHandle {
+  schema_file_id: string (required);
+  row_id: uint64;
+}
+
+table RuntimeRegionRecord {
+  region_id: uint64;
+  record_index: uint32;
+  layout_id: string (required);
+  record_byte_length: uint32;
+  byte_length: uint32;
+  alignment: uint16 = 1;
+  bytes: [ubyte];
+}
+
+table ResolveRowViewRequest {
+  handle: RowHandle;
+}
+
+table ResolveRowViewResult {
+  handle: RowHandle;
+  found: bool = false;
+}
+
+table ResolveRegionRecordRequest {
+  region_id: uint64;
+  record_index: uint32;
+}
+
+table ResolveRegionRecordResult {
+  record: RuntimeRegionRecord;
+  found: bool = false;
+}
+
+table AllocateRuntimeRegionRequest {
+  layout_id: string (required);
+  record_byte_length: uint32;
+  alignment: uint16 = 1;
+  initial_record_count: uint32;
+}
+
+table AllocateRuntimeRegionResult {
+  region_id: uint64;
+  layout_id: string (required);
+  record_byte_length: uint32;
+  alignment: uint16 = 1;
+  record_count: uint32;
+}
+
+root_type ResolveRowViewRequest;
+file_identifier "HSTR";

@@ -14,6 +14,8 @@ This repository is the source of truth for module-level concerns:
 - the `sds.bundle` single-file container
 - deployment authorization plus SDS publication records (`REC`, `PNM`, `ENC`)
 - the first canonical module hostcall/import ABI surface
+- the canonical runtime-host model for append-only standards rows, host-managed
+  runtime regions, and dynamic module installation/loading
 - shared module-level testing/runtime harnesses, including the WasmEdge
   process runner used by package-level validation suites
 
@@ -35,6 +37,28 @@ enqueue/drain behavior on top of its compiled standalone runtime host. Package-
 specific validation suites, including conjunction replay/V&V, are expected to
 sit on top of these shared harnesses instead of defining their own runtime
 process model.
+
+## Canonical Runtime Host
+
+The SDK now owns the durable runtime identity model used by OrbPro, browser and
+server SDN hosts, and the evolving WasmEdge harness:
+
+- standards rows are addressed only by `($SCHEMA_FILE_ID, rowId)`
+- `rowId` is append-only and never reused
+- aligned-binary runtime state is addressed only by `(regionId, recordIndex)`
+- raw pointers remain internal execution details and are not durable APIs
+
+The minimal host surface lives under `src/runtime-host/` and covers three
+responsibilities:
+
+- `createFlatSqlRuntimeStore()` for append-only row handles and row resolution
+- `createRuntimeRegionStore()` for host-allocated aligned-binary regions and
+  externally backed record-view descriptors
+- `createModuleRegistry()` for dynamic install/load/unload/invoke
+
+`createRuntimeHost()` composes those stores into the canonical SDK host model.
+OrbPro layers entity/view helpers on top of that host instead of inventing a
+separate durable identity model.
 
 ## Module Artifact Model
 
@@ -321,6 +345,46 @@ The reference path lives in
 Standard bundle payloads now include the optional `deployment-plan` JSON entry
 for resolved protocol installations and producer input bindings.
 
+## Publication Protection Extensions
+
+Digital signature and encrypted-delivery metadata are publication-layer
+extensions, not a second module format. The canonical module is still:
+
+- valid `.wasm`
+- optionally carrying `sds.bundle` as a wasm custom section
+- optionally carrying one appended SDS `REC` trailer after the wasm bytes
+
+That trailing `REC` FlatBuffer is the standards-backed container for
+publication records:
+
+- `PNM` is the publication notice / digital-signature record
+  - identifies the artifact
+  - carries the CID and publish timestamp
+  - carries signature metadata so a loader can verify who published the module
+- `ENC` is the encrypted-delivery record
+  - carries the X25519 / AES-CTR / HKDF parameters needed to decrypt the
+    protected transport payload
+  - does not change the canonical module ABI or manifest shape
+
+The loader contract is always:
+
+1. Start with the protected blob.
+2. Scan backward for the trailing `REC` footer.
+3. Parse `REC` using the standards-generated `REC`, `PNM`, and `ENC`
+   FlatBuffers from `spacedatastandards.org`.
+4. Resolve `PNM` for signature/publication metadata.
+5. Resolve `ENC` if the delivery was encrypted.
+6. Strip the trailer or decrypt the protected payload.
+7. Hand the remaining raw wasm bytes to the runtime.
+
+Aligned-binary payloads are a separate invoke-ABI optimization. They do not
+replace the canonical FlatBuffer schema. If a port advertises
+`wireFormat: "aligned-binary"`, it must also advertise the regular
+`wireFormat: "flatbuffer"` fallback for the same schema and file identifier in
+the same accepted type set. The publication demo in the local lab uses a
+regular `OMM.fbs` request and a `StateVector.fbs` response that advertises both
+the canonical FlatBuffer fallback and the aligned-binary layout metadata.
+
 ## Module Publication
 
 Packages that publish Space Data modules use the canonical `sdn-module`
@@ -424,10 +488,14 @@ npm run start:lab
 
 Then open `http://localhost:4318`.
 
+Use the `Run Publication Demo` button to generate a protected demo artifact and
+inspect the parsed `REC`, `PNM`, and `ENC` records produced by the real
+`spacedatastandards.org` generated message classes.
+
 ## Related Projects
 
 - [`spacedatastandards.org`](https://spacedatastandards.org)
-- [`@digitalarsenal/sdn-flow`](https://github.com/DigitalArsenal/sdn-flow)
+- [`sdn-flow`](https://github.com/DigitalArsenal/sdn-flow)
 - [`hd-wallet-wasm`](https://github.com/nicktj-dev/hd-wallet-wasm)
 
 ## Development

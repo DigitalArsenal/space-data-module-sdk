@@ -258,6 +258,137 @@ export function loadComplianceConfig(
   rootDirectory: string,
 ): Promise<{ path: string; config: Record<string, unknown> } | null>;
 export function getWasmExportNames(wasmBytes: Uint8Array): string[];
+
+// --- Runtime Host ---
+
+export interface RowHandle {
+  schemaFileId: string;
+  rowId: number;
+}
+
+export interface RuntimeRowView {
+  handle: RowHandle;
+  payload: unknown;
+}
+
+export interface FlatSqlRuntimeStore {
+  appendRow(options: { schemaFileId: string; payload?: unknown }): RowHandle;
+  listRows(schemaFileId?: string | null): RuntimeRowView[];
+  resolveRow(handle: RowHandle): RuntimeRowView | null;
+}
+
+export interface RuntimeRegionDescriptor {
+  regionId: number;
+  layoutId: string;
+  recordByteLength: number;
+  alignment: number;
+  recordCount: number;
+}
+
+export interface RuntimeRegionRecord {
+  regionId: number;
+  recordIndex: number;
+  layoutId: string;
+  recordByteLength: number;
+  alignment: number;
+  byteLength: number;
+  bytes: Uint8Array;
+}
+
+export interface RuntimeRegionExternalRecordView {
+  regionId: number;
+  recordIndex: number;
+  layoutId: string;
+  recordByteLength: number;
+  alignment: number;
+  byteOffset?: number;
+  buffer?: ArrayBufferLike;
+  elementType?: string;
+  elementCount?: number;
+  strideElements?: number;
+  [key: string]: unknown;
+}
+
+export interface RuntimeRegionRecordViewRequest {
+  regionId: number;
+  recordIndex: number;
+}
+
+export interface RuntimeRegionStore {
+  allocateRegion(options: {
+    layoutId: string;
+    recordByteLength: number;
+    alignment?: number;
+    initialRecords?: Array<Uint8Array | ArrayBuffer | ArrayBufferView | null | undefined>;
+  }): RuntimeRegionDescriptor;
+  registerExternalRegion(options: {
+    layoutId: string;
+    recordByteLength: number;
+    alignment?: number;
+    recordCount?: number;
+    getRecordCount?: (regionId: number) => number;
+    resolveRecordView?: (query: {
+      regionId: number;
+      recordIndex: number;
+      layoutId: string;
+      recordByteLength: number;
+      alignment: number;
+    }) =>
+      | Omit<
+          RuntimeRegionExternalRecordView,
+          "regionId" | "recordIndex" | "layoutId" | "recordByteLength" | "alignment"
+        >
+      | null
+      | undefined;
+  }): RuntimeRegionDescriptor;
+  setRegionRecordCount(regionId: number, recordCount: number): RuntimeRegionDescriptor | null;
+  describeRegion(regionId: number): RuntimeRegionDescriptor | null;
+  resolveRecord(options: RuntimeRegionRecordViewRequest): RuntimeRegionRecord | null;
+  resolveRecordView(
+    options: RuntimeRegionRecordViewRequest,
+  ): RuntimeRegionRecord | RuntimeRegionExternalRecordView | null;
+}
+
+export interface InstalledRuntimeModule {
+  moduleId: string;
+  metadata: unknown;
+  methodIds: string[];
+}
+
+export interface RuntimeModuleRegistry {
+  installModule(definition: {
+    moduleId: string;
+    methods?: Record<string, (...args: unknown[]) => unknown>;
+    metadata?: unknown;
+  }): InstalledRuntimeModule;
+  invokeModule(
+    moduleId: string,
+    methodId: string,
+    ...args: unknown[]
+  ): Promise<unknown>;
+  listModules(): InstalledRuntimeModule[];
+  loadModule(moduleId: string): {
+    moduleId: string;
+    methods: Record<string, (...args: unknown[]) => unknown>;
+    metadata: unknown;
+  } | null;
+  unloadModule(moduleId: string): boolean;
+}
+
+export interface RuntimeHost {
+  rows: FlatSqlRuntimeStore;
+  regions: RuntimeRegionStore;
+  moduleRegistry: RuntimeModuleRegistry;
+}
+
+export function createFlatSqlRuntimeStore(): FlatSqlRuntimeStore;
+export function createRuntimeRegionStore(): RuntimeRegionStore;
+export function createModuleRegistry(): RuntimeModuleRegistry;
+export function createRuntimeHost(options?: {
+  rows?: FlatSqlRuntimeStore;
+  regions?: RuntimeRegionStore;
+  moduleRegistry?: RuntimeModuleRegistry;
+}): RuntimeHost;
 export function getWasmExportNamesFromFile(wasmPath: string): Promise<string[]>;
 
 // --- Auth ---
@@ -664,6 +795,8 @@ export type {
   ManifestHarnessPlan,
   ModuleHarness,
   ModuleHarnessRuntimeDescriptor,
+  PublicationProtectionDemoAlignedType,
+  PublicationProtectionDemoSummary,
   PluginInvokeProcessClient,
   PluginInvokeProcessLaunchPlan,
   WasmEdgeRunnerBuildPlan,
@@ -672,8 +805,11 @@ export type {
 export {
   buildWasmEdgeEmscriptenPthreadRunner,
   buildWasmEdgeSpawnEnv,
+  createPublicationProtectionDemoManifest,
+  createPublicationProtectionDemoSummary,
   createModuleHarness,
   createPluginInvokeProcessClient,
+  createWasmEdgeStreamProcessClient,
   describeCapabilityRuntimeSurface,
   generateManifestHarnessPlan,
   materializeHarnessScenario,

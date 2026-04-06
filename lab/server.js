@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   compileModuleFromSource,
+  createPublicationProtectionDemoSummary,
   createRecipientKeypairHex,
   loadStandardsCatalog,
   protectModuleArtifact,
@@ -106,6 +107,15 @@ app.post("/api/protect", async (request, response) => {
       capabilities: request.body.capabilities ?? [],
     });
     response.json({ ok: true, result });
+  } catch (error) {
+    response.status(400).json({ ok: false, error: error.message });
+  }
+});
+
+app.post("/api/demo/publication-protection", async (_request, response) => {
+  try {
+    const summary = await createPublicationProtectionDemoSummary();
+    response.json({ ok: true, summary });
   } catch (error) {
     response.status(400).json({ ok: false, error: error.message });
   }

@@ -2,240 +2,162 @@
 
 ## Goal
 
-Make Space Data modules and flows portable across browser and server runtimes
-without changing the signed module or flow artifact.
+Run the same signed Space Data modules across browser, server, OrbPro, and
+WasmEdge without changing the module contract.
 
-The same compiled WASM artifact should be deployable in both environments. The
-deployment layer may change host bindings, trust policy, routing, and delegated
-services, but not the module contract, method signatures, schemas, or protocol
-IDs.
+The runtime differences are host differences, not module differences.
 
-## Definition Of "Isomorphic"
+## Current Direction
 
-Isomorphic does **not** mean the browser gets raw server powers like local cron,
-raw TCP listeners, unrestricted filesystem access, or direct OS process
-control.
+`space-data-module-sdk` is the source of truth for:
 
-It means:
+- the canonical module artifact
+- the canonical module ABI
+- the canonical dynamic runtime host
+- the canonical WasmEdge/browser/server harness model
 
-- the same signed module or flow artifact runs in browser and server
-- the same typed ports, schemas, protocol IDs, and deployment semantics apply
-- runtime differences are expressed through explicit host bindings
-- unsupported capabilities fail at deploy time unless a delegated service is
-  configured
+`sdn-flow` is layered on top of that runtime host as:
 
-## Required Runtime Model
+- graph/program compiler
+- deployment planner
+- editor/runtime authoring surface
+- optional `emception`-backed build tooling
 
-Every deployable artifact must separate:
+It is no longer the intended source of truth for a separate runtime model.
 
-1. Canonical artifact contract
-   - methods
-   - ports
-   - schemas
-   - capabilities
-   - hosted protocol identity
+## Canonical Identity Model
 
-2. Deployment bindings
-   - browser-local vs server-local vs delegated services
-   - trust policy
-   - route bindings
-   - multiaddrs and advertised addresses
-   - scheduler bindings
-   - storage bindings
+### Standards Rows
 
-## Capability Portability Rules
+Standards payloads are always addressed by:
 
-Each capability used by a module or flow must be classified into one of:
+- `($SCHEMA_FILE_ID, rowId)`
 
-- `browser-local`
-- `browser-delegated`
-- `server-local`
-- `server-delegated`
-- `unsupported`
+Rules:
 
-Initial intended classification:
+- `rowId` is append-only
+- `rowId` is never reused
+- rows are not individually recycled
+- if a host needs a new retention window, it recreates the mounted table/range
 
-| Capability Family | Browser | Server | Notes |
-| --- | --- | --- | --- |
-| `clock`, `random`, `logging`, `crypto_*` | local | local | shared baseline |
-| `http` outbound | local | local | browser uses fetch/Web APIs |
-| `websocket` outbound | local | local | secure transport only in browser |
-| `pubsub` | delegated or local via web libp2p | local | same topic/schema contract |
-| `protocol_dial` | local via web-safe libp2p transports | local | browser requires relay/web transport |
-| `protocol_handle` | delegated | local | browser cannot assume inbound listeners |
-| `filesystem` | delegated or OPFS-style adapter | local | no portable raw POSIX assumption |
-| `storage_query` / `storage_write` | delegated or browser store | local | FlatSQL likely server-local first |
-| `schedule_cron` | delegated | local | browser should not promise native cron |
-| raw `tcp` / `udp` listen | unsupported or delegated | local | browser-unfriendly |
-| inbound HTTPS service | delegated or service-worker/gateway model | local | same flow contract, different binding |
+FlatSQL is the only query backend for standards rows.
 
-## Five Target Scenarios
+### Runtime Aligned-Binary Records
 
-### 1. CelesTrak OMM ingest -> FlatSQL -> HTTPS REST
+High-performance derived runtime state is always addressed by:
 
-Target outcome:
+- `(regionId, recordIndex)`
 
-- same flow artifact compiles once
-- server deployment binds local FlatSQL and local HTTPS listener
-- browser deployment binds remote storage/query and delegated HTTPS gateway
+Rules:
 
-Needed:
+- the host allocates all regions
+- regions are dynamically requested at runtime
+- regions are fixed-layout aligned-binary memory regions
+- records stay stable for the lifetime of a region
+- regions are not indexed in FlatSQL
 
-- server-side FlatSQL adapter in `sdn-flow`
-- browser-side delegated storage/query binding
-- CSV ingestion as compiled/runtime capability, not editor-only behavior
+### Raw Pointers
 
-### 2. EPM-driven SDN/IPFS discovery -> offer list -> publish watch -> pull/pin
+Raw pointers are valid only as internal execution details inside a live host or
+module instance.
 
-Target outcome:
+They are not a durable public contract.
 
-- flow declares required pubsub/protocol/data input contracts
-- deployment binds it to SDN/IPFS discovery and trust policy
-- browser can consume via web-safe libp2p transports or delegated relay
+## Host Responsibilities
 
-Needed:
+The canonical SDK runtime host is responsible for:
 
-- generic SDN/IPFS host bindings in `sdn-flow`
-- generic manifest-driven WASI/libp2p bridge in `space-data-network`
-- actual `publish -> PNM -> fetch/pin` runtime completion
+- installing and loading modules dynamically
+- exposing one canonical module registry for install/load/unload/invoke
+- exposing FlatSQL-backed standards storage
+- exposing row-handle resolution
+- allocating aligned-binary runtime regions
+- exposing region-record resolution
+- routing typed invoke traffic across loaded modules
+- hosting the same model in browser, server, and WasmEdge
 
-### 3. Scheduled space weather polling -> publish SDS records -> FlatBuffer on disk
+## OrbPro
 
-Target outcome:
+OrbPro is not a separate storage/runtime architecture.
 
-- same flow artifact
-- server runs local schedule plus local file/storage/publish pipeline
-- browser uses delegated scheduler and delegated durable storage
+OrbPro adds a host-side entity/view layer over the same core model:
 
-Needed:
+- standards rows live in FlatSQL
+- WasmEngine owns transient zero-copy render/runtime views
+- workers own query and index work
+- main thread resolves transient shared-memory views for rendering and UI
+- propagators write into host-managed aligned-binary regions
 
-- deployment-plan schedule metadata
-- explicit publish/storage binding model
-- file/archive representation that can target disk or delegated object storage
+So OrbPro is:
 
-### 4. Authenticated REST and IPFS services using approved keys
+- canonical SDK runtime host
+- plus Cesium-facing entity/view helpers
 
-Target outcome:
+## Server and Browser Node
 
-- modules do not implement trust policy internally
-- deployment binds services to trust mappings and approved-key policy
-- same flow contract, different enforcement adapters
+Server and browser-node use the same core host model:
 
-Needed:
+- FlatSQL-backed standards rows
+- host-managed runtime regions
+- dynamic module loading
+- typed invoke routing
 
-- request-time enforcement in host/harness
-- common identity model across peer ID, xpub, and published entity profile data
-- delegated auth path for browser-hosted services
+They do not need the OrbPro entity facade.
 
-### 5. Homomorphic encrypted conjunction service
+## WasmEdge
 
-Target outcome:
+WasmEdge is a host target for the same runtime model.
 
-- HE operations come from `../flatbuffers/wasm`
-- module/flow artifacts treat ciphertexts and HE operations as typed payloads and
-  service calls
-- SDN provides transport, trust, discovery, and hosting
+The SDK’s WasmEdge runner should evolve from:
 
-Needed:
+- single top-level guest launcher
 
-- actual conjunction/assessor module
-- explicit HE deployment/service policy
-- browser/server transport parity for encrypted typed payload exchange
+to:
 
-## Repo Responsibilities
+- dynamic multi-module host
+- FlatSQL row service host
+- runtime-region allocator host
+- typed invoke router
 
-### `space-data-module-sdk`
+This is a host concern, not a second guest ABI.
 
-This repo should own:
+## Capability Model
 
-- canonical manifest schema
-- protocol identity and deployment-binding schema
-- bundle format and deployment metadata
-- portable capability vocabulary
-- deploy-time validation of portability requirements
+The capabilities that matter most for this runtime model are:
 
-Changes still needed here:
+- `database`
+- `storage_query`
+- `storage_write`
+- `filesystem` only when backing FlatSQL to disk
+- `pipe`
+- `http`
+- `network`
+- `timers`
 
-- add deployment metadata for scheduler binding
-- add explicit binding vocabulary for local vs delegated host services
-- add portability validation so browser deployments fail early when a capability
-  has no legal binding
-- keep canonical manifest free of concrete multiaddrs, peer selections, and
-  environment-specific routes
+But direct standards-row reads and runtime-region reads should still happen
+through the host’s typed row/region services rather than ad hoc JSON APIs.
 
-### `sdn-flow`
+## Dynamic Loading vs Compiled Flows
 
-`sdn-flow` should own:
+Dynamic module loading is the default runtime model.
 
-- flow composition
-- requirement inspection
-- compiled runtime integration
-- host binding resolution
-- generated deployment plans
+Compiled flows remain useful, but only as an optional deployment/build mode:
 
-Changes needed there:
+- freezing a graph into one artifact
+- minimizing moving parts
+- packaging one sealed runtime
 
-- make the compiled runtime the installed runtime, not the temporary JS runtime
-- move CSV/file/cron/IPFS/pubsub/protocol behavior out of editor-only code
-- generate deployment bindings that distinguish browser/server/delegated modes
-- stop overstating browser/runtime capability support
+Compiled flow output must target the same runtime host contract, not invent a
+parallel execution model.
 
-### `space-data-network`
+## Definition of Done
 
-`space-data-network` should own:
+This runtime model is complete when:
 
-- libp2p/IPFS harness
-- trust and discovery
-- PNM/pubsub/fetch/pin runtime
-- generic manifest-driven protocol hosting
-- request-time auth enforcement
-
-Changes needed there:
-
-- generalize the WASI stream bridge beyond OrbPro-only protocol IDs
-- complete `publish -> PNM -> fetch/pin`
-- normalize identity across peer ID, xpub, and entity profile data
-- make browser `sdn-js` use real FlatBuffer/aligned-binary transport instead of
-  JSON payload fallback
-
-### `../flatbuffers/wasm`
-
-This dependency should remain the owner of:
-
-- aligned-binary FlatBuffer generation
-- HE contexts and ciphertext operations
-- encrypted field and encrypted payload tooling
-
-This stack should consume it, not reimplement it.
-
-## Hard Constraints
-
-- No feature may be marked "browser-supported" unless it has either a true
-  browser-local implementation or a required delegated binding path.
-- No installed runtime may rely on editor-only handlers.
-- No protocol host integration may depend on hardcoded product-specific protocol
-  IDs when the manifest already declares protocol identity.
-- No deployment should silently coerce server-only features into a browser
-  deployment.
-
-## Recommended Order
-
-1. Finish the portable deployment vocabulary in this repo.
-2. Replace `sdn-flow` installed runtime with the compiled runtime path.
-3. Add browser/server/delegated binding generation in `sdn-flow`.
-4. Generalize the `space-data-network` WASI/libp2p bridge.
-5. Complete SDN publish/PNM/fetch/pin and trust enforcement.
-6. Then build the concrete end-user flows and the HE conjunction service.
-
-## Definition Of Done
-
-This plan is complete when:
-
-- one signed flow artifact can be deployed to browser or server
-- deployment validation explains every required binding
-- browser deployments use delegated services where local support is impossible
-- server deployments use native host integrations where available
-- SDN/IPFS discovery and hosting honor the same protocol metadata in both
-  environments
-- HE-enabled services can exchange typed encrypted payloads without inventing a
-  second browser-only or server-only contract
+- the SDK ships one canonical runtime host surface
+- the SDK host surface exposes row-handle, region, and registry services
+- OrbPro, browser/server SDN nodes, and WasmEdge all consume that same host
+- `sdn-flow` compiles and deploys into that host rather than re-owning runtime behavior
+- standards identity is always `($SCHEMA_FILE_ID, rowId)`
+- aligned-binary runtime identity is always `(regionId, recordIndex)`
+- Aerospace and SOCRATES validation pass on the composed host path

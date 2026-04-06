@@ -4,8 +4,13 @@ import { encodePluginInvokeRequest } from "../invoke/codec.js";
 import { normalizeInvokeSurfaces } from "../invoke/index.js";
 import { selectPreferredPayloadTypeRef } from "../manifest/typeRefs.js";
 export {
+  createPublicationProtectionDemoManifest,
+  createPublicationProtectionDemoSummary,
+} from "./publicationProtectionDemo.js";
+export {
   buildWasmEdgeSpawnEnv,
   createPluginInvokeProcessClient,
+  createWasmEdgeStreamProcessClient,
   resolveWasmEdgePluginLaunchPlan,
 } from "./processInvoke.js";
 export {
