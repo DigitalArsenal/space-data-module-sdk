@@ -1,4 +1,4 @@
-import * as flatbuffers from "../../../../node_modules/flatbuffers/mjs/flatbuffers.js";
+import * as flatbuffers from "flatbuffers/mjs/flatbuffers.js";
 
 import { DrainPolicy } from "../generated/orbpro/manifest/drain-policy.js";
 import { TypedArenaBuffer } from "../generated/orbpro/stream/typed-arena-buffer.js";
