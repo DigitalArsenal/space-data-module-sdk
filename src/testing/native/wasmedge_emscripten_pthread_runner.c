@@ -75,6 +75,7 @@ typedef enum HostControlOpcode {
   HOST_CONTROL_ALLOCATE_REGION = 23,
   HOST_CONTROL_DESCRIBE_REGION = 24,
   HOST_CONTROL_RESOLVE_RECORD = 25,
+  HOST_CONTROL_QUERY_ROWS = 26,
 } HostControlOpcode;
 
 #define EM_PTHREAD_STACK_OFFSET 52U
@@ -1987,6 +1988,57 @@ static RuntimeHostRow *find_runtime_host_row(
   return NULL;
 }
 
+static uint64_t next_runtime_host_row_id_for_schema(
+    RuntimeHostState *state,
+    const char *schema_file_id) {
+  uint64_t next_row_id = 1;
+  for (size_t index = 0; index < state->row_count; ++index) {
+    RuntimeHostRow *row = &state->rows[index];
+    if (strcmp(row->schema_file_id, schema_file_id) != 0) {
+      continue;
+    }
+    if (row->row_id >= next_row_id) {
+      next_row_id = row->row_id + 1;
+    }
+  }
+  return next_row_id;
+}
+
+static bool append_runtime_host_row_query_result_json(
+    JsonBuffer *buffer,
+    RuntimeHostState *state,
+    const char *schema_file_id_filter) {
+  if (!json_buffer_append_cstr(
+          buffer,
+          "{\"columns\":[\"schemaFileId\",\"rowId\"],\"rows\":[")) {
+    return false;
+  }
+  uint64_t row_count = 0;
+  bool first = true;
+  for (size_t index = 0; index < state->row_count; ++index) {
+    RuntimeHostRow *row = &state->rows[index];
+    if (schema_file_id_filter != NULL &&
+        strcmp(row->schema_file_id, schema_file_id_filter) != 0) {
+      continue;
+    }
+    if (!first && !json_buffer_append_char(buffer, ',')) {
+      return false;
+    }
+    first = false;
+    if (!json_buffer_append_char(buffer, '[') ||
+        !json_buffer_append_json_string(buffer, row->schema_file_id) ||
+        !json_buffer_append_char(buffer, ',') ||
+        !json_buffer_append_u64(buffer, row->row_id) ||
+        !json_buffer_append_char(buffer, ']')) {
+      return false;
+    }
+    row_count += 1;
+  }
+  return json_buffer_append_cstr(buffer, "],\"rowCount\":") &&
+         json_buffer_append_u64(buffer, row_count) &&
+         json_buffer_append_char(buffer, '}');
+}
+
 static bool append_runtime_host_module_json(
     JsonBuffer *buffer,
     const RuntimeHostModule *module) {
@@ -2522,7 +2574,7 @@ static bool dispatch_runtime_host_request(
     }
     RuntimeHostRow *row = &state->rows[state->row_count++];
     row->schema_file_id = schema_file_id;
-    row->row_id = state->next_row_id++;
+    row->row_id = next_runtime_host_row_id_for_schema(state, schema_file_id);
     row->payload_json = payload_json;
     if (!json_buffer_append_cstr(&response, "{\"schemaFileId\":") ||
         !json_buffer_append_json_string(&response, row->schema_file_id) ||
@@ -2587,6 +2639,49 @@ static bool dispatch_runtime_host_request(
         goto fail;
       }
     } else if (!append_runtime_host_row_json(&response, row)) {
+      goto fail;
+    }
+    return respond_with_json_buffer(&response, response_bytes_out, response_size_out);
+  }
+
+  if (opcode == HOST_CONTROL_QUERY_ROWS) {
+    char *sql = NULL;
+    char *schema_file_id_filter = NULL;
+    if (!parse_json_string_field(json, json_length, "sql", &sql)) {
+      free(sql);
+      goto fail;
+    }
+    const char *runtime_rows_query_prefix =
+        "SELECT schemaFileId, rowId FROM RuntimeHostRow";
+    if (strstr(sql, runtime_rows_query_prefix) != sql) {
+      free(sql);
+      goto fail;
+    }
+    const char *where_prefix = "WHERE schemaFileId = '";
+    const char *where_clause = strstr(sql, where_prefix);
+    if (where_clause != NULL) {
+      const char *schema_start = where_clause + strlen(where_prefix);
+      const char *schema_end = strchr(schema_start, '\'');
+      if (schema_end == NULL) {
+        free(sql);
+        goto fail;
+      }
+      const size_t schema_length = (size_t)(schema_end - schema_start);
+      schema_file_id_filter = malloc(schema_length + 1);
+      if (schema_file_id_filter == NULL) {
+        free(sql);
+        goto fail;
+      }
+      memcpy(schema_file_id_filter, schema_start, schema_length);
+      schema_file_id_filter[schema_length] = '\0';
+    }
+    const bool appended = append_runtime_host_row_query_result_json(
+        &response,
+        state,
+        schema_file_id_filter);
+    free(schema_file_id_filter);
+    free(sql);
+    if (!appended) {
       goto fail;
     }
     return respond_with_json_buffer(&response, response_bytes_out, response_size_out);

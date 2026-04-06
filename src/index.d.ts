@@ -271,9 +271,16 @@ export interface RuntimeRowView {
   payload: unknown;
 }
 
+export interface RuntimeRowQueryResult {
+  columns: string[];
+  rows: unknown[][];
+  rowCount: number;
+}
+
 export interface FlatSqlRuntimeStore {
   appendRow(options: { schemaFileId: string; payload?: unknown }): RowHandle;
   listRows(schemaFileId?: string | null): RuntimeRowView[];
+  query(sql: string): RuntimeRowQueryResult;
   resolveRow(handle: RowHandle): RuntimeRowView | null;
 }
 

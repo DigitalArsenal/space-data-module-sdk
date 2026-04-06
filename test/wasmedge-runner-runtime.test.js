@@ -438,6 +438,16 @@ test("threaded WasmEdge runner serves real runtime-host install/invoke and row-r
       payload: { norad: 25544, name: "ISS" },
     },
   ]);
+  assert.deepEqual(
+    await harness.queryRows(
+      "SELECT schemaFileId, rowId FROM RuntimeHostRow WHERE schemaFileId = 'OMM' ORDER BY rowId",
+    ),
+    {
+      columns: ["schemaFileId", "rowId"],
+      rows: [["OMM", 1]],
+      rowCount: 1,
+    },
+  );
 
   const region = await harness.allocateRegion({
     layoutId: "state-vector",

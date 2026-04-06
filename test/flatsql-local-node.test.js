@@ -238,6 +238,21 @@ test("runtime host preserves canonical row and region identities", async () => {
       },
     },
   ]);
+  assert.equal(typeof host.rows.query, "function");
+  assert.deepEqual(
+    host.rows.query(
+      "SELECT schemaFileId, rowId FROM RuntimeHostRow WHERE schemaFileId = 'OMM' ORDER BY rowId",
+    ),
+    {
+      columns: ["schemaFileId", "rowId"],
+      rows: [
+        ["OMM", 1],
+        ["OMM", 2],
+        ["OMM", 3],
+      ],
+      rowCount: 3,
+    },
+  );
 
   const region = host.regions.allocateRegion({
     layoutId: "StateVector:f64x6",

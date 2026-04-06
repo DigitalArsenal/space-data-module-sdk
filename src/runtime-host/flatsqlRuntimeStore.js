@@ -1,3 +1,17 @@
+import { DirectAccessor, FlatSQLDatabase } from "flatsql";
+
+const RUNTIME_ROW_TABLE = "RuntimeHostRow";
+const RUNTIME_ROW_SCHEMA = `
+table RuntimeHostRow {
+  schemaFileId: string;
+  rowId: ulong;
+  payloadJson: string;
+}
+`;
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
 function clonePayload(payload) {
   if (payload === null || payload === undefined) {
     return payload ?? null;
@@ -36,40 +50,139 @@ function normalizeRowHandle(handle) {
   return { schemaFileId, rowId };
 }
 
-export function createFlatSqlRuntimeStore() {
+function escapeSqlStringLiteral(value) {
+  return String(value).replaceAll("'", "''");
+}
+
+function serializePayload(payload) {
+  if (payload === null || payload === undefined) {
+    return {
+      kind: "json",
+      value: null,
+    };
+  }
+  if (ArrayBuffer.isView(payload)) {
+    return {
+      kind: "bytes",
+      bytes: Array.from(
+        new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength),
+      ),
+    };
+  }
+  if (payload instanceof ArrayBuffer) {
+    return {
+      kind: "bytes",
+      bytes: Array.from(new Uint8Array(payload)),
+    };
+  }
+  return {
+    kind: "json",
+    value: clonePayload(payload),
+  };
+}
+
+function deserializePayload(payloadJson) {
+  const payload = JSON.parse(String(payloadJson ?? "null"));
+  if (payload?.kind === "bytes") {
+    return Uint8Array.from(payload.bytes ?? []);
+  }
+  if (payload?.kind === "json") {
+    return clonePayload(payload.value);
+  }
+  return clonePayload(payload);
+}
+
+function createRuntimeRowAccessor() {
+  const accessor = new DirectAccessor();
+  accessor.registerAccessor(RUNTIME_ROW_TABLE, (data, path) => {
+    const row = JSON.parse(decoder.decode(data));
+    let current = row;
+    for (const segment of Array.isArray(path) ? path : []) {
+      if (current === null || current === undefined) {
+        return null;
+      }
+      current = current[segment];
+    }
+    return current ?? null;
+  });
+  accessor.registerBuilder(RUNTIME_ROW_TABLE, (fields) =>
+    encoder.encode(
+      JSON.stringify({
+        schemaFileId: normalizeSchemaFileId(fields.schemaFileId),
+        rowId: Number(fields.rowId),
+        payloadJson: String(fields.payloadJson ?? "null"),
+      }),
+    ),
+  );
+  return accessor;
+}
+
+function cloneQueryResult(result) {
+  return {
+    columns: Array.from(result?.columns ?? []),
+    rows: (result?.rows ?? []).map((row) =>
+      Array.isArray(row) ? row.map((value) => clonePayload(value)) : row,
+    ),
+    rowCount: Number(result?.rowCount ?? 0),
+  };
+}
+
+function rowViewFromQueryRow(row) {
+  return {
+    handle: {
+      schemaFileId: String(row[0]),
+      rowId: Number(row[1]),
+    },
+    payload: deserializePayload(row[2]),
+  };
+}
+
+export function createFlatSqlRuntimeStore(options = {}) {
+  const accessor = options.accessor ?? createRuntimeRowAccessor();
+  const database =
+    options.database ??
+    FlatSQLDatabase.fromSchema(
+      RUNTIME_ROW_SCHEMA,
+      accessor,
+      options.databaseName ?? "runtime-host",
+    );
   const nextRowIdBySchema = new Map();
-  const rows = [];
-  const rowsByKey = new Map();
+  const existingRows = database.query(
+    `SELECT schemaFileId, rowId FROM ${RUNTIME_ROW_TABLE} ORDER BY schemaFileId, rowId`,
+  );
+  for (const row of existingRows.rows ?? []) {
+    const schemaFileId = normalizeSchemaFileId(row[0]);
+    const rowId = Number(row[1]);
+    if (Number.isInteger(rowId) && rowId > 0) {
+      nextRowIdBySchema.set(
+        schemaFileId,
+        Math.max(nextRowIdBySchema.get(schemaFileId) ?? 0, rowId),
+      );
+    }
+  }
 
   function appendRow({ schemaFileId, payload = null }) {
     const normalizedSchemaFileId = normalizeSchemaFileId(schemaFileId);
     const nextRowId = (nextRowIdBySchema.get(normalizedSchemaFileId) ?? 0) + 1;
     nextRowIdBySchema.set(normalizedSchemaFileId, nextRowId);
-    const handle = {
+    database.insert(RUNTIME_ROW_TABLE, {
+      schemaFileId: normalizedSchemaFileId,
+      rowId: nextRowId,
+      payloadJson: JSON.stringify(serializePayload(payload)),
+    });
+    return {
       schemaFileId: normalizedSchemaFileId,
       rowId: nextRowId,
     };
-    const entry = {
-      handle,
-      payload: clonePayload(payload),
-    };
-    rows.push(entry);
-    rowsByKey.set(`${handle.schemaFileId}:${handle.rowId}`, entry);
-    return { ...handle };
   }
 
   function resolveRow(handle) {
     const normalizedHandle = normalizeRowHandle(handle);
-    const entry = rowsByKey.get(
-      `${normalizedHandle.schemaFileId}:${normalizedHandle.rowId}`,
+    return (
+      listRows(normalizedHandle.schemaFileId).find(
+        (row) => row.handle.rowId === normalizedHandle.rowId,
+      ) ?? null
     );
-    if (!entry) {
-      return null;
-    }
-    return {
-      handle: { ...entry.handle },
-      payload: clonePayload(entry.payload),
-    };
   }
 
   function listRows(schemaFileId = null) {
@@ -77,21 +190,28 @@ export function createFlatSqlRuntimeStore() {
       schemaFileId === null || schemaFileId === undefined
         ? null
         : normalizeSchemaFileId(schemaFileId);
-    return rows
-      .filter(
-        (entry) =>
-          normalizedSchemaFileId === null ||
-          entry.handle.schemaFileId === normalizedSchemaFileId,
-      )
-      .map((entry) => ({
-        handle: { ...entry.handle },
-        payload: clonePayload(entry.payload),
-      }));
+    const result =
+      normalizedSchemaFileId === null
+        ? database.query(
+            `SELECT schemaFileId, rowId, payloadJson FROM ${RUNTIME_ROW_TABLE} ORDER BY schemaFileId, rowId`,
+          )
+        : database.query(
+            `SELECT schemaFileId, rowId, payloadJson FROM ${RUNTIME_ROW_TABLE} WHERE schemaFileId = '${escapeSqlStringLiteral(normalizedSchemaFileId)}' ORDER BY rowId`,
+          );
+    return (result.rows ?? []).map(rowViewFromQueryRow);
+  }
+
+  function query(sql) {
+    if (typeof sql !== "string" || sql.trim().length === 0) {
+      throw new TypeError("sql must be a non-empty string");
+    }
+    return cloneQueryResult(database.query(sql));
   }
 
   return {
     appendRow,
     listRows,
+    query,
     resolveRow,
   };
 }

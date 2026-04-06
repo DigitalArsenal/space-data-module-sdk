@@ -158,6 +158,12 @@ export interface RuntimeHostRowView {
   payload: unknown;
 }
 
+export interface RuntimeHostRowQueryResult {
+  columns: string[];
+  rows: unknown[][];
+  rowCount: number;
+}
+
 export interface RuntimeHostRegionDescriptor {
   regionId: number;
   layoutId: string;
@@ -206,6 +212,7 @@ export interface PluginInvokeProcessClient {
   }): Promise<RuntimeHostRowHandle>;
   listRows(schemaFileId?: string | null): Promise<RuntimeHostRowView[]>;
   resolveRow(handle: RuntimeHostRowHandle): Promise<RuntimeHostRowView | null>;
+  queryRows(sql: string): Promise<RuntimeHostRowQueryResult>;
   allocateRegion(options: {
     layoutId: string;
     recordByteLength: number;
@@ -268,6 +275,7 @@ export interface ModuleHarness {
   }): Promise<RuntimeHostRowHandle>;
   listRows(schemaFileId?: string | null): Promise<RuntimeHostRowView[]>;
   resolveRow(handle: RuntimeHostRowHandle): Promise<RuntimeHostRowView | null>;
+  queryRows(sql: string): Promise<RuntimeHostRowQueryResult>;
   allocateRegion(options: {
     layoutId: string;
     recordByteLength: number;

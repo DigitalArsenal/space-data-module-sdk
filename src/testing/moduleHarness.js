@@ -144,6 +144,9 @@ export async function createModuleHarness(options = {}) {
     resolveRow(handle) {
       return processClient.resolveRow(handle);
     },
+    queryRows(sql) {
+      return processClient.queryRows(sql);
+    },
     allocateRegion(options) {
       return processClient.allocateRegion(options);
     },

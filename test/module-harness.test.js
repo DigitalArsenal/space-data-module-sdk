@@ -42,6 +42,7 @@ const OPCODES = {
   allocateRegion: 23,
   describeRegion: 24,
   resolveRecord: 25,
+  queryRows: 26,
 };
 
 const host = createRuntimeHost();
@@ -148,6 +149,8 @@ function dispatchHostControl(opcode, payloadBytes) {
     }
     case OPCODES.resolveRow:
       return encodeJson(host.rows.resolveRow(decodeJson(payloadBytes)));
+    case OPCODES.queryRows:
+      return encodeJson(host.rows.query(decodeJson(payloadBytes).sql ?? ""));
     case OPCODES.allocateRegion: {
       const request = decodeJson(payloadBytes);
       return encodeJson(
@@ -320,6 +323,16 @@ test("createModuleHarness manages a multi-module runtime host and keeps invoke a
         payload: { name: "Explorer-1" },
       },
     ]);
+    assert.deepEqual(
+      await harness.queryRows(
+        "SELECT schemaFileId, rowId FROM RuntimeHostRow WHERE schemaFileId = 'SATL' ORDER BY rowId",
+      ),
+      {
+        columns: ["schemaFileId", "rowId"],
+        rows: [["SATL", 1]],
+        rowCount: 1,
+      },
+    );
 
     const region = await harness.allocateRegion({
       layoutId: "orbit-state",

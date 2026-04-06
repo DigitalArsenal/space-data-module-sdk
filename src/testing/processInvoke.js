@@ -24,6 +24,7 @@ const HOST_CONTROL_OPCODE = Object.freeze({
   ALLOCATE_REGION: 23,
   DESCRIBE_REGION: 24,
   RESOLVE_RECORD: 25,
+  QUERY_ROWS: 26,
 });
 
 function formatProcessFailure(message, stderrChunks = [], cause = null) {
@@ -376,6 +377,11 @@ function attachRuntimeHostControls(client, rawClient, options = {}) {
     },
     resolveRow(handle) {
       return invokeJsonHostControl(rawClient, HOST_CONTROL_OPCODE.RESOLVE_ROW, handle);
+    },
+    queryRows(sql) {
+      return invokeJsonHostControl(rawClient, HOST_CONTROL_OPCODE.QUERY_ROWS, {
+        sql,
+      });
     },
     allocateRegion(options = {}) {
       return invokeJsonHostControl(

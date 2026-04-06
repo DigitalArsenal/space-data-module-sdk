@@ -44,6 +44,7 @@ const OPCODES = {
   allocateRegion: 23,
   describeRegion: 24,
   resolveRecord: 25,
+  queryRows: 26,
 };
 
 const host = createRuntimeHost();
@@ -128,6 +129,8 @@ async function handleHostControl(opcode, payloadBytes) {
     }
     case OPCODES.resolveRow:
       return encodeJson(host.rows.resolveRow(decodeJson(payloadBytes)));
+    case OPCODES.queryRows:
+      return encodeJson(host.rows.query(decodeJson(payloadBytes).sql ?? ""));
     case OPCODES.allocateRegion: {
       const request = decodeJson(payloadBytes);
       return encodeJson(
@@ -292,6 +295,16 @@ test("createPluginInvokeProcessClient exposes runtime-host module and storage co
         payload: { noradId: 5 },
       },
     ]);
+    assert.deepEqual(
+      await client.queryRows(
+        "SELECT schemaFileId, rowId FROM RuntimeHostRow WHERE schemaFileId = 'SATL' ORDER BY rowId",
+      ),
+      {
+        columns: ["schemaFileId", "rowId"],
+        rows: [["SATL", 1]],
+        rowCount: 1,
+      },
+    );
 
     const region = await client.allocateRegion({
       layoutId: "state-vector",
