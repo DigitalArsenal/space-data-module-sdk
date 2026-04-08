@@ -164,6 +164,23 @@ The full object form is:
 - `publicationMode`: `standalone` or `attached`
 - `module.path`: relative path to the `.wasm` artifact
 
+### Recommended Module Repo Build Layout
+
+When authoring a module repo before publication packaging, keep the shared
+compiled artifact at a stable runtime path:
+
+- required: `dist/isomorphic/module.wasm`
+
+If the repo also ships a browser-specific adapter or wrapper, place it beside
+the browser runtime path:
+
+- optional: `dist/browser/module.js`
+- optional: `dist/browser/module.wasm`
+
+The publication descriptor can still point anywhere, but the SDK standard for
+checked-in module repos is that the exact shared browser/WasmEdge build lands at
+`dist/isomorphic/module.wasm`.
+
 ### Recommended Fields
 
 - `module.packaging`: `plain-wasm` or `sds-bundled-wasm`

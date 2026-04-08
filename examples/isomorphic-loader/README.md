@@ -13,7 +13,7 @@ The source artifact definition lives in:
 
 The build step writes the shared artifact to:
 
-- `examples/isomorphic-loader/generated/isomorphic-echo.wasm`
+- `examples/isomorphic-loader/generated/dist/isomorphic/module.wasm`
 
 ## Build The Shared Artifact
 
@@ -53,7 +53,7 @@ Install the `wasmedge` CLI and run:
 node ./examples/isomorphic-loader/wasmedge-demo.mjs
 ```
 
-That script uses the same `generated/isomorphic-echo.wasm` artifact the browser
+That script uses the same `generated/dist/isomorphic/module.wasm` artifact the browser
 page loads. `loadModule(...)` detects that the artifact is a standalone
 command-surface module and drives WasmEdge through raw stdin/stdout command
 execution rather than the runner protocol.

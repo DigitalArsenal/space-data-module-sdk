@@ -6,7 +6,10 @@ import {
 
 const output = document.querySelector("[data-output]");
 const runButton = document.querySelector("[data-run]");
-const artifactUrl = new URL("./generated/isomorphic-echo.wasm", import.meta.url);
+const artifactUrl = new URL(
+  "./generated/dist/isomorphic/module.wasm",
+  import.meta.url,
+);
 
 function render(value) {
   output.textContent = JSON.stringify(value, null, 2);

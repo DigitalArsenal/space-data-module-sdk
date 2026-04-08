@@ -493,3 +493,25 @@ test("host storage ABI carries runtime-region record bytes", async () => {
   assert.match(schema, /bytes:\s*\[ubyte\]/);
   assert.match(schema, /byte_length:\s*uint32/);
 });
+
+test("runtime host row store preserves non-JSON payloads without coercing them through JSON", () => {
+  const rows = sdk.createFlatSqlRuntimeStore();
+  const payload = new Map([
+    [
+      "epoch",
+      new Date("2026-04-08T00:00:00.000Z"),
+    ],
+    ["bytes", Uint8Array.from([1, 2, 3, 4])],
+  ]);
+
+  const handle = rows.appendRow({
+    schemaFileId: "OMM",
+    payload,
+  });
+  const resolved = rows.resolveRow(handle);
+
+  assert.ok(resolved);
+  assert.ok(resolved.payload instanceof Map);
+  assert.equal(resolved.payload.get("epoch").toISOString(), "2026-04-08T00:00:00.000Z");
+  assert.deepEqual(resolved.payload.get("bytes"), Uint8Array.from([1, 2, 3, 4]));
+});

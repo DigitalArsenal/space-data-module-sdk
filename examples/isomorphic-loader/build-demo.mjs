@@ -10,8 +10,8 @@ import {
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const manifestPath = path.join(currentDir, "manifest.json");
 const sourcePath = path.join(currentDir, "module.c");
-const outputDir = path.join(currentDir, "generated");
-const outputPath = path.join(outputDir, "isomorphic-echo.wasm");
+const outputDir = path.join(currentDir, "generated", "dist", "isomorphic");
+const outputPath = path.join(outputDir, "module.wasm");
 
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 const sourceCode = await readFile(sourcePath, "utf8");

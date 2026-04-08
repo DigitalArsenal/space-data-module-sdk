@@ -26,6 +26,7 @@ export {
   createModuleHarness,
   resolveModuleHarnessLaunchPlan,
 } from "./moduleHarness.js";
+export { createModuleFlatBufferStreamPump } from "./moduleFlatbufferStreamPump.js";
 
 const CapabilitySurfaceMatrix = Object.freeze({
   logging: Object.freeze({

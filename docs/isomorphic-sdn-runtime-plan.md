@@ -70,11 +70,15 @@ The canonical SDK runtime host is responsible for:
 - installing and loading modules dynamically
 - exposing one canonical module registry for install/load/unload/invoke
 - exposing FlatSQL-backed standards storage
+- exposing canonical streamed FlatBuffer ingest into host-owned rows
 - exposing row-handle resolution
 - allocating aligned-binary runtime regions
 - exposing region-record resolution
 - routing typed invoke traffic across loaded modules
 - hosting the same model in browser, server, and WasmEdge
+
+The recommended outer transport / invoke / storage split is documented in
+[`./flatsql-streaming-standard.md`](./flatsql-streaming-standard.md).
 
 ## OrbPro
 

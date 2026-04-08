@@ -52,6 +52,10 @@ The minimal host surface lives under `src/runtime-host/` and covers three
 responsibilities:
 
 - `createFlatSqlRuntimeStore()` for append-only row handles and row resolution
+- `createFlatBufferStreamIngestor()` for little-endian size-prefixed FlatBuffer
+  transport ingest into host-owned row storage without JSON transcoding
+- `createModuleFlatBufferStreamPump()` for feeding those same FlatBuffer stream
+  chunks into a resident stateful module instance without JSON envelopes
 - `createRuntimeRegionStore()` for host-allocated aligned-binary regions and
   externally backed record-view descriptors
 - `createModuleRegistry()` for dynamic install/load/unload/invoke
@@ -59,6 +63,9 @@ responsibilities:
 `createRuntimeHost()` composes those stores into the canonical SDK host model.
 OrbPro layers entity/view helpers on top of that host instead of inventing a
 separate durable identity model.
+
+The canonical FlatBuffer-to-FlatSQL streaming contract is documented in
+[`docs/flatsql-streaming-standard.md`](./docs/flatsql-streaming-standard.md).
 
 ## Module Artifact Model
 
@@ -236,6 +243,12 @@ The checked-in same-artifact demo lives in
 - [`wasmedge-demo.mjs`](./examples/isomorphic-loader/wasmedge-demo.mjs) loads
   that same artifact in WasmEdge
 
+Large streamed FlatBuffer ingest should use either the runtime-host transport
+path or the resident-module stream pump, not one giant invoke envelope. See
+[`docs/flatsql-streaming-standard.md`](./docs/flatsql-streaming-standard.md)
+for the recommended browser/WasmEdge/FlatSQL split and the canonical
+direct-binary ingest contract.
+
 ## Testing
 
 This repo now exposes a manifest-driven harness generator from
@@ -260,10 +273,23 @@ This repo now exposes a manifest-driven harness generator from
 - `npm run test:host-surfaces`
   - authoritative Node-host coverage for HTTP, TCP, UDP, TLS, WebSocket, MQTT,
     process execution, timers, filesystem, and the sync `sdn_host` ABI
+- `npm run test:stream-ingest`
+  - correctness coverage for chunked size-prefixed FlatBuffer ingest into the
+    runtime-host row store
+- `npm run test:module-stream`
+  - correctness coverage for chunked FlatBuffer streaming into a resident
+    direct-surface module instance
+- `npm run benchmark:stream-1gib`
+  - env-gated local stress benchmark for 1 GiB total FlatBuffer transport ingest
+- `npm run benchmark:module-stream-1gib`
+  - env-gated local stress benchmark for 1 GiB total chunked module stream-pump
+    ingest
 
 The detailed edge cases and the current WASI-vs-host portability boundary are
 documented in
-[`docs/testing-harness.md`](./docs/testing-harness.md).
+[`docs/testing-harness.md`](./docs/testing-harness.md). The canonical
+FlatBuffer-to-FlatSQL ingest contract is documented in
+[`docs/flatsql-streaming-standard.md`](./docs/flatsql-streaming-standard.md).
 
 ## Install
 
@@ -437,6 +463,22 @@ For npm packages, the simplest form is:
 }
 ```
 
+For module repos themselves, the canonical compiled artifact should live at:
+
+```text
+dist/isomorphic/module.wasm
+```
+
+If the repo also ships a direct browser adapter, publish it under:
+
+```text
+dist/browser/module.js
+dist/browser/module.wasm
+```
+
+That keeps the shared browser/WasmEdge artifact path stable across repos while
+leaving the browser-specific adapter optional.
+
 When publication metadata is published in the same file, it belongs in an
 appended SDS `REC` trailer. Loaders scan from the end of the protected blob,
 resolve `PNM` / `ENC`, strip or decrypt as needed, and only then instantiate
@@ -492,16 +534,16 @@ Manifests can also declare coarse runtime targets for planning and compliance:
 
 ```bash
 # Validate a manifest + wasm pair
-npx space-data-module check --manifest ./manifest.json --wasm ./dist/module.wasm
+npx space-data-module check --manifest ./manifest.json --wasm ./dist/isomorphic/module.wasm
 
 # Compile C/C++ source and embed the manifest
-npx space-data-module compile --manifest ./manifest.json --source ./src/module.c --out ./dist/module.wasm
+npx space-data-module compile --manifest ./manifest.json --source ./src/module.c --out ./dist/isomorphic/module.wasm
 
 # Sign and encrypt a deployment payload
-npx space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
+npx space-data-module protect --manifest ./manifest.json --wasm ./dist/isomorphic/module.wasm --json
 
 # Emit a single-file bundled wasm
-npx space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --single-file-bundle --out ./dist/module.bundle.wasm
+npx space-data-module protect --manifest ./manifest.json --wasm ./dist/isomorphic/module.wasm --single-file-bundle --out ./dist/module.bundle.wasm
 ```
 
 ## Module Lab
@@ -534,8 +576,11 @@ npm run check:compliance
 ```
 
 Node.js `>=20` is required. The compiler uses `sdn-emception` and `flatc-wasm`
-by default for the embedded toolchain path. WasmEdge pthread builds require a
-system Emscripten toolchain on `PATH`.
+by default for the embedded toolchain path. For multi-repo module builds, use a
+repo-local `deps/emsdk` checkout by default instead of Homebrew or any other
+machine-global Emscripten install. Treat `PATH` Emscripten as an explicit escape
+hatch, not the default. WasmEdge pthread builds still require a system
+Emscripten toolchain on `PATH`.
 
 If another repo needs the same compiler runtime, the package also exposes a
 shared emception session at `space-data-module-sdk/compiler/emception` with

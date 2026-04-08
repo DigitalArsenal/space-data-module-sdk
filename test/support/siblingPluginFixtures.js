@@ -42,18 +42,23 @@ function packagePath(name, ...parts) {
   return path.join(packageDir(name), ...parts);
 }
 
+const CANONICAL_BROWSER_ARTIFACT_PARTS = ["dist", "browser", "module.wasm"];
+const CANONICAL_BROWSER_LOADER_PARTS = ["dist", "browser", "module.js"];
+const CANONICAL_ISOMORPHIC_ARTIFACT_PARTS = [
+  "dist",
+  "isomorphic",
+  "module.wasm",
+];
+
 export const siblingPluginSpecs = Object.freeze([
   {
     name: "conjunction-assessment",
-    browserArtifactFile: "conjunction_assessment_wasm.wasm",
-    standaloneArtifactFile: "conjunction_assessment_standalone.wasm",
     requestFixturePath: packagePath(
       "conjunction-assessment",
       "tests",
       "fixtures",
       "request.assess.json",
     ),
-    pending: true,
     assertResponsePayload(payload) {
       assert.equal(typeof payload, "object");
       assert.notEqual(payload, null);
@@ -61,8 +66,6 @@ export const siblingPluginSpecs = Object.freeze([
   },
   {
     name: "atmosphere",
-    browserArtifactFile: "atmosphere_wasm.wasm",
-    standaloneArtifactFile: "atmosphere_standalone.wasm",
     requestFixturePath: packagePath(
       "atmosphere",
       "tests",
@@ -78,8 +81,6 @@ export const siblingPluginSpecs = Object.freeze([
   },
   {
     name: "cislunar",
-    browserArtifactFile: "cislunar_wasm.wasm",
-    standaloneArtifactFile: "cislunar_standalone.wasm",
     requestFixturePath: packagePath(
       "cislunar",
       "tests",
@@ -94,8 +95,6 @@ export const siblingPluginSpecs = Object.freeze([
   },
   {
     name: "fred",
-    browserArtifactFile: "fred_wasm.wasm",
-    standaloneArtifactFile: "fred_standalone.wasm",
     requestFixturePath: packagePath(
       "fred",
       "tests",
@@ -110,15 +109,12 @@ export const siblingPluginSpecs = Object.freeze([
   },
   {
     name: "hpop",
-    browserArtifactFile: "hpop_wasm.wasm",
-    standaloneArtifactFile: "hpop_standalone.wasm",
     requestFixturePath: packagePath(
       "hpop",
       "tests",
       "fixtures",
       "request.propagate.json",
     ),
-    pending: true,
     assertResponsePayload(payload) {
       assert.equal(typeof payload, "object");
       assert.notEqual(payload, null);
@@ -126,8 +122,6 @@ export const siblingPluginSpecs = Object.freeze([
   },
   {
     name: "maneuver",
-    browserArtifactFile: "maneuver_wasm.wasm",
-    standaloneArtifactFile: "maneuver_standalone.wasm",
     requestFixturePath: packagePath(
       "maneuver",
       "tests",
@@ -142,8 +136,6 @@ export const siblingPluginSpecs = Object.freeze([
   },
   {
     name: "od",
-    browserArtifactFile: "od_wasm.wasm",
-    standaloneArtifactFile: "od_standalone.wasm",
     requestFixturePath: packagePath("od", "tests", "fixtures", "request.fit.meme"),
     requestFixtureText: odRequestFixtureText,
     assertResponsePayload(payload) {
@@ -153,8 +145,6 @@ export const siblingPluginSpecs = Object.freeze([
   },
   {
     name: "sgp4-propagator",
-    browserArtifactFile: "sgp4_wasm.wasm",
-    standaloneArtifactFile: "sgp4_standalone.wasm",
     requestFixturePath: packagePath(
       "sgp4-propagator",
       "tests",
@@ -173,11 +163,17 @@ export const siblingPluginSpecs = Object.freeze([
     ...spec,
     packageDir: packageDir(spec.name),
     manifestPath: packagePath(spec.name, "plugin-manifest.json"),
-    browserArtifactPath: packagePath(spec.name, "dist", spec.browserArtifactFile),
+    browserLoaderPath: packagePath(
+      spec.name,
+      ...CANONICAL_BROWSER_LOADER_PARTS,
+    ),
+    browserArtifactPath: packagePath(
+      spec.name,
+      ...CANONICAL_BROWSER_ARTIFACT_PARTS,
+    ),
     standaloneArtifactPath: packagePath(
       spec.name,
-      "dist",
-      spec.standaloneArtifactFile,
+      ...CANONICAL_ISOMORPHIC_ARTIFACT_PARTS,
     ),
   }),
 ));

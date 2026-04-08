@@ -101,6 +101,11 @@ own resident buffers and need transient region descriptors without turning raw
 addresses into durable harness identity. Those helpers are not part of the
 current process/WasmEdge control protocol, which remains copy-based.
 
+For outer transport ingest, the runtime-host surface also exposes
+`createFlatBufferStreamIngestor(...)`. That helper is intentionally outside the
+module invoke ABI. It accepts little-endian size-prefixed FlatBuffer stream
+chunks and appends durable rows through `createFlatSqlRuntimeStore()`.
+
 Identity rules remain:
 
 - standards rows are addressed by `($SCHEMA_FILE_ID, rowId)`
@@ -217,6 +222,19 @@ Run the host-only suite directly with:
 npm run test:host-surfaces
 ```
 
+Run the streamed FlatBuffer ingest checks with:
+
+```bash
+npm run test:stream-ingest
+npm run test:module-stream
+npm run benchmark:stream-1gib
+npm run benchmark:module-stream-1gib
+```
+
+The 1 GiB path is env-gated and intended for local stress/perf work. It
+measures either outer transport ingest or chunked resident-module ingest, not
+one giant `PluginInvokeRequest`.
+
 ## Important Edge Cases
 
 ### 1. Generated harnesses are contract smoke tests, not semantic proofs
@@ -241,6 +259,15 @@ every language adapter.
 
 For dynamic runtime-host tests, use the host-control APIs instead of assuming a
 single command-surface guest is the whole runtime.
+
+Direct invoke is also not the right path for multi-hundred-megabyte or 1 GiB
+single-request benchmarks. The invoke ABI is still batch-oriented and fully
+buffered.
+
+If a module needs resident internal state, such as a FlatSQL instance imported
+inside the SDN module itself, prefer `createModuleFlatBufferStreamPump(...)`
+with a persistent direct-surface harness. That keeps the stream chunked and
+binary while preserving guest state across many small invokes.
 
 ### 4. WASI filesystem behavior is still only smoke-tested cross-runtime
 
@@ -311,6 +338,10 @@ Portable-but-narrow today:
 The harness generator exposes this distinction explicitly so module authors can
 see which capabilities are portable today and which still require host-side or
 future async ABI work.
+
+This JSON-over-memory note applies only to the current sync `sdn_host` guest
+ABI. It is not the canonical FlatBuffer stream-ingest contract, which uses
+direct size-prefixed FlatBuffer frames and keeps payload bytes binary end-to-end.
 
 ## Strict Standalone WASI Target
 

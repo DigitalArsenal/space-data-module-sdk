@@ -29,6 +29,39 @@ The practical effect is:
 Use the pure `["wasmedge"]` target when you want maximum WasmEdge-native guest
 capability and do not need browser loading from the same binary.
 
+## Canonical Module Repo Layout
+
+Module repos should publish the shared compiled artifact under a stable runtime
+path, not a plugin-named filename:
+
+- required: `dist/isomorphic/module.wasm`
+
+If a repo also ships a browser-specific adapter, place it under:
+
+- optional: `dist/browser/module.js`
+- optional: `dist/browser/module.wasm`
+
+That keeps the artifact name stable across repos and lets runtime intent live in
+the path rather than in the filename.
+
+## Toolchain Options
+
+The recommended browser-side build selector for module repos is:
+
+- `SDN_WASM_TOOLCHAIN=local-emsdk`: default. Build with a repo-local
+  `deps/emsdk` checkout and avoid Homebrew or any other machine-global
+  Emscripten install.
+- `SDN_WASM_TOOLCHAIN=sdn-emception`: optional SDK-first path for repos that use
+  `compileModuleFromSource(...)` or an SDK-driven build script to emit the
+  shared `dist/isomorphic/module.wasm` artifact.
+- `SDN_WASM_TOOLCHAIN=path`: explicit escape hatch when a repo intentionally
+  wants to use a preinstalled Emscripten toolchain from `PATH`.
+
+The isomorphic contract is the compiled wasm path, not the browser wrapper. A
+repo can publish only `dist/isomorphic/module.wasm` and still satisfy the
+browser/WasmEdge shared-artifact requirement when it loads through the SDK
+harnesses.
+
 ## Loader Entry Points
 
 The supported browser/WasmEdge entry points are:
@@ -96,4 +129,20 @@ That example includes:
 
 Both demos load the same generated artifact:
 
-- `examples/isomorphic-loader/generated/isomorphic-echo.wasm`
+- `examples/isomorphic-loader/generated/dist/isomorphic/module.wasm`
+
+## Streaming Into The Same Artifact
+
+If that shared artifact owns resident state, such as an SDN module that imports
+`flatsql` internally, stream raw FlatBuffer frames into the live instance with
+`createModuleFlatBufferStreamPump(...)`.
+
+Use:
+
+- a persistent `direct` browser harness for browser-resident state
+- a persistent runtime-backed harness on the server/WasmEdge side
+- chunked size-prefixed FlatBuffer stream input
+- many small invokes, not one monolithic invoke envelope
+
+That path is documented in
+[`docs/flatsql-streaming-standard.md`](/Users/tj/software/space-data-module-sdk/docs/flatsql-streaming-standard.md).

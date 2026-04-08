@@ -277,11 +277,34 @@ export interface RuntimeRowQueryResult {
   rowCount: number;
 }
 
+export interface FlatBufferStreamIngestStats {
+  bytesReceived: number;
+  chunksReceived: number;
+  framesDecoded: number;
+  framesAppended: number;
+  framesRouted: number;
+  parseErrors: number;
+}
+
+export interface FlatBufferStreamIngestContext {
+  rawFileIdentifier: string;
+  schemaFileId: string;
+  rows: FlatSqlRuntimeStore;
+  stats: FlatBufferStreamIngestStats;
+}
+
 export interface FlatSqlRuntimeStore {
   appendRow(options: { schemaFileId: string; payload?: unknown }): RowHandle;
   listRows(schemaFileId?: string | null): RuntimeRowView[];
   query(sql: string): RuntimeRowQueryResult;
   resolveRow(handle: RowHandle): RuntimeRowView | null;
+}
+
+export interface FlatBufferStreamIngestor {
+  rows: FlatSqlRuntimeStore;
+  stats: FlatBufferStreamIngestStats;
+  pushBytes(data: Uint8Array | ArrayBuffer | ArrayBufferView): number;
+  finish(): 0;
 }
 
 export interface RuntimeRegionDescriptor {
@@ -388,6 +411,25 @@ export interface RuntimeHost {
   moduleRegistry: RuntimeModuleRegistry;
 }
 
+export function createFlatBufferStreamIngestor(options?: {
+  rows?: FlatSqlRuntimeStore;
+  frameRouter?:
+    | ((
+        payload: Uint8Array,
+        context: FlatBufferStreamIngestContext,
+      ) => boolean | void)
+    | Record<
+        string,
+        (
+          payload: Uint8Array,
+          context: FlatBufferStreamIngestContext,
+        ) => boolean | void
+      >;
+  appendFrame?: (
+    payload: Uint8Array,
+    context: FlatBufferStreamIngestContext,
+  ) => void;
+}): FlatBufferStreamIngestor;
 export function createFlatSqlRuntimeStore(): FlatSqlRuntimeStore;
 export function createRuntimeRegionStore(): RuntimeRegionStore;
 export function createModuleRegistry(): RuntimeModuleRegistry;
@@ -1563,6 +1605,64 @@ export function createBrowserModuleHarness(options?: {
   };
   logOutput?: boolean;
 }): Promise<BrowserModuleHarness>;
+export interface ModuleFlatBufferStreamPumpStats {
+  bytesReceived: number;
+  chunksReceived: number;
+  framesDecoded: number;
+  framesInvoked: number;
+  invokes: number;
+  parseErrors: number;
+}
+export interface ModuleFlatBufferStreamPumpContext {
+  rawFileIdentifier: string;
+  schemaFileId: string;
+  methodId: string;
+  portId: string;
+  streamId: number;
+  sequence: number;
+  stats: ModuleFlatBufferStreamPumpStats;
+}
+export interface ModuleFlatBufferStreamPump {
+  stats: ModuleFlatBufferStreamPumpStats;
+  lastResponse: PluginInvokeResponseEnvelope | null;
+  pushBytes(data: Uint8Array | ArrayBuffer | ArrayBufferView): Promise<number>;
+  finish(): Promise<PluginInvokeResponseEnvelope | null>;
+}
+export function createModuleFlatBufferStreamPump(options: {
+  harness?: {
+    invoke(
+      request: PluginInvokeRequestEnvelope,
+    ): Promise<PluginInvokeResponseEnvelope>;
+  };
+  invoke?: (
+    request: PluginInvokeRequestEnvelope,
+  ) => Promise<PluginInvokeResponseEnvelope>;
+  methodId: string;
+  portId: string;
+  maxFramesPerInvoke?: number;
+  streamId?: number;
+  sequenceStart?: number;
+  typeResolver?: (
+    payload: Uint8Array,
+    context: ModuleFlatBufferStreamPumpContext,
+  ) => PayloadTypeRef | null | undefined;
+  frameTemplate?:
+    | Partial<InvokeFrame>
+    | ((
+        payload: Uint8Array,
+        context: ModuleFlatBufferStreamPumpContext,
+      ) => Partial<InvokeFrame> | null | undefined);
+  onResponse?: (
+    response: PluginInvokeResponseEnvelope,
+    context: {
+      methodId: string;
+      portId: string;
+      frames: InvokeFrame[];
+      isFinalBatch: boolean;
+      stats: ModuleFlatBufferStreamPumpStats;
+    },
+  ) => void | Promise<void>;
+}): ModuleFlatBufferStreamPump;
 export function loadModule(options?: {
   wasmSource: Uint8Array | ArrayBuffer | string | WebAssembly.Module | unknown;
   host?: BrowserHost;

@@ -59,7 +59,7 @@ function skipIfStandaloneArtifactsUnavailable(t) {
     return false;
   }
   t.skip(
-    `No *_standalone.wasm artifacts were found under ${siblingPluginsRoot}. Build the migrated plugin packages first.`,
+    `No dist/isomorphic/module.wasm artifacts were found under ${siblingPluginsRoot}. Build the migrated plugin packages first.`,
   );
   return true;
 }
@@ -79,6 +79,34 @@ test("all sibling plugin packages emit standalone artifacts", (t) => {
       fs.existsSync(spec.standaloneArtifactPath),
       true,
       `Missing ${spec.standaloneArtifactPath}. Run ${spec.packageDir}/build.sh after the standalone build path is wired.`,
+    );
+  }
+});
+
+test("all sibling plugin packages emit the canonical shared artifact path", (t) => {
+  if (skipIfStandaloneArtifactsUnavailable(t)) {
+    return;
+  }
+  for (const spec of listCheckedOutSiblingPluginSpecs()) {
+    assert.equal(
+      fs.existsSync(spec.standaloneArtifactPath),
+      true,
+      `Missing ${spec.standaloneArtifactPath}. Build outputs must place the shared artifact at dist/isomorphic/module.wasm.`,
+    );
+  }
+});
+
+test("browser adapters, when published, live under dist/browser", (t) => {
+  if (skipIfStandaloneArtifactsUnavailable(t)) {
+    return;
+  }
+  for (const spec of listCheckedOutSiblingPluginSpecs()) {
+    const hasLoader = fs.existsSync(spec.browserLoaderPath);
+    const hasBrowserWasm = fs.existsSync(spec.browserArtifactPath);
+    assert.equal(
+      hasLoader,
+      hasBrowserWasm,
+      `Browser adapter outputs for ${spec.name} must either publish both dist/browser/module.js and dist/browser/module.wasm or omit both.`,
     );
   }
 });

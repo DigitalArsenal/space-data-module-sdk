@@ -1,4 +1,5 @@
 import { createFlatSqlRuntimeStore } from "./flatsqlRuntimeStore.js";
+import { createFlatBufferStreamIngestor } from "./flatbufferStreamIngestor.js";
 import { createRuntimeRegionStore } from "./runtimeRegionStore.js";
 import { createModuleRegistry } from "./moduleRegistry.js";
 
@@ -15,6 +16,7 @@ export function createRuntimeHost(options = {}) {
 }
 
 export {
+  createFlatBufferStreamIngestor,
   createFlatSqlRuntimeStore,
   createModuleRegistry,
   createRuntimeRegionStore,

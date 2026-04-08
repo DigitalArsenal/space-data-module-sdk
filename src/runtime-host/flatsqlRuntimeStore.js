@@ -5,7 +5,6 @@ const RUNTIME_ROW_SCHEMA = `
 table RuntimeHostRow {
   schemaFileId: string;
   rowId: ulong;
-  payloadJson: string;
 }
 `;
 
@@ -19,14 +18,85 @@ function clonePayload(payload) {
   if (typeof structuredClone === "function") {
     return structuredClone(payload);
   }
+  return clonePayloadFallback(payload, new WeakMap());
+}
+
+function clonePayloadFallback(payload, seen) {
+  if (payload instanceof Date) {
+    return new Date(payload.getTime());
+  }
+  if (payload instanceof RegExp) {
+    return new RegExp(payload.source, payload.flags);
+  }
+  if (payload instanceof Map) {
+    if (seen.has(payload)) {
+      return seen.get(payload);
+    }
+    const cloned = new Map();
+    seen.set(payload, cloned);
+    for (const [key, value] of payload.entries()) {
+      cloned.set(clonePayloadFallback(key, seen), clonePayloadFallback(value, seen));
+    }
+    return cloned;
+  }
+  if (payload instanceof Set) {
+    if (seen.has(payload)) {
+      return seen.get(payload);
+    }
+    const cloned = new Set();
+    seen.set(payload, cloned);
+    for (const value of payload.values()) {
+      cloned.add(clonePayloadFallback(value, seen));
+    }
+    return cloned;
+  }
   if (ArrayBuffer.isView(payload)) {
-    return payload.slice(0);
+    if (payload instanceof DataView) {
+      return new DataView(
+        payload.buffer.slice(
+          payload.byteOffset,
+          payload.byteOffset + payload.byteLength,
+        ),
+      );
+    }
+    const clonedBuffer = payload.buffer.slice(
+      payload.byteOffset,
+      payload.byteOffset + payload.byteLength,
+    );
+    return new payload.constructor(clonedBuffer, 0, payload.length);
   }
   if (payload instanceof ArrayBuffer) {
     return payload.slice(0);
   }
+  if (Array.isArray(payload)) {
+    if (seen.has(payload)) {
+      return seen.get(payload);
+    }
+    const cloned = [];
+    seen.set(payload, cloned);
+    for (const value of payload) {
+      cloned.push(clonePayloadFallback(value, seen));
+    }
+    return cloned;
+  }
   if (typeof payload === "object") {
-    return JSON.parse(JSON.stringify(payload));
+    if (seen.has(payload)) {
+      return seen.get(payload);
+    }
+    const prototype = Object.getPrototypeOf(payload);
+    const cloned = Object.create(prototype ?? Object.prototype);
+    seen.set(payload, cloned);
+    for (const key of Reflect.ownKeys(payload)) {
+      const descriptor = Object.getOwnPropertyDescriptor(payload, key);
+      if (!descriptor) {
+        continue;
+      }
+      if ("value" in descriptor) {
+        descriptor.value = clonePayloadFallback(descriptor.value, seen);
+      }
+      Object.defineProperty(cloned, key, descriptor);
+    }
+    return cloned;
   }
   return payload;
 }
@@ -54,48 +124,46 @@ function escapeSqlStringLiteral(value) {
   return String(value).replaceAll("'", "''");
 }
 
-function serializePayload(payload) {
-  if (payload === null || payload === undefined) {
-    return {
-      kind: "json",
-      value: null,
-    };
+function encodeRuntimeRowMetadata({ schemaFileId, rowId }) {
+  const schemaBytes = encoder.encode(normalizeSchemaFileId(schemaFileId));
+  const encoded = new Uint8Array(4 + schemaBytes.byteLength + 8);
+  const view = new DataView(encoded.buffer);
+  view.setUint32(0, schemaBytes.byteLength, true);
+  encoded.set(schemaBytes, 4);
+  view.setBigUint64(4 + schemaBytes.byteLength, BigInt(rowId), true);
+  return encoded;
+}
+
+function decodeRuntimeRowMetadata(data) {
+  const bytes =
+    data instanceof Uint8Array
+      ? data
+      : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  if (bytes.byteLength < 12) {
+    throw new Error("Invalid runtime row metadata buffer.");
   }
-  if (ArrayBuffer.isView(payload)) {
-    return {
-      kind: "bytes",
-      bytes: Array.from(
-        new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength),
-      ),
-    };
-  }
-  if (payload instanceof ArrayBuffer) {
-    return {
-      kind: "bytes",
-      bytes: Array.from(new Uint8Array(payload)),
-    };
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const schemaLength = view.getUint32(0, true);
+  const schemaStart = 4;
+  const schemaEnd = schemaStart + schemaLength;
+  const rowIdOffset = schemaEnd;
+  if (schemaEnd + 8 > bytes.byteLength) {
+    throw new Error("Invalid runtime row metadata layout.");
   }
   return {
-    kind: "json",
-    value: clonePayload(payload),
+    schemaFileId: decoder.decode(bytes.subarray(schemaStart, schemaEnd)),
+    rowId: Number(view.getBigUint64(rowIdOffset, true)),
   };
 }
 
-function deserializePayload(payloadJson) {
-  const payload = JSON.parse(String(payloadJson ?? "null"));
-  if (payload?.kind === "bytes") {
-    return Uint8Array.from(payload.bytes ?? []);
-  }
-  if (payload?.kind === "json") {
-    return clonePayload(payload.value);
-  }
-  return clonePayload(payload);
+function buildRowKey(schemaFileId, rowId) {
+  return `${normalizeSchemaFileId(schemaFileId)}:${Number(rowId)}`;
 }
 
 function createRuntimeRowAccessor() {
   const accessor = new DirectAccessor();
   accessor.registerAccessor(RUNTIME_ROW_TABLE, (data, path) => {
-    const row = JSON.parse(decoder.decode(data));
+    const row = decodeRuntimeRowMetadata(data);
     let current = row;
     for (const segment of Array.isArray(path) ? path : []) {
       if (current === null || current === undefined) {
@@ -106,13 +174,10 @@ function createRuntimeRowAccessor() {
     return current ?? null;
   });
   accessor.registerBuilder(RUNTIME_ROW_TABLE, (fields) =>
-    encoder.encode(
-      JSON.stringify({
-        schemaFileId: normalizeSchemaFileId(fields.schemaFileId),
-        rowId: Number(fields.rowId),
-        payloadJson: String(fields.payloadJson ?? "null"),
-      }),
-    ),
+    encodeRuntimeRowMetadata({
+      schemaFileId: fields.schemaFileId,
+      rowId: Number(fields.rowId),
+    }),
   );
   return accessor;
 }
@@ -127,18 +192,21 @@ function cloneQueryResult(result) {
   };
 }
 
-function rowViewFromQueryRow(row) {
+function rowViewFromQueryRow(row, payloadStore) {
+  const schemaFileId = String(row[0]);
+  const rowId = Number(row[1]);
   return {
     handle: {
-      schemaFileId: String(row[0]),
-      rowId: Number(row[1]),
+      schemaFileId,
+      rowId,
     },
-    payload: deserializePayload(row[2]),
+    payload: clonePayload(payloadStore.get(buildRowKey(schemaFileId, rowId))),
   };
 }
 
 export function createFlatSqlRuntimeStore(options = {}) {
   const accessor = options.accessor ?? createRuntimeRowAccessor();
+  const payloadStore = options.payloadStore ?? new Map();
   const database =
     options.database ??
     FlatSQLDatabase.fromSchema(
@@ -168,8 +236,11 @@ export function createFlatSqlRuntimeStore(options = {}) {
     database.insert(RUNTIME_ROW_TABLE, {
       schemaFileId: normalizedSchemaFileId,
       rowId: nextRowId,
-      payloadJson: JSON.stringify(serializePayload(payload)),
     });
+    payloadStore.set(
+      buildRowKey(normalizedSchemaFileId, nextRowId),
+      clonePayload(payload),
+    );
     return {
       schemaFileId: normalizedSchemaFileId,
       rowId: nextRowId,
@@ -193,12 +264,12 @@ export function createFlatSqlRuntimeStore(options = {}) {
     const result =
       normalizedSchemaFileId === null
         ? database.query(
-            `SELECT schemaFileId, rowId, payloadJson FROM ${RUNTIME_ROW_TABLE} ORDER BY schemaFileId, rowId`,
+            `SELECT schemaFileId, rowId FROM ${RUNTIME_ROW_TABLE} ORDER BY schemaFileId, rowId`,
           )
         : database.query(
-            `SELECT schemaFileId, rowId, payloadJson FROM ${RUNTIME_ROW_TABLE} WHERE schemaFileId = '${escapeSqlStringLiteral(normalizedSchemaFileId)}' ORDER BY rowId`,
+            `SELECT schemaFileId, rowId FROM ${RUNTIME_ROW_TABLE} WHERE schemaFileId = '${escapeSqlStringLiteral(normalizedSchemaFileId)}' ORDER BY rowId`,
           );
-    return (result.rows ?? []).map(rowViewFromQueryRow);
+    return (result.rows ?? []).map((row) => rowViewFromQueryRow(row, payloadStore));
   }
 
   function query(sql) {

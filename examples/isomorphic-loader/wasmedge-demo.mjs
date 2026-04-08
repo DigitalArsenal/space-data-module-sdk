@@ -5,7 +5,13 @@ import { fileURLToPath } from "node:url";
 import { loadModule } from "../../src/index.js";
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
-const artifactPath = path.join(currentDir, "generated", "isomorphic-echo.wasm");
+const artifactPath = path.join(
+  currentDir,
+  "generated",
+  "dist",
+  "isomorphic",
+  "module.wasm",
+);
 
 await access(artifactPath);
 
