@@ -10,6 +10,7 @@ export {
 export {
   buildWasmEdgeSpawnEnv,
   createPluginInvokeProcessClient,
+  createWasmEdgeStreamProcessClient,
   resolveWasmEdgePluginLaunchPlan,
 } from "./processInvoke.js";
 export {

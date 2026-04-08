@@ -1,92 +1,49 @@
-# Cross-Repo Integration TODO
+# SDK Runtime Host TODO
 
-This file is the checked-in summary of the remaining work after the SDK-side
-deployment, protocol, aligned-binary, and emception changes landed.
+This file is the checked-in summary of remaining work that matches the current
+runtime direction.
 
-Detailed local working notes live under `.claude/todos/`.
+Detailed working notes can live elsewhere, but this file should not compete
+with the active architecture.
 
-## `space-data-module-sdk`
+## Core Direction
 
-- [ ] Treat `wasmedge` as the documented standard server-side deployment target
-      while keeping plain `wasi` as the strict no-wrapper baseline.
-- [ ] Add an end-to-end example package that combines:
-  - hosted protocol metadata
-  - deployment-plan metadata
-  - mixed regular/aligned port contracts
-  - signed `sds.bundle` packaging
-- [ ] Add a WasmEdge-targeted example that exercises guest-owned networking.
-- [ ] Add bundle/vector coverage for deployment plans that include:
-  - `protocolInstallations`
-  - `inputBindings`
-  - `scheduleBindings`
-  - `serviceBindings`
-  - `authPolicies`
-  - `publicationBindings`
-- [ ] Add an SDK-level deployment-plan-driven harness helper so downstream
-      repos can generate runtime/install tests from:
-  - manifest
-  - deployment plan
-  - selected runtime profile
-- [ ] Add a concrete example of regular FlatBuffer input plus aligned-binary
-      output, mirroring the OrbPro/SGP4 contract.
-- [ ] Add target-specific examples and vector coverage for embedded
-      `runtimeTargets`, especially strict `wasi` and server-side `wasmedge`.
-- [ ] Document browser-local versus delegated deployment bindings more sharply
-      for:
-  - filesystem
-  - scheduler
-  - inbound HTTP services
-  - protocol hosting
-- [ ] Keep the next host ABI expansion scoped to typed async/resource-oriented
-      hostcalls, not new ad hoc JSON bridges.
+- [ ] Ship the canonical dynamic runtime host from `space-data-module-sdk`
+- [ ] Keep `sdn-flow` as compiler/editor/deployment tooling layered on that host
+- [ ] Keep `emception` as an optional build tool, not the defining runtime model
+
+## Runtime Host
+
+- [ ] Add a canonical runtime-host package/export surface
+- [ ] Add append-only FlatSQL row services addressed by `($SCHEMA_FILE_ID, rowId)`
+- [ ] Add host-managed runtime regions addressed by `(regionId, recordIndex)`
+- [ ] Add dynamic module install/load/unload/invoke
+- [ ] Add browser, server, and WasmEdge host adapters over the same model
+- [ ] Keep raw pointers internal-only and out of durable public contracts
+
+## WasmEdge
+
+- [ ] Upgrade the WasmEdge runner from single-module launch to dynamic multi-module host
+- [ ] Keep Emscripten pthread compatibility intact
+- [ ] Support paid-module install and runtime composition through the same host surface
+
+## OrbPro
+
+- [ ] Make the entity model a host-side view over FlatSQL-backed standards rows
+- [ ] Preserve the existing fast shared-buffer WasmEngine path
+- [ ] Route SGP4 and HPOP runtime state through host-managed aligned-binary regions
+- [ ] Keep conjunction consuming generic propagator outputs only
 
 ## `sdn-flow`
 
-- [ ] Finish applying generated deployment plans in the installed host/runtime
-      path.
-- [ ] Keep the flow compiler generating C++ and compiling it through the SDK
-      emception API only.
-- [ ] Move remaining deterministic runtime/editor behavior out of the JS
-      runtime path and into compiled WASM modules.
-- [ ] Replace editor/runtime JSON `msg` plumbing with typed frame transport.
-- [ ] Add deployment/install packaging that persists the generated deployment
-      plan with compiled artifacts.
-- [ ] Enforce auth, service, schedule, and publication bindings at runtime.
-- [ ] Use the Node-RED parity matrix in
-      `docs/node-red-default-node-parity.md` as the planning contract:
-  - standalone `wasi` for pure transform/control nodes
-  - `wasmedge` for guest-owned network services
-  - delegated bindings for watchers, cron, exec, and browser-only gaps
+- [ ] Re-scope `sdn-flow` docs and code so it clearly depends on the SDK runtime host
+- [ ] Keep graph compilation, editor runtime, deployment planning, and flow packaging there
+- [ ] Keep optional `emception` compile support there or re-export it cleanly from the SDK repo
+- [ ] Stop describing `sdn-flow` as the owner of a separate runtime model
 
-## `OrbPro`
+## Validation
 
-- [ ] Consume `sds.bundle` deployment-plan metadata during install.
-- [ ] Generalize the licensing-server protocol install path to arbitrary module
-      protocols.
-- [ ] Preserve aligned-binary metadata end-to-end for mixed-format modules such
-      as SGP4.
-- [ ] Apply approved-key trust mappings from `hd-wasm-wallet` to REST and
-      libp2p/IPFS services.
-- [ ] Distinguish local hosting from delegated hosting cleanly in browser
-      deployments.
-
-## `space-data-network`
-
-- [ ] Generalize the WASI/libp2p harness from OrbPro-specific protocols to
-      manifest/deployment-driven protocol installs.
-- [ ] Complete the `publish -> PNM -> fetch/pin` loop with signed policy-driven
-      retention behavior.
-- [ ] Expose installed protocol metadata and publish offerings through node-info
-      and related APIs.
-- [ ] Route stream handlers by `wireId` and preserve aligned-binary metadata in
-      the stream bridge.
-- [ ] Apply trust/auth policy uniformly across REST, pubsub, and direct
-      protocol services.
-
-## Scenario Acceptance Targets
-
-- [ ] CSV OMM ingest to FlatSQL on disk plus authenticated HTTPS query service
-- [ ] SDN publish discovery, pull, watch, and policy-driven pinning
-- [ ] Scheduled space-weather ingest plus PNM publication and FlatSQL REST
-- [ ] Approved-key-only REST and IPFS services
-- [ ] Homomorphic conjunction service built on `../flatbuffers/wasm`
+- [ ] Aerospace V&V passes on the composed runtime-host path
+- [ ] SOCRATES replay passes on the composed runtime-host path
+- [ ] OrbPro browser runtime passes on the runtime-host path
+- [ ] WasmEdge standalone harness passes on the runtime-host path

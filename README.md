@@ -14,6 +14,8 @@ This repository is the source of truth for module-level concerns:
 - the `sds.bundle` single-file container
 - deployment authorization plus SDS publication records (`REC`, `PNM`, `ENC`)
 - the first canonical module hostcall/import ABI surface
+- the canonical runtime-host model for append-only standards rows, host-managed
+  runtime regions, and dynamic module installation/loading
 - shared module-level testing/runtime harnesses, including the WasmEdge
   process runner used by package-level validation suites
 
@@ -35,6 +37,28 @@ enqueue/drain behavior on top of its compiled standalone runtime host. Package-
 specific validation suites, including conjunction replay/V&V, are expected to
 sit on top of these shared harnesses instead of defining their own runtime
 process model.
+
+## Canonical Runtime Host
+
+The SDK now owns the durable runtime identity model used by OrbPro, browser and
+server SDN hosts, and the evolving WasmEdge harness:
+
+- standards rows are addressed only by `($SCHEMA_FILE_ID, rowId)`
+- `rowId` is append-only and never reused
+- aligned-binary runtime state is addressed only by `(regionId, recordIndex)`
+- raw pointers remain internal execution details and are not durable APIs
+
+The minimal host surface lives under `src/runtime-host/` and covers three
+responsibilities:
+
+- `createFlatSqlRuntimeStore()` for append-only row handles and row resolution
+- `createRuntimeRegionStore()` for host-allocated aligned-binary regions and
+  externally backed record-view descriptors
+- `createModuleRegistry()` for dynamic install/load/unload/invoke
+
+`createRuntimeHost()` composes those stores into the canonical SDK host model.
+OrbPro layers entity/view helpers on top of that host instead of inventing a
+separate durable identity model.
 
 ## Module Artifact Model
 

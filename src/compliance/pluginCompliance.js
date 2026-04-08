@@ -366,7 +366,7 @@ function validateAllowedType(type, issues, location) {
       "Allowed type fixedStringLength",
       { min: 0 },
     );
-    validateIntegerField(
+    validateOptionalIntegerField(
       issues,
       type.byteLength,
       `${location}.byteLength`,

@@ -1,4 +1,4 @@
-import * as flatbuffers from "flatbuffers";
+import * as flatbuffers from "flatbuffers/mjs/flatbuffers.js";
 
 import {
   CanonicalizationRuleT,

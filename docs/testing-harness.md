@@ -1,7 +1,15 @@
 # Testing Harness
 
-This repo now includes a manifest-driven harness generator at
-`space-data-module-sdk/testing` plus a cross-language runtime matrix suite.
+This repo now includes two related testing/runtime surfaces in
+`space-data-module-sdk/testing`:
+
+- the manifest-driven harness generator for contract smoke tests
+- the canonical dynamic runtime-host harness for multi-module process and
+  WasmEdge execution
+
+The runtime-host harness is the new baseline for paid-module/server/browser-node
+execution. Single-module invoke is still supported, but it now sits on top of
+the same host-controlled process model as a compatibility profile.
 
 ## Public API
 
@@ -31,6 +39,74 @@ const commandCase = materializeHarnessScenario(
 );
 ```
 
+For actual runtime-host execution, use `createModuleHarness(...)` or the lower
+level process clients:
+
+```js
+import {
+  createModuleHarness,
+  createPluginInvokeProcessClient,
+  resolveWasmEdgePluginLaunchPlan,
+} from "space-data-module-sdk";
+
+const harness = await createModuleHarness({
+  runtime: {
+    kind: "process",
+    hostProfile: "runtime-host",
+    command: process.execPath,
+    args: ["--input-type=module", "--eval", runtimeHostServerScript],
+    modules: [
+      { moduleId: "alpha", metadata: { tier: "paid" } },
+      { moduleId: "beta", metadata: { tier: "paid" } },
+    ],
+    defaultModuleId: "alpha",
+  },
+});
+
+await harness.installModule({ moduleId: "gamma", metadata: { tier: "trial" } });
+const modules = await harness.listModules();
+const rowHandle = await harness.appendRow({
+  schemaFileId: "OMM",
+  payload: { noradCatId: 25544 },
+});
+const region = await harness.allocateRegion({
+  layoutId: "propagator-state",
+  recordByteLength: 64,
+  alignment: 16,
+  initialRecords: [new Uint8Array(64)],
+});
+const response = await harness.invokeModule("beta", {
+  methodId: "echo",
+  inputs: [{ portId: "request", payload: new TextEncoder().encode("hello") }],
+});
+```
+
+The same host control surface is available from `createPluginInvokeProcessClient`
+and `createWasmEdgeStreamProcessClient`:
+
+- `installModule(definition)`
+- `listModules()`
+- `unloadModule(moduleId)`
+- `invokeModule(moduleId, request)`
+- `appendRow({ schemaFileId, payload })`
+- `listRows(schemaFileId?)`
+- `resolveRow({ schemaFileId, rowId })`
+- `allocateRegion({ layoutId, recordByteLength, alignment, initialRecords })`
+- `describeRegion(regionId)`
+- `resolveRecord({ regionId, recordIndex })`
+
+In-process `createRuntimeHost()` also exposes `registerExternalRegion(...)`,
+`setRegionRecordCount(...)`, and `resolveRecordView(...)` for hosts that already
+own resident buffers and need transient region descriptors without turning raw
+addresses into durable harness identity. Those helpers are not part of the
+current process/WasmEdge control protocol, which remains copy-based.
+
+Identity rules remain:
+
+- standards rows are addressed by `($SCHEMA_FILE_ID, rowId)`
+- aligned runtime records are addressed by `(regionId, recordIndex)`
+- raw pointers remain internal execution details, not durable harness identity
+
 The generator does two things:
 
 1. It derives smoke cases from the manifest shape and invoke surfaces.
@@ -52,6 +128,14 @@ between those declared type refs rather than inventing one.
 Flows are treated as degenerate modules for harness generation. The generator
 does not require a separate flow-only code path. A flow manifest still produces
 method-level invoke cases and capability classifications.
+
+For runtime execution, flows should target the same dynamic runtime-host model.
+`sdn-flow` may still compile or bundle flows for deployment, but the harness
+contract in this repo is now the canonical host surface for:
+
+- installing multiple modules into one host
+- wiring host-owned row and region services
+- exercising the same control plane in process mode and WasmEdge mode
 
 ## Runtime Matrix
 
@@ -83,6 +167,34 @@ currently maintains natively. The SDK matrix therefore uses:
 
 That keeps every supported language in the matrix immediately while preserving a
 single canonical execution baseline.
+
+## Dynamic Runtime-Host Harness
+
+The SDK now treats dynamic host composition as the default server/browser/WasmEdge
+execution model. The harness supports two execution profiles:
+
+1. Compatibility profile:
+   - single module
+   - plain `invoke(...)`
+   - same shape as the earlier process harness
+
+2. Runtime-host profile:
+   - multiple installed modules in one host
+   - explicit module install/list/unload/invoke controls
+   - host-owned row services and aligned-binary region services
+
+Process mode can emulate the runtime host with a normal Node child process. For
+WasmEdge, the runner can start in standalone host mode with:
+
+```js
+const plan = resolveWasmEdgePluginLaunchPlan({
+  hostProfile: "runtime-host",
+  wasmEdgeRunnerBinary: process.env.WASMEDGE_RUNNER_BINARY,
+});
+```
+
+That launches the runner with `--serve-runtime-host` and no preloaded guest
+module. Modules are then installed over the host control channel.
 
 ## Covered Surfaces
 
@@ -126,6 +238,9 @@ The matrix uses command-mode invoke for broad portability. Direct invoke still
 exists and is covered in the Node-based SDK tests, but it requires runtime-
 specific memory management and export calling that is not yet normalized across
 every language adapter.
+
+For dynamic runtime-host tests, use the host-control APIs instead of assuming a
+single command-surface guest is the whole runtime.
 
 ### 4. WASI filesystem behavior is still only smoke-tested cross-runtime
 

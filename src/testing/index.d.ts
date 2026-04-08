@@ -131,7 +131,55 @@ export interface PluginInvokeProcessLaunchPlan {
   args: string[];
   env?: Record<string, string | undefined>;
   cwd?: string;
-  wasmPath?: string;
+  wasmPath?: string | null;
+  hostProfile?: "runtime-host";
+}
+
+export interface RuntimeHostTestModuleDefinition {
+  moduleId: string;
+  wasmPath?: string | null;
+  metadata?: unknown;
+  [key: string]: unknown;
+}
+
+export interface RuntimeHostInstalledModule {
+  moduleId: string;
+  metadata: unknown;
+  methodIds: string[];
+}
+
+export interface RuntimeHostRowHandle {
+  schemaFileId: string;
+  rowId: number;
+}
+
+export interface RuntimeHostRowView {
+  handle: RuntimeHostRowHandle;
+  payload: unknown;
+}
+
+export interface RuntimeHostRowQueryResult {
+  columns: string[];
+  rows: unknown[][];
+  rowCount: number;
+}
+
+export interface RuntimeHostRegionDescriptor {
+  regionId: number;
+  layoutId: string;
+  recordByteLength: number;
+  alignment: number;
+  recordCount: number;
+}
+
+export interface RuntimeHostRegionRecord {
+  regionId: number;
+  recordIndex: number;
+  layoutId: string;
+  recordByteLength: number;
+  alignment: number;
+  byteLength: number;
+  bytes: Uint8Array;
 }
 
 export interface PluginInvokeProcessClient {
@@ -141,11 +189,41 @@ export interface PluginInvokeProcessClient {
     methodId?: string | null;
     inputs?: HarnessInputFrame[];
   }): Promise<{
+      statusCode: number;
+      errorCode?: string | null;
+      errorMessage?: string | null;
+      outputs: HarnessInputFrame[];
+  }>;
+  installModule(definition: RuntimeHostTestModuleDefinition): Promise<RuntimeHostInstalledModule>;
+  listModules(): Promise<RuntimeHostInstalledModule[]>;
+  unloadModule(moduleId: string): Promise<boolean>;
+  invokeModule(requestModuleId: string, request: {
+    methodId?: string | null;
+    inputs?: HarnessInputFrame[];
+  }): Promise<{
     statusCode: number;
     errorCode?: string | null;
     errorMessage?: string | null;
     outputs: HarnessInputFrame[];
   }>;
+  appendRow(options: {
+    schemaFileId: string;
+    payload?: unknown;
+  }): Promise<RuntimeHostRowHandle>;
+  listRows(schemaFileId?: string | null): Promise<RuntimeHostRowView[]>;
+  resolveRow(handle: RuntimeHostRowHandle): Promise<RuntimeHostRowView | null>;
+  queryRows(sql: string): Promise<RuntimeHostRowQueryResult>;
+  allocateRegion(options: {
+    layoutId: string;
+    recordByteLength: number;
+    alignment?: number;
+    initialRecords?: Array<Uint8Array | ArrayBuffer | ArrayBufferView | null | undefined>;
+  }): Promise<RuntimeHostRegionDescriptor>;
+  describeRegion(regionId: number): Promise<RuntimeHostRegionDescriptor | null>;
+  resolveRecord(query: {
+    regionId: number;
+    recordIndex: number;
+  }): Promise<RuntimeHostRegionRecord | null>;
   destroy(): Promise<void>;
 }
 
@@ -160,6 +238,10 @@ export interface ModuleHarnessRuntimeDescriptor {
   wasmEdgeBinary?: string;
   wasmEdgeRunnerBinary?: string;
   enableThreads?: boolean;
+  hostProfile?: "runtime-host";
+  modules?: RuntimeHostTestModuleDefinition[];
+  defaultModuleId?: string;
+  metadata?: unknown;
 }
 
 export interface ModuleHarness {
@@ -170,11 +252,41 @@ export interface ModuleHarness {
     methodId?: string | null;
     inputs?: HarnessInputFrame[];
   }): Promise<{
+      statusCode: number;
+      errorCode?: string | null;
+      errorMessage?: string | null;
+      outputs: HarnessInputFrame[];
+  }>;
+  installModule(definition: RuntimeHostTestModuleDefinition): Promise<RuntimeHostInstalledModule>;
+  listModules(): Promise<RuntimeHostInstalledModule[]>;
+  unloadModule(moduleId: string): Promise<boolean>;
+  invokeModule(moduleId: string, request: {
+    methodId?: string | null;
+    inputs?: HarnessInputFrame[];
+  }): Promise<{
     statusCode: number;
     errorCode?: string | null;
     errorMessage?: string | null;
     outputs: HarnessInputFrame[];
   }>;
+  appendRow(options: {
+    schemaFileId: string;
+    payload?: unknown;
+  }): Promise<RuntimeHostRowHandle>;
+  listRows(schemaFileId?: string | null): Promise<RuntimeHostRowView[]>;
+  resolveRow(handle: RuntimeHostRowHandle): Promise<RuntimeHostRowView | null>;
+  queryRows(sql: string): Promise<RuntimeHostRowQueryResult>;
+  allocateRegion(options: {
+    layoutId: string;
+    recordByteLength: number;
+    alignment?: number;
+    initialRecords?: Array<Uint8Array | ArrayBuffer | ArrayBufferView | null | undefined>;
+  }): Promise<RuntimeHostRegionDescriptor>;
+  describeRegion(regionId: number): Promise<RuntimeHostRegionDescriptor | null>;
+  resolveRecord(query: {
+    regionId: number;
+    recordIndex: number;
+  }): Promise<RuntimeHostRegionRecord | null>;
   destroy(): Promise<void>;
 }
 
@@ -234,15 +346,24 @@ export function buildWasmEdgeSpawnEnv(
 ): Record<string, string | undefined>;
 
 export function resolveWasmEdgePluginLaunchPlan(options: {
-  wasmPath: string;
+  wasmPath?: string;
   wasmEdgeBinary?: string;
   wasmEdgeRunnerBinary?: string;
   enableThreads?: boolean;
   invokeArgs?: string[];
   env?: Record<string, string | undefined>;
+  hostProfile?: "runtime-host";
 }): PluginInvokeProcessLaunchPlan;
 
 export function createPluginInvokeProcessClient(options: {
+  launchPlan?: PluginInvokeProcessLaunchPlan;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string | undefined>;
+  cwd?: string;
+}): Promise<PluginInvokeProcessClient>;
+
+export function createWasmEdgeStreamProcessClient(options: {
   launchPlan?: PluginInvokeProcessLaunchPlan;
   command?: string;
   args?: string[];

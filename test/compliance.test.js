@@ -79,6 +79,20 @@ function createFlatbufferAllowedType(overrides = {}) {
   };
 }
 
+function createDualFormatTypeSet(overrides = {}) {
+  const alignedType = createAlignedAllowedType(overrides);
+  return {
+    setId: "state-vector",
+    allowedTypes: [
+      createFlatbufferAllowedType({
+        schemaName: alignedType.schemaName,
+        fileIdentifier: alignedType.fileIdentifier,
+      }),
+      alignedType,
+    ],
+  };
+}
+
 let generatedAlignedFallbackTypePromise = null;
 
 async function createFlatcWasmAlignedAllowedType(overrides = {}) {
@@ -388,25 +402,19 @@ test("aligned-binary type requires rootTypeName", () => {
   );
 });
 
-test("aligned-binary type requires positive byteLength", () => {
+test("aligned-binary type allows omitted byteLength for variable-length layouts", () => {
   const missing = createValidManifest();
-  missing.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
-    createAlignedAllowedType({ byteLength: undefined }),
-  ];
+  missing.methods[0].inputPorts[0].acceptedTypeSets[0] = createDualFormatTypeSet({
+    byteLength: undefined,
+  });
   const missingReport = validatePluginManifest(missing);
-  assert.equal(missingReport.ok, false);
-  assert.ok(
-    missingReport.errors.some(
-      (e) =>
-        e.code === "invalid-integer" &&
-        e.location?.endsWith(".byteLength"),
-    ),
-  );
+  assert.equal(missingReport.ok, true);
+  assert.equal(missingReport.errors.length, 0);
 
   const zero = createValidManifest();
-  zero.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
-    createAlignedAllowedType({ byteLength: 0 }),
-  ];
+  zero.methods[0].inputPorts[0].acceptedTypeSets[0] = createDualFormatTypeSet({
+    byteLength: 0,
+  });
   const zeroReport = validatePluginManifest(zero);
   assert.equal(zeroReport.ok, false);
   assert.ok(
