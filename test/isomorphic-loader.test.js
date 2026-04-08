@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import test from "node:test";
@@ -85,6 +86,16 @@ int echo(void) {
 `;
 }
 
+function hasWasmEdgeCli() {
+  if (process.env.WASMEDGE_RUNNER_BINARY) {
+    return true;
+  }
+  const result = spawnSync("wasmedge", ["--version"], {
+    stdio: "ignore",
+  });
+  return result.status === 0;
+}
+
 test("inspectModule reports the standalone profile for shared browser/WasmEdge artifacts", async (t) => {
   const compilation = await compileModuleFromSource({
     manifest: createInvokeManifest(),
@@ -139,8 +150,9 @@ test("loadModule can drive generic process runtimes on the server path", async (
 });
 
 test("loadModule can drive standalone artifacts through the WasmEdge server path", async (t) => {
-  if (!process.env.WASMEDGE_RUNNER_BINARY && !process.env.PATH.includes("wasmedge")) {
-    // Defer actual availability checks to the command launch if PATH is misleading.
+  if (!hasWasmEdgeCli()) {
+    t.skip("Install wasmedge to exercise the isomorphic WasmEdge loader path.");
+    return;
   }
 
   const compilation = await compileModuleFromSource({
