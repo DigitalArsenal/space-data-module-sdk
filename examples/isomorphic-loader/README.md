@@ -54,7 +54,9 @@ node ./examples/isomorphic-loader/wasmedge-demo.mjs
 ```
 
 That script uses the same `generated/isomorphic-echo.wasm` artifact the browser
-page loads.
+page loads. `loadModule(...)` detects that the artifact is a standalone
+command-surface module and drives WasmEdge through raw stdin/stdout command
+execution rather than the runner protocol.
 
 ## Optional Parity Test
 

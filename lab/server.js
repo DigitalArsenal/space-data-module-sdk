@@ -1,4 +1,5 @@
 import express from "express";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,6 +25,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = Number(process.env.PORT ?? 4318);
 
+function resolvePluginsDir() {
+  const configuredRoot = process.env.SPACE_DATA_NETWORK_PLUGINS_ROOT
+    ? path.resolve(process.env.SPACE_DATA_NETWORK_PLUGINS_ROOT)
+    : path.resolve(__dirname, "..", "..", "space-data-network-plugins");
+  return path.basename(configuredRoot) === "packages"
+    ? configuredRoot
+    : path.join(configuredRoot, "packages");
+}
+
 app.use(express.json({ limit: "20mb" }));
 
 // Cross-origin isolation headers for SharedArrayBuffer (needed by pthread builds)
@@ -36,7 +46,13 @@ app.use((_req, res, next) => {
 app.use(express.static(path.join(__dirname, "public")));
 
 // Serve WASM plugin artifacts from the plugins directory
-const pluginsDir = path.resolve(__dirname, "..", "..", "space-data-network-plugins", "packages");
+const pluginsDir = resolvePluginsDir();
+if (!fs.existsSync(pluginsDir)) {
+  console.warn(
+    `[module-lab] Plugin artifact directory not found: ${pluginsDir}. ` +
+      "Set SPACE_DATA_NETWORK_PLUGINS_ROOT to a space-data-network-plugins checkout to enable /plugins and /api/plugins.",
+  );
+}
 app.use("/plugins", express.static(pluginsDir, {
   setHeaders(res) {
     res.setHeader("Content-Type", "application/wasm");

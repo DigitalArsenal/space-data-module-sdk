@@ -6,9 +6,8 @@ import { promisify } from "node:util";
 import {
   cleanupCompilation,
   compileModuleFromSource,
-  createWasmEdgeStreamProcessClient,
+  loadModule,
   ModuleThreadModel,
-  resolveWasmEdgePluginLaunchPlan,
 } from "../src/index.js";
 import { createBrowserHost } from "../src/browser.js";
 import { createBrowserModuleHarness } from "../src/testing/browserModuleHarness.js";
@@ -217,14 +216,13 @@ test("the same browser+wasmedge artifact can run in both browser harness and Was
     browserHarness.destroy();
   });
 
-  const wasmedgeClient = await createWasmEdgeStreamProcessClient({
-    launchPlan: resolveWasmEdgePluginLaunchPlan({
-      wasmPath: compilation.outputPath,
-      enableThreads: false,
-    }),
+  const wasmedgeHarness = await loadModule({
+    wasmSource: compilation.outputPath,
+    runtimeKind: "wasmedge",
+    enableThreads: false,
   });
   t.after(async () => {
-    await wasmedgeClient.destroy();
+    await wasmedgeHarness.destroy();
   });
 
   const request = {
@@ -243,7 +241,7 @@ test("the same browser+wasmedge artifact can run in both browser harness and Was
 
   const [browserResponse, wasmedgeResponse] = await Promise.all([
     browserHarness.invoke(request),
-    wasmedgeClient.invoke(request),
+    wasmedgeHarness.invoke(request),
   ]);
 
   assert.deepEqual(browserResponse.statusCode, 0);

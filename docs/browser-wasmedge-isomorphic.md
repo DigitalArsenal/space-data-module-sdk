@@ -40,6 +40,11 @@ The supported browser/WasmEdge entry points are:
 - browser edge shims: [`src/host/browserEdgeShims.js`](/Users/tj/software/space-data-module-sdk/src/host/browserEdgeShims.js)
 - browser host adapter: [`src/host/browserHost.js`](/Users/tj/software/space-data-module-sdk/src/host/browserHost.js)
 
+On the server path, [`loadModule(...)`](/Users/tj/software/space-data-module-sdk/src/host/isomorphicLoader.js)
+now chooses the raw WasmEdge command harness automatically for standalone
+artifacts with `_start`. The `--serve-plugin-invoke` runner protocol remains
+available for explicit runtime-host / runner-backed flows.
+
 ## What The Browser Shims Cover
 
 The browser edge shims map host capabilities onto browser-native surfaces:
@@ -60,7 +65,8 @@ shared profile:
 
 - standalone WASI imports
 - optional sync `sdn_host` imports
-- direct or command invoke surfaces
+- command invoke surfaces through `_start` on WasmEdge and direct or command
+  invoke surfaces in the browser harness
 - no Emscripten pthread imports
 
 Not browser-portable from the same raw guest binary:

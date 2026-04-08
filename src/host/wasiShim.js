@@ -7,7 +7,8 @@
  *
  * Covers the 11 imports observed across all SDN plugin standalone builds:
  *   clock_time_get, fd_write, fd_read, fd_close, fd_seek, fd_fdstat_get,
- *   environ_sizes_get, environ_get, proc_exit, args_get, args_sizes_get
+ *   environ_sizes_get, environ_get, proc_exit, args_get, args_sizes_get,
+ *   random_get
  */
 
 const ERRNO_SUCCESS = 0;
@@ -38,6 +39,7 @@ export function createBrowserWasiShim(options = {}) {
     now: () => Date.now(),
     timeOrigin: 0,
   };
+  const cryptoApi = options.crypto ?? globalThis.crypto ?? null;
   const stdoutChunks = [];
   const stderrChunks = [];
   let stdinOffset = 0;
@@ -206,6 +208,14 @@ export function createBrowserWasiShim(options = {}) {
     return ERRNO_SUCCESS;
   }
 
+  function random_get(bufPtr, bufLen) {
+    if (!cryptoApi?.getRandomValues) {
+      return ERRNO_NOSYS;
+    }
+    cryptoApi.getRandomValues(mem8().subarray(bufPtr, bufPtr + bufLen));
+    return ERRNO_SUCCESS;
+  }
+
   function proc_exit(code) {
     if (logOutput) {
       flushOutput();
@@ -259,6 +269,7 @@ export function createBrowserWasiShim(options = {}) {
         environ_get,
         args_sizes_get,
         args_get,
+        random_get,
         proc_exit,
       },
     },
