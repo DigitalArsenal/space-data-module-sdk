@@ -1,9 +1,9 @@
 # AGENTS
 
-This is the canonical Space Data module repository. Use it to define and verify
-module contracts, manifest encoding, compiled artifact layout, host ABI
-surfaces, `sds.bundle`, signing records, encrypted transport envelopes, and the
-portable browser/WasmEdge loading story.
+This repo is the source of truth for authors building compliant Space Data
+modules. Use it to learn the contract, compile modules, validate artifacts,
+package `sds.bundle` files, sign or encrypt delivery records, and verify
+browser/WasmEdge portability.
 
 Nearest-file wins: read this file first, then follow the most specific child
 `AGENTS.md` in the directory you are editing.
@@ -29,29 +29,34 @@ Nearest-file wins: read this file first, then follow the most specific child
 - `docs/AGENTS.md`: normative docs and cross-link requirements.
 - `examples/AGENTS.md`: checked-in demos and runnable example expectations.
 
-## What Belongs Here
+## Primary Audience
 
-Change this repo when the task involves:
+These `AGENTS.md` files are for module authors and downstream integrators, not
+for ordinary SDK maintenance work. Treat the SDK internals as reference
+implementation unless the task explicitly says to change the SDK standard
+itself.
 
-- `PluginManifest.fbs`, manifest encoding/normalization, or standards-aware
-  validation.
-- Canonical module exports such as
-  `plugin_get_manifest_flatbuffer`,
-  `plugin_get_manifest_flatbuffer_size`,
-  `plugin_invoke_stream`,
-  and `_start`.
-- Compiler behavior, embedded manifest generation, runtime target inference, or
-  portable artifact layout.
-- `sds.bundle` encoding, parsing, or vector generation.
-- Module signing records, encrypted delivery envelopes, deployment metadata, or
-  transport protection helpers.
-- Host capabilities, the `sdn_host` sync import ABI, Node reference host
-  behavior, browser harnesses, WasmEdge launch behavior inside the SDK, or
-  isomorphic browser/WasmEdge artifact loading.
-- Runtime-host row/region storage and binary FlatBuffer streaming standards.
+## Use This Repo To Build Modules
+
+Use this repo when you need to:
+
+- Start from a known-good module shape.
+- Compile source into a compliant `.wasm` artifact.
+- Validate a manifest or built artifact.
+- Follow the canonical `dist/isomorphic/module.wasm` layout.
+- Build one-file `sds.bundle` delivery artifacts.
+- Use browser or WasmEdge harnesses to test the same artifact.
+- Apply signing, deployment authorization, or encrypted transport helpers.
+- Follow the binary FlatBuffer streaming contract.
 
 ## What Does Not Belong Here
 
+- Ordinary module-authoring work should usually happen in your own module repo,
+  using this repo’s examples, CLI, docs, and exported helpers.
+- Do not edit `src/*` here just to build your own module. Prefer public APIs,
+  examples, and the CLI.
+- Only change SDK internals when you are explicitly changing the standard for
+  all module authors.
 - Flow composition, runtime orchestration, flow launch plans, or workspace
   startup belong in `sdn-flow`.
 - Application behavior, scene integration, UI flows, and standards ingestion in
@@ -62,7 +67,7 @@ Change this repo when the task involves:
 - SDS schema source content belongs in the standards/schema repos; this repo
   consumes canonical schema names and file identifiers.
 
-## Canonical Module Contract
+## Canonical Module Contract For Authors
 
 Every compliant module produced here should satisfy all of the following:
 
@@ -105,9 +110,20 @@ Every compliant module produced here should satisfy all of the following:
 - Do not benchmark 1 GiB by constructing one giant invoke envelope. Benchmark
   chunked stream ingest instead.
 
-## Required Verification
+## Recommended Author Workflow
 
-Run these before calling work complete:
+1. Start from the closest example under `examples/`.
+2. Define a manifest that round-trips and validates.
+3. Compile through `compileModuleFromSource(...)` or
+   `npx space-data-module compile ...`.
+4. Validate the artifact with the compliance tooling.
+5. If needed, test the same artifact in browser and WasmEdge.
+6. If needed, bundle, sign, or encrypt using the public helpers.
+
+## Verification Recipes
+
+Run these when you need confidence that your module or a deliberate SDK contract
+change is correct:
 
 - Always run:
   - `npm test`
@@ -127,7 +143,7 @@ Run these before calling work complete:
   - `npm run test:module-stream`
   - `node --test test/flatsql-local-node.test.js`
 
-## Practical Entry Points
+## Practical Entry Points For Authors
 
 - `src/manifest`: manifest schema codecs and normalization.
 - `src/compliance`: module compliance and standards validation.
@@ -140,3 +156,6 @@ Run these before calling work complete:
   deployment protection metadata.
 - `docs/`: normative docs for publication, streaming, testing, and isomorphism.
 - `examples/`: runnable demos that define the intended UX for consumers.
+
+If you are only building your own module, prefer reading these surfaces over
+editing them.

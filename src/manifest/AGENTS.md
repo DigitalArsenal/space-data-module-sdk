@@ -1,18 +1,15 @@
 # AGENTS
 
-You are in `src/manifest`, which owns the manifest schema codecs and
-normalization rules.
+This directory is the reference implementation for manifest encoding,
+normalization, and round-trip behavior.
 
-## Rules
+## What Authors Should Use It For
 
 - Keep manifest encode/decode round-trips stable.
 - Prefer canonical SDS schema names and file identifiers; do not add repo-local
   aliases when a standards name already exists.
-- If you change a manifest field or normalization rule, update the compiler,
-  compliance checks, and any affected examples/tests together.
 
-## Check Before You Finish
+## Note
 
-- `npm test`
-- `npm run check:compliance`
-- `node --test test/module-sdk.test.js test/compliance.test.js`
+Use the public manifest helpers from this repo to build manifests. Only edit
+this directory when you are intentionally changing the manifest standard.

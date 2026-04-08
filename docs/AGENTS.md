@@ -3,7 +3,7 @@
 Apply the root `AGENTS.md` first. The docs in this repo are normative whenever
 they use words like "canonical", "required", or "must".
 
-## Documentation Rules
+## What Authors Should Expect From These Docs
 
 - When behavior changes, update the relevant doc in the same change. Do not let
   README, examples, and normative docs drift.
@@ -16,11 +16,14 @@ they use words like "canonical", "required", or "must".
 - Keep testing claims aligned with `docs/testing-harness.md`.
 - If you change user-facing behavior, update the nearest example README as well.
 
-## Cross-Link Expectations
+## Read These First
 
-- User-facing feature changes should usually touch `README.md` plus one focused
-  doc file.
-- If an example is the proof point for a feature, link the example from the doc
-  and the doc from the example README.
-- Be explicit about boundaries. If something is not browser-isomorphic or not
-  part of the canonical contract, say so plainly.
+- `docs/browser-wasmedge-isomorphic.md`
+- `docs/flatsql-streaming-standard.md`
+- `docs/module-publication-standard.md`
+- `docs/testing-harness.md`
+
+## Note
+
+If you are only authoring a module, prefer following these docs over editing
+them. Edit docs here only when the canonical guidance itself needs to change.

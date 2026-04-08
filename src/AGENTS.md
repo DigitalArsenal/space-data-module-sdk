@@ -1,9 +1,9 @@
 # AGENTS
 
-Apply the root `AGENTS.md` first. This file routes source edits to the correct
-subsystem.
+Apply the root `AGENTS.md` first. This file is a map for module authors reading
+the SDK source, not a prompt to edit SDK internals by default.
 
-## Source Routing
+## Use `src/` As A Reference Map
 
 - `src/manifest`, `src/compliance`, `src/standards`: manifest shape, type refs,
   standards validation, and compliance warnings/errors.
@@ -23,11 +23,10 @@ subsystem.
 - `src/generated`: generated code. Do not hand-edit unless regeneration is part
   of the task and you update the generation path or fixtures as needed.
 
-## Working Rules
+## Author Rules
 
-- Keep module contracts portable unless the task is explicitly runtime-specific.
-- Prefer changes in the smallest subsystem that owns the behavior.
-- If a change crosses compiler, host, and docs, update each owner explicitly
-  rather than hiding policy in one layer.
-- Add or update tests near the owning subsystem and then wire them into the
-  repo-level verification set in `test/AGENTS.md`.
+- Prefer public APIs and examples over editing `src/*`.
+- Read the nearest child `AGENTS.md` to understand which source files define the
+  contract you are using.
+- Only edit internals here when the task explicitly says to change the SDK
+  standard for everyone.

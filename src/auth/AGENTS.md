@@ -1,15 +1,13 @@
 # AGENTS
 
-You are in `src/auth`, which owns deployment authorization, signing helpers,
-and related record handling used by module distribution.
+This directory is the reference implementation for deployment authorization and
+signing helpers used by compliant module distribution.
 
-## Rules
+## What Authors Should Use It For
 
 - Keep signing and authorization flows deterministic and explicit.
 - Do not invent app-local signature records when a repo-level contract belongs
   here.
-- When auth changes affect transport or deployment plans, update the related
-  surfaces together rather than splitting incompatible changes across repos.
 
 ## Related Surfaces
 
@@ -18,8 +16,7 @@ and related record handling used by module distribution.
 - `test/transport-records.test.js`
 - `test/deployment-plan.test.js`
 
-## Check Before You Finish
+## Note
 
-- `npm test`
-- `npm run check:compliance`
-- `node --test test/transport-records.test.js test/deployment-plan.test.js`
+Use the exported helpers here rather than inventing your own signing records.
+Only edit this directory when you are intentionally changing the auth contract.

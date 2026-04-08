@@ -1,12 +1,15 @@
 # AGENTS
 
-Apply the root and `src/AGENTS.md` files first.
+Apply the root and `src/AGENTS.md` files first. This directory contains the
+author-facing harnesses and streaming helpers.
 
-## Area Ownership
+## What Authors Should Use From Here
 
-This directory owns SDK test harnesses and runtime-facing helper surfaces used
-by examples and downstream consumers: browser harnesses, generic process invoke
-clients, runtime-matrix helpers, and resident-module FlatBuffer pumps.
+- `createBrowserModuleHarness(...)` is the browser-side proof path for shared
+  standalone artifacts.
+- `createModuleHarness(...)` is the generic process-side harness.
+- `createModuleFlatBufferStreamPump(...)` is the canonical no-JSON path for
+  streaming size-prefixed FlatBuffer frames into a resident module instance.
 
 ## Harness Rules
 
@@ -19,15 +22,13 @@ clients, runtime-matrix helpers, and resident-module FlatBuffer pumps.
 - Avoid hiding stateful behavior inside one-off demos; if a harness contract is
   real, test it here.
 
-## Key Files
+## Key Files To Read
 
 - `browserModuleHarness.js`
 - `moduleFlatbufferStreamPump.js`
 - `processInvoke.js`
 
-## Verification
+## Note
 
-- `node --test test/browser-harness.test.js`
-- `node --test test/isomorphic-loader.test.js`
-- `npm run test:module-stream`
-- `node --test test/process-invoke.test.js`
+Use these helpers from your module repo or app harnesses. Only edit them when
+you are intentionally changing the SDK testing/runtime contract.

@@ -1,18 +1,16 @@
 # AGENTS
 
-You are in `src/compliance`, which defines what counts as a compliant module or
+This directory is the reference policy for what counts as a compliant module or
 artifact.
 
-## Rules
+## What Authors Should Use It For
 
-- Treat this directory as policy, not convenience code.
-- When tightening validation, update tests and error messages together so the
-  failure mode is actionable.
-- When relaxing validation, make sure the compiler, docs, and examples still
-  describe the broader contract accurately.
+- Use the CLI and public validation helpers to understand whether a manifest or
+  artifact is compliant.
+- Read this directory when you need to know why a module was rejected.
+- Prefer fixing your module manifest or build output before changing policy here.
 
-## Check Before You Finish
+## Note
 
-- `npm test`
-- `npm run check:compliance`
-- `node --test test/module-sdk.test.js test/compliance.test.js`
+Only edit this directory when you are intentionally changing the compliance
+standard for all module authors.

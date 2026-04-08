@@ -1,8 +1,9 @@
 # AGENTS
 
-Apply the root `AGENTS.md` first. This directory owns verification strategy.
+Apply the root `AGENTS.md` first. This directory is the verification cookbook
+module authors can borrow from.
 
-## Test Matrix
+## Verification Recipes
 
 - Always run:
   - `npm test`
@@ -34,11 +35,10 @@ Apply the root `AGENTS.md` first. This directory owns verification strategy.
 - `SPACE_DATA_MODULE_SDK_ENABLE_RUNTIME_MATRIX=1` enables the broader runtime
   matrix suite.
 
-## Test Design Rules
+## Note
 
 - Skip cleanly when external dependencies such as WasmEdge or sibling plugin
   artifacts are unavailable.
-- Prefer one focused regression test per contract change over broad incidental
-  rewrites.
-- Keep checked-in fixture paths aligned with the canonical module repo layout,
-  especially `dist/isomorphic/module.wasm`.
+- If you are only authoring a module, use these tests as patterns and recipes.
+- Only change this directory when you are intentionally changing the SDK
+  verification contract.

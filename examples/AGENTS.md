@@ -3,7 +3,7 @@
 Apply the root `AGENTS.md` first. Examples are checked-in proofs of how the SDK
 is intended to be used.
 
-## Example Rules
+## How Authors Should Use These Examples
 
 - Keep examples runnable from the repo without hidden setup beyond documented
   toolchain requirements.
@@ -16,9 +16,7 @@ is intended to be used.
 - If an example emits generated artifacts, keep their location aligned with the
   canonical module repo layout.
 
-## When Updating Examples
+## Note
 
-- Update the example README together with code changes.
-- Keep file paths, commands, and expected artifact names exact.
-- Do not leave examples on deprecated APIs if the root docs describe a newer
-  canonical path.
+Start from the nearest example instead of editing SDK internals. Only change the
+examples here when the canonical example path itself needs to change.

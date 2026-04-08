@@ -1,12 +1,15 @@
 # AGENTS
 
-Apply the root and `src/AGENTS.md` files first.
+Apply the root and `src/AGENTS.md` files first. This directory shows the
+host-owned storage and ingest path available to module authors.
 
-## Area Ownership
+## What Authors Should Take From This Directory
 
-This directory owns the canonical runtime-host storage model: row handles,
-region handles, FlatSQL-backed storage, and binary FlatBuffer ingest on the host
-side.
+- Host-owned durable identity is `(schemaFileId, rowId)` for rows and
+  `(regionId, recordIndex)` for aligned-binary regions.
+- The canonical ingest path is direct FlatBuffer bytes, not JSON.
+- If the host owns persistence, use these helpers. If a module owns state, keep
+  the stream binary and use the resident-module pump path from `src/testing`.
 
 ## Storage And Streaming Rules
 
@@ -19,14 +22,13 @@ side.
 - If a resident module owns state, keep the stream binary and push into the
   module through the harness/pump path rather than inventing JSON wrappers.
 
-## Key Files
+## Key Files To Read
 
 - `flatbufferStreamIngestor.js`
 - `flatsqlRuntimeStore.js`
 - `index.js`
 
-## Verification
+## Note
 
-- `npm run test:stream-ingest`
-- `node --test test/flatsql-local-node.test.js`
-- `npm run benchmark:stream-1gib` for large-stream changes
+Do not edit this directory just to store data for one module. Use the exported
+helpers unless you are intentionally changing the runtime-host contract.

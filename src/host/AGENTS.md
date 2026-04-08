@@ -1,14 +1,17 @@
 # AGENTS
 
-Apply the root and `src/AGENTS.md` files first.
+Apply the root and `src/AGENTS.md` files first. This directory explains the
+host/runtime boundary that compliant modules can rely on.
 
-## Area Ownership
+## What Authors Should Take From This Directory
 
-This directory owns the Node reference host, browser host, browser edge shims,
-WASI shims, the sync `sdn_host` ABI bridge, WasmEdge launch planning, and the
-isomorphic loader path.
+- The portable shared path is standalone WASI, optionally plus `sdn_host`.
+- Browser helpers here are host-side shims and harnesses, not proof that raw
+  WasmEdge-native guest imports are browser-portable.
+- The isomorphic loader and browser harness show how the same artifact is meant
+  to run in both places.
 
-## Host Rules
+## Host Rules Authors Should Follow
 
 - Shared browser/WasmEdge artifacts must stay within standalone WASI plus the
   optional `sdn_host` bridge. Raw WasmEdge-native extension imports are not
@@ -20,7 +23,7 @@ isomorphic loader path.
 - Scope host capabilities tightly: filesystem roots, network allowlists, TLS,
   exec, timers, and crypto should stay explicit.
 
-## Key Files
+## Key Files To Read
 
 - `abi.js`
 - `browserEdgeShims.js`
@@ -29,11 +32,7 @@ isomorphic loader path.
 - `nodeHost.js`
 - `wasiShim.js`
 
-## Verification
+## Note
 
-- `node --test test/node-host.test.js test/host-abi.test.js`
-- `node --test test/browser-harness.test.js test/isomorphic-loader.test.js`
-- `node --test test/process-invoke.test.js`
-- `node --test test/wasmedge-runner-build.test.js`
-- `node --test test/wasmedge-runner-runtime.test.js` when WasmEdge behavior is
-  part of the change
+Prefer using the exported host and harness surfaces rather than editing these
+files unless the task is explicitly to change the SDK host contract.
