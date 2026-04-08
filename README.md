@@ -189,6 +189,11 @@ the preferred server-side target when the guest needs network-oriented runtime
 features such as sockets or TLS. Plain `wasi` remains the strict portability
 baseline; `wasmedge` is the practical higher-capability target.
 
+If a manifest declares `runtimeTargets: ["browser", "wasmedge"]`, this SDK
+treats that as the explicit "one binary for both" profile. That pair now
+defaults to a shared `single-thread` artifact so the compiled wasm can be loaded
+unchanged by the browser harness and the WasmEdge harness.
+
 ## WasmEdge Pthreads
 
 `space-data-module-sdk` is also the source of truth for module thread-model
@@ -197,6 +202,7 @@ selection.
 - `compileModuleFromSource({ threadModel })` accepts an explicit thread model.
 - If `threadModel` is omitted, the SDK resolves it from `manifest.runtimeTargets`.
 - `runtimeTargets: ["wasmedge"]` defaults to `emscripten-pthreads`.
+- `runtimeTargets: ["browser", "wasmedge"]` defaults to `single-thread`.
 - Other targets currently default to `single-thread`.
 
 WasmEdge-targeted pthread builds do not use the embedded `sdn-emception`
@@ -214,10 +220,31 @@ If a runtime cannot interoperate with the guest pthread contract directly,
 document that as a wrapper requirement instead of changing the guest artifact
 semantics.
 
+## Browser + WasmEdge Isomorphism
+
+The supported isomorphic profile and browser edge shims are documented in
+[`docs/browser-wasmedge-isomorphic.md`](./docs/browser-wasmedge-isomorphic.md).
+
+The checked-in same-artifact demo lives in
+[`examples/isomorphic-loader`](./examples/isomorphic-loader):
+
+- [`build-demo.mjs`](./examples/isomorphic-loader/build-demo.mjs) compiles the
+  shared artifact
+- [`browser-demo.html`](./examples/isomorphic-loader/browser-demo.html) and
+  [`browser-demo.mjs`](./examples/isomorphic-loader/browser-demo.mjs) load that
+  artifact in the browser harness with browser edge shims
+- [`wasmedge-demo.mjs`](./examples/isomorphic-loader/wasmedge-demo.mjs) loads
+  that same artifact in WasmEdge
+
 ## Testing
 
 This repo now exposes a manifest-driven harness generator from
 `space-data-module-sdk/testing` and two complementary integration suites:
+
+- browser/isomorphic helpers:
+  - `createBrowserModuleHarness(...)`
+  - `detectArtifactProfile(...)`
+  - `loadModule(...)`
 
 - shared process-level helpers for command-surface runtimes:
   - `createPluginInvokeProcessClient(...)`

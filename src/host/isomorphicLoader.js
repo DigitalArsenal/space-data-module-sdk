@@ -36,32 +36,40 @@ export async function loadModule(options = {}) {
     return createBrowserModuleHarness(options);
   }
 
-  // Server-side: dynamically import the process-based harness
   const { createModuleHarness } = await import("../testing/moduleHarness.js");
-
-  // If we got raw bytes/URL, we need to figure out the launch plan
   const source = options.wasmSource;
-  let wasmPath;
-
-  if (typeof source === "string") {
-    // Assume it's a file path on the server side
-    wasmPath = source;
-  } else {
+  if (typeof source !== "string") {
     throw new TypeError(
       "Server-side isomorphic loader expects a file path string for wasmSource.",
     );
   }
 
   const runtimeKind = options.runtimeKind ?? "wasmedge";
+  if (runtimeKind === "wasmedge") {
+    return createModuleHarness({
+      runtime: {
+        kind: "wasmedge",
+        wasmPath: source,
+        wasmEdgeBinary: options.wasmEdgeBinary,
+        wasmEdgeRunnerBinary: options.wasmEdgeRunnerBinary,
+        enableThreads: options.enableThreads,
+        env: options.env,
+        cwd: options.cwd,
+        hostProfile: options.hostProfile,
+        modules: options.modules,
+        defaultModuleId: options.defaultModuleId,
+        metadata: options.metadata,
+      },
+    });
+  }
 
   return createModuleHarness({
     runtime: {
       kind: runtimeKind,
-      command: runtimeKind === "wasmedge" ? "wasmedge" : "node",
-      args:
-        runtimeKind === "wasmedge"
-          ? [wasmPath]
-          : [wasmPath],
+      command: options.command ?? runtimeKind,
+      args: options.args ?? [source],
+      env: options.env,
+      cwd: options.cwd,
       hostProfile: options.hostProfile,
       modules: options.modules,
       defaultModuleId: options.defaultModuleId,

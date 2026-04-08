@@ -1,6 +1,6 @@
 {
   "name": "space-data-module-sdk",
-  "version": "0.5.18",
+  "version": "0.5.19",
   "description": "Module SDK for building, validating, signing, and deploying WebAssembly modules on the Space Data Network.",
   "type": "module",
   "types": "./src/index.d.ts",
@@ -36,6 +36,7 @@
       "default": "./src/runtime-host/index.js"
     },
     "./host/browser": "./src/host/browserHost.js",
+    "./host/browser-edge-shims": "./src/host/browserEdgeShims.js",
     "./host/wasi-shim": "./src/host/wasiShim.js",
     "./host/isomorphic": "./src/host/isomorphicLoader.js",
     "./testing/browser": "./src/testing/browserModuleHarness.js",

@@ -59,6 +59,60 @@ export function detectArtifactProfile(wasmModule) {
   return "unknown";
 }
 
+async function compileWasmModule(source) {
+  if (source instanceof WebAssembly.Module) {
+    return source;
+  }
+  if (source instanceof Response) {
+    return WebAssembly.compileStreaming(source);
+  }
+  if (typeof source === "string") {
+    return WebAssembly.compileStreaming(fetch(source));
+  }
+  const bytes = source instanceof ArrayBuffer ? new Uint8Array(source) : source;
+  return WebAssembly.compile(bytes);
+}
+
+async function instantiateBrowserModule(options = {}) {
+  const wasi = createBrowserWasiShim({
+    args: options.args ?? [],
+    env: options.env ?? {},
+    stdinBytes: options.stdinBytes ?? new Uint8Array(),
+    logOutput: options.logOutput === true,
+    performance: options.performance,
+  });
+  const importObject = { ...wasi.imports };
+  const moduleImports = WebAssembly.Module.imports(options.wasmModule);
+  const needsHostBridge = moduleImports.some(
+    (entry) => entry.module === DEFAULT_HOSTCALL_IMPORT_MODULE,
+  );
+
+  let instance = null;
+  let bridge = null;
+  if (needsHostBridge) {
+    const dispatch = createNodeHostSyncDispatcher(options.host);
+    bridge = createJsonHostcallBridge({
+      dispatch,
+      getMemory: () => instance.exports.memory,
+    });
+    Object.assign(importObject, bridge.imports);
+  }
+
+  instance = await WebAssembly.instantiate(options.wasmModule, importObject);
+  if (instance.exports.memory) {
+    wasi.setMemory(instance.exports.memory);
+  }
+  if (instance.exports._initialize) {
+    instance.exports._initialize();
+  }
+
+  return {
+    instance,
+    bridge,
+    wasi,
+  };
+}
+
 /**
  * Create a browser-side module harness for a standalone WASI artifact.
  *
@@ -72,21 +126,7 @@ export function detectArtifactProfile(wasmModule) {
  */
 export async function createBrowserModuleHarness(options = {}) {
   const host = options.host ?? createBrowserHost(options.hostOptions);
-
-  // --- Compile the module ---
-  let wasmModule;
-  const source = options.wasmSource;
-  if (source instanceof WebAssembly.Module) {
-    wasmModule = source;
-  } else if (source instanceof Response) {
-    wasmModule = await WebAssembly.compileStreaming(source);
-  } else if (typeof source === "string") {
-    wasmModule = await WebAssembly.compileStreaming(fetch(source));
-  } else {
-    const bytes =
-      source instanceof ArrayBuffer ? new Uint8Array(source) : source;
-    wasmModule = await WebAssembly.compile(bytes);
-  }
+  const wasmModule = await compileWasmModule(options.wasmSource);
 
   const profile = detectArtifactProfile(wasmModule);
   const moduleExports = WebAssembly.Module.exports(wasmModule);
@@ -96,62 +136,54 @@ export async function createBrowserModuleHarness(options = {}) {
   const hasCommand = exportNames.has(DefaultInvokeExports.commandSymbol);
   const surface =
     options.surface ?? (hasDirectInvoke ? "direct" : hasCommand ? "command" : "direct");
+  if (profile === "emscripten") {
+    throw new Error(
+      "Browser harness only supports standalone WASI or sdn_host artifacts. " +
+        'Compile shared browser/WasmEdge modules with runtimeTargets: ["browser", "wasmedge"] ' +
+        'or override threadModel to "single-thread".',
+    );
+  }
 
-  // --- Build import object ---
-  const wasi = createBrowserWasiShim({
-    args: options.args ?? [],
-    env: options.env ?? {},
+  const activeContext = await instantiateBrowserModule({
+    wasmModule,
+    host,
+    args: options.args,
+    env: options.env,
+    performance: options.performance ?? host?.performance,
+    logOutput: options.logOutput === true,
   });
-
-  const importObject = { ...wasi.imports };
-
-  // Add sdn_host bridge if the module imports it
-  let bridge = null;
-  const moduleImports = WebAssembly.Module.imports(wasmModule);
-  const needsHostBridge = moduleImports.some(
-    (i) => i.module === DEFAULT_HOSTCALL_IMPORT_MODULE,
-  );
-
-  if (needsHostBridge) {
-    const dispatch = createNodeHostSyncDispatcher(host);
-    bridge = createJsonHostcallBridge({
-      dispatch,
-      getMemory: () => instance.exports.memory,
-    });
-    Object.assign(importObject, bridge.imports);
-  }
-
-  // --- Instantiate ---
-  const { instance } = await WebAssembly.instantiate(wasmModule, importObject);
-  wasi.setMemory(instance.exports.memory);
-
-  // Call _initialize for WASI reactors (standalone modules that export it)
-  if (instance.exports._initialize) {
-    instance.exports._initialize();
-  }
+  const { instance, bridge, wasi } = activeContext;
 
   // --- Invoke helpers ---
-
-  const alloc = instance.exports[DefaultInvokeExports.allocSymbol];
-  const free = instance.exports[DefaultInvokeExports.freeSymbol];
-  const invokeStream = instance.exports[DefaultInvokeExports.invokeSymbol];
-  const memory = () => instance.exports.memory;
-
   function invokeDirectRaw(requestBytes) {
+    const alloc = instance.exports[DefaultInvokeExports.allocSymbol];
+    const free = instance.exports[DefaultInvokeExports.freeSymbol];
+    const invokeStream = instance.exports[DefaultInvokeExports.invokeSymbol];
+    const memory = instance.exports.memory;
+    if (
+      typeof alloc !== "function" ||
+      typeof free !== "function" ||
+      typeof invokeStream !== "function" ||
+      !memory
+    ) {
+      throw new Error(
+        "Direct browser invoke requires plugin_alloc, plugin_free, plugin_invoke_stream, and memory exports.",
+      );
+    }
     const reqLen = requestBytes.length;
     const reqPtr = alloc(reqLen);
     if (!reqPtr) throw new Error("plugin_alloc returned null for request.");
 
-    new Uint8Array(memory().buffer, reqPtr, reqLen).set(requestBytes);
+    new Uint8Array(memory.buffer, reqPtr, reqLen).set(requestBytes);
 
     // Allocate space for the response length output
     const outLenPtr = alloc(4);
     if (!outLenPtr) throw new Error("plugin_alloc returned null for response length.");
 
-    new DataView(memory().buffer).setUint32(outLenPtr, 0, true);
+    new DataView(memory.buffer).setUint32(outLenPtr, 0, true);
 
     const resPtr = invokeStream(reqPtr, reqLen, outLenPtr);
-    const resLen = new DataView(memory().buffer).getUint32(outLenPtr, true);
+    const resLen = new DataView(memory.buffer).getUint32(outLenPtr, true);
 
     free(reqPtr, reqLen);
     free(outLenPtr, 4);
@@ -160,32 +192,49 @@ export async function createBrowserModuleHarness(options = {}) {
       throw new Error("plugin_invoke_stream returned null response.");
     }
 
-    const responseBytes = new Uint8Array(memory().buffer, resPtr, resLen).slice();
+    const responseBytes = new Uint8Array(memory.buffer, resPtr, resLen).slice();
     free(resPtr, resLen);
     return responseBytes;
   }
 
-  function invokeCommandRaw(stdinBytes) {
-    // For command-surface modules, we re-instantiate with stdin piped in
-    // This is a simplified approach; command modules read stdin and write stdout
-    throw new Error(
-      "Command-surface browser invoke requires module re-instantiation. " +
-        "Use direct-surface modules for browser harness, or use the server-side harness.",
-    );
+  async function invokeCommandRaw(stdinBytes) {
+    const commandContext = await instantiateBrowserModule({
+      wasmModule,
+      host,
+      args: options.args,
+      env: options.env,
+      stdinBytes,
+      performance: options.performance ?? host?.performance,
+      logOutput: false,
+    });
+    try {
+      const commandExport = commandContext.instance.exports[DefaultInvokeExports.commandSymbol];
+      if (typeof commandExport !== "function") {
+        throw new Error(
+          `Command-surface browser invoke requires the ${DefaultInvokeExports.commandSymbol} export.`,
+        );
+      }
+      commandExport();
+    } catch (error) {
+      if (!(error instanceof WasiExitError) || error.code !== 0) {
+        throw error;
+      }
+    }
+    return commandContext.wasi.stdout;
   }
 
   // --- Public API ---
 
-  function invokeRaw(requestBytes) {
+  async function invokeRaw(requestBytes) {
     if (surface === "command") {
       return invokeCommandRaw(requestBytes);
     }
     return invokeDirectRaw(requestBytes);
   }
 
-  function invoke(request) {
+  async function invoke(request) {
     const requestBytes = encodePluginInvokeRequest(request);
-    const responseBytes = invokeRaw(requestBytes);
+    const responseBytes = await invokeRaw(requestBytes);
     return decodePluginInvokeResponse(responseBytes);
   }
 
@@ -200,7 +249,7 @@ export async function createBrowserModuleHarness(options = {}) {
     const size = getSizeExport();
     if (!ptr || !size) return null;
 
-    return new Uint8Array(memory().buffer, ptr, size).slice();
+    return new Uint8Array(instance.exports.memory.buffer, ptr, size).slice();
   }
 
   function destroy() {

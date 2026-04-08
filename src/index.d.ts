@@ -1037,6 +1037,62 @@ export interface HostcallBridge {
   getLastResponseJson(): unknown;
 }
 
+export interface BrowserFilesystemShim {
+  filesystemRoot?: string;
+  resolvePath(path?: string): string;
+  readFile(
+    path: string,
+    options?: { encoding?: string | null },
+  ): Promise<string | Uint8Array>;
+  writeFile(
+    path: string,
+    value: Uint8Array | ArrayBuffer | ArrayBufferView | string,
+    options?: { encoding?: string | null },
+  ): Promise<{ path: string }>;
+  appendFile(
+    path: string,
+    value: Uint8Array | ArrayBuffer | ArrayBufferView | string,
+    options?: { encoding?: string | null },
+  ): Promise<{ path: string }>;
+  deleteFile(path: string): Promise<{ path: string }>;
+  mkdir(
+    path: string,
+    options?: { recursive?: boolean },
+  ): Promise<{ path: string }>;
+  readdir(path?: string): Promise<NodeHostFilesystemEntry[]>;
+  stat(path: string): Promise<NodeHostFilesystemStat>;
+  rename(
+    fromPath: string,
+    toPath: string,
+  ): Promise<{ from: string; to: string }>;
+}
+
+export interface BrowserEdgeShims {
+  fetch?: (...args: any[]) => Promise<any>;
+  WebSocket?: any;
+  crypto?: any;
+  performance?: {
+    now(): number;
+    timeOrigin: number;
+  };
+  filesystem?: BrowserFilesystemShim;
+}
+
+export interface BrowserHostOptions {
+  capabilities?: string[];
+  edgeShims?: BrowserEdgeShims;
+  contextStore?: Map<string, Map<string, unknown>>;
+  fetch?: (...args: any[]) => Promise<any>;
+  WebSocket?: any;
+  crypto?: any;
+  performance?: {
+    now(): number;
+    timeOrigin: number;
+  };
+  filesystem?: BrowserFilesystemShim;
+  filesystemRoot?: string;
+}
+
 export interface NodeHostOptions {
   manifest?: PluginManifest;
   grantedCapabilities?: string[];
@@ -1067,6 +1123,12 @@ export class HostCapabilityError extends Error {
 }
 
 export class HostFilesystemScopeError extends Error {
+  code: string;
+  requestedPath: string | null;
+  filesystemRoot: string | null;
+}
+
+export class BrowserFilesystemScopeError extends Error {
   code: string;
   requestedPath: string | null;
   filesystemRoot: string | null;
@@ -1322,14 +1384,93 @@ export class NodeHost {
   invoke(operation: string, params?: Record<string, any>): Promise<any>;
 }
 
+export class BrowserHost {
+  runtimeTarget: string;
+  filesystemRoot: string;
+  clock: {
+    now(): number;
+    monotonicNow(): number;
+    nowIso(): string;
+  };
+  random: {
+    bytes(length: number): Uint8Array;
+  };
+  timers: {
+    delay(ms: number): Promise<void>;
+  };
+  schedule: {
+    parse(expression: string): CronSchedule;
+    matches(expression: string | CronSchedule, date?: Date | number | string): boolean;
+    next(expression: string | CronSchedule, from?: Date | number | string): Date;
+  };
+  http: {
+    request<TBody = unknown>(options: NodeHostHttpRequest): Promise<NodeHostHttpResponse<TBody>>;
+  };
+  websocket: {
+    exchange<TBody = unknown>(options: {
+      url: string;
+      protocols?: string | string[];
+      message?: Uint8Array | ArrayBuffer | ArrayBufferView | string | null;
+      responseType?: "bytes" | "utf8" | "json";
+      timeoutMs?: number;
+      expectResponse?: boolean;
+    }): Promise<NodeHostWebSocketResponse<TBody>>;
+  };
+  context: {
+    get(scope: string, key: string): unknown;
+    set(scope: string, key: string, value: unknown): void;
+    delete(scope: string, key: string): void;
+    listKeys(scope: string): string[];
+    listScopes(): string[];
+  };
+  crypto: {
+    sha256(data: Uint8Array | ArrayBuffer | ArrayBufferView | string): Promise<Uint8Array>;
+    sha512(data: Uint8Array | ArrayBuffer | ArrayBufferView | string): Promise<Uint8Array>;
+    aesGcmEncrypt(options: {
+      key: Uint8Array | ArrayBuffer | ArrayBufferView;
+      plaintext: Uint8Array | ArrayBuffer | ArrayBufferView;
+      iv?: Uint8Array | ArrayBuffer | ArrayBufferView;
+    }): Promise<{ ciphertext: Uint8Array; iv: Uint8Array | ArrayBuffer | ArrayBufferView }>;
+    aesGcmDecrypt(options: {
+      key: Uint8Array | ArrayBuffer | ArrayBufferView;
+      ciphertext: Uint8Array | ArrayBuffer | ArrayBufferView;
+      iv: Uint8Array | ArrayBuffer | ArrayBufferView;
+    }): Promise<Uint8Array>;
+  };
+  filesystem: BrowserFilesystemShim;
+  constructor(options?: BrowserHostOptions);
+  listCapabilities(): string[];
+  listSupportedCapabilities(): string[];
+  listOperations(): string[];
+  hasCapability(capability: string): boolean;
+  assertCapability(capability: string, operation?: string | null): void;
+}
+
 export const NodeHostSupportedCapabilities: readonly string[];
 export const NodeHostSupportedOperations: readonly string[];
+export const BrowserHostSupportedCapabilities: readonly string[];
+export const BrowserHostSupportedOperations: readonly string[];
 export const DEFAULT_HOSTCALL_IMPORT_MODULE: string;
 export const HOSTCALL_STATUS_OK: number;
 export const HOSTCALL_STATUS_ERROR: number;
 export const NodeHostSyncHostcallOperations: readonly string[];
 
 export function createNodeHost(options?: NodeHostOptions): NodeHost;
+export function createBrowserHost(options?: BrowserHostOptions): BrowserHost;
+export function createMemoryFilesystemEdgeShim(options?: {
+  filesystemRoot?: string;
+}): BrowserFilesystemShim;
+export function createBrowserEdgeShims(options?: {
+  fetch?: (...args: any[]) => Promise<any>;
+  WebSocket?: any;
+  crypto?: any;
+  performance?: {
+    now(): number;
+    timeOrigin: number;
+  };
+  filesystem?: BrowserFilesystemShim;
+  filesystemRoot?: string;
+}): BrowserEdgeShims;
 export function parseCronExpression(expression: string): CronSchedule;
 export function matchesCronExpression(
   expression: string | CronSchedule,
@@ -1361,6 +1502,90 @@ export function createNodeHostSyncHostcallBridge(options: {
   maxRequestBytes?: number;
   maxResponseBytes?: number;
 }): HostcallBridge;
+export class WasiExitError extends Error {
+  code: number;
+}
+export interface BrowserWasiShim {
+  imports: Record<string, Record<string, (...args: number[]) => number>>;
+  setMemory(mem: { buffer: ArrayBuffer | SharedArrayBuffer }): void;
+  getMemory(): { buffer: ArrayBuffer | SharedArrayBuffer } | null;
+  flushOutput(): void;
+  stdout: Uint8Array;
+  stderr: Uint8Array;
+}
+export function createBrowserWasiShim(options?: {
+  args?: string[];
+  env?: Record<string, string>;
+  stdinBytes?: Uint8Array | ArrayBuffer | ArrayBufferView;
+  logOutput?: boolean;
+  performance?: {
+    now(): number;
+    timeOrigin: number;
+  };
+}): BrowserWasiShim;
+export interface BrowserModuleHarness {
+  runtime: {
+    kind: "browser";
+    profile: string;
+    surface: string;
+  };
+  instance: WebAssembly.Instance;
+  module: WebAssembly.Module;
+  host: BrowserHost;
+  bridge: HostcallBridge | null;
+  wasi: BrowserWasiShim;
+  invokeRaw(
+    requestBytes: Uint8Array | ArrayBuffer | ArrayBufferView,
+  ): Promise<Uint8Array>;
+  invoke(request: {
+    methodId?: string | null;
+    inputs?: HarnessInputFrame[];
+  }): Promise<{
+    statusCode: number;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    outputs: HarnessInputFrame[];
+  }>;
+  readManifest(): Uint8Array | null;
+  destroy(): void;
+}
+export function detectArtifactProfile(wasmModule: WebAssembly.Module): string;
+export function createBrowserModuleHarness(options?: {
+  wasmSource: Uint8Array | ArrayBuffer | string | WebAssembly.Module | unknown;
+  host?: BrowserHost;
+  hostOptions?: BrowserHostOptions;
+  args?: string[];
+  env?: Record<string, string>;
+  surface?: "direct" | "command";
+  performance?: {
+    now(): number;
+    timeOrigin: number;
+  };
+  logOutput?: boolean;
+}): Promise<BrowserModuleHarness>;
+export function loadModule(options?: {
+  wasmSource: Uint8Array | ArrayBuffer | string | WebAssembly.Module | unknown;
+  host?: BrowserHost;
+  hostOptions?: BrowserHostOptions;
+  args?: string[];
+  env?: Record<string, string | undefined>;
+  surface?: "direct" | "command";
+  runtimeKind?: "wasmedge" | "process";
+  wasmEdgeBinary?: string;
+  wasmEdgeRunnerBinary?: string;
+  enableThreads?: boolean;
+  hostProfile?: "runtime-host";
+  modules?: RuntimeHostTestModuleDefinition[];
+  defaultModuleId?: string;
+  metadata?: unknown;
+  command?: string;
+  cwd?: string;
+}): Promise<BrowserModuleHarness | ModuleHarness>;
+export function inspectModule(source: Uint8Array | ArrayBuffer | WebAssembly.Module): Promise<{
+  profile: string;
+  exports: string[];
+  imports: WebAssembly.ModuleImportDescriptor[];
+}>;
 
 // --- Runtime constants ---
 

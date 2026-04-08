@@ -499,7 +499,7 @@ test("non-string capability produces error", () => {
 test("browser runtime target rejects browser-impossible capabilities", () => {
   const m = createValidManifest();
   m.runtimeTargets = ["browser"];
-  m.capabilities = ["http", "filesystem", "process_exec"];
+  m.capabilities = ["http", "process_exec"];
   const report = validatePluginManifest(m);
   assert.equal(report.ok, false);
   assert.ok(
@@ -510,7 +510,15 @@ test("browser runtime target rejects browser-impossible capabilities", () => {
 test("browser runtime target accepts browser-safe capabilities", () => {
   const m = createValidManifest();
   m.runtimeTargets = ["browser"];
-  m.capabilities = ["clock", "random", "timers", "http", "websocket", "crypto_sign"];
+  m.capabilities = [
+    "clock",
+    "random",
+    "timers",
+    "filesystem",
+    "http",
+    "websocket",
+    "crypto_sign",
+  ];
   const report = validatePluginManifest(m);
   assert.equal(report.ok, true);
 });

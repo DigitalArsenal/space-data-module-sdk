@@ -317,6 +317,40 @@ export function createPublicationProtectionDemoSummary(options?: {
   };
 }): Promise<PublicationProtectionDemoSummary>;
 
+export interface BrowserModuleHarness {
+  runtime: {
+    kind: "browser";
+    profile: string;
+    surface: string;
+  };
+  instance: WebAssembly.Instance;
+  module: WebAssembly.Module;
+  host: unknown;
+  bridge: unknown;
+  wasi: {
+    imports: Record<string, Record<string, (...args: number[]) => number>>;
+    setMemory(mem: { buffer: ArrayBuffer | SharedArrayBuffer }): void;
+    getMemory(): { buffer: ArrayBuffer | SharedArrayBuffer } | null;
+    flushOutput(): void;
+    stdout: Uint8Array;
+    stderr: Uint8Array;
+  };
+  invokeRaw(
+    requestBytes: Uint8Array | ArrayBuffer | ArrayBufferView,
+  ): Promise<Uint8Array>;
+  invoke(request: {
+    methodId?: string | null;
+    inputs?: HarnessInputFrame[];
+  }): Promise<{
+    statusCode: number;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    outputs: HarnessInputFrame[];
+  }>;
+  readManifest(): Uint8Array | null;
+  destroy(): void;
+}
+
 export function generateManifestHarnessPlan(options: {
   manifest: PluginManifest;
   includeOptionalInputs?: boolean;
@@ -374,6 +408,22 @@ export function createWasmEdgeStreamProcessClient(options: {
 export function resolveModuleHarnessLaunchPlan(options: {
   runtime?: ModuleHarnessRuntimeDescriptor;
 } | ModuleHarnessRuntimeDescriptor): PluginInvokeProcessLaunchPlan;
+
+export function detectArtifactProfile(wasmModule: WebAssembly.Module): string;
+
+export function createBrowserModuleHarness(options?: {
+  wasmSource: Uint8Array | ArrayBuffer | string | WebAssembly.Module | unknown;
+  host?: unknown;
+  hostOptions?: unknown;
+  args?: string[];
+  env?: Record<string, string>;
+  surface?: "direct" | "command";
+  performance?: {
+    now(): number;
+    timeOrigin: number;
+  };
+  logOutput?: boolean;
+}): Promise<BrowserModuleHarness>;
 
 export function createModuleHarness(options: {
   runtime?: ModuleHarnessRuntimeDescriptor;

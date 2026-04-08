@@ -30,7 +30,6 @@ const ExternalInterfaceKindSet = new Set(Object.values(ExternalInterfaceKind));
 const ProtocolRoleSet = new Set(Object.values(ProtocolRole));
 const ProtocolTransportKindSet = new Set(Object.values(ProtocolTransportKind));
 const BrowserIncompatibleCapabilitySet = new Set([
-  "filesystem",
   "pipe",
   "network",
   "tcp",

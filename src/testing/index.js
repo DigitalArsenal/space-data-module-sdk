@@ -8,6 +8,10 @@ export {
   createPublicationProtectionDemoSummary,
 } from "./publicationProtectionDemo.js";
 export {
+  createBrowserModuleHarness,
+  detectArtifactProfile,
+} from "./browserModuleHarness.js";
+export {
   buildWasmEdgeSpawnEnv,
   createPluginInvokeProcessClient,
   createWasmEdgeStreamProcessClient,

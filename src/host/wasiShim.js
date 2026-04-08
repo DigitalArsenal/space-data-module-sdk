@@ -32,8 +32,15 @@ export class WasiExitError extends Error {
 export function createBrowserWasiShim(options = {}) {
   const args = options.args ?? [];
   const env = options.env ?? {};
+  const stdinBytes = new Uint8Array(options.stdinBytes ?? []);
+  const logOutput = options.logOutput === true;
+  const performanceApi = options.performance ?? globalThis.performance ?? {
+    now: () => Date.now(),
+    timeOrigin: 0,
+  };
   const stdoutChunks = [];
   const stderrChunks = [];
+  let stdinOffset = 0;
 
   let memory = null;
 
@@ -63,9 +70,11 @@ export function createBrowserWasiShim(options = {}) {
   function clock_time_get(clockId, _precisionBigInt, resultPtr) {
     let nanos;
     if (clockId === CLOCKID_REALTIME) {
-      nanos = BigInt(Math.round((performance.timeOrigin + performance.now()) * 1e6));
+      nanos = BigInt(
+        Math.round((performanceApi.timeOrigin + performanceApi.now()) * 1e6),
+      );
     } else if (clockId === CLOCKID_MONOTONIC) {
-      nanos = BigInt(Math.round(performance.now() * 1e6));
+      nanos = BigInt(Math.round(performanceApi.now() * 1e6));
     } else {
       return ERRNO_INVAL;
     }
@@ -93,9 +102,32 @@ export function createBrowserWasiShim(options = {}) {
     return ERRNO_SUCCESS;
   }
 
-  function fd_read(_fd, _iovsPtr, _iovsLen, nreadPtr) {
-    view().setUint32(nreadPtr, 0, true);
-    return ERRNO_BADF;
+  function fd_read(fd, iovsPtr, iovsLen, nreadPtr) {
+    if (fd !== 0) {
+      view().setUint32(nreadPtr, 0, true);
+      return ERRNO_BADF;
+    }
+
+    const dv = view();
+    const bytes = mem8();
+    let totalRead = 0;
+
+    for (let i = 0; i < iovsLen; i += 1) {
+      if (stdinOffset >= stdinBytes.length) {
+        break;
+      }
+      const base = iovsPtr + i * 8;
+      const ptr = dv.getUint32(base, true);
+      const len = dv.getUint32(base + 4, true);
+      const remaining = stdinBytes.length - stdinOffset;
+      const count = Math.min(len, remaining);
+      bytes.set(stdinBytes.subarray(stdinOffset, stdinOffset + count), ptr);
+      stdinOffset += count;
+      totalRead += count;
+    }
+
+    dv.setUint32(nreadPtr, totalRead, true);
+    return ERRNO_SUCCESS;
   }
 
   function fd_close(fd) {
@@ -175,8 +207,9 @@ export function createBrowserWasiShim(options = {}) {
   }
 
   function proc_exit(code) {
-    // Flush stdout/stderr to console before exiting
-    flushOutput();
+    if (logOutput) {
+      flushOutput();
+    }
     throw new WasiExitError(code);
   }
 
@@ -185,14 +218,18 @@ export function createBrowserWasiShim(options = {}) {
   function flushOutput() {
     if (stdoutChunks.length > 0) {
       const combined = concatChunks(stdoutChunks);
-      const text = new TextDecoder().decode(combined);
-      if (text) console.log(text);
+      if (logOutput) {
+        const text = new TextDecoder().decode(combined);
+        if (text) console.log(text);
+      }
       stdoutChunks.length = 0;
     }
     if (stderrChunks.length > 0) {
       const combined = concatChunks(stderrChunks);
-      const text = new TextDecoder().decode(combined);
-      if (text) console.warn(text);
+      if (logOutput) {
+        const text = new TextDecoder().decode(combined);
+        if (text) console.warn(text);
+      }
       stderrChunks.length = 0;
     }
   }

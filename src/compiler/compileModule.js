@@ -142,6 +142,9 @@ function resolveThreadModel({ manifest, threadModel } = {}) {
         .map((target) => String(target ?? "").trim().toLowerCase())
         .filter(Boolean)
     : [];
+  if (runtimeTargets.includes(RuntimeTarget.BROWSER)) {
+    return ModuleThreadModel.SINGLE_THREAD;
+  }
   if (runtimeTargets.includes(RuntimeTarget.WASMEDGE)) {
     return ModuleThreadModel.EMSCRIPTEN_PTHREADS;
   }

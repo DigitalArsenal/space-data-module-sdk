@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Isomorphic Browser Loader Demo</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "IBM Plex Sans", "Helvetica Neue", sans-serif;
+        background:
+          radial-gradient(circle at top left, #eef6ff, transparent 48%),
+          linear-gradient(135deg, #fbf6eb 0%, #f8fbff 100%);
+        color: #16324f;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 2rem;
+      }
+
+      main {
+        width: min(820px, 100%);
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(22, 50, 79, 0.12);
+        border-radius: 24px;
+        box-shadow: 0 18px 60px rgba(22, 50, 79, 0.12);
+        padding: 2rem;
+        backdrop-filter: blur(12px);
+      }
+
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 3vw, 3rem);
+        line-height: 1;
+      }
+
+      p {
+        max-width: 64ch;
+      }
+
+      button {
+        appearance: none;
+        border: 0;
+        border-radius: 999px;
+        background: #16324f;
+        color: #fff;
+        padding: 0.9rem 1.4rem;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      pre {
+        margin-bottom: 0;
+        padding: 1rem;
+        overflow: auto;
+        background: #0f2238;
+        color: #eef6ff;
+        border-radius: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Browser + WasmEdge Isomorphic Artifact</h1>
+      <p>
+        This page loads the exact same <code>generated/isomorphic-echo.wasm</code>
+        artifact that the WasmEdge demo runs. The browser host exposes edge shims
+        for filesystem, HTTP, WebSocket, timers, random, context, and crypto.
+      </p>
+      <button type="button" data-run>Run Browser Demo</button>
+      <pre data-output></pre>
+    </main>
+    <script type="module" src="./browser-demo.mjs"></script>
+  </body>
+</html>
