@@ -6,3 +6,8 @@ export * from "./capabilities.js";
 export * from "./deployment/index.js";
 export * from "./invoke/index.js";
 export * from "./runtime/index.js";
+export * from "./host/browserHost.js";
+export * from "./host/wasiShim.js";
+export * from "./host/abi.js";
+export * from "./host/isomorphicLoader.js";
+export { createBrowserModuleHarness, detectArtifactProfile } from "./testing/browserModuleHarness.js";

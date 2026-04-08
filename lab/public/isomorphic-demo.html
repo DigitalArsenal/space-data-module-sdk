@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Isomorphic WASM Plugin Demo</title>
+  <style>
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d37;
+      --text: #e4e4e7; --muted: #8b8d97; --accent: #6366f1;
+      --success: #22c55e; --error: #ef4444; --warn: #f59e0b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace; background: var(--bg); color: var(--text); padding: 1.5rem; line-height: 1.6; }
+    h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+    .subtitle { color: var(--muted); font-size: 0.85rem; margin-bottom: 1.5rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; }
+    .panel h2 { font-size: 1rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+    .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+    .badge-browser { background: #6366f133; color: var(--accent); }
+    .badge-wasmedge { background: #22c55e33; color: var(--success); }
+    .badge-match { background: #22c55e33; color: var(--success); }
+    .badge-mismatch { background: #ef444433; color: var(--error); }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem; }
+    select, button { font-family: inherit; font-size: 0.85rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem 0.75rem; }
+    select { width: 100%; margin-bottom: 1rem; }
+    button { cursor: pointer; transition: background 0.15s; }
+    button:hover { background: var(--border); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #5558e6; }
+    .output { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem; font-size: 0.8rem; max-height: 300px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+    .status { font-size: 0.8rem; margin-top: 0.5rem; }
+    .status-ok { color: var(--success); }
+    .status-err { color: var(--error); }
+    .status-loading { color: var(--warn); }
+    .controls { display: flex; gap: 0.75rem; align-items: end; margin-bottom: 1rem; }
+    .controls > div { flex: 1; }
+    .shim-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .shim-table th { text-align: left; color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--border); }
+    .shim-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
+    .shim-table tr:last-child td { border-bottom: none; }
+    #comparison { margin-bottom: 1.5rem; }
+    .full-width { grid-column: 1 / -1; }
+  </style>
+</head>
+<body>
+  <h1>Isomorphic WASM Plugin Demo</h1>
+  <p class="subtitle">
+    Same compiled artifact loaded in Browser (WASI shim) and WasmEdge (native WASI).
+    Shims: clock, random, fd_write, environ, args, proc_exit.
+  </p>
+
+  <div class="controls">
+    <div>
+      <label for="plugin-select">Plugin</label>
+      <select id="plugin-select">
+        <option value="">Loading plugins...</option>
+      </select>
+    </div>
+    <div>
+      <label for="artifact-select">Artifact</label>
+      <select id="artifact-select">
+        <option value="">Select a plugin first</option>
+      </select>
+    </div>
+    <div style="flex: 0 0 auto;">
+      <button id="run-btn" class="btn-primary" disabled>Run Isomorphic</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2><span class="badge badge-browser">BROWSER</span> Browser Harness</h2>
+      <div class="output" id="browser-output">Waiting...</div>
+      <div class="status" id="browser-status"></div>
+    </div>
+    <div class="panel">
+      <h2><span class="badge badge-wasmedge">WASMEDGE</span> WasmEdge Harness</h2>
+      <div class="output" id="wasmedge-output">Waiting...</div>
+      <div class="status" id="wasmedge-status"></div>
+    </div>
+  </div>
+
+  <div id="comparison" class="panel" style="display:none;">
+    <h2>Result Comparison</h2>
+    <div id="comparison-output" class="output"></div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>Module Inspection</h2>
+      <div class="output" id="inspect-output">Load a plugin to inspect...</div>
+    </div>
+    <div class="panel">
+      <h2>Active Shims</h2>
+      <table class="shim-table" id="shim-table">
+        <tr><th>WASI Import</th><th>Browser Shim</th></tr>
+        <tr><td>clock_time_get</td><td>performance.now() / timeOrigin</td></tr>
+        <tr><td>fd_write</td><td>console.log / console.warn</td></tr>
+        <tr><td>fd_read</td><td>EBADF (no stdin)</td></tr>
+        <tr><td>fd_close</td><td>no-op for 0,1,2</td></tr>
+        <tr><td>fd_seek</td><td>ESPIPE for stdio</td></tr>
+        <tr><td>fd_fdstat_get</td><td>CHARACTER_DEVICE</td></tr>
+        <tr><td>environ_sizes_get</td><td>in-memory env map</td></tr>
+        <tr><td>environ_get</td><td>in-memory env map</td></tr>
+        <tr><td>args_sizes_get</td><td>in-memory args array</td></tr>
+        <tr><td>args_get</td><td>in-memory args array</td></tr>
+        <tr><td>proc_exit</td><td>throw WasiExitError</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <script type="module" src="./isomorphic-demo.js"></script>
+</body>
+</html>

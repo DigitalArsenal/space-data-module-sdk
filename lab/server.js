@@ -25,7 +25,23 @@ const app = express();
 const port = Number(process.env.PORT ?? 4318);
 
 app.use(express.json({ limit: "20mb" }));
+
+// Cross-origin isolation headers for SharedArrayBuffer (needed by pthread builds)
+app.use((_req, res, next) => {
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+  next();
+});
+
 app.use(express.static(path.join(__dirname, "public")));
+
+// Serve WASM plugin artifacts from the plugins directory
+const pluginsDir = path.resolve(__dirname, "..", "..", "space-data-network-plugins", "packages");
+app.use("/plugins", express.static(pluginsDir, {
+  setHeaders(res) {
+    res.setHeader("Content-Type", "application/wasm");
+  },
+}));
 
 function parseManifest(input) {
   if (typeof input === "string") {
@@ -118,6 +134,64 @@ app.post("/api/demo/publication-protection", async (_request, response) => {
     response.json({ ok: true, summary });
   } catch (error) {
     response.status(400).json({ ok: false, error: error.message });
+  }
+});
+
+// WasmEdge invoke endpoint — same artifact, server-side runtime
+app.post("/api/wasmedge-invoke", async (request, response) => {
+  try {
+    const { spawnSync } = await import("node:child_process");
+    const wasmRelPath = request.body.wasmPath;
+    if (!wasmRelPath || typeof wasmRelPath !== "string") {
+      return response.status(400).json({ ok: false, error: "wasmPath is required." });
+    }
+    const wasmAbsPath = path.resolve(pluginsDir, wasmRelPath);
+    const stdinBase64 = request.body.stdinBase64 ?? "";
+    const stdinBytes = Buffer.from(stdinBase64, "base64");
+
+    const result = spawnSync("wasmedge", [wasmAbsPath], {
+      input: stdinBytes,
+      encoding: null,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+
+    if (result.error) {
+      return response.status(500).json({ ok: false, error: result.error.message });
+    }
+
+    response.json({
+      ok: true,
+      exitCode: result.status,
+      stdoutBase64: result.stdout ? Buffer.from(result.stdout).toString("base64") : "",
+      stderrText: result.stderr ? result.stderr.toString("utf8") : "",
+    });
+  } catch (error) {
+    response.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// List available plugin artifacts
+app.get("/api/plugins", async (_request, response) => {
+  try {
+    const { readdirSync, existsSync } = await import("node:fs");
+    const plugins = [];
+    if (existsSync(pluginsDir)) {
+      for (const dir of readdirSync(pluginsDir)) {
+        const distDir = path.join(pluginsDir, dir, "dist");
+        if (existsSync(distDir)) {
+          const wasmFiles = readdirSync(distDir).filter((f) => f.endsWith(".wasm"));
+          if (wasmFiles.length > 0) {
+            plugins.push({
+              name: dir,
+              artifacts: wasmFiles.map((f) => `${dir}/dist/${f}`),
+            });
+          }
+        }
+      }
+    }
+    response.json({ ok: true, plugins });
+  } catch (error) {
+    response.status(500).json({ ok: false, error: error.message });
   }
 });
 

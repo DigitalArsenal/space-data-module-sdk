@@ -35,6 +35,10 @@
       "types": "./src/index.d.ts",
       "default": "./src/runtime-host/index.js"
     },
+    "./host/browser": "./src/host/browserHost.js",
+    "./host/wasi-shim": "./src/host/wasiShim.js",
+    "./host/isomorphic": "./src/host/isomorphicLoader.js",
+    "./testing/browser": "./src/testing/browserModuleHarness.js",
     "./testing": "./src/testing/index.js",
     "./standards": "./src/standards/index.js",
     "./schemas/*": "./schemas/*"
