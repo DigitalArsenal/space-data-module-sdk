@@ -13,10 +13,24 @@ import {
   createBrowserModuleHarness,
   detectArtifactProfile,
 } from "../testing/browserModuleHarness.js";
+import { dispatchHostOperation } from "./abi.js";
 
 const isBrowser =
   typeof globalThis.window !== "undefined" &&
   typeof globalThis.document !== "undefined";
+
+function attachHostDispatch(harness, host) {
+  if (!host || typeof host !== "object") {
+    return harness;
+  }
+  return {
+    ...harness,
+    host,
+    async callHost(operation, params = {}) {
+      return dispatchHostOperation(host, operation, params);
+    },
+  };
+}
 
 async function createWasmEdgeCommandHarness(options = {}) {
   const [
@@ -175,14 +189,18 @@ export async function loadModule(options = {}) {
         (inspection.profile === "standalone" || inspection.profile === "sdn-abi") &&
         inspection.exports.includes("_start")
       ) {
-        return createWasmEdgeCommandHarness(options);
+        return attachHostDispatch(
+          await createWasmEdgeCommandHarness(options),
+          options.host ?? null,
+        );
       }
     }
 
-    return createModuleHarness({
-      runtime: {
-        kind: "wasmedge",
-        wasmPath: source,
+    return attachHostDispatch(
+      await createModuleHarness({
+        runtime: {
+          kind: "wasmedge",
+          wasmPath: source,
         wasmEdgeBinary: options.wasmEdgeBinary,
         wasmEdgeRunnerBinary: options.wasmEdgeRunnerBinary,
         enableThreads: options.enableThreads,
@@ -191,23 +209,28 @@ export async function loadModule(options = {}) {
         hostProfile: options.hostProfile,
         modules: options.modules,
         defaultModuleId: options.defaultModuleId,
-        metadata: options.metadata,
-      },
-    });
+          metadata: options.metadata,
+        },
+      }),
+      options.host ?? null,
+    );
   }
 
-  return createModuleHarness({
-    runtime: {
-      kind: runtimeKind,
-      command: options.command ?? runtimeKind,
-      args: options.args ?? [source],
-      env: options.env,
-      cwd: options.cwd,
-      hostProfile: options.hostProfile,
-      modules: options.modules,
-      defaultModuleId: options.defaultModuleId,
-    },
-  });
+  return attachHostDispatch(
+    await createModuleHarness({
+      runtime: {
+        kind: runtimeKind,
+        command: options.command ?? runtimeKind,
+        args: options.args ?? [source],
+        env: options.env,
+        cwd: options.cwd,
+        hostProfile: options.hostProfile,
+        modules: options.modules,
+        defaultModuleId: options.defaultModuleId,
+      },
+    }),
+    options.host ?? null,
+  );
 }
 
 /**

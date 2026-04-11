@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   cleanupCompilation,
   compileModuleFromSource,
+  createNodeHost,
   inspectModule,
   loadModule,
   ModuleThreadModel,
@@ -147,6 +148,39 @@ test("loadModule can drive generic process runtimes on the server path", async (
     new TextDecoder().decode(response.outputs[0].payload),
     "echo:server-path",
   );
+});
+
+test("loadModule exposes awaited host dispatch on the server path when a host is provided", async (t) => {
+  const harness = await loadModule({
+    wasmSource: echoProcessFixturePath,
+    runtimeKind: "process",
+    command: process.execPath,
+    args: [echoProcessFixturePath],
+    host: createNodeHost({
+      capabilities: ["ipfs"],
+      ipfs: {
+        async resolve(params) {
+          return {
+            path: params.path,
+            cid: "bafyloadercid",
+          };
+        },
+      },
+    }),
+  });
+  t.after(async () => {
+    await harness.destroy();
+  });
+
+  const response = await harness.callHost("ipfs.invoke", {
+    operation: "resolve",
+    path: "/ipns/loader",
+  });
+
+  assert.deepEqual(response, {
+    path: "/ipns/loader",
+    cid: "bafyloadercid",
+  });
 });
 
 test("loadModule can drive standalone artifacts through the WasmEdge server path", async (t) => {

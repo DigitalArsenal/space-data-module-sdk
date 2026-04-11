@@ -91,7 +91,7 @@ async function instantiateBrowserModule(options = {}) {
   let instance = null;
   let bridge = null;
   if (needsHostBridge) {
-    const dispatch = createHostSyncDispatcher(host);
+    const dispatch = createHostSyncDispatcher(options.host);
     bridge = createJsonHostcallBridge({
       dispatch,
       getMemory: () => instance.exports.memory,

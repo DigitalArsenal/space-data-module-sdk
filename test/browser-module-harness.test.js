@@ -78,7 +78,13 @@ test("browser module harness exposes awaited host dispatch alongside module invo
   const harness = await createBrowserModuleHarness({
     wasmSource: compilation.wasmBytes,
     hostOptions: {
-      capabilities: ["network", "ipfs", "protocol_handle", "protocol_dial"],
+      capabilities: [
+        "filesystem",
+        "network",
+        "ipfs",
+        "protocol_handle",
+        "protocol_dial",
+      ],
       fetch: async (url) =>
         new Response(
           JSON.stringify({
@@ -133,6 +139,19 @@ test("browser module harness exposes awaited host dispatch alongside module invo
       },
     ],
   });
+  await harness.callHost("filesystem.mkdir", {
+    path: "cache",
+    recursive: true,
+  });
+  await harness.callHost("filesystem.writeFile", {
+    path: "cache/host.txt",
+    value: "from host dispatch",
+    encoding: "utf8",
+  });
+  const filesystemResponse = await harness.callHost("filesystem.readFile", {
+    path: "cache/host.txt",
+    encoding: "utf8",
+  });
   const networkResponse = await harness.callHost("network.request", {
     transport: "http",
     url: "https://example.test/harness",
@@ -155,6 +174,7 @@ test("browser module harness exposes awaited host dispatch alongside module invo
     new TextDecoder().decode(invokeResponse.outputs[0].payload),
     "hello from harness",
   );
+  assert.equal(filesystemResponse, "from host dispatch");
   assert.deepEqual(networkResponse.body, {
     url: "https://example.test/harness",
   });
