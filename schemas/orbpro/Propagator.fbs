@@ -68,4 +68,22 @@ table PropagatorDescribeSourcesBatchResult {
   sources:[PropagatorSourceDescription];
 }
 
+table PropagatorSampleTrajectoryStatesRequest {
+  catalogHandle:uint = 0;
+  sourceHandles:[uint];
+  startJd:double = 0.0;
+  durationDays:double = 0.0;
+  profile:string;
+}
+
+table PropagatorSampleTrajectoryStatesResult {
+  catalogHandle:uint = 0;
+  startJd:double = 0.0;
+  durationDays:double = 0.0;
+  sampleJds:[double];
+  sourceHandles:[uint];
+  referenceFrame:ReferenceFrame = TEME;
+  states:[StateVector];
+}
+
 root_type PropagatorDescribeSourcesBatchRequest;

@@ -14,6 +14,8 @@ import {
 } from "../src/generated/orbpro/query.js";
 import {
   PropagatorDescribeSourcesBatchRequest,
+  PropagatorSampleTrajectoryStatesRequest,
+  PropagatorSampleTrajectoryStatesResult,
   ReferenceFrame,
   StateFlags,
   StateVector,
@@ -182,4 +184,98 @@ test("orbpro generated bindings expose the canonical runtime FlatBuffer contract
   assert.equal(describeRequest.sourceHandlesLength(), 3);
   assert.equal(describeRequest.sourceHandles(0), 2);
   assert.equal(describeRequest.sourceHandles(2), 8);
+
+  const sampleRequestBuilder = new flatbuffers.Builder(128);
+  const sampleRequestSourceHandles =
+    PropagatorSampleTrajectoryStatesRequest.createSourceHandlesVector(
+      sampleRequestBuilder,
+      [2, 4, 8],
+    );
+  sampleRequestBuilder.finish(
+    PropagatorSampleTrajectoryStatesRequest.createPropagatorSampleTrajectoryStatesRequest(
+      sampleRequestBuilder,
+      7,
+      sampleRequestSourceHandles,
+      2460000.5,
+      1.5,
+      sampleRequestBuilder.createString("sgp4"),
+    ),
+  );
+  const sampleRequest =
+    PropagatorSampleTrajectoryStatesRequest.getRootAsPropagatorSampleTrajectoryStatesRequest(
+      new flatbuffers.ByteBuffer(sampleRequestBuilder.asUint8Array()),
+    );
+  assert.equal(sampleRequest.catalogHandle(), 7);
+  assert.equal(sampleRequest.sourceHandlesLength(), 3);
+  assert.equal(sampleRequest.sourceHandles(1), 4);
+  assert.equal(sampleRequest.startJd(), 2460000.5);
+  assert.equal(sampleRequest.durationDays(), 1.5);
+  assert.equal(sampleRequest.profile(), "sgp4");
+
+  const sampleResultBuilder = new flatbuffers.Builder(256);
+  const sampleResultSampleJds =
+    PropagatorSampleTrajectoryStatesResult.createSampleJdsVector(
+      sampleResultBuilder,
+      [2460000.5, 2460000.75],
+    );
+  const sampleResultSourceHandles =
+    PropagatorSampleTrajectoryStatesResult.createSourceHandlesVector(
+      sampleResultBuilder,
+      [2, 4],
+    );
+  PropagatorSampleTrajectoryStatesResult.startStatesVector(
+    sampleResultBuilder,
+    2,
+  );
+  StateVector.createStateVector(
+    sampleResultBuilder,
+    2460000.75,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    ReferenceFrame.J2000,
+    StateFlags.VALID | StateFlags.EXTRAPOLATED,
+  );
+  StateVector.createStateVector(
+    sampleResultBuilder,
+    2460000.5,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    ReferenceFrame.TEME,
+    StateFlags.VALID,
+  );
+  const sampleResultStates = sampleResultBuilder.endVector();
+  sampleResultBuilder.finish(
+    PropagatorSampleTrajectoryStatesResult.createPropagatorSampleTrajectoryStatesResult(
+      sampleResultBuilder,
+      7,
+      2460000.5,
+      1.5,
+      sampleResultSampleJds,
+      sampleResultSourceHandles,
+      ReferenceFrame.ECEF,
+      sampleResultStates,
+    ),
+  );
+  const sampleResult =
+    PropagatorSampleTrajectoryStatesResult.getRootAsPropagatorSampleTrajectoryStatesResult(
+      new flatbuffers.ByteBuffer(sampleResultBuilder.asUint8Array()),
+    );
+  assert.equal(sampleResult.catalogHandle(), 7);
+  assert.equal(sampleResult.sampleJdsLength(), 2);
+  assert.equal(sampleResult.sampleJds(1), 2460000.75);
+  assert.equal(sampleResult.sourceHandlesLength(), 2);
+  assert.equal(sampleResult.sourceHandles(0), 2);
+  assert.equal(sampleResult.referenceFrame(), ReferenceFrame.ECEF);
+  assert.equal(sampleResult.statesLength(), 2);
+  assert.equal(sampleResult.states(0)?.epoch(), 2460000.5);
+  assert.equal(sampleResult.states(0)?.referenceFrame(), ReferenceFrame.TEME);
+  assert.equal(sampleResult.states(1)?.referenceFrame(), ReferenceFrame.J2000);
 });

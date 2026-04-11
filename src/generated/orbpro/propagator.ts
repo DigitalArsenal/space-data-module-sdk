@@ -4,6 +4,8 @@
 
 export { PropagatorDescribeSourcesBatchRequest } from './propagator/propagator-describe-sources-batch-request.js';
 export { PropagatorDescribeSourcesBatchResult } from './propagator/propagator-describe-sources-batch-result.js';
+export { PropagatorSampleTrajectoryStatesRequest } from './propagator/propagator-sample-trajectory-states-request.js';
+export { PropagatorSampleTrajectoryStatesResult } from './propagator/propagator-sample-trajectory-states-result.js';
 export { PropagatorSourceDescription } from './propagator/propagator-source-description.js';
 export { PropagatorSourceKind } from './propagator/propagator-source-kind.js';
 export { ReferenceFrame } from './propagator/reference-frame.js';
