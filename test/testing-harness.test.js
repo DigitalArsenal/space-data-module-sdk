@@ -88,7 +88,7 @@ function createDualFormatManifest() {
   };
 }
 
-test("capability runtime surface matrix distinguishes WASI, sync hostcalls, and host-only APIs", () => {
+test("capability runtime surface matrix distinguishes WASI, sync hostcalls, and async host APIs", () => {
   assert.deepEqual(
     describeCapabilityRuntimeSurface("clock"),
     {
@@ -116,6 +116,9 @@ test("capability runtime surface matrix distinguishes WASI, sync hostcalls, and 
   assert.equal(describeCapabilityRuntimeSurface("websocket").wasmedge, false);
   assert.equal(describeCapabilityRuntimeSurface("pipe").nodeHostApi, false);
   assert.equal(describeCapabilityRuntimeSurface("network").nodeHostApi, true);
+  assert.equal(describeCapabilityRuntimeSurface("ipfs").nodeHostApi, true);
+  assert.equal(describeCapabilityRuntimeSurface("protocol_handle").nodeHostApi, true);
+  assert.equal(describeCapabilityRuntimeSurface("protocol_dial").nodeHostApi, true);
   assert.equal(describeCapabilityRuntimeSurface("logging").wasi, true);
   assert.equal(describeCapabilityRuntimeSurface("http").wasi, false);
   assert.equal(describeCapabilityRuntimeSurface("http").syncHostcall, false);

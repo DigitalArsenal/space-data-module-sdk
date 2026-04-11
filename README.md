@@ -176,8 +176,15 @@ This repo currently includes:
 - non-JS bundle reference clients in
   [`examples/single-file-bundle/go`](./examples/single-file-bundle/go) and
   [`examples/single-file-bundle/python`](./examples/single-file-bundle/python)
-- a reference Node host and sync `sdn_host` bridge for the first hostcall
-  surface
+- reference Node and browser hosts plus the legacy sync `sdn_host` bridge for
+  sync-safe guest hostcalls
+
+The current host/runtime contract is two-tiered:
+
+- raw guest `sdn_host` imports stay sync-only
+- generic async capabilities such as filesystem, network, IPFS, and protocol
+  adapters are exposed through `NodeHost`, `BrowserHost`, and the browser/module
+  harness APIs
 
 ## Runtime Targets
 

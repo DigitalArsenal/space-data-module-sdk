@@ -46,10 +46,14 @@ export const NodeHostSupportedCapabilities = Object.freeze([
   "http",
   "websocket",
   "mqtt",
+  "network",
   "filesystem",
   "tcp",
   "udp",
   "tls",
+  "ipfs",
+  "protocol_handle",
+  "protocol_dial",
   "context_read",
   "context_write",
   "crypto_hash",
@@ -75,6 +79,7 @@ export const NodeHostSupportedOperations = Object.freeze([
   "websocket.exchange",
   "mqtt.publish",
   "mqtt.subscribeOnce",
+  "network.request",
   "filesystem.resolvePath",
   "filesystem.readFile",
   "filesystem.writeFile",
@@ -87,6 +92,10 @@ export const NodeHostSupportedOperations = Object.freeze([
   "tcp.request",
   "udp.request",
   "tls.request",
+  "ipfs.invoke",
+  "protocol_handle.register",
+  "protocol_handle.unregister",
+  "protocol_dial.dial",
   "exec.execFile",
   "context.get",
   "context.set",
@@ -227,6 +236,45 @@ function normalizeAllowedPorts(ports, label, { allowZero = false } = {}) {
     normalized.add(assertPort(port, label, { allowZero }));
   }
   return normalized;
+}
+
+function normalizeNetworkTransport(params = {}) {
+  const explicit = String(
+    params.transport ?? params.kind ?? params.request?.transport ?? "",
+  )
+    .trim()
+    .toLowerCase();
+  if (explicit) {
+    return explicit;
+  }
+  const candidateUrl = params.url ?? params.request?.url ?? null;
+  if (candidateUrl) {
+    const protocol = new URL(candidateUrl).protocol.toLowerCase();
+    if (protocol === "http:" || protocol === "https:") {
+      return "http";
+    }
+    if (protocol === "ws:" || protocol === "wss:") {
+      return "websocket";
+    }
+  }
+  throw new Error(
+    'network.request requires a transport value such as "http", "tcp", or "websocket".',
+  );
+}
+
+async function invokeAdapterMethod(adapter, methodName, params, label) {
+  if (!adapter || typeof adapter !== "object") {
+    throw new Error(`${label} adapter is not configured for this host.`);
+  }
+  if (typeof adapter[methodName] === "function") {
+    return adapter[methodName](params);
+  }
+  if (typeof adapter.invoke === "function") {
+    return adapter.invoke(methodName, params);
+  }
+  throw new Error(
+    `${label} adapter does not implement "${methodName}" or invoke().`,
+  );
 }
 
 function normalizeFilesystemRoot(rootPath) {
@@ -1397,6 +1445,10 @@ export class NodeHost {
     );
     this.fetch = options.fetch ?? globalThis.fetch;
     this.WebSocket = options.WebSocket ?? globalThis.WebSocket;
+    this._networkAdapter = options.network ?? null;
+    this._ipfsAdapter = options.ipfs ?? null;
+    this._protocolHandleAdapter = options.protocolHandle ?? null;
+    this._protocolDialAdapter = options.protocolDial ?? null;
     if (typeof this.fetch !== "function") {
       throw new TypeError(
         "A fetch implementation is required to create a Node host.",
@@ -1547,6 +1599,40 @@ export class NodeHost {
             expectResponse: websocketOptions.expectResponse,
             WebSocketImpl: websocketOptions.WebSocketImpl ?? this.WebSocket,
           });
+        }),
+    });
+
+    this.network = Object.freeze({
+      request: async (params = {}) =>
+        this.#withCapability("network", "network.request", async () => {
+          const transport = normalizeNetworkTransport(params);
+          const request = params.request ?? params;
+          switch (transport) {
+            case "http":
+              return this.http.request(request);
+            case "websocket":
+              return this.websocket.exchange(request);
+            case "mqtt":
+              return request.subscribe === true
+                ? this.mqtt.subscribeOnce(request)
+                : this.mqtt.publish(request);
+            case "tcp":
+              return this.tcp.request(request);
+            case "udp":
+              return this.udp.request(request);
+            case "tls":
+              return this.tls.request(request);
+            default:
+              if (this._networkAdapter) {
+                return invokeAdapterMethod(this._networkAdapter, "request", {
+                  ...request,
+                  transport,
+                }, "network");
+              }
+              throw new Error(
+                `Node host does not support network transport "${transport}".`,
+              );
+          }
         }),
     });
 
@@ -1825,6 +1911,56 @@ export class NodeHost {
           this._contextStore.listScopes(),
         ),
     });
+
+    this.ipfs = Object.freeze({
+      invoke: async (params = {}) =>
+        this.#withCapability("ipfs", "ipfs.invoke", async () => {
+          const operation = String(params.operation ?? "invoke").trim();
+          if (!operation) {
+            throw new Error("ipfs.invoke requires a non-empty operation.");
+          }
+          return invokeAdapterMethod(this._ipfsAdapter, operation, params, "ipfs");
+        }),
+    });
+
+    this.protocolHandle = Object.freeze({
+      register: async (params = {}) =>
+        this.#withCapability(
+          "protocol_handle",
+          "protocol_handle.register",
+          async () =>
+            invokeAdapterMethod(
+              this._protocolHandleAdapter,
+              "register",
+              params,
+              "protocol_handle",
+            ),
+        ),
+      unregister: async (params = {}) =>
+        this.#withCapability(
+          "protocol_handle",
+          "protocol_handle.unregister",
+          async () =>
+            invokeAdapterMethod(
+              this._protocolHandleAdapter,
+              "unregister",
+              params,
+              "protocol_handle",
+            ),
+        ),
+    });
+
+    this.protocolDial = Object.freeze({
+      dial: async (params = {}) =>
+        this.#withCapability("protocol_dial", "protocol_dial.dial", async () =>
+          invokeAdapterMethod(
+            this._protocolDialAdapter,
+            "dial",
+            params,
+            "protocol_dial",
+          ),
+        ),
+    });
   }
 
   listCapabilities() {
@@ -1840,11 +1976,26 @@ export class NodeHost {
   }
 
   hasCapability(capability) {
-    return this._grantedCapabilities.has(String(capability ?? "").trim());
+    const normalized = String(capability ?? "").trim();
+    return (
+      this._grantedCapabilities.has(normalized) ||
+      (this._grantedCapabilities.has("network") &&
+        ["http", "websocket", "mqtt", "tcp", "udp", "tls"].includes(
+          normalized,
+        ))
+    );
   }
 
   assertCapability(capability, operation = null) {
     const normalized = assertNonEmptyString(capability, "Capability id");
+    const networkBackedCapabilities = new Set([
+      "http",
+      "websocket",
+      "mqtt",
+      "tcp",
+      "udp",
+      "tls",
+    ]);
     if (!this._supportedCapabilities.has(normalized)) {
       throw new HostCapabilityError(
         `Capability "${normalized}" is not supported by the reference Node host.`,
@@ -1855,7 +2006,13 @@ export class NodeHost {
         },
       );
     }
-    if (!this._grantedCapabilities.has(normalized)) {
+    if (
+      !this._grantedCapabilities.has(normalized) &&
+      !(
+        this._grantedCapabilities.has("network") &&
+        networkBackedCapabilities.has(normalized)
+      )
+    ) {
       throw new HostCapabilityError(
         `Capability "${normalized}" is not granted for this Node host.`,
         {
@@ -1871,6 +2028,16 @@ export class NodeHost {
   async invoke(operation, params = {}) {
     const normalized = assertNonEmptyString(operation, "Host operation");
     switch (normalized) {
+      case "host.runtimeTarget":
+        return this.runtimeTarget;
+      case "host.listCapabilities":
+        return this.listCapabilities();
+      case "host.listSupportedCapabilities":
+        return this.listSupportedCapabilities();
+      case "host.listOperations":
+        return this.listOperations();
+      case "host.hasCapability":
+        return this.hasCapability(params.capability);
       case "clock.now":
         return this.clock.now();
       case "clock.monotonicNow":
@@ -1897,6 +2064,8 @@ export class NodeHost {
         return this.mqtt.publish(params);
       case "mqtt.subscribeOnce":
         return this.mqtt.subscribeOnce(params);
+      case "network.request":
+        return this.network.request(params);
       case "filesystem.resolvePath":
         return this.filesystem.resolvePath(params.path);
       case "filesystem.readFile":
@@ -1929,6 +2098,14 @@ export class NodeHost {
         return this.udp.request(params);
       case "tls.request":
         return this.tls.request(params);
+      case "ipfs.invoke":
+        return this.ipfs.invoke(params);
+      case "protocol_handle.register":
+        return this.protocolHandle.register(params);
+      case "protocol_handle.unregister":
+        return this.protocolHandle.unregister(params);
+      case "protocol_dial.dial":
+        return this.protocolDial.dial(params);
       case "exec.execFile":
         return this.exec.execFile(params);
       case "context.get":

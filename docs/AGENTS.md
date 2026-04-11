@@ -9,6 +9,8 @@ they use words like "canonical", "required", or "must".
   README, examples, and normative docs drift.
 - Keep browser/WasmEdge portability aligned with
   `docs/browser-wasmedge-isomorphic.md`.
+- Keep the async host adapter boundary aligned with
+  `docs/browser-wasmedge-isomorphic.md` and `docs/testing-harness.md`.
 - Keep publication layout and release expectations aligned with
   `docs/module-publication-standard.md`.
 - Keep binary FlatBuffer ingest guidance aligned with

@@ -5,7 +5,9 @@ import { WASI } from "node:wasi";
 import {
   cleanupCompilation,
   compileModuleFromSource,
+  createAsyncHostDispatcher,
   createNodeHost,
+  createNodeHostSyncDispatcher,
   createNodeHostSyncHostcallBridge,
 } from "../src/index.js";
 
@@ -233,4 +235,42 @@ test("sync hostcall ABI bridges a wasm guest into the reference Node host", asyn
   } finally {
     await cleanupCompilation(compilation);
   }
+});
+
+test("sync hostcall dispatcher rejects async-only operations", () => {
+  const host = createNodeHost({
+    capabilities: ["timers"],
+  });
+  const dispatch = createNodeHostSyncDispatcher(host);
+
+  assert.throws(
+    () => dispatch("timers.delay", { ms: 1 }),
+    /not available in the synchronous hostcall ABI/,
+  );
+});
+
+test("async host dispatcher awaits host invoke operations", async () => {
+  const host = createNodeHost({
+    capabilities: ["timers", "ipfs"],
+    ipfs: {
+      async resolve(params) {
+        return {
+          path: params.path,
+          cid: "bafyasyncdispatcher",
+        };
+      },
+    },
+  });
+  const dispatch = createAsyncHostDispatcher(host);
+
+  await dispatch("timers.delay", { ms: 5 });
+  const response = await dispatch("ipfs.invoke", {
+    operation: "resolve",
+    path: "/ipns/demo",
+  });
+
+  assert.deepEqual(response, {
+    path: "/ipns/demo",
+    cid: "bafyasyncdispatcher",
+  });
 });

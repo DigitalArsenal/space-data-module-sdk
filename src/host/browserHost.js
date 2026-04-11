@@ -20,7 +20,11 @@ export const BrowserHostSupportedCapabilities = Object.freeze([
   "schedule_cron",
   "http",
   "websocket",
+  "network",
   "filesystem",
+  "ipfs",
+  "protocol_handle",
+  "protocol_dial",
   "context_read",
   "context_write",
   "crypto_hash",
@@ -39,11 +43,13 @@ export const BrowserHostSupportedOperations = Object.freeze([
   "clock.monotonicNow",
   "clock.nowIso",
   "random.bytes",
+  "timers.delay",
   "schedule.parse",
   "schedule.matches",
   "schedule.next",
   "http.request",
   "websocket.exchange",
+  "network.request",
   "filesystem.resolvePath",
   "filesystem.readFile",
   "filesystem.writeFile",
@@ -53,6 +59,10 @@ export const BrowserHostSupportedOperations = Object.freeze([
   "filesystem.readdir",
   "filesystem.stat",
   "filesystem.rename",
+  "ipfs.invoke",
+  "protocol_handle.register",
+  "protocol_handle.unregister",
+  "protocol_dial.dial",
   "context.get",
   "context.set",
   "context.delete",
@@ -73,6 +83,46 @@ export class BrowserHostCapabilityError extends Error {
   }
 }
 
+function normalizeBrowserNetworkTransport(params = {}) {
+  const explicit = String(
+    params.transport ?? params.kind ?? params.request?.transport ?? "",
+  )
+    .trim()
+    .toLowerCase();
+  if (explicit) {
+    return explicit;
+  }
+  const candidateUrl = params.url ?? params.request?.url ?? null;
+  if (candidateUrl) {
+    const protocol = new URL(candidateUrl, "https://browser-host.invalid")
+      .protocol.toLowerCase();
+    if (protocol === "http:" || protocol === "https:") {
+      return "http";
+    }
+    if (protocol === "ws:" || protocol === "wss:") {
+      return "websocket";
+    }
+  }
+  throw new Error(
+    'network.request requires a transport value such as "http" or "websocket".',
+  );
+}
+
+async function invokeAdapterMethod(adapter, methodName, params, label) {
+  if (!adapter || typeof adapter !== "object") {
+    throw new Error(`${label} adapter is not configured for this host.`);
+  }
+  if (typeof adapter[methodName] === "function") {
+    return adapter[methodName](params);
+  }
+  if (typeof adapter.invoke === "function") {
+    return adapter.invoke(methodName, params);
+  }
+  throw new Error(
+    `${label} adapter does not implement "${methodName}" or invoke().`,
+  );
+}
+
 export class BrowserHost {
   constructor(options = {}) {
     this.runtimeTarget = RuntimeTarget.BROWSER;
@@ -86,6 +136,11 @@ export class BrowserHost {
       WebSocket: options.WebSocket ?? options.edgeShims?.WebSocket,
       crypto: options.crypto ?? options.edgeShims?.crypto,
       performance: options.performance ?? options.edgeShims?.performance,
+      network: options.network ?? options.edgeShims?.network,
+      ipfs: options.ipfs ?? options.edgeShims?.ipfs,
+      protocolHandle:
+        options.protocolHandle ?? options.edgeShims?.protocolHandle,
+      protocolDial: options.protocolDial ?? options.edgeShims?.protocolDial,
       filesystem: options.filesystem ?? options.edgeShims?.filesystem,
       filesystemRoot: options.filesystemRoot ?? options.edgeShims?.filesystemRoot,
     });
@@ -97,6 +152,10 @@ export class BrowserHost {
     const fetchImpl = edgeShims.fetch;
     const WebSocketImpl = edgeShims.WebSocket;
     const filesystem = edgeShims.filesystem;
+    const networkAdapter = edgeShims.network;
+    const ipfsAdapter = edgeShims.ipfs;
+    const protocolHandleAdapter = edgeShims.protocolHandle;
+    const protocolDialAdapter = edgeShims.protocolDial;
 
     this._grantedCapabilities = granted;
     this._contextStore = options.contextStore ?? new Map();
@@ -239,6 +298,73 @@ export class BrowserHost {
       },
     });
 
+    this.network = Object.freeze({
+      request: async (params = {}) => {
+        this.#assertCapability("network", "network.request");
+        const transport = normalizeBrowserNetworkTransport(params);
+        const request = params.request ?? params;
+        if (transport === "http") {
+          return this.http.request(request);
+        }
+        if (transport === "websocket") {
+          return this.websocket.exchange(request);
+        }
+        if (networkAdapter) {
+          return invokeAdapterMethod(networkAdapter, "request", {
+            ...request,
+            transport,
+          }, "network");
+        }
+        throw new Error(
+          `Browser host does not support network transport "${transport}".`,
+        );
+      },
+    });
+
+    this.ipfs = Object.freeze({
+      invoke: async (params = {}) => {
+        this.#assertCapability("ipfs", "ipfs.invoke");
+        const operation = String(params.operation ?? "invoke").trim();
+        if (!operation) {
+          throw new Error("ipfs.invoke requires a non-empty operation.");
+        }
+        return invokeAdapterMethod(ipfsAdapter, operation, params, "ipfs");
+      },
+    });
+
+    this.protocolHandle = Object.freeze({
+      register: async (params = {}) => {
+        this.#assertCapability("protocol_handle", "protocol_handle.register");
+        return invokeAdapterMethod(
+          protocolHandleAdapter,
+          "register",
+          params,
+          "protocol_handle",
+        );
+      },
+      unregister: async (params = {}) => {
+        this.#assertCapability("protocol_handle", "protocol_handle.unregister");
+        return invokeAdapterMethod(
+          protocolHandleAdapter,
+          "unregister",
+          params,
+          "protocol_handle",
+        );
+      },
+    });
+
+    this.protocolDial = Object.freeze({
+      dial: async (params = {}) => {
+        this.#assertCapability("protocol_dial", "protocol_dial.dial");
+        return invokeAdapterMethod(
+          protocolDialAdapter,
+          "dial",
+          params,
+          "protocol_dial",
+        );
+      },
+    });
+
     this.context = Object.freeze({
       get: (scope, key) => {
         this.#assertCapability("context_read", "context.get");
@@ -378,17 +504,125 @@ export class BrowserHost {
   }
 
   hasCapability(capability) {
-    return this._grantedCapabilities.has(capability);
+    const normalized = String(capability ?? "").trim();
+    return (
+      this._grantedCapabilities.has(normalized) ||
+      (this._grantedCapabilities.has("network") &&
+        ["http", "websocket"].includes(normalized))
+    );
   }
 
   assertCapability(capability, operation) {
     this.#assertCapability(capability, operation);
   }
 
+  async invoke(operation, params = {}) {
+    const normalized = String(operation ?? "").trim();
+    switch (normalized) {
+      case "host.runtimeTarget":
+        return this.runtimeTarget;
+      case "host.listCapabilities":
+        return this.listCapabilities();
+      case "host.listSupportedCapabilities":
+        return this.listSupportedCapabilities();
+      case "host.listOperations":
+        return this.listOperations();
+      case "host.hasCapability":
+        return this.hasCapability(params.capability);
+      case "clock.now":
+        return this.clock.now();
+      case "clock.monotonicNow":
+        return this.clock.monotonicNow();
+      case "clock.nowIso":
+        return this.clock.nowIso();
+      case "random.bytes":
+        return this.random.bytes(params.length);
+      case "timers.delay":
+        return this.timers.delay(params.ms ?? params.delayMs ?? 0);
+      case "schedule.parse":
+        return this.schedule.parse(params.expression);
+      case "schedule.matches":
+        return this.schedule.matches(params.expression, params.date);
+      case "schedule.next":
+        return this.schedule.next(params.expression, params.from);
+      case "http.request":
+        return this.http.request(params);
+      case "websocket.exchange":
+        return this.websocket.exchange(params);
+      case "network.request":
+        return this.network.request(params);
+      case "filesystem.resolvePath":
+        return this.filesystem.resolvePath(params.path);
+      case "filesystem.readFile":
+        return this.filesystem.readFile(params.path, {
+          encoding: params.encoding,
+        });
+      case "filesystem.writeFile":
+        return this.filesystem.writeFile(params.path, params.value, {
+          encoding: params.encoding,
+        });
+      case "filesystem.appendFile":
+        return this.filesystem.appendFile(params.path, params.value, {
+          encoding: params.encoding,
+        });
+      case "filesystem.deleteFile":
+        return this.filesystem.deleteFile(params.path);
+      case "filesystem.mkdir":
+        return this.filesystem.mkdir(params.path, {
+          recursive: params.recursive,
+        });
+      case "filesystem.readdir":
+        return this.filesystem.readdir(params.path);
+      case "filesystem.stat":
+        return this.filesystem.stat(params.path);
+      case "filesystem.rename":
+        return this.filesystem.rename(params.fromPath, params.toPath);
+      case "ipfs.invoke":
+        return this.ipfs.invoke(params);
+      case "protocol_handle.register":
+        return this.protocolHandle.register(params);
+      case "protocol_handle.unregister":
+        return this.protocolHandle.unregister(params);
+      case "protocol_dial.dial":
+        return this.protocolDial.dial(params);
+      case "context.get":
+        return this.context.get(params.scope, params.key);
+      case "context.set":
+        return this.context.set(params.scope, params.key, params.value);
+      case "context.delete":
+        return this.context.delete(params.scope, params.key);
+      case "context.listKeys":
+        return this.context.listKeys(params.scope);
+      case "context.listScopes":
+        return this.context.listScopes();
+      case "crypto.sha256":
+        return this.crypto.sha256(params.value ?? params.bytes);
+      case "crypto.sha512":
+        return this.crypto.sha512(params.value ?? params.bytes);
+      case "crypto.aesGcmEncrypt":
+        return this.crypto.aesGcmEncrypt(params);
+      case "crypto.aesGcmDecrypt":
+        return this.crypto.aesGcmDecrypt(params);
+      default:
+        throw new Error(`Unknown browser host operation "${normalized}".`);
+    }
+  }
+
   // --- Private ---
 
   #assertCapability(capability, operation) {
-    if (!this._grantedCapabilities.has(capability)) {
+    const normalized = String(capability ?? "").trim();
+    const networkBackedCapabilities = new Set([
+      "http",
+      "websocket",
+    ]);
+    if (
+      !this._grantedCapabilities.has(normalized) &&
+      !(
+        this._grantedCapabilities.has("network") &&
+        networkBackedCapabilities.has(normalized)
+      )
+    ) {
       throw new BrowserHostCapabilityError(capability, operation);
     }
   }

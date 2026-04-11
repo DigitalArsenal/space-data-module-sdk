@@ -16,7 +16,8 @@ import { createBrowserWasiShim, WasiExitError } from "../host/wasiShim.js";
 import { createBrowserHost } from "../host/browserHost.js";
 import {
   createJsonHostcallBridge,
-  createNodeHostSyncDispatcher,
+  createHostSyncDispatcher,
+  dispatchHostOperation,
   DEFAULT_HOSTCALL_IMPORT_MODULE,
 } from "../host/abi.js";
 import {
@@ -90,7 +91,7 @@ async function instantiateBrowserModule(options = {}) {
   let instance = null;
   let bridge = null;
   if (needsHostBridge) {
-    const dispatch = createNodeHostSyncDispatcher(options.host);
+    const dispatch = createHostSyncDispatcher(host);
     bridge = createJsonHostcallBridge({
       dispatch,
       getMemory: () => instance.exports.memory,
@@ -238,6 +239,10 @@ export async function createBrowserModuleHarness(options = {}) {
     return decodePluginInvokeResponse(responseBytes);
   }
 
+  async function callHost(operation, params = {}) {
+    return dispatchHostOperation(host, operation, params);
+  }
+
   function readManifest() {
     const getBytesExport =
       instance.exports[DefaultManifestExports.pluginBytesSymbol];
@@ -267,6 +272,7 @@ export async function createBrowserModuleHarness(options = {}) {
     host,
     bridge,
     wasi,
+    callHost,
     invoke,
     invokeRaw,
     readManifest,

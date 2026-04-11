@@ -1,6 +1,6 @@
 {
   "name": "space-data-module-sdk",
-  "version": "0.5.22",
+  "version": "0.6.0",
   "description": "Module SDK for building, validating, signing, and deploying WebAssembly modules on the Space Data Network.",
   "type": "module",
   "types": "./src/index.d.ts",
@@ -51,7 +51,7 @@
   ],
   "scripts": {
     "test": "node --test",
-    "test:host-surfaces": "node --test test/node-host.test.js test/host-abi.test.js",
+    "test:host-surfaces": "node --test test/node-host.test.js test/host-abi.test.js test/browser-host.test.js test/browser-module-harness.test.js test/testing-harness.test.js",
     "test:runtime-matrix": "SPACE_DATA_MODULE_SDK_ENABLE_RUNTIME_MATRIX=1 node --test test/runtime-matrix.test.js",
     "test:stream-ingest": "node --test test/runtime-host-stream-ingest.test.js",
     "test:module-stream": "node --test test/module-flatbuffer-stream-pump.test.js",

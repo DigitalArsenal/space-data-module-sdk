@@ -7,7 +7,7 @@ export const DEFAULT_HOSTCALL_IMPORT_MODULE = "sdn_host";
 export const HOSTCALL_STATUS_OK = 0;
 export const HOSTCALL_STATUS_ERROR = 1;
 
-export const NodeHostSyncHostcallOperations = Object.freeze([
+export const SyncHostcallOperations = Object.freeze([
   "host.runtimeTarget",
   "host.listCapabilities",
   "host.listSupportedCapabilities",
@@ -22,6 +22,7 @@ export const NodeHostSyncHostcallOperations = Object.freeze([
   "schedule.next",
   "filesystem.resolvePath",
 ]);
+export const NodeHostSyncHostcallOperations = SyncHostcallOperations;
 
 function assertNonEmptyString(value, label) {
   const normalized = String(value ?? "").trim();
@@ -149,7 +150,7 @@ function encodeHostcallValue(value) {
   return value;
 }
 
-export function dispatchNodeHostSyncOperation(host, operation, params = null) {
+export function dispatchHostSyncOperation(host, operation, params = null) {
   const normalized = assertNonEmptyString(operation, "Hostcall operation");
   switch (normalized) {
     case "host.runtimeTarget":
@@ -185,12 +186,39 @@ export function dispatchNodeHostSyncOperation(host, operation, params = null) {
   }
 }
 
+export function dispatchNodeHostSyncOperation(host, operation, params = null) {
+  return dispatchHostSyncOperation(host, operation, params);
+}
+
 export function createNodeHostSyncDispatcher(host) {
   if (!host || typeof host !== "object") {
     throw new TypeError("createNodeHostSyncDispatcher requires a host object.");
   }
   return (operation, params = null) =>
-    dispatchNodeHostSyncOperation(host, operation, params);
+    dispatchHostSyncOperation(host, operation, params);
+}
+
+export function createHostSyncDispatcher(host) {
+  return createNodeHostSyncDispatcher(host);
+}
+
+export async function dispatchHostOperation(host, operation, params = null) {
+  if (!host || typeof host !== "object") {
+    throw new TypeError("dispatchHostOperation requires a host object.");
+  }
+  const normalized = assertNonEmptyString(operation, "Host operation");
+  if (typeof host.invoke === "function") {
+    return host.invoke(normalized, params);
+  }
+  return dispatchHostSyncOperation(host, normalized, params);
+}
+
+export function createAsyncHostDispatcher(host) {
+  if (!host || typeof host !== "object") {
+    throw new TypeError("createAsyncHostDispatcher requires a host object.");
+  }
+  return (operation, params = null) =>
+    dispatchHostOperation(host, operation, params);
 }
 
 export function createJsonHostcallBridge(options = {}) {

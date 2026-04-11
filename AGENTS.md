@@ -19,8 +19,8 @@ Nearest-file wins: read this file first, then follow the most specific child
 - `src/bundle/AGENTS.md`: `sds.bundle` and single-file wasm packaging.
 - `src/auth/AGENTS.md`: signing, deployment authorization, and related record
   handling.
-- `src/host/AGENTS.md`: Node host, browser shims, WasmEdge, `sdn_host`, and
-  isomorphic loaders.
+- `src/host/AGENTS.md`: Node host, browser shims, the legacy sync `sdn_host`
+  subset, async host adapters, and isomorphic loaders.
 - `src/runtime-host/AGENTS.md`: FlatSQL-backed runtime-host storage, row/region
   identity, and binary FlatBuffer ingest.
 - `src/testing/AGENTS.md`: harnesses, process invoke clients, browser harness,
@@ -78,7 +78,10 @@ Every compliant module produced here should satisfy all of the following:
 - The module exports the canonical manifest accessor symbols.
 - Declared capability IDs come from this repo's vocabulary.
 - Single-file delivery uses `sds.bundle`; do not append raw bytes after wasm.
-- Sync hostcalls use the `sdn_host` import module and the bridge in `src/host`.
+- Sync guest hostcalls use the `sdn_host` import module and the bridge in
+  `src/host` for sync-safe operations only.
+- Generic async filesystem, network, IPFS, and protocol capabilities are
+  exposed through the NodeHost/BrowserHost and harness APIs.
 
 ## Canonical Build And Publication Rules
 
@@ -136,7 +139,7 @@ change is correct:
   - `npm run generate:vectors` when bundle vectors change
 - If you changed host capabilities, Node host behavior, browser/WasmEdge
   portability, or the sync host ABI:
-  - `node --test test/node-host.test.js test/host-abi.test.js`
+  - `node --test test/node-host.test.js test/host-abi.test.js test/browser-host.test.js test/browser-module-harness.test.js test/testing-harness.test.js`
   - `node --test test/browser-harness.test.js test/isomorphic-loader.test.js`
 - If you changed runtime-host storage or FlatBuffer streaming helpers:
   - `npm run test:stream-ingest`
@@ -149,7 +152,8 @@ change is correct:
 - `src/compliance`: module compliance and standards validation.
 - `src/compiler`: source-to-wasm compile flow and target selection.
 - `src/bundle`: `sds.bundle` encoding, parsing, and wasm custom sections.
-- `src/host`: Node host, browser shims, `sdn_host`, and isomorphic loaders.
+- `src/host`: Node host, browser shims, the legacy sync `sdn_host` subset,
+  async host adapters, and isomorphic loaders.
 - `src/runtime-host`: FlatSQL-backed row/region storage and stream ingest.
 - `src/testing`: browser harnesses, process invoke clients, and streaming pumps.
 - `src/auth`, `src/transport`, `src/deployment`: signing, encryption, and

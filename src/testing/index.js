@@ -120,7 +120,8 @@ const CapabilitySurfaceMatrix = Object.freeze({
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
-      "The coarse network capability maps to host-side HTTP/TCP/UDP/TLS/WebSocket services today.",
+      "The coarse network capability maps to async host-side HTTP/TCP/UDP/TLS/WebSocket services.",
+      "Browser harnesses can await the same capability surface through BrowserHost.invoke().",
       "Pure WASI guests cannot reach that surface through the current sync hostcall ABI.",
       "WasmEdge provides non-blocking socket-oriented extensions that can serve as the standard server-side max-WASI target.",
     ],
@@ -196,6 +197,42 @@ const CapabilitySurfaceMatrix = Object.freeze({
     notes: [
       "TLS request support exists in the Node host API only today.",
       "WasmEdge TLS support provides a practical no-wrapper server-side target for guest HTTPS/TLS logic.",
+    ],
+  }),
+  ipfs: Object.freeze({
+    capability: "ipfs",
+    wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
+    syncHostcall: false,
+    nodeHostApi: true,
+    notes: [
+      "IPFS access is available through async host adapters and browser/module harness dispatch.",
+      "Pure WASM guests cannot reach that surface through the current sync hostcall ABI.",
+    ],
+  }),
+  protocol_handle: Object.freeze({
+    capability: "protocol_handle",
+    wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
+    syncHostcall: false,
+    nodeHostApi: true,
+    notes: [
+      "Protocol registration is available through async host adapters and browser/module harness dispatch.",
+      "Pure WASM guests cannot reach that surface through the current sync hostcall ABI.",
+    ],
+  }),
+  protocol_dial: Object.freeze({
+    capability: "protocol_dial",
+    wasi: false,
+    standaloneWasi: false,
+    wasmedge: false,
+    syncHostcall: false,
+    nodeHostApi: true,
+    notes: [
+      "Protocol dialing is available through async host adapters and browser/module harness dispatch.",
+      "Pure WASM guests cannot reach that surface through the current sync hostcall ABI.",
     ],
   }),
   context_read: Object.freeze({

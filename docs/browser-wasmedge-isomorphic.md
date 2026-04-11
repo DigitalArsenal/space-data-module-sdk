@@ -86,6 +86,10 @@ The browser edge shims map host capabilities onto browser-native surfaces:
   `writeFile`, `appendFile`, `deleteFile`, `mkdir`, `readdir`, `stat`, `rename`
 - `http`: `fetch`
 - `websocket`: browser `WebSocket`
+- `network`: async browser-host dispatch that routes to the available transport
+  adapters
+- `ipfs`, `protocol_handle`, `protocol_dial`: async browser-host adapters that
+  can be supplied by the embedding runtime
 - `clock`, `random`, `timers`, `schedule_cron`, `context_*`, `crypto_*`:
   browser-native implementations in the browser host adapter
 
@@ -106,11 +110,19 @@ Not browser-portable from the same raw guest binary:
 
 - WasmEdge-native socket/TLS extension imports
 - pthread-oriented `env.*` imports
-- async guest hostcalls that need a broader ABI than the current sync
+- raw guest async hostcalls that need a broader ABI than the current sync
   `sdn_host` bridge
 
-For browser-hosted networking, use the browser edge shims or host-delegated
-services instead of relying on raw WasmEdge socket extensions.
+Today’s portable split is:
+
+- the guest-visible `sdn_host` import remains a sync-only subset for sync-safe
+  operations
+- the host and harness APIs can still await filesystem, network, IPFS, and
+  protocol adapters in both browser and Node-hosted test/runtime flows
+
+For browser-hosted networking and IPFS/protocol work, use the browser edge
+shims or host-delegated adapters instead of relying on raw WasmEdge socket
+extensions.
 
 ## Checked-In Demo
 

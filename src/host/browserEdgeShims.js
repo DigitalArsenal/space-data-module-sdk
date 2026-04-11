@@ -346,6 +346,10 @@ export function createBrowserEdgeShims(options = {}) {
     WebSocket: options.WebSocket ?? globalThis.WebSocket,
     crypto: options.crypto ?? globalThis.crypto,
     performance: options.performance ?? globalThis.performance,
+    network: options.network ?? null,
+    ipfs: options.ipfs ?? null,
+    protocolHandle: options.protocolHandle ?? null,
+    protocolDial: options.protocolDial ?? null,
     filesystem:
       options.filesystem ??
       createMemoryFilesystemEdgeShim({

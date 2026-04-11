@@ -118,7 +118,7 @@ The generator does two things:
 2. It classifies declared capabilities by runtime surface:
    - WASI-native
    - sync hostcall
-   - Node host API only
+   - async host API
 
 When a port advertises multiple payload wire formats, pass
 `preferredWireFormat` to select which declared type ref the generated smoke
@@ -287,10 +287,11 @@ pipe contract, but not arbitrary named-pipe services.
 ### 6. Network and most Node-RED-style host services are not WASI-native
 
 Pure WASI does not provide a portable HTTP/TCP/UDP/WebSocket/MQTT/process-exec
-surface here. Those capabilities exist today on the Node host API side, and the
-repo already tests them in `test/node-host.test.js`. Treat the runtime matrix as
-the portable guest suite and `npm run test:host-surfaces` as the authoritative
-Node-host suite for the default Node-RED-style services.
+surface here. Those capabilities exist today on the async host API side, and
+the repo tests them through the Node host, browser host, and browser module
+harness suites. Treat the runtime matrix as the portable guest suite and
+`npm run test:host-surfaces` as the authoritative host-adapter suite for the
+default Node-RED-style services.
 
 ### 7. Random entropy is not a stable libc-level cross-runtime assertion here
 
@@ -309,7 +310,8 @@ WASM guests today:
 - `schedule_cron`
 - `filesystem.resolvePath`
 
-These remain Node-host-only today from a guest execution perspective:
+These remain async host API capabilities today from a guest execution
+perspective:
 
 - `network`
 - `http`
@@ -329,6 +331,9 @@ These remain Node-host-only today from a guest execution perspective:
 - `crypto_decrypt`
 - `crypto_key_agreement`
 - `crypto_kdf`
+- `ipfs`
+- `protocol_handle`
+- `protocol_dial`
 
 Portable-but-narrow today:
 
@@ -336,8 +341,8 @@ Portable-but-narrow today:
 - `pipe` via stdio descriptors only
 
 The harness generator exposes this distinction explicitly so module authors can
-see which capabilities are portable today and which still require host-side or
-future async ABI work.
+see which capabilities are portable in the raw guest ABI today and which
+require the async host adapter path.
 
 This JSON-over-memory note applies only to the current sync `sdn_host` guest
 ABI. It is not the canonical FlatBuffer stream-ingest contract, which uses
@@ -360,9 +365,9 @@ The current SDK enforcement for that target is:
   - `pipe`
 - hosted protocols may only use `wasi-pipe`
 
-Anything else still requires a host adapter, delegated service, or future async
-ABI expansion and therefore should not claim the canonical `wasi` runtime
-target yet.
+Anything else still requires a host adapter, delegated service, or a future raw
+guest async ABI expansion and therefore should not claim the canonical `wasi`
+runtime target yet.
 
 ## WasmEdge Deployment Target
 
