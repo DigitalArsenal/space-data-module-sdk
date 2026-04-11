@@ -23,6 +23,28 @@ function createCapabilityRegistry(capabilities = {}) {
   return registry;
 }
 
+function listCapabilityOperations(capabilities) {
+  const operations = new Set();
+  for (const [capabilityId, adapter] of capabilities.entries()) {
+    if (!adapter || typeof adapter !== "object") {
+      continue;
+    }
+    const methodIds = Object.keys(adapter).filter(
+      (methodId) => typeof adapter[methodId] === "function" && methodId !== "invoke",
+    );
+    if (methodIds.length > 0) {
+      for (const methodId of methodIds) {
+        operations.add(`${capabilityId}.${methodId}`);
+      }
+      continue;
+    }
+    if (typeof adapter.invoke === "function") {
+      operations.add(`${capabilityId}.invoke`);
+    }
+  }
+  return Array.from(operations).sort();
+}
+
 export function createRuntimeHost(options = {}) {
   const rows = options.rows ?? createFlatSqlRuntimeStore();
   const regions = options.regions ?? createRuntimeRegionStore();
@@ -35,6 +57,15 @@ export function createRuntimeHost(options = {}) {
     moduleRegistry,
     listCapabilities() {
       return Array.from(capabilities.keys()).sort();
+    },
+    listSupportedCapabilities() {
+      return Array.from(capabilities.keys()).sort();
+    },
+    listOperations() {
+      return listCapabilityOperations(capabilities);
+    },
+    hasCapability(capability) {
+      return capabilities.has(normalizeCapabilityId(capability));
     },
     getCapability(capability) {
       return capabilities.get(normalizeCapabilityId(capability)) ?? null;
@@ -67,6 +98,9 @@ export function createRuntimeHost(options = {}) {
       throw new Error(
         `Runtime host capability "${capabilityId}" does not implement "${methodId}" or invoke().`,
       );
+    },
+    async invoke(operation, params = {}) {
+      return this.invokeCapability(operation, params);
     },
   };
 }

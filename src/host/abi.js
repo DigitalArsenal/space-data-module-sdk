@@ -24,6 +24,78 @@ export const SyncHostcallOperations = Object.freeze([
 ]);
 export const NodeHostSyncHostcallOperations = SyncHostcallOperations;
 
+function normalizeCapabilityOperation(operation) {
+  const normalized = assertNonEmptyString(operation, "Host operation");
+  const separator = normalized.indexOf(".");
+  if (separator <= 0 || separator === normalized.length - 1) {
+    return null;
+  }
+  return {
+    capabilityId: normalized.slice(0, separator),
+    methodId: normalized.slice(separator + 1),
+  };
+}
+
+function getHostCapabilityAdapter(host, capabilityId) {
+  if (!host || typeof host !== "object") {
+    return null;
+  }
+  if (typeof host.getCapability === "function") {
+    const adapter = host.getCapability(capabilityId);
+    if (adapter) {
+      return adapter;
+    }
+  }
+  const capabilityRegistry = host.capabilities;
+  if (capabilityRegistry instanceof Map) {
+    const adapter = capabilityRegistry.get(capabilityId);
+    if (adapter) {
+      return adapter;
+    }
+  } else if (capabilityRegistry && typeof capabilityRegistry === "object") {
+    const adapter = capabilityRegistry[capabilityId];
+    if (adapter) {
+      return adapter;
+    }
+  }
+
+  const directAdapter = host[capabilityId];
+  if (directAdapter && typeof directAdapter === "object") {
+    return directAdapter;
+  }
+
+  const camelCapabilityId = capabilityId.replace(/_([a-z])/g, (_, letter) =>
+    letter.toUpperCase(),
+  );
+  const camelAdapter = host[camelCapabilityId];
+  if (camelAdapter && typeof camelAdapter === "object") {
+    return camelAdapter;
+  }
+
+  return null;
+}
+
+async function dispatchHostCapabilityOperation(host, operation, params = null) {
+  const normalized = normalizeCapabilityOperation(operation);
+  if (!normalized) {
+    return undefined;
+  }
+
+  const adapter = getHostCapabilityAdapter(host, normalized.capabilityId);
+  if (!adapter || typeof adapter !== "object") {
+    return undefined;
+  }
+  if (typeof adapter[normalized.methodId] === "function") {
+    return adapter[normalized.methodId](params);
+  }
+  if (typeof adapter.invoke === "function") {
+    return adapter.invoke(normalized.methodId, params);
+  }
+  throw new Error(
+    `Host capability "${normalized.capabilityId}" does not implement "${normalized.methodId}" or invoke().`,
+  );
+}
+
 function assertNonEmptyString(value, label) {
   const normalized = String(value ?? "").trim();
   if (!normalized) {
@@ -209,6 +281,24 @@ export async function dispatchHostOperation(host, operation, params = null) {
   const normalized = assertNonEmptyString(operation, "Host operation");
   if (typeof host.invoke === "function") {
     return host.invoke(normalized, params);
+  }
+  if (typeof host.invokeCapability === "function") {
+    try {
+      return host.invokeCapability(normalized, params);
+    } catch (error) {
+      if (SyncHostcallOperations.includes(normalized)) {
+        return dispatchHostSyncOperation(host, normalized, params);
+      }
+      throw error;
+    }
+  }
+  const genericResult = await dispatchHostCapabilityOperation(
+    host,
+    normalized,
+    params,
+  );
+  if (genericResult !== undefined) {
+    return genericResult;
   }
   return dispatchHostSyncOperation(host, normalized, params);
 }

@@ -16,8 +16,8 @@ import { createBrowserWasiShim, WasiExitError } from "../host/wasiShim.js";
 import { createBrowserHost } from "../host/browserHost.js";
 import {
   createJsonHostcallBridge,
+  createAsyncHostDispatcher,
   createHostSyncDispatcher,
-  dispatchHostOperation,
   DEFAULT_HOSTCALL_IMPORT_MODULE,
 } from "../host/abi.js";
 import {
@@ -127,6 +127,7 @@ async function instantiateBrowserModule(options = {}) {
  */
 export async function createBrowserModuleHarness(options = {}) {
   const host = options.host ?? createBrowserHost(options.hostOptions);
+  const dispatchHost = createAsyncHostDispatcher(host);
   const wasmModule = await compileWasmModule(options.wasmSource);
 
   const profile = detectArtifactProfile(wasmModule);
@@ -240,7 +241,7 @@ export async function createBrowserModuleHarness(options = {}) {
   }
 
   async function callHost(operation, params = {}) {
-    return dispatchHostOperation(host, operation, params);
+    return dispatchHost(operation, params);
   }
 
   function readManifest() {

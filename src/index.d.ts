@@ -409,6 +409,18 @@ export interface RuntimeHost {
   rows: FlatSqlRuntimeStore;
   regions: RuntimeRegionStore;
   moduleRegistry: RuntimeModuleRegistry;
+  listCapabilities(): string[];
+  listSupportedCapabilities(): string[];
+  listOperations(): string[];
+  hasCapability(capability: string): boolean;
+  getCapability(capability: string): Record<string, (...args: any[]) => unknown> | null;
+  registerCapability(
+    capability: string,
+    adapter: Record<string, (...args: any[]) => unknown>,
+  ): Record<string, (...args: any[]) => unknown>;
+  unregisterCapability(capability: string): boolean;
+  invokeCapability(operation: string, params?: Record<string, any>): Promise<unknown>;
+  invoke(operation: string, params?: Record<string, any>): Promise<unknown>;
 }
 
 export function createFlatBufferStreamIngestor(options?: {
@@ -1117,7 +1129,13 @@ export interface BrowserEdgeShims {
     now(): number;
     timeOrigin: number;
   };
+  network?: Record<string, (...args: any[]) => unknown> | null;
+  ipfs?: Record<string, (...args: any[]) => unknown> | null;
+  protocolHandle?: Record<string, (...args: any[]) => unknown> | null;
+  protocolDial?: Record<string, (...args: any[]) => unknown> | null;
   filesystem?: BrowserFilesystemShim;
+  filesystemRoot?: string;
+  capabilityAdapters?: Record<string, Record<string, (...args: any[]) => unknown>>;
 }
 
 export interface BrowserHostOptions {
@@ -1133,6 +1151,11 @@ export interface BrowserHostOptions {
   };
   filesystem?: BrowserFilesystemShim;
   filesystemRoot?: string;
+  network?: Record<string, (...args: any[]) => unknown> | null;
+  ipfs?: Record<string, (...args: any[]) => unknown> | null;
+  protocolHandle?: Record<string, (...args: any[]) => unknown> | null;
+  protocolDial?: Record<string, (...args: any[]) => unknown> | null;
+  capabilityAdapters?: Record<string, Record<string, (...args: any[]) => unknown>>;
 }
 
 export interface NodeHostOptions {
@@ -1156,6 +1179,39 @@ export interface NodeHostOptions {
   contextStore?: NodeHostContextStore;
   fetch?: (...args: any[]) => Promise<any>;
   WebSocket?: any;
+  filesystem?: {
+    resolvePath(path: string): string;
+    readFile(
+      path: string,
+      options?: { encoding?: string | null },
+    ): Promise<string | Uint8Array>;
+    writeFile(
+      path: string,
+      value: Uint8Array | ArrayBuffer | ArrayBufferView | string,
+      options?: { encoding?: string | null },
+    ): Promise<{ path: string }>;
+    appendFile(
+      path: string,
+      value: Uint8Array | ArrayBuffer | ArrayBufferView | string,
+      options?: { encoding?: string | null },
+    ): Promise<{ path: string }>;
+    deleteFile(path: string): Promise<{ path: string }>;
+    mkdir(
+      path: string,
+      options?: { recursive?: boolean },
+    ): Promise<{ path: string }>;
+    readdir(path?: string): Promise<NodeHostFilesystemEntry[]>;
+    stat(path: string): Promise<NodeHostFilesystemStat>;
+    rename(
+      fromPath: string,
+      toPath: string,
+    ): Promise<{ from: string; to: string }>;
+  } | null;
+  network?: Record<string, (...args: any[]) => unknown> | null;
+  ipfs?: Record<string, (...args: any[]) => unknown> | null;
+  protocolHandle?: Record<string, (...args: any[]) => unknown> | null;
+  protocolDial?: Record<string, (...args: any[]) => unknown> | null;
+  capabilityAdapters?: Record<string, Record<string, (...args: any[]) => unknown>>;
 }
 
 export class HostCapabilityError extends Error {
@@ -1576,6 +1632,7 @@ export interface BrowserModuleHarness {
   host: BrowserHost;
   bridge: HostcallBridge | null;
   wasi: BrowserWasiShim;
+  callHost(operation: string, params?: Record<string, any>): Promise<unknown>;
   invokeRaw(
     requestBytes: Uint8Array | ArrayBuffer | ArrayBufferView,
   ): Promise<Uint8Array>;
@@ -1594,7 +1651,7 @@ export interface BrowserModuleHarness {
 export function detectArtifactProfile(wasmModule: WebAssembly.Module): string;
 export function createBrowserModuleHarness(options?: {
   wasmSource: Uint8Array | ArrayBuffer | string | WebAssembly.Module | unknown;
-  host?: BrowserHost;
+  host?: BrowserHost | RuntimeHost | Record<string, unknown>;
   hostOptions?: BrowserHostOptions;
   args?: string[];
   env?: Record<string, string>;
@@ -1665,7 +1722,7 @@ export function createModuleFlatBufferStreamPump(options: {
 }): ModuleFlatBufferStreamPump;
 export function loadModule(options?: {
   wasmSource: Uint8Array | ArrayBuffer | string | WebAssembly.Module | unknown;
-  host?: BrowserHost;
+  host?: BrowserHost | RuntimeHost | Record<string, unknown>;
   hostOptions?: BrowserHostOptions;
   args?: string[];
   env?: Record<string, string | undefined>;

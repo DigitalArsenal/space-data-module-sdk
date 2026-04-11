@@ -93,7 +93,11 @@ The browser edge shims map host capabilities onto browser-native surfaces:
 - `clock`, `random`, `timers`, `schedule_cron`, `context_*`, `crypto_*`:
   browser-native implementations in the browser host adapter
 
-These are host shims, not raw WasmEdge socket imports.
+These are host shims, not raw WasmEdge socket imports. When an embedding host
+needs to override the reference behavior, pass `capabilityAdapters` keyed by
+the canonical capability ids. That same generic async capability boundary is
+shared by `BrowserHost`, `NodeHost`, `createRuntimeHost()`, `loadModule(...)`,
+and `createBrowserModuleHarness(...)`.
 
 ## Current Boundary
 
@@ -118,7 +122,8 @@ Today’s portable split is:
 - the guest-visible `sdn_host` import remains a sync-only subset for sync-safe
   operations
 - the host and harness APIs can still await filesystem, network, IPFS, and
-  protocol adapters in both browser and Node-hosted test/runtime flows
+  protocol adapters through the generic async capability boundary in both
+  browser and Node-hosted test/runtime flows
 
 For browser-hosted networking and IPFS/protocol work, use the browser edge
 shims or host-delegated adapters instead of relying on raw WasmEdge socket

@@ -108,6 +108,28 @@ function normalizeBrowserNetworkTransport(params = {}) {
   );
 }
 
+function resolveCapabilityAdapters(options = {}) {
+  const adapters =
+    options.capabilityAdapters && typeof options.capabilityAdapters === "object"
+      ? options.capabilityAdapters
+      : {};
+  return {
+    filesystem: options.filesystem ?? adapters.filesystem ?? null,
+    network: options.network ?? adapters.network ?? null,
+    ipfs: options.ipfs ?? adapters.ipfs ?? null,
+    protocolHandle:
+      options.protocolHandle ??
+      adapters.protocolHandle ??
+      adapters.protocol_handle ??
+      null,
+    protocolDial:
+      options.protocolDial ??
+      adapters.protocolDial ??
+      adapters.protocol_dial ??
+      null,
+  };
+}
+
 async function invokeAdapterMethod(adapter, methodName, params, label) {
   if (!adapter || typeof adapter !== "object") {
     throw new Error(`${label} adapter is not configured for this host.`);
@@ -126,6 +148,7 @@ async function invokeAdapterMethod(adapter, methodName, params, label) {
 export class BrowserHost {
   constructor(options = {}) {
     this.runtimeTarget = RuntimeTarget.BROWSER;
+    const capabilityAdapters = resolveCapabilityAdapters(options);
 
     const granted = options.capabilities
       ? new Set(options.capabilities)
@@ -136,12 +159,15 @@ export class BrowserHost {
       WebSocket: options.WebSocket ?? options.edgeShims?.WebSocket,
       crypto: options.crypto ?? options.edgeShims?.crypto,
       performance: options.performance ?? options.edgeShims?.performance,
-      network: options.network ?? options.edgeShims?.network,
-      ipfs: options.ipfs ?? options.edgeShims?.ipfs,
+      capabilityAdapters,
+      network: capabilityAdapters.network ?? options.edgeShims?.network,
+      ipfs: capabilityAdapters.ipfs ?? options.edgeShims?.ipfs,
       protocolHandle:
-        options.protocolHandle ?? options.edgeShims?.protocolHandle,
-      protocolDial: options.protocolDial ?? options.edgeShims?.protocolDial,
-      filesystem: options.filesystem ?? options.edgeShims?.filesystem,
+        capabilityAdapters.protocolHandle ?? options.edgeShims?.protocolHandle,
+      protocolDial:
+        capabilityAdapters.protocolDial ?? options.edgeShims?.protocolDial,
+      filesystem:
+        capabilityAdapters.filesystem ?? options.edgeShims?.filesystem,
       filesystemRoot: options.filesystemRoot ?? options.edgeShims?.filesystemRoot,
     });
     const performanceApi = edgeShims.performance ?? {
@@ -303,17 +329,17 @@ export class BrowserHost {
         this.#assertCapability("network", "network.request");
         const transport = normalizeBrowserNetworkTransport(params);
         const request = params.request ?? params;
-        if (transport === "http") {
-          return this.http.request(request);
-        }
-        if (transport === "websocket") {
-          return this.websocket.exchange(request);
-        }
         if (networkAdapter) {
           return invokeAdapterMethod(networkAdapter, "request", {
             ...request,
             transport,
           }, "network");
+        }
+        if (transport === "http") {
+          return this.http.request(request);
+        }
+        if (transport === "websocket") {
+          return this.websocket.exchange(request);
         }
         throw new Error(
           `Browser host does not support network transport "${transport}".`,

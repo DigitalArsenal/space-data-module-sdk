@@ -160,6 +160,28 @@ function normalizeGrantedCapabilities(options) {
   return normalized;
 }
 
+function resolveCapabilityAdapters(options = {}) {
+  const adapters =
+    options.capabilityAdapters && typeof options.capabilityAdapters === "object"
+      ? options.capabilityAdapters
+      : {};
+  return {
+    filesystem: options.filesystem ?? adapters.filesystem ?? null,
+    network: options.network ?? adapters.network ?? null,
+    ipfs: options.ipfs ?? adapters.ipfs ?? null,
+    protocolHandle:
+      options.protocolHandle ??
+      adapters.protocolHandle ??
+      adapters.protocol_handle ??
+      null,
+    protocolDial:
+      options.protocolDial ??
+      adapters.protocolDial ??
+      adapters.protocol_dial ??
+      null,
+  };
+}
+
 function normalizeAllowedOrigins(origins) {
   if (origins === undefined || origins === null) {
     return null;
@@ -1445,10 +1467,12 @@ export class NodeHost {
     );
     this.fetch = options.fetch ?? globalThis.fetch;
     this.WebSocket = options.WebSocket ?? globalThis.WebSocket;
-    this._networkAdapter = options.network ?? null;
-    this._ipfsAdapter = options.ipfs ?? null;
-    this._protocolHandleAdapter = options.protocolHandle ?? null;
-    this._protocolDialAdapter = options.protocolDial ?? null;
+    const capabilityAdapters = resolveCapabilityAdapters(options);
+    this._filesystemAdapter = capabilityAdapters.filesystem;
+    this._networkAdapter = capabilityAdapters.network;
+    this._ipfsAdapter = capabilityAdapters.ipfs;
+    this._protocolHandleAdapter = capabilityAdapters.protocolHandle;
+    this._protocolDialAdapter = capabilityAdapters.protocolDial;
     if (typeof this.fetch !== "function") {
       throw new TypeError(
         "A fetch implementation is required to create a Node host.",
@@ -1607,6 +1631,12 @@ export class NodeHost {
         this.#withCapability("network", "network.request", async () => {
           const transport = normalizeNetworkTransport(params);
           const request = params.request ?? params;
+          if (this._networkAdapter) {
+            return invokeAdapterMethod(this._networkAdapter, "request", {
+              ...request,
+              transport,
+            }, "network");
+          }
           switch (transport) {
             case "http":
               return this.http.request(request);
@@ -1623,18 +1653,93 @@ export class NodeHost {
             case "tls":
               return this.tls.request(request);
             default:
-              if (this._networkAdapter) {
-                return invokeAdapterMethod(this._networkAdapter, "request", {
-                  ...request,
-                  transport,
-                }, "network");
-              }
               throw new Error(
                 `Node host does not support network transport "${transport}".`,
               );
           }
         }),
     });
+
+    const builtinFilesystem = {
+      resolvePath: (targetPath) => this.#resolveFilesystemPath(targetPath),
+      readFile: async (targetPath, options = {}) => {
+        const resolvedPath = this.#resolveFilesystemPath(targetPath);
+        const file = await readFile(resolvedPath);
+        if (options.encoding) {
+          return file.toString(options.encoding);
+        }
+        return new Uint8Array(file);
+      },
+      writeFile: async (targetPath, value, options = {}) => {
+        const resolvedPath = this.#resolveFilesystemPath(targetPath);
+        await mkdir(path.dirname(resolvedPath), { recursive: true });
+        await writeFile(
+          resolvedPath,
+          typeof value === "string" ? value : Buffer.from(toUint8Array(value)),
+          options.encoding && typeof value === "string" ? options.encoding : undefined,
+        );
+        return { path: resolvedPath };
+      },
+      appendFile: async (targetPath, value, options = {}) => {
+        const resolvedPath = this.#resolveFilesystemPath(targetPath);
+        await mkdir(path.dirname(resolvedPath), { recursive: true });
+        const existing = await readFile(resolvedPath).catch((error) => {
+          if (error?.code === "ENOENT") {
+            return Buffer.alloc(0);
+          }
+          throw error;
+        });
+        const nextChunk =
+          typeof value === "string"
+            ? Buffer.from(value, options.encoding ?? "utf8")
+            : Buffer.from(toUint8Array(value));
+        await writeFile(resolvedPath, Buffer.concat([existing, nextChunk]));
+        return { path: resolvedPath };
+      },
+      deleteFile: async (targetPath) => {
+        const resolvedPath = this.#resolveFilesystemPath(targetPath);
+        await rm(resolvedPath, { force: true });
+        return { path: resolvedPath };
+      },
+      mkdir: async (targetPath, options = {}) => {
+        const resolvedPath = this.#resolveFilesystemPath(targetPath);
+        await mkdir(resolvedPath, {
+          recursive: options.recursive ?? true,
+        });
+        return { path: resolvedPath };
+      },
+      readdir: async (targetPath = ".") => {
+        const resolvedPath = this.#resolveFilesystemPath(targetPath);
+        const entries = await readdir(resolvedPath, { withFileTypes: true });
+        return entries
+          .map((entry) => ({
+            name: entry.name,
+            isFile: entry.isFile(),
+            isDirectory: entry.isDirectory(),
+          }))
+          .sort((left, right) => left.name.localeCompare(right.name));
+      },
+      stat: async (targetPath) => {
+        const resolvedPath = this.#resolveFilesystemPath(targetPath);
+        const metadata = await stat(resolvedPath);
+        return {
+          path: resolvedPath,
+          size: metadata.size,
+          isFile: metadata.isFile(),
+          isDirectory: metadata.isDirectory(),
+          ctimeMs: metadata.ctimeMs,
+          mtimeMs: metadata.mtimeMs,
+        };
+      },
+      rename: async (fromPath, toPath) => {
+        const resolvedFrom = this.#resolveFilesystemPath(fromPath);
+        const resolvedTo = this.#resolveFilesystemPath(toPath);
+        await mkdir(path.dirname(resolvedTo), { recursive: true });
+        await rename(resolvedFrom, resolvedTo);
+        return { from: resolvedFrom, to: resolvedTo };
+      },
+    };
+    const filesystem = this._filesystemAdapter ?? builtinFilesystem;
 
     this.mqtt = Object.freeze({
       publish: async (mqttOptions = {}) =>
@@ -1687,91 +1792,39 @@ export class NodeHost {
     this.filesystem = Object.freeze({
       resolvePath: (targetPath) =>
         this.#withCapability("filesystem", "filesystem.resolvePath", () =>
-          this.#resolveFilesystemPath(targetPath),
+          filesystem.resolvePath(targetPath),
         ),
       readFile: async (targetPath, options = {}) =>
         this.#withCapability("filesystem", "filesystem.readFile", async () => {
-          const resolvedPath = this.#resolveFilesystemPath(targetPath);
-          const file = await readFile(resolvedPath);
-          if (options.encoding) {
-            return file.toString(options.encoding);
-          }
-          return new Uint8Array(file);
+          return filesystem.readFile(targetPath, options);
         }),
       writeFile: async (targetPath, value, options = {}) =>
         this.#withCapability("filesystem", "filesystem.writeFile", async () => {
-          const resolvedPath = this.#resolveFilesystemPath(targetPath);
-          await mkdir(path.dirname(resolvedPath), { recursive: true });
-          await writeFile(
-            resolvedPath,
-            typeof value === "string" ? value : Buffer.from(toUint8Array(value)),
-            options.encoding && typeof value === "string" ? options.encoding : undefined,
-          );
-          return { path: resolvedPath };
+          return filesystem.writeFile(targetPath, value, options);
         }),
       appendFile: async (targetPath, value, options = {}) =>
         this.#withCapability("filesystem", "filesystem.appendFile", async () => {
-          const resolvedPath = this.#resolveFilesystemPath(targetPath);
-          await mkdir(path.dirname(resolvedPath), { recursive: true });
-          const existing = await readFile(resolvedPath).catch((error) => {
-            if (error?.code === "ENOENT") {
-              return Buffer.alloc(0);
-            }
-            throw error;
-          });
-          const nextChunk =
-            typeof value === "string"
-              ? Buffer.from(value, options.encoding ?? "utf8")
-              : Buffer.from(toUint8Array(value));
-          await writeFile(resolvedPath, Buffer.concat([existing, nextChunk]));
-          return { path: resolvedPath };
+          return filesystem.appendFile(targetPath, value, options);
         }),
       deleteFile: async (targetPath) =>
         this.#withCapability("filesystem", "filesystem.deleteFile", async () => {
-          const resolvedPath = this.#resolveFilesystemPath(targetPath);
-          await rm(resolvedPath, { force: true });
-          return { path: resolvedPath };
+          return filesystem.deleteFile(targetPath);
         }),
       mkdir: async (targetPath, options = {}) =>
         this.#withCapability("filesystem", "filesystem.mkdir", async () => {
-          const resolvedPath = this.#resolveFilesystemPath(targetPath);
-          await mkdir(resolvedPath, {
-            recursive: options.recursive ?? true,
-          });
-          return { path: resolvedPath };
+          return filesystem.mkdir(targetPath, options);
         }),
       readdir: async (targetPath = ".") =>
         this.#withCapability("filesystem", "filesystem.readdir", async () => {
-          const resolvedPath = this.#resolveFilesystemPath(targetPath);
-          const entries = await readdir(resolvedPath, { withFileTypes: true });
-          return entries
-            .map((entry) => ({
-              name: entry.name,
-              isFile: entry.isFile(),
-              isDirectory: entry.isDirectory(),
-            }))
-            .sort((left, right) => left.name.localeCompare(right.name));
+          return filesystem.readdir(targetPath);
         }),
       stat: async (targetPath) =>
         this.#withCapability("filesystem", "filesystem.stat", async () => {
-          const resolvedPath = this.#resolveFilesystemPath(targetPath);
-          const metadata = await stat(resolvedPath);
-          return {
-            path: resolvedPath,
-            size: metadata.size,
-            isFile: metadata.isFile(),
-            isDirectory: metadata.isDirectory(),
-            ctimeMs: metadata.ctimeMs,
-            mtimeMs: metadata.mtimeMs,
-          };
+          return filesystem.stat(targetPath);
         }),
       rename: async (fromPath, toPath) =>
         this.#withCapability("filesystem", "filesystem.rename", async () => {
-          const resolvedFrom = this.#resolveFilesystemPath(fromPath);
-          const resolvedTo = this.#resolveFilesystemPath(toPath);
-          await mkdir(path.dirname(resolvedTo), { recursive: true });
-          await rename(resolvedFrom, resolvedTo);
-          return { from: resolvedFrom, to: resolvedTo };
+          return filesystem.rename(fromPath, toPath);
         }),
     });
 

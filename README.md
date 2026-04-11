@@ -183,8 +183,16 @@ The current host/runtime contract is two-tiered:
 
 - raw guest `sdn_host` imports stay sync-only
 - generic async capabilities such as filesystem, network, IPFS, and protocol
-  adapters are exposed through `NodeHost`, `BrowserHost`, and the browser/module
-  harness APIs
+  adapters are exposed through `NodeHost`, `BrowserHost`,
+  `createRuntimeHost()` capability registries, and the browser/module harness
+  `callHost(...)` APIs
+
+Hosts can wire those async capabilities either through the built-in reference
+implementations or through explicit `capabilityAdapters` keyed by capability
+id (`filesystem`, `network`, `ipfs`, `protocol_handle`, `protocol_dial`). That
+generic async capability boundary is the canonical SDK contract for awaited
+host services; keep it aligned across Node, browser, and runtime-host entry
+points.
 
 ## Runtime Targets
 

@@ -4,7 +4,6 @@ import test from "node:test";
 import { createBrowserHost } from "../src/browser.js";
 
 test("browser host exposes awaited filesystem, network, ipfs, and protocol adapters", async () => {
-  const requests = [];
   const host = createBrowserHost({
     capabilities: [
       "filesystem",
@@ -13,59 +12,69 @@ test("browser host exposes awaited filesystem, network, ipfs, and protocol adapt
       "protocol_handle",
       "protocol_dial",
     ],
-    fetch: async (url, options = {}) => {
-      requests.push({
-        url,
-        method: options.method ?? "GET",
-      });
-      return new Response(
-        JSON.stringify({
-          url,
-          method: options.method ?? "GET",
-        }),
-        {
-          status: 200,
-          headers: {
-            "content-type": "application/json",
-          },
+    capabilityAdapters: {
+      filesystem: {
+        resolvePath(path) {
+          return `/virtual/${path}`;
         },
-      );
-    },
-    ipfs: {
-      async resolve(params) {
-        return {
-          path: params.path,
-          cid: "bafybrowsercid",
-        };
+        async mkdir(path) {
+          return { path: `/virtual/${path}` };
+        },
+        async writeFile(path, value, options) {
+          return {
+            path: `/virtual/${path}`,
+            value,
+            encoding: options?.encoding ?? null,
+          };
+        },
+        async readFile(path, options) {
+          return `browser:${path}:${options?.encoding ?? "bytes"}`;
+        },
       },
-    },
-    protocolHandle: {
-      async register(params) {
-        return {
-          registered: params.protocolId,
-        };
+      network: {
+        async request(params) {
+          return {
+            transport: params.transport,
+            url: params.url,
+          };
+        },
       },
-      async unregister(params) {
-        return {
-          unregistered: params.protocolId,
-        };
+      ipfs: {
+        async resolve(params) {
+          return {
+            path: params.path,
+            cid: "bafybrowsercid",
+          };
+        },
       },
-    },
-    protocolDial: {
-      async dial(params) {
-        return {
-          dialed: params.protocolId,
-          peerId: params.peerId,
-        };
+      protocol_handle: {
+        async register(params) {
+          return {
+            registered: params.protocolId,
+          };
+        },
+        async unregister(params) {
+          return {
+            unregistered: params.protocolId,
+          };
+        },
+      },
+      protocol_dial: {
+        async dial(params) {
+          return {
+            dialed: params.protocolId,
+            peerId: params.peerId,
+          };
+        },
       },
     },
   });
 
-  await host.invoke("filesystem.mkdir", {
+  const mkdirResponse = await host.invoke("filesystem.mkdir", {
     path: "cache",
     recursive: true,
   });
-  await host.invoke("filesystem.writeFile", {
+  const writeResponse = await host.invoke("filesystem.writeFile", {
     path: "cache/demo.txt",
     value: "browser-data",
     encoding: "utf8",
@@ -97,10 +106,18 @@ test("browser host exposes awaited filesystem, network, ipfs, and protocol adapt
 
   assert.equal(host.hasCapability("http"), true);
   assert.equal(host.listOperations().includes("network.request"), true);
-  assert.equal(fileText, "browser-data");
-  assert.deepEqual(networkResponse.body, {
+  assert.deepEqual(mkdirResponse, {
+    path: "/virtual/cache",
+  });
+  assert.deepEqual(writeResponse, {
+    path: "/virtual/cache/demo.txt",
+    value: "browser-data",
+    encoding: "utf8",
+  });
+  assert.equal(fileText, "browser:cache/demo.txt:utf8");
+  assert.deepEqual(networkResponse, {
+    transport: "http",
     url: "https://example.test/runtime",
-    method: "GET",
   });
   assert.deepEqual(ipfsResponse, {
     path: "/ipns/browser-demo",
@@ -116,10 +133,4 @@ test("browser host exposes awaited filesystem, network, ipfs, and protocol adapt
     dialed: "/space-data-network/module-delivery/1.0.0",
     peerId: "12D3KooWBrowserPeer",
   });
-  assert.deepEqual(requests, [
-    {
-      url: "https://example.test/runtime",
-      method: "GET",
-    },
-  ]);
 });

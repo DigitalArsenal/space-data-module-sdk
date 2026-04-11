@@ -9,6 +9,7 @@ import {
   createNodeHost,
   createNodeHostSyncDispatcher,
   createNodeHostSyncHostcallBridge,
+  createRuntimeHost,
 } from "../src/index.js";
 
 const ABI_GUEST_SOURCE = `
@@ -272,5 +273,84 @@ test("async host dispatcher awaits host invoke operations", async () => {
   assert.deepEqual(response, {
     path: "/ipns/demo",
     cid: "bafyasyncdispatcher",
+  });
+});
+
+test("async host dispatcher routes generic runtime-host capability adapters", async () => {
+  const host = createRuntimeHost({
+    capabilities: {
+      filesystem: {
+        async readFile(params) {
+          return `runtime:${params.path}`;
+        },
+      },
+      network: {
+        async request(params) {
+          return {
+            transport: params.transport,
+            url: params.url,
+          };
+        },
+      },
+      ipfs: {
+        async resolve(params) {
+          return {
+            path: params.path,
+            cid: "bafyruntimecid",
+          };
+        },
+      },
+      protocol_handle: {
+        async register(params) {
+          return {
+            registered: params.protocolId,
+          };
+        },
+      },
+      protocol_dial: {
+        async dial(params) {
+          return {
+            dialed: params.protocolId,
+            peerId: params.peerId,
+          };
+        },
+      },
+    },
+  });
+  const dispatch = createAsyncHostDispatcher(host);
+
+  const fileText = await dispatch("filesystem.readFile", {
+    path: "demo.txt",
+  });
+  const networkResponse = await dispatch("network.request", {
+    transport: "http",
+    url: "https://example.test/runtime-host",
+  });
+  const ipfsResponse = await dispatch("ipfs.resolve", {
+    path: "/ipns/runtime-host",
+  });
+  const registerResponse = await dispatch("protocol_handle.register", {
+    protocolId: "/space-data-network/module-delivery/1.0.0",
+  });
+  const dialResponse = await dispatch("protocol_dial.dial", {
+    protocolId: "/space-data-network/module-delivery/1.0.0",
+    peerId: "12D3KooWRuntimeHostPeer",
+  });
+
+  assert.equal(fileText, "runtime:demo.txt");
+  assert.deepEqual(networkResponse, {
+    transport: "http",
+    url: "https://example.test/runtime-host",
+  });
+  assert.deepEqual(ipfsResponse, {
+    path: "/ipns/runtime-host",
+    cid: "bafyruntimecid",
+  });
+  assert.deepEqual(registerResponse, {
+    registered: "/space-data-network/module-delivery/1.0.0",
+  });
+  assert.deepEqual(dialResponse, {
+    dialed: "/space-data-network/module-delivery/1.0.0",
+    peerId: "12D3KooWRuntimeHostPeer",
   });
 });

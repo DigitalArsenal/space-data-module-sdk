@@ -341,17 +341,30 @@ export function createMemoryFilesystemEdgeShim(options = {}) {
 }
 
 export function createBrowserEdgeShims(options = {}) {
+  const capabilityAdapters =
+    options.capabilityAdapters && typeof options.capabilityAdapters === "object"
+      ? options.capabilityAdapters
+      : {};
   return Object.freeze({
     fetch: options.fetch ?? globalThis.fetch?.bind(globalThis),
     WebSocket: options.WebSocket ?? globalThis.WebSocket,
     crypto: options.crypto ?? globalThis.crypto,
     performance: options.performance ?? globalThis.performance,
-    network: options.network ?? null,
-    ipfs: options.ipfs ?? null,
-    protocolHandle: options.protocolHandle ?? null,
-    protocolDial: options.protocolDial ?? null,
+    network: options.network ?? capabilityAdapters.network ?? null,
+    ipfs: options.ipfs ?? capabilityAdapters.ipfs ?? null,
+    protocolHandle:
+      options.protocolHandle ??
+      capabilityAdapters.protocolHandle ??
+      capabilityAdapters.protocol_handle ??
+      null,
+    protocolDial:
+      options.protocolDial ??
+      capabilityAdapters.protocolDial ??
+      capabilityAdapters.protocol_dial ??
+      null,
     filesystem:
       options.filesystem ??
+      capabilityAdapters.filesystem ??
       createMemoryFilesystemEdgeShim({
         filesystemRoot: options.filesystemRoot ?? "/",
       }),

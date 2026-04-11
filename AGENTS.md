@@ -80,8 +80,11 @@ Every compliant module produced here should satisfy all of the following:
 - Single-file delivery uses `sds.bundle`; do not append raw bytes after wasm.
 - Sync guest hostcalls use the `sdn_host` import module and the bridge in
   `src/host` for sync-safe operations only.
-- Generic async filesystem, network, IPFS, and protocol capabilities are
-  exposed through the NodeHost/BrowserHost and harness APIs.
+- The raw `sdn_host` bridge remains fail-closed and sync-only.
+- The generic async filesystem, network, IPFS, and protocol capability
+  boundary lives in `NodeHost`, `BrowserHost`, `createRuntimeHost()`
+  capability registries, and harness `callHost(...)` dispatch. Keep that
+  boundary aligned across code, types, docs, and tests.
 
 ## Canonical Build And Publication Rules
 

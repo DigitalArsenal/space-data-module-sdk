@@ -344,6 +344,19 @@ The harness generator exposes this distinction explicitly so module authors can
 see which capabilities are portable in the raw guest ABI today and which
 require the async host adapter path.
 
+That async host adapter path is now a single generic capability boundary:
+
+- `NodeHost.invoke(...)`
+- `BrowserHost.invoke(...)`
+- `createRuntimeHost().invoke(...)`
+- `loadModule(...).callHost(...)`
+- `createBrowserModuleHarness(...).callHost(...)`
+
+Those entry points all dispatch the same awaited capability ids and operation
+names. If you override reference behavior, do it with explicit
+`capabilityAdapters` keyed by canonical capability id rather than inventing a
+repo-local host API variant.
+
 This JSON-over-memory note applies only to the current sync `sdn_host` guest
 ABI. It is not the canonical FlatBuffer stream-ingest contract, which uses
 direct size-prefixed FlatBuffer frames and keeps payload bytes binary end-to-end.

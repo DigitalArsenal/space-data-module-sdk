@@ -13,7 +13,7 @@ import {
   createBrowserModuleHarness,
   detectArtifactProfile,
 } from "../testing/browserModuleHarness.js";
-import { dispatchHostOperation } from "./abi.js";
+import { createAsyncHostDispatcher } from "./abi.js";
 
 const isBrowser =
   typeof globalThis.window !== "undefined" &&
@@ -23,11 +23,12 @@ function attachHostDispatch(harness, host) {
   if (!host || typeof host !== "object") {
     return harness;
   }
+  const dispatchHost = createAsyncHostDispatcher(host);
   return {
     ...harness,
     host,
     async callHost(operation, params = {}) {
-      return dispatchHostOperation(host, operation, params);
+      return dispatchHost(operation, params);
     },
   };
 }

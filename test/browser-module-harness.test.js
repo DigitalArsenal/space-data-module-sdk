@@ -85,39 +85,57 @@ test("browser module harness exposes awaited host dispatch alongside module invo
         "protocol_handle",
         "protocol_dial",
       ],
-      fetch: async (url) =>
-        new Response(
-          JSON.stringify({
-            url,
-          }),
-          {
-            status: 200,
-            headers: {
-              "content-type": "application/json",
-            },
+      capabilityAdapters: {
+        filesystem: {
+          resolvePath(path) {
+            return `/virtual/${path}`;
           },
-        ),
-      ipfs: {
-        async resolve(params) {
-          return {
-            path: params.path,
-            cid: "bafyharnesscid",
-          };
+          async mkdir(path) {
+            return {
+              path: `/virtual/${path}`,
+            };
+          },
+          async writeFile(path, value, options) {
+            return {
+              path: `/virtual/${path}`,
+              value,
+              encoding: options?.encoding ?? null,
+            };
+          },
+          async readFile(path, options) {
+            return `harness:${path}:${options?.encoding ?? "bytes"}`;
+          },
         },
-      },
-      protocolHandle: {
-        async register(params) {
-          return {
-            registered: params.protocolId,
-          };
+        network: {
+          async request(params) {
+            return {
+              transport: params.transport,
+              url: params.url,
+            };
+          },
         },
-      },
-      protocolDial: {
-        async dial(params) {
-          return {
-            dialed: params.protocolId,
-            peerId: params.peerId,
-          };
+        ipfs: {
+          async resolve(params) {
+            return {
+              path: params.path,
+              cid: "bafyharnesscid",
+            };
+          },
+        },
+        protocol_handle: {
+          async register(params) {
+            return {
+              registered: params.protocolId,
+            };
+          },
+        },
+        protocol_dial: {
+          async dial(params) {
+            return {
+              dialed: params.protocolId,
+              peerId: params.peerId,
+            };
+          },
         },
       },
     },
@@ -139,11 +157,11 @@ test("browser module harness exposes awaited host dispatch alongside module invo
       },
     ],
   });
-  await harness.callHost("filesystem.mkdir", {
+  const mkdirResponse = await harness.callHost("filesystem.mkdir", {
     path: "cache",
     recursive: true,
   });
-  await harness.callHost("filesystem.writeFile", {
+  const writeResponse = await harness.callHost("filesystem.writeFile", {
     path: "cache/host.txt",
     value: "from host dispatch",
     encoding: "utf8",
@@ -174,8 +192,17 @@ test("browser module harness exposes awaited host dispatch alongside module invo
     new TextDecoder().decode(invokeResponse.outputs[0].payload),
     "hello from harness",
   );
-  assert.equal(filesystemResponse, "from host dispatch");
-  assert.deepEqual(networkResponse.body, {
+  assert.deepEqual(mkdirResponse, {
+    path: "/virtual/cache",
+  });
+  assert.deepEqual(writeResponse, {
+    path: "/virtual/cache/host.txt",
+    value: "from host dispatch",
+    encoding: "utf8",
+  });
+  assert.equal(filesystemResponse, "harness:cache/host.txt:utf8");
+  assert.deepEqual(networkResponse, {
+    transport: "http",
     url: "https://example.test/harness",
   });
   assert.deepEqual(ipfsResponse, {

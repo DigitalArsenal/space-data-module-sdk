@@ -98,6 +98,7 @@ const CapabilitySurfaceMatrix = Object.freeze({
     notes: [
       "WASI preopens are the preferred cross-runtime filesystem surface.",
       "The sync hostcall ABI currently exposes filesystem.resolvePath only.",
+      "Awaited filesystem reads and writes live on the generic async host boundary shared by NodeHost, BrowserHost, runtime-host capability registries, and harness callHost dispatch.",
     ],
   }),
   pipe: Object.freeze({
@@ -121,7 +122,7 @@ const CapabilitySurfaceMatrix = Object.freeze({
     nodeHostApi: true,
     notes: [
       "The coarse network capability maps to async host-side HTTP/TCP/UDP/TLS/WebSocket services.",
-      "Browser harnesses can await the same capability surface through BrowserHost.invoke().",
+      "Browser and Node harnesses can await the same capability surface through BrowserHost.invoke(), loadModule(...).callHost(...), and createBrowserModuleHarness(...).callHost(...).",
       "Pure WASI guests cannot reach that surface through the current sync hostcall ABI.",
       "WasmEdge provides non-blocking socket-oriented extensions that can serve as the standard server-side max-WASI target.",
     ],
@@ -207,7 +208,7 @@ const CapabilitySurfaceMatrix = Object.freeze({
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
-      "IPFS access is available through async host adapters and browser/module harness dispatch.",
+      "IPFS access is available through the generic async host boundary and browser/module harness dispatch.",
       "Pure WASM guests cannot reach that surface through the current sync hostcall ABI.",
     ],
   }),
@@ -219,7 +220,7 @@ const CapabilitySurfaceMatrix = Object.freeze({
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
-      "Protocol registration is available through async host adapters and browser/module harness dispatch.",
+      "Protocol registration is available through the generic async host boundary and browser/module harness dispatch.",
       "Pure WASM guests cannot reach that surface through the current sync hostcall ABI.",
     ],
   }),
@@ -231,7 +232,7 @@ const CapabilitySurfaceMatrix = Object.freeze({
     syncHostcall: false,
     nodeHostApi: true,
     notes: [
-      "Protocol dialing is available through async host adapters and browser/module harness dispatch.",
+      "Protocol dialing is available through the generic async host boundary and browser/module harness dispatch.",
       "Pure WASM guests cannot reach that surface through the current sync hostcall ABI.",
     ],
   }),

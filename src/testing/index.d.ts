@@ -335,6 +335,7 @@ export interface BrowserModuleHarness {
     stdout: Uint8Array;
     stderr: Uint8Array;
   };
+  callHost(operation: string, params?: Record<string, any>): Promise<unknown>;
   invokeRaw(
     requestBytes: Uint8Array | ArrayBuffer | ArrayBufferView,
   ): Promise<Uint8Array>;

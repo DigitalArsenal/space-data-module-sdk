@@ -11,6 +11,9 @@ they use words like "canonical", "required", or "must".
   `docs/browser-wasmedge-isomorphic.md`.
 - Keep the async host adapter boundary aligned with
   `docs/browser-wasmedge-isomorphic.md` and `docs/testing-harness.md`.
+- When the generic async capability boundary changes, update the exported types
+  and public entry points in the same change so `NodeHost`, `BrowserHost`,
+  `createRuntimeHost()`, and harness `callHost(...)` stay in sync.
 - Keep publication layout and release expectations aligned with
   `docs/module-publication-standard.md`.
 - Keep binary FlatBuffer ingest guidance aligned with

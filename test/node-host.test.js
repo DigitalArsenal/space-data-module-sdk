@@ -548,19 +548,44 @@ test("node host exposes random, timer, crypto, and invoke helpers", async () => 
   assert.deepEqual(host.listOperations().includes("filesystem.readFile"), true);
 });
 
-test("node host exposes generic network, ipfs, and protocol adapters", async () => {
-  await withServer((request, response) => {
-    response.writeHead(200, {
-      "content-type": "application/json",
-    });
-    response.end(JSON.stringify({
-      transport: "http",
-      url: request.url,
-    }));
-  }, async (baseUrl) => {
-    const host = createNodeHost({
-      capabilities: ["network", "ipfs", "protocol_handle", "protocol_dial"],
-      allowedHttpOrigins: [baseUrl],
+test("node host routes awaited filesystem, network, ipfs, and protocol operations through generic capability adapters", async () => {
+  const host = createNodeHost({
+    capabilities: [
+      "filesystem",
+      "network",
+      "ipfs",
+      "protocol_handle",
+      "protocol_dial",
+    ],
+    capabilityAdapters: {
+      filesystem: {
+        resolvePath(targetPath) {
+          return `/virtual/${targetPath}`;
+        },
+        async mkdir(targetPath) {
+          return {
+            path: `/virtual/${targetPath}`,
+          };
+        },
+        async writeFile(targetPath, value, options) {
+          return {
+            path: `/virtual/${targetPath}`,
+            value,
+            encoding: options?.encoding ?? null,
+          };
+        },
+        async readFile(targetPath, options) {
+          return `virtual:${targetPath}:${options?.encoding ?? "bytes"}`;
+        },
+      },
+      network: {
+        async request(params) {
+          return {
+            transport: params.transport,
+            url: params.url,
+          };
+        },
+      },
       ipfs: {
         async resolve(params) {
           return {
@@ -569,7 +594,7 @@ test("node host exposes generic network, ipfs, and protocol adapters", async () 
           };
         },
       },
-      protocolHandle: {
+      protocol_handle: {
         async register(params) {
           return {
             registered: params.protocolId,
@@ -581,7 +606,7 @@ test("node host exposes generic network, ipfs, and protocol adapters", async () 
           };
         },
       },
-      protocolDial: {
+      protocol_dial: {
         async dial(params) {
           return {
             dialed: params.protocolId,
@@ -589,48 +614,69 @@ test("node host exposes generic network, ipfs, and protocol adapters", async () 
           };
         },
       },
-    });
+    },
+  });
 
-    const networkResponse = await host.invoke("network.request", {
-      transport: "http",
-      url: `${baseUrl}/generic`,
-      responseType: "json",
-    });
-    const ipfsResponse = await host.invoke("ipfs.invoke", {
-      operation: "resolve",
-      path: "/ipns/demo",
-    });
-    const registerResponse = await host.invoke("protocol_handle.register", {
-      protocolId: "/space-data-network/module-delivery/1.0.0",
-    });
-    const unregisterResponse = await host.invoke("protocol_handle.unregister", {
-      protocolId: "/space-data-network/module-delivery/1.0.0",
-    });
-    const dialResponse = await host.invoke("protocol_dial.dial", {
-      protocolId: "/space-data-network/module-delivery/1.0.0",
-      peerId: "12D3KooWTestPeer",
-    });
+  const mkdirResponse = await host.invoke("filesystem.mkdir", {
+    path: "cache",
+    recursive: true,
+  });
+  const writeResponse = await host.invoke("filesystem.writeFile", {
+    path: "cache/module.bin",
+    value: "payload",
+    encoding: "utf8",
+  });
+  const fileText = await host.invoke("filesystem.readFile", {
+    path: "cache/module.bin",
+    encoding: "utf8",
+  });
+  const networkResponse = await host.invoke("network.request", {
+    transport: "http",
+    url: "https://example.test/generic",
+  });
+  const ipfsResponse = await host.invoke("ipfs.invoke", {
+    operation: "resolve",
+    path: "/ipns/demo",
+  });
+  const registerResponse = await host.invoke("protocol_handle.register", {
+    protocolId: "/space-data-network/module-delivery/1.0.0",
+  });
+  const unregisterResponse = await host.invoke("protocol_handle.unregister", {
+    protocolId: "/space-data-network/module-delivery/1.0.0",
+  });
+  const dialResponse = await host.invoke("protocol_dial.dial", {
+    protocolId: "/space-data-network/module-delivery/1.0.0",
+    peerId: "12D3KooWTestPeer",
+  });
 
-    assert.equal(host.hasCapability("http"), true);
-    assert.equal(host.listOperations().includes("network.request"), true);
-    assert.deepEqual(networkResponse.body, {
-      transport: "http",
-      url: "/generic",
-    });
-    assert.deepEqual(ipfsResponse, {
-      path: "/ipns/demo",
-      cid: "bafyresolvedcid",
-    });
-    assert.deepEqual(registerResponse, {
-      registered: "/space-data-network/module-delivery/1.0.0",
-    });
-    assert.deepEqual(unregisterResponse, {
-      unregistered: "/space-data-network/module-delivery/1.0.0",
-    });
-    assert.deepEqual(dialResponse, {
-      dialed: "/space-data-network/module-delivery/1.0.0",
-      peerId: "12D3KooWTestPeer",
-    });
+  assert.equal(host.hasCapability("http"), true);
+  assert.equal(host.listOperations().includes("network.request"), true);
+  assert.deepEqual(mkdirResponse, {
+    path: "/virtual/cache",
+  });
+  assert.deepEqual(writeResponse, {
+    path: "/virtual/cache/module.bin",
+    value: "payload",
+    encoding: "utf8",
+  });
+  assert.equal(fileText, "virtual:cache/module.bin:utf8");
+  assert.deepEqual(networkResponse, {
+    transport: "http",
+    url: "https://example.test/generic",
+  });
+  assert.deepEqual(ipfsResponse, {
+    path: "/ipns/demo",
+    cid: "bafyresolvedcid",
+  });
+  assert.deepEqual(registerResponse, {
+    registered: "/space-data-network/module-delivery/1.0.0",
+  });
+  assert.deepEqual(unregisterResponse, {
+    unregistered: "/space-data-network/module-delivery/1.0.0",
+  });
+  assert.deepEqual(dialResponse, {
+    dialed: "/space-data-network/module-delivery/1.0.0",
+    peerId: "12D3KooWTestPeer",
   });
 });
 
