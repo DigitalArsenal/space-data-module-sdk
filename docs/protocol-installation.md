@@ -37,7 +37,7 @@ Examples:
 - concrete multiaddrs
 - resolved listen ports
 - selected peer IDs
-- node-info URLs
+- deployment URLs
 - interface-keyed input bindings
 - scheduler bindings
 - hosted service bindings

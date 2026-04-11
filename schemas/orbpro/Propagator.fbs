@@ -1,0 +1,71 @@
+include "BaseTypes.fbs";
+
+namespace orbpro.propagator;
+
+enum ReferenceFrame : ubyte {
+  TEME = 0,
+  J2000 = 1,
+  ICRF = 2,
+  ECEF = 3,
+  MCI = 4,
+  MCMF = 5
+}
+
+enum StateFlags : uint {
+  NONE = 0,
+  VALID = 1,
+  IN_ECLIPSE = 2,
+  DECAYED = 4,
+  MANEUVERING = 8,
+  EXTRAPOLATED = 16,
+  HAS_COVARIANCE = 32
+}
+
+enum PropagatorSourceKind : ubyte {
+  UNKNOWN = 0,
+  SGP4 = 1
+}
+
+struct StateVector {
+  epoch:double;
+  position:orbpro.Vec3;
+  velocity:orbpro.Vec3;
+  reference_frame:ReferenceFrame;
+  flags:uint;
+}
+
+table PropagatorDescribeSourcesBatchRequest {
+  catalogHandle:uint = 0;
+  sourceHandles:[uint];
+}
+
+table PropagatorSourceDescription {
+  sourceHandle:uint = 0;
+  sourceKind:PropagatorSourceKind = UNKNOWN;
+  objectName:string;
+  objectId:string;
+  noradCatId:uint = 0;
+  epochJd:double = 0.0;
+  meanMotionRevPerDay:double = 0.0;
+  eccentricity:double = 0.0;
+  inclinationDeg:double = 0.0;
+  raOfAscNodeDeg:double = 0.0;
+  argOfPericenterDeg:double = 0.0;
+  meanAnomalyDeg:double = 0.0;
+  ephemerisType:int = 0;
+  classificationType:string;
+  elementSetNo:uint = 0;
+  revAtEpoch:uint = 0;
+  bstar:double = 0.0;
+  meanMotionDotRevPerDay2:double = 0.0;
+  meanMotionDdotRevPerDay3:double = 0.0;
+  perigeeKm:double = 0.0;
+  apogeeKm:double = 0.0;
+}
+
+table PropagatorDescribeSourcesBatchResult {
+  catalogHandle:uint = 0;
+  sources:[PropagatorSourceDescription];
+}
+
+root_type PropagatorDescribeSourcesBatchRequest;

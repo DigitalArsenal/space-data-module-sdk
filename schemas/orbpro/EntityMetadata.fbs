@@ -1,0 +1,53 @@
+namespace orbpro.entity;
+
+enum EntityKind : ubyte {
+  ENTITY = 0,
+  SPACE = 1,
+  GROUND = 2,
+  AIRCRAFT = 3,
+  MISSILE = 4,
+  SHIP = 5,
+  VEHICLE = 6,
+  SENSOR = 7,
+  OTHER = 255
+}
+
+table EntityMetadata {
+  entity_id:string (required, key);
+  name:string;
+  entity_kind:EntityKind = ENTITY;
+  subtype:string;
+  parent_entity_id:string;
+  primary_schema_file_id:string;
+  primary_row_id:double = 0.0;
+  wasm_handle:uint = 0;
+  position_region_id:uint = 0;
+  position_record_index:uint = 0;
+  velocity_region_id:uint = 0;
+  velocity_record_index:uint = 0;
+  visibility_region_id:uint = 0;
+  visibility_record_index:uint = 0;
+  norad_cat_id:uint = 0;
+  object_name:string;
+  object_id:string;
+  cat_object_name:string;
+  cat_object_id:string;
+  facility_type:string;
+  search_text:string;
+  owner:string;
+  status_code:string;
+  launch_date:string;
+  launch_year:string;
+  orbit_regime:string;
+  period:double = 0.0;
+  inclination:double = 0.0;
+  apogee:double = 0.0;
+  perigee:double = 0.0;
+  mean_motion:double = 0.0;
+  eccentricity:double = 0.0;
+  bstar:double = 0.0;
+  has_gp:bool = false;
+}
+
+root_type EntityMetadata;
+file_identifier "ENTM";

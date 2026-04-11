@@ -1,0 +1,14 @@
+include "CatalogQueryBase.fbs";
+
+namespace orbpro.query;
+
+table CatalogQueryRequest {
+  query_kind:CatalogQueryKind = ROWS;
+  query:string;
+  entity_index:uint = 0;
+  max_count:uint = 0;
+  entity_count:uint = 0;
+}
+
+root_type CatalogQueryRequest;
+file_identifier "CQRQ";

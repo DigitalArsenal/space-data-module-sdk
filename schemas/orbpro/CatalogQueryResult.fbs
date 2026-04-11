@@ -1,0 +1,17 @@
+include "CatalogQueryBase.fbs";
+include "EntityMetadata.fbs";
+
+namespace orbpro.query;
+
+table CatalogQueryResult {
+  query_kind:CatalogQueryKind = ROWS;
+  rows:[orbpro.entity.EntityMetadata];
+  entity_indices:[uint];
+  mask:[ubyte];
+  visible_count:uint = 0;
+  entity_index:uint = 0;
+  row:orbpro.entity.EntityMetadata;
+}
+
+root_type CatalogQueryResult;
+file_identifier "CQRS";

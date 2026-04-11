@@ -1,0 +1,15 @@
+namespace orbpro.entity;
+
+table StandardsRecordIndex {
+  record_key:string (required, key);
+  schema_name:string (required);
+  schema_file_id:string (required);
+  row_id:double = 0.0;
+  role:string;
+  attached_via:string;
+  payload_kind:string;
+  updated_at_ms:double = 0.0;
+}
+
+root_type StandardsRecordIndex;
+file_identifier "STRI";
