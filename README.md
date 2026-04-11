@@ -597,6 +597,11 @@ machine-global Emscripten install. Treat `PATH` Emscripten as an explicit escape
 hatch, not the default. WasmEdge pthread builds still require a system
 Emscripten toolchain on `PATH`.
 
+For `spacedatastandards.org` schemas, the required FlatBuffer libraries and
+generated bindings must come from upstream SDS sources or published SDS
+artifacts generated with `flatc-wasm`. Do not add repo-local shadow `.fbs`
+families or hand-authored generated classes in this repo.
+
 If another repo needs the same compiler runtime, the package also exposes a
 shared emception session at `space-data-module-sdk/compiler/emception` with
 helpers for serialized command execution and virtual filesystem access.
