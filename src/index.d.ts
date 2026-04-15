@@ -1131,6 +1131,7 @@ export interface BrowserEdgeShims {
   };
   network?: Record<string, (...args: any[]) => unknown> | null;
   ipfs?: Record<string, (...args: any[]) => unknown> | null;
+  walletSign?: Record<string, (...args: any[]) => unknown> | null;
   protocolHandle?: Record<string, (...args: any[]) => unknown> | null;
   protocolDial?: Record<string, (...args: any[]) => unknown> | null;
   filesystem?: BrowserFilesystemShim;
@@ -1142,6 +1143,7 @@ export interface BrowserHostOptions {
   capabilities?: string[];
   edgeShims?: BrowserEdgeShims;
   contextStore?: Map<string, Map<string, unknown>>;
+  wasmWallet?: unknown;
   fetch?: (...args: any[]) => Promise<any>;
   WebSocket?: any;
   crypto?: any;
@@ -1153,6 +1155,7 @@ export interface BrowserHostOptions {
   filesystemRoot?: string;
   network?: Record<string, (...args: any[]) => unknown> | null;
   ipfs?: Record<string, (...args: any[]) => unknown> | null;
+  walletSign?: Record<string, (...args: any[]) => unknown> | null;
   protocolHandle?: Record<string, (...args: any[]) => unknown> | null;
   protocolDial?: Record<string, (...args: any[]) => unknown> | null;
   capabilityAdapters?: Record<string, Record<string, (...args: any[]) => unknown>>;
@@ -1209,6 +1212,7 @@ export interface NodeHostOptions {
   } | null;
   network?: Record<string, (...args: any[]) => unknown> | null;
   ipfs?: Record<string, (...args: any[]) => unknown> | null;
+  walletSign?: Record<string, (...args: any[]) => unknown> | null;
   protocolHandle?: Record<string, (...args: any[]) => unknown> | null;
   protocolDial?: Record<string, (...args: any[]) => unknown> | null;
   capabilityAdapters?: Record<string, Record<string, (...args: any[]) => unknown>>;
@@ -1524,16 +1528,51 @@ export class BrowserHost {
   crypto: {
     sha256(data: Uint8Array | ArrayBuffer | ArrayBufferView | string): Promise<Uint8Array>;
     sha512(data: Uint8Array | ArrayBuffer | ArrayBufferView | string): Promise<Uint8Array>;
+    hkdf(options: {
+      ikm: Uint8Array | ArrayBuffer | ArrayBufferView | number[];
+      salt: Uint8Array | ArrayBuffer | ArrayBufferView | number[];
+      info?: Uint8Array | ArrayBuffer | ArrayBufferView | number[];
+      length: number;
+    }): Promise<Uint8Array>;
     aesGcmEncrypt(options: {
       key: Uint8Array | ArrayBuffer | ArrayBufferView;
       plaintext: Uint8Array | ArrayBuffer | ArrayBufferView;
       iv?: Uint8Array | ArrayBuffer | ArrayBufferView;
-    }): Promise<{ ciphertext: Uint8Array; iv: Uint8Array | ArrayBuffer | ArrayBufferView }>;
+      aad?: Uint8Array | ArrayBuffer | ArrayBufferView | number[] | null;
+    }): Promise<{
+      ciphertext: Uint8Array;
+      tag: Uint8Array;
+      iv: Uint8Array | ArrayBuffer | ArrayBufferView;
+    }>;
     aesGcmDecrypt(options: {
       key: Uint8Array | ArrayBuffer | ArrayBufferView;
       ciphertext: Uint8Array | ArrayBuffer | ArrayBufferView;
+      tag: Uint8Array | ArrayBuffer | ArrayBufferView;
       iv: Uint8Array | ArrayBuffer | ArrayBufferView;
+      aad?: Uint8Array | ArrayBuffer | ArrayBufferView | number[] | null;
     }): Promise<Uint8Array>;
+    generateX25519Keypair(): Promise<X25519Keypair>;
+    x25519PublicKey(
+      privateKey: Uint8Array | ArrayBuffer | ArrayBufferView | number[],
+    ): Promise<Uint8Array>;
+    x25519SharedSecret(
+      privateKey: Uint8Array | ArrayBuffer | ArrayBufferView | number[],
+      publicKey: Uint8Array | ArrayBuffer | ArrayBufferView | number[],
+    ): Promise<Uint8Array>;
+    ed25519: {
+      publicKeyFromSeed(
+        seed: Uint8Array | ArrayBuffer | ArrayBufferView | number[],
+      ): Promise<Uint8Array>;
+      sign(
+        message: Uint8Array | ArrayBuffer | ArrayBufferView | number[],
+        seed: Uint8Array | ArrayBuffer | ArrayBufferView | number[],
+      ): Promise<Uint8Array>;
+      verify(
+        message: Uint8Array | ArrayBuffer | ArrayBufferView | number[],
+        signature: Uint8Array | ArrayBuffer | ArrayBufferView | number[],
+        publicKey: Uint8Array | ArrayBuffer | ArrayBufferView | number[],
+      ): Promise<boolean>;
+    };
   };
   filesystem: BrowserFilesystemShim;
   constructor(options?: BrowserHostOptions);

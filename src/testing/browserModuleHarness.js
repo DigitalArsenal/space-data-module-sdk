@@ -14,6 +14,7 @@
 
 import { createBrowserWasiShim, WasiExitError } from "../host/wasiShim.js";
 import { createBrowserHost } from "../host/browserHost.js";
+import { getWasmWallet } from "../utils/wasmCrypto.js";
 import {
   createJsonHostcallBridge,
   createAsyncHostDispatcher,
@@ -126,9 +127,20 @@ async function instantiateBrowserModule(options = {}) {
  * @param {string} [options.surface] - "direct" or "command" (default: auto-detect).
  */
 export async function createBrowserModuleHarness(options = {}) {
-  const host = options.host ?? createBrowserHost(options.hostOptions);
-  const dispatchHost = createAsyncHostDispatcher(host);
   const wasmModule = await compileWasmModule(options.wasmSource);
+  const moduleImports = WebAssembly.Module.imports(wasmModule);
+  const needsHostBridge = moduleImports.some(
+    (entry) => entry.module === DEFAULT_HOSTCALL_IMPORT_MODULE,
+  );
+  const hostOptions =
+    !options.host && needsHostBridge && !options.hostOptions?.wasmWallet
+      ? {
+          ...options.hostOptions,
+          wasmWallet: await getWasmWallet(),
+        }
+      : options.hostOptions;
+  const host = options.host ?? createBrowserHost(hostOptions);
+  const dispatchHost = createAsyncHostDispatcher(host);
 
   const profile = detectArtifactProfile(wasmModule);
   const moduleExports = WebAssembly.Module.exports(wasmModule);

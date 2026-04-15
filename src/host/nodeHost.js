@@ -63,6 +63,7 @@ export const NodeHostSupportedCapabilities = Object.freeze([
   "crypto_decrypt",
   "crypto_key_agreement",
   "crypto_kdf",
+  "wallet_sign",
   "process_exec",
 ]);
 
@@ -93,9 +94,13 @@ export const NodeHostSupportedOperations = Object.freeze([
   "udp.request",
   "tls.request",
   "ipfs.invoke",
+  "ipfs.add",
+  "ipfs.cat",
   "protocol_handle.register",
   "protocol_handle.unregister",
   "protocol_dial.dial",
+  "protocol.request",
+  "keyslot.get",
   "exec.execFile",
   "context.get",
   "context.set",
@@ -169,6 +174,12 @@ function resolveCapabilityAdapters(options = {}) {
     filesystem: options.filesystem ?? adapters.filesystem ?? null,
     network: options.network ?? adapters.network ?? null,
     ipfs: options.ipfs ?? adapters.ipfs ?? null,
+    walletSign:
+      options.walletSign ??
+      adapters.walletSign ??
+      adapters.wallet_sign ??
+      adapters.keyslot ??
+      null,
     protocolHandle:
       options.protocolHandle ??
       adapters.protocolHandle ??
@@ -1471,6 +1482,7 @@ export class NodeHost {
     this._filesystemAdapter = capabilityAdapters.filesystem;
     this._networkAdapter = capabilityAdapters.network;
     this._ipfsAdapter = capabilityAdapters.ipfs;
+    this._walletSignAdapter = capabilityAdapters.walletSign;
     this._protocolHandleAdapter = capabilityAdapters.protocolHandle;
     this._protocolDialAdapter = capabilityAdapters.protocolDial;
     if (typeof this.fetch !== "function") {
@@ -1974,6 +1986,14 @@ export class NodeHost {
           }
           return invokeAdapterMethod(this._ipfsAdapter, operation, params, "ipfs");
         }),
+      add: async (params = {}) =>
+        this.#withCapability("ipfs", "ipfs.add", async () =>
+          invokeAdapterMethod(this._ipfsAdapter, "add", params, "ipfs"),
+        ),
+      cat: async (params = {}) =>
+        this.#withCapability("ipfs", "ipfs.cat", async () =>
+          invokeAdapterMethod(this._ipfsAdapter, "cat", params, "ipfs"),
+        ),
     });
 
     this.protocolHandle = Object.freeze({
@@ -2012,6 +2032,22 @@ export class NodeHost {
             params,
             "protocol_dial",
           ),
+        ),
+      request: async (params = {}) =>
+        this.#withCapability("protocol_dial", "protocol.request", async () =>
+          invokeAdapterMethod(
+            this._protocolDialAdapter,
+            "request",
+            params,
+            "protocol_dial",
+          ),
+        ),
+    });
+
+    this.keyslot = Object.freeze({
+      get: async (params = {}) =>
+        this.#withCapability("wallet_sign", "keyslot.get", async () =>
+          invokeAdapterMethod(this._walletSignAdapter, "get", params, "wallet_sign"),
         ),
     });
   }
@@ -2153,12 +2189,20 @@ export class NodeHost {
         return this.tls.request(params);
       case "ipfs.invoke":
         return this.ipfs.invoke(params);
+      case "ipfs.add":
+        return this.ipfs.add(params);
+      case "ipfs.cat":
+        return this.ipfs.cat(params);
       case "protocol_handle.register":
         return this.protocolHandle.register(params);
       case "protocol_handle.unregister":
         return this.protocolHandle.unregister(params);
       case "protocol_dial.dial":
         return this.protocolDial.dial(params);
+      case "protocol.request":
+        return this.protocolDial.request(params);
+      case "keyslot.get":
+        return this.keyslot.get(params);
       case "exec.execFile":
         return this.exec.execFile(params);
       case "context.get":

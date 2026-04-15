@@ -554,6 +554,7 @@ test("node host routes awaited filesystem, network, ipfs, and protocol operation
       "filesystem",
       "network",
       "ipfs",
+      "wallet_sign",
       "protocol_handle",
       "protocol_dial",
     ],
@@ -587,10 +588,30 @@ test("node host routes awaited filesystem, network, ipfs, and protocol operation
         },
       },
       ipfs: {
+        async add(params) {
+          return {
+            cid: "bafynodeaddcid",
+            bytes: params.base64?.length ?? 0,
+          };
+        },
+        async cat(params) {
+          return {
+            cid: params.cid,
+            base64: "bm9kZS1pcGZzLWNhdA==",
+          };
+        },
         async resolve(params) {
           return {
             path: params.path,
             cid: "bafyresolvedcid",
+          };
+        },
+      },
+      wallet_sign: {
+        async get(params) {
+          return {
+            slotId: params.slotId,
+            base64: "bm9kZS1rZXktc2xvdA==",
           };
         },
       },
@@ -611,6 +632,13 @@ test("node host routes awaited filesystem, network, ipfs, and protocol operation
           return {
             dialed: params.protocolId,
             peerId: params.peerId,
+          };
+        },
+        async request(params) {
+          return {
+            target: params.target,
+            protocolId: params.protocolId,
+            payloadBase64: params.payloadBase64 ?? null,
           };
         },
       },
@@ -638,6 +666,12 @@ test("node host routes awaited filesystem, network, ipfs, and protocol operation
     operation: "resolve",
     path: "/ipns/demo",
   });
+  const ipfsAddResponse = await host.invoke("ipfs.add", {
+    base64: "bm9kZS1hZGQ=",
+  });
+  const ipfsCatResponse = await host.invoke("ipfs.cat", {
+    cid: "bafyresolvedcid",
+  });
   const registerResponse = await host.invoke("protocol_handle.register", {
     protocolId: "/space-data-network/module-delivery/1.0.0",
   });
@@ -647,6 +681,14 @@ test("node host routes awaited filesystem, network, ipfs, and protocol operation
   const dialResponse = await host.invoke("protocol_dial.dial", {
     protocolId: "/space-data-network/module-delivery/1.0.0",
     peerId: "12D3KooWTestPeer",
+  });
+  const requestResponse = await host.invoke("protocol.request", {
+    target: "12D3KooWTestPeer",
+    protocolId: "/space-data-network/module-delivery/1.0.0",
+    payloadBase64: "bm9kZS1yZXF1ZXN0",
+  });
+  const keyslotResponse = await host.invoke("keyslot.get", {
+    slotId: "node-provider-signing",
   });
 
   assert.equal(host.hasCapability("http"), true);
@@ -668,6 +710,14 @@ test("node host routes awaited filesystem, network, ipfs, and protocol operation
     path: "/ipns/demo",
     cid: "bafyresolvedcid",
   });
+  assert.deepEqual(ipfsAddResponse, {
+    cid: "bafynodeaddcid",
+    bytes: 12,
+  });
+  assert.deepEqual(ipfsCatResponse, {
+    cid: "bafyresolvedcid",
+    base64: "bm9kZS1pcGZzLWNhdA==",
+  });
   assert.deepEqual(registerResponse, {
     registered: "/space-data-network/module-delivery/1.0.0",
   });
@@ -677,6 +727,15 @@ test("node host routes awaited filesystem, network, ipfs, and protocol operation
   assert.deepEqual(dialResponse, {
     dialed: "/space-data-network/module-delivery/1.0.0",
     peerId: "12D3KooWTestPeer",
+  });
+  assert.deepEqual(requestResponse, {
+    target: "12D3KooWTestPeer",
+    protocolId: "/space-data-network/module-delivery/1.0.0",
+    payloadBase64: "bm9kZS1yZXF1ZXN0",
+  });
+  assert.deepEqual(keyslotResponse, {
+    slotId: "node-provider-signing",
+    base64: "bm9kZS1rZXktc2xvdA==",
   });
 });
 

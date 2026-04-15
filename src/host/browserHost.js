@@ -6,6 +6,7 @@
  */
 
 import { RuntimeTarget } from "../runtime/constants.js";
+import { toUint8Array } from "../utils/encoding.js";
 import {
   parseCronExpression,
   matchesCronExpression,
@@ -28,8 +29,13 @@ export const BrowserHostSupportedCapabilities = Object.freeze([
   "context_read",
   "context_write",
   "crypto_hash",
+  "crypto_sign",
+  "crypto_verify",
   "crypto_encrypt",
   "crypto_decrypt",
+  "crypto_key_agreement",
+  "crypto_kdf",
+  "wallet_sign",
   "logging",
 ]);
 
@@ -60,9 +66,13 @@ export const BrowserHostSupportedOperations = Object.freeze([
   "filesystem.stat",
   "filesystem.rename",
   "ipfs.invoke",
+  "ipfs.add",
+  "ipfs.cat",
   "protocol_handle.register",
   "protocol_handle.unregister",
   "protocol_dial.dial",
+  "protocol.request",
+  "keyslot.get",
   "context.get",
   "context.set",
   "context.delete",
@@ -70,8 +80,15 @@ export const BrowserHostSupportedOperations = Object.freeze([
   "context.listScopes",
   "crypto.sha256",
   "crypto.sha512",
+  "crypto.hkdf",
   "crypto.aesGcmEncrypt",
   "crypto.aesGcmDecrypt",
+  "crypto.x25519.generateKeypair",
+  "crypto.x25519.publicKey",
+  "crypto.x25519.sharedSecret",
+  "crypto.ed25519.publicKeyFromSeed",
+  "crypto.ed25519.sign",
+  "crypto.ed25519.verify",
 ]);
 
 export class BrowserHostCapabilityError extends Error {
@@ -117,6 +134,12 @@ function resolveCapabilityAdapters(options = {}) {
     filesystem: options.filesystem ?? adapters.filesystem ?? null,
     network: options.network ?? adapters.network ?? null,
     ipfs: options.ipfs ?? adapters.ipfs ?? null,
+    walletSign:
+      options.walletSign ??
+      adapters.walletSign ??
+      adapters.wallet_sign ??
+      adapters.keyslot ??
+      null,
     protocolHandle:
       options.protocolHandle ??
       adapters.protocolHandle ??
@@ -128,6 +151,13 @@ function resolveCapabilityAdapters(options = {}) {
       adapters.protocol_dial ??
       null,
   };
+}
+
+function normalizeCryptoBytes(value) {
+  if (typeof value === "string") {
+    return new TextEncoder().encode(value);
+  }
+  return toUint8Array(value);
 }
 
 async function invokeAdapterMethod(adapter, methodName, params, label) {
@@ -175,11 +205,13 @@ export class BrowserHost {
       timeOrigin: 0,
     };
     const cryptoApi = edgeShims.crypto;
+    const wasmWallet = options.wasmWallet ?? null;
     const fetchImpl = edgeShims.fetch;
     const WebSocketImpl = edgeShims.WebSocket;
     const filesystem = edgeShims.filesystem;
     const networkAdapter = edgeShims.network;
     const ipfsAdapter = edgeShims.ipfs;
+    const walletSignAdapter = capabilityAdapters.walletSign;
     const protocolHandleAdapter = edgeShims.protocolHandle;
     const protocolDialAdapter = edgeShims.protocolDial;
 
@@ -356,6 +388,14 @@ export class BrowserHost {
         }
         return invokeAdapterMethod(ipfsAdapter, operation, params, "ipfs");
       },
+      add: async (params = {}) => {
+        this.#assertCapability("ipfs", "ipfs.add");
+        return invokeAdapterMethod(ipfsAdapter, "add", params, "ipfs");
+      },
+      cat: async (params = {}) => {
+        this.#assertCapability("ipfs", "ipfs.cat");
+        return invokeAdapterMethod(ipfsAdapter, "cat", params, "ipfs");
+      },
     });
 
     this.protocolHandle = Object.freeze({
@@ -389,6 +429,22 @@ export class BrowserHost {
           "protocol_dial",
         );
       },
+      request: async (params = {}) => {
+        this.#assertCapability("protocol_dial", "protocol.request");
+        return invokeAdapterMethod(
+          protocolDialAdapter,
+          "request",
+          params,
+          "protocol_dial",
+        );
+      },
+    });
+
+    this.keyslot = Object.freeze({
+      get: async (params = {}) => {
+        this.#assertCapability("wallet_sign", "keyslot.get");
+        return invokeAdapterMethod(walletSignAdapter, "get", params, "wallet_sign");
+      },
     });
 
     this.context = Object.freeze({
@@ -419,60 +475,161 @@ export class BrowserHost {
     });
 
     this.crypto = Object.freeze({
-      sha256: async (data) => {
+      sha256: (data) => {
         this.#assertCapability("crypto_hash", "crypto.sha256");
-        if (!cryptoApi?.subtle) {
-          throw new Error("No Web Crypto subtle implementation is available.");
+        if (!wasmWallet?.utils?.sha256) {
+          throw new Error("Browser host crypto.sha256 requires a preloaded wasmWallet.");
         }
-        const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
-        return new Uint8Array(await cryptoApi.subtle.digest("SHA-256", bytes));
+        return new Uint8Array(wasmWallet.utils.sha256(normalizeCryptoBytes(data)));
       },
-      sha512: async (data) => {
+      sha512: (data) => {
         this.#assertCapability("crypto_hash", "crypto.sha512");
-        if (!cryptoApi?.subtle) {
-          throw new Error("No Web Crypto subtle implementation is available.");
+        if (!wasmWallet?.utils?.sha512) {
+          throw new Error("Browser host crypto.sha512 requires a preloaded wasmWallet.");
         }
-        const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
-        return new Uint8Array(await cryptoApi.subtle.digest("SHA-512", bytes));
+        return new Uint8Array(wasmWallet.utils.sha512(normalizeCryptoBytes(data)));
       },
-      aesGcmEncrypt: async (params) => {
-        this.#assertCapability("crypto_encrypt", "crypto.aesGcmEncrypt");
-        if (!cryptoApi?.subtle || !cryptoApi?.getRandomValues) {
-          throw new Error("No Web Crypto implementation is available.");
+      hkdf: (params = {}) => {
+        this.#assertCapability("crypto_kdf", "crypto.hkdf");
+        if (!wasmWallet?.utils?.hkdf) {
+          throw new Error("Browser host crypto.hkdf requires a preloaded wasmWallet.");
         }
-        const key = await cryptoApi.subtle.importKey(
-          "raw",
-          params.key,
-          { name: "AES-GCM" },
-          false,
-          ["encrypt"],
-        );
-        const iv = params.iv ?? cryptoApi.getRandomValues(new Uint8Array(12));
-        const ciphertext = new Uint8Array(
-          await cryptoApi.subtle.encrypt({ name: "AES-GCM", iv }, key, params.plaintext),
-        );
-        return { ciphertext, iv };
-      },
-      aesGcmDecrypt: async (params) => {
-        this.#assertCapability("crypto_decrypt", "crypto.aesGcmDecrypt");
-        if (!cryptoApi?.subtle) {
-          throw new Error("No Web Crypto subtle implementation is available.");
-        }
-        const key = await cryptoApi.subtle.importKey(
-          "raw",
-          params.key,
-          { name: "AES-GCM" },
-          false,
-          ["decrypt"],
-        );
         return new Uint8Array(
-          await cryptoApi.subtle.decrypt(
-            { name: "AES-GCM", iv: params.iv },
-            key,
-            params.ciphertext,
+          wasmWallet.utils.hkdf(
+            toUint8Array(params.ikm),
+            toUint8Array(params.salt),
+            params.info === undefined || params.info === null
+              ? new Uint8Array()
+              : toUint8Array(params.info),
+            Number(params.length ?? 0),
           ),
         );
       },
+      aesGcmEncrypt: (params = {}) => {
+        this.#assertCapability("crypto_encrypt", "crypto.aesGcmEncrypt");
+        if (!wasmWallet?.utils?.aesGcm?.encrypt) {
+          throw new Error(
+            "Browser host crypto.aesGcmEncrypt requires a preloaded wasmWallet.",
+          );
+        }
+        const iv =
+          params.iv === undefined || params.iv === null
+            ? new Uint8Array(wasmWallet.utils.getRandomBytes(12))
+            : toUint8Array(params.iv);
+        const result = wasmWallet.utils.aesGcm.encrypt(
+          toUint8Array(params.key),
+          toUint8Array(params.plaintext),
+          iv,
+          params.aad === undefined || params.aad === null
+            ? undefined
+            : toUint8Array(params.aad),
+        );
+        return {
+          ciphertext: new Uint8Array(result.ciphertext),
+          tag: new Uint8Array(result.tag),
+          iv,
+        };
+      },
+      aesGcmDecrypt: (params = {}) => {
+        this.#assertCapability("crypto_decrypt", "crypto.aesGcmDecrypt");
+        if (!wasmWallet?.utils?.aesGcm?.decrypt) {
+          throw new Error(
+            "Browser host crypto.aesGcmDecrypt requires a preloaded wasmWallet.",
+          );
+        }
+        return new Uint8Array(
+          wasmWallet.utils.aesGcm.decrypt(
+            toUint8Array(params.key),
+            toUint8Array(params.ciphertext),
+            toUint8Array(params.tag),
+            toUint8Array(params.iv),
+            params.aad === undefined || params.aad === null
+              ? undefined
+              : toUint8Array(params.aad),
+          ),
+        );
+      },
+      generateX25519Keypair: () => {
+        this.#assertCapability(
+          "crypto_key_agreement",
+          "crypto.x25519.generateKeypair",
+        );
+        if (!wasmWallet?.curves?.x25519 || !wasmWallet?.utils?.getRandomBytes) {
+          throw new Error(
+            "Browser host crypto.x25519.generateKeypair requires a preloaded wasmWallet.",
+          );
+        }
+        const privateKey = new Uint8Array(wasmWallet.utils.getRandomBytes(32));
+        const publicKey = new Uint8Array(
+          wasmWallet.curves.x25519.publicKey(privateKey),
+        );
+        return { privateKey, publicKey };
+      },
+      x25519PublicKey: (privateKey) => {
+        this.#assertCapability("crypto_key_agreement", "crypto.x25519.publicKey");
+        if (!wasmWallet?.curves?.x25519?.publicKey) {
+          throw new Error(
+            "Browser host crypto.x25519.publicKey requires a preloaded wasmWallet.",
+          );
+        }
+        return new Uint8Array(
+          wasmWallet.curves.x25519.publicKey(toUint8Array(privateKey)),
+        );
+      },
+      x25519SharedSecret: (privateKey, publicKey) => {
+        this.#assertCapability("crypto_key_agreement", "crypto.x25519.sharedSecret");
+        if (!wasmWallet?.curves?.x25519?.ecdh) {
+          throw new Error(
+            "Browser host crypto.x25519.sharedSecret requires a preloaded wasmWallet.",
+          );
+        }
+        return new Uint8Array(
+          wasmWallet.curves.x25519.ecdh(
+            toUint8Array(privateKey),
+            toUint8Array(publicKey),
+          ),
+        );
+      },
+      ed25519: Object.freeze({
+        publicKeyFromSeed: (seed) => {
+          this.#assertCapability("crypto_sign", "crypto.ed25519.publicKeyFromSeed");
+          if (!wasmWallet?.curves?.ed25519?.publicKeyFromSeed) {
+            throw new Error(
+              "Browser host crypto.ed25519.publicKeyFromSeed requires a preloaded wasmWallet.",
+            );
+          }
+          return new Uint8Array(
+            wasmWallet.curves.ed25519.publicKeyFromSeed(toUint8Array(seed)),
+          );
+        },
+        sign: (message, seed) => {
+          this.#assertCapability("crypto_sign", "crypto.ed25519.sign");
+          if (!wasmWallet?.curves?.ed25519?.sign) {
+            throw new Error(
+              "Browser host crypto.ed25519.sign requires a preloaded wasmWallet.",
+            );
+          }
+          return new Uint8Array(
+            wasmWallet.curves.ed25519.sign(
+              toUint8Array(message),
+              toUint8Array(seed),
+            ),
+          );
+        },
+        verify: (message, signature, publicKey) => {
+          this.#assertCapability("crypto_verify", "crypto.ed25519.verify");
+          if (!wasmWallet?.curves?.ed25519?.verify) {
+            throw new Error(
+              "Browser host crypto.ed25519.verify requires a preloaded wasmWallet.",
+            );
+          }
+          return wasmWallet.curves.ed25519.verify(
+            toUint8Array(message),
+            toUint8Array(signature),
+            toUint8Array(publicKey),
+          );
+        },
+      }),
     });
 
     this.filesystem = Object.freeze({
@@ -605,12 +762,20 @@ export class BrowserHost {
         return this.filesystem.rename(params.fromPath, params.toPath);
       case "ipfs.invoke":
         return this.ipfs.invoke(params);
+      case "ipfs.add":
+        return this.ipfs.add(params);
+      case "ipfs.cat":
+        return this.ipfs.cat(params);
       case "protocol_handle.register":
         return this.protocolHandle.register(params);
       case "protocol_handle.unregister":
         return this.protocolHandle.unregister(params);
       case "protocol_dial.dial":
         return this.protocolDial.dial(params);
+      case "protocol.request":
+        return this.protocolDial.request(params);
+      case "keyslot.get":
+        return this.keyslot.get(params);
       case "context.get":
         return this.context.get(params.scope, params.key);
       case "context.set":
@@ -625,10 +790,31 @@ export class BrowserHost {
         return this.crypto.sha256(params.value ?? params.bytes);
       case "crypto.sha512":
         return this.crypto.sha512(params.value ?? params.bytes);
+      case "crypto.hkdf":
+        return this.crypto.hkdf(params);
       case "crypto.aesGcmEncrypt":
         return this.crypto.aesGcmEncrypt(params);
       case "crypto.aesGcmDecrypt":
         return this.crypto.aesGcmDecrypt(params);
+      case "crypto.x25519.generateKeypair":
+        return this.crypto.generateX25519Keypair();
+      case "crypto.x25519.publicKey":
+        return this.crypto.x25519PublicKey(params.privateKey);
+      case "crypto.x25519.sharedSecret":
+        return this.crypto.x25519SharedSecret(
+          params.privateKey,
+          params.publicKey,
+        );
+      case "crypto.ed25519.publicKeyFromSeed":
+        return this.crypto.ed25519.publicKeyFromSeed(params.seed);
+      case "crypto.ed25519.sign":
+        return this.crypto.ed25519.sign(params.message, params.seed);
+      case "crypto.ed25519.verify":
+        return this.crypto.ed25519.verify(
+          params.message,
+          params.signature,
+          params.publicKey,
+        );
       default:
         throw new Error(`Unknown browser host operation "${normalized}".`);
     }

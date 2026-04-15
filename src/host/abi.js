@@ -181,6 +181,15 @@ function isPromiseLike(value) {
   );
 }
 
+function assertSyncHostcallResult(value, operation) {
+  if (isPromiseLike(value)) {
+    throw new Error(
+      `Operation "${operation}" is not available in the synchronous hostcall ABI.`,
+    );
+  }
+  return value;
+}
+
 function encodeHostcallValue(value) {
   if (value === undefined) {
     return undefined;
@@ -251,6 +260,65 @@ export function dispatchHostSyncOperation(host, operation, params = null) {
       return host.schedule.next(params?.expression, params?.from);
     case "filesystem.resolvePath":
       return host.filesystem.resolvePath(params?.path);
+    case "crypto.sha256":
+      return assertSyncHostcallResult(
+        host.crypto.sha256(params?.value ?? params?.bytes),
+        normalized,
+      );
+    case "crypto.sha512":
+      return assertSyncHostcallResult(
+        host.crypto.sha512(params?.value ?? params?.bytes),
+        normalized,
+      );
+    case "crypto.hkdf":
+      return assertSyncHostcallResult(host.crypto.hkdf(params), normalized);
+    case "crypto.aesGcmEncrypt":
+      return assertSyncHostcallResult(
+        host.crypto.aesGcmEncrypt(params),
+        normalized,
+      );
+    case "crypto.aesGcmDecrypt":
+      return assertSyncHostcallResult(
+        host.crypto.aesGcmDecrypt(params),
+        normalized,
+      );
+    case "crypto.x25519.generateKeypair":
+      return assertSyncHostcallResult(
+        host.crypto.generateX25519Keypair(),
+        normalized,
+      );
+    case "crypto.x25519.publicKey":
+      return assertSyncHostcallResult(
+        host.crypto.x25519PublicKey(params?.privateKey),
+        normalized,
+      );
+    case "crypto.x25519.sharedSecret":
+      return assertSyncHostcallResult(
+        host.crypto.x25519SharedSecret(
+          params?.privateKey,
+          params?.publicKey,
+        ),
+        normalized,
+      );
+    case "crypto.ed25519.publicKeyFromSeed":
+      return assertSyncHostcallResult(
+        host.crypto.ed25519.publicKeyFromSeed(params?.seed),
+        normalized,
+      );
+    case "crypto.ed25519.sign":
+      return assertSyncHostcallResult(
+        host.crypto.ed25519.sign(params?.message, params?.seed),
+        normalized,
+      );
+    case "crypto.ed25519.verify":
+      return assertSyncHostcallResult(
+        host.crypto.ed25519.verify(
+          params?.message,
+          params?.signature,
+          params?.publicKey,
+        ),
+        normalized,
+      );
     default:
       throw new Error(
         `Operation "${normalized}" is not available in the synchronous hostcall ABI.`,
