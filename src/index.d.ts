@@ -1783,6 +1783,194 @@ export function inspectModule(source: Uint8Array | ArrayBuffer | WebAssembly.Mod
   imports: WebAssembly.ModuleImportDescriptor[];
 }>;
 
+// --- Licensing ---
+
+export class LicensingProtocolError extends Error {
+  code: string;
+  constructor(code: string, message: string);
+}
+
+export interface LicensingChallengeMessage {
+  messageType: string;
+  role: string;
+  reqId: string;
+  moduleId: string;
+  moduleVersion?: string;
+  requesterPeerId?: string;
+  requesterXpub?: string;
+  requesterSigningPublicKey?: Uint8Array;
+  requesterEphemeralPublicKey?: Uint8Array;
+  requestedDomain?: string;
+  requestedTimeoutMs?: number;
+  requestedAtMs?: number;
+  challengeNonce?: Uint8Array;
+  expiresAtMs?: number;
+  providerPeerId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  rawBytes: Uint8Array;
+}
+
+export interface LicensingProofMessage {
+  messageType: string;
+  reqId: string;
+  moduleId: string;
+  moduleVersion?: string;
+  requesterPeerId?: string;
+  requesterXpub?: string;
+  requestedDomain?: string;
+  requestedTimeoutMs: number;
+  requesterEphemeralPublicKey: Uint8Array;
+  challengeNonce: Uint8Array;
+  challengeExpiresAtMs: number;
+  providerPeerId?: string;
+  signature: Uint8Array;
+  requesterSigningPublicKey: Uint8Array;
+  timestampMs: number;
+  rejectionCode?: string;
+  rejectionMessage?: string;
+  rawBytes: Uint8Array;
+}
+
+export interface LicensingGrantModuleDescriptor {
+  cid: string;
+  contentHash: Uint8Array;
+  sizeBytes: number;
+  moduleId: string;
+  moduleVersion?: string;
+  requiredScope?: string;
+  keyId?: string;
+  allowedDomains: string[];
+  maxGrantTimeoutMs: number;
+  encrypted: boolean;
+}
+
+export interface LicensingWrappedContentKeyHeader {
+  version: number;
+  keyExchange: string;
+  symmetric: string;
+  keyDerivation: string;
+  ephemeralPublicKey: Uint8Array;
+  nonceStart: Uint8Array;
+  recipientKeyId: Uint8Array;
+  context?: string;
+  schemaHash: Uint8Array;
+  rootType?: string;
+  timestamp?: number;
+}
+
+export interface LicensingWrappedContentKey {
+  wrappingAlgorithm: string;
+  contentKeyId?: string;
+  contentKeyRole?: string;
+  contentKeyAlgorithm?: string;
+  contentKeyEncoding?: string;
+  keyBytes: Uint8Array;
+  contentKeyVersion?: number;
+  recipientKeyId?: string;
+  requesterEphemeralPublicKey: Uint8Array;
+  providerEphemeralPublicKey: Uint8Array;
+  hkdfSalt: Uint8Array;
+  iv: Uint8Array;
+  ciphertext: Uint8Array;
+  tag: Uint8Array;
+  expiresAtMs: number;
+  recipientPublicKey: Uint8Array;
+  ephemeralPublicKey: Uint8Array;
+  nonce: Uint8Array;
+  header: LicensingWrappedContentKeyHeader;
+  encryptedPayload: Uint8Array;
+  recipientKeyIdBytes: Uint8Array;
+  schemaHash: Uint8Array;
+  keyMaterialRootType?: string;
+}
+
+export interface LicensingGrantMessage {
+  messageType: string;
+  reqId: string;
+  moduleId: string;
+  moduleVersion?: string;
+  requesterPeerId?: string;
+  requesterXpub?: string;
+  requestedDomain?: string;
+  requestedTimeoutMs: number;
+  grantedDomain?: string;
+  grantedTimeoutMs: number;
+  expiresAtMs: number;
+  requiredScope?: string;
+  grantStatus?: string;
+  denialReason?: string;
+  capabilityToken: Uint8Array;
+  grantVerifierPublicKey: Uint8Array;
+  providerSignature: Uint8Array;
+  moduleDescriptor: LicensingGrantModuleDescriptor | null;
+  wrappedContentKey: LicensingWrappedContentKey | null;
+  rawBytes: Uint8Array;
+}
+
+export function encodeLicensingChallengeRequest(options: {
+  reqId: string;
+  moduleId: string;
+  moduleVersion?: string;
+  requesterPeerId: string;
+  requesterXpub?: string;
+  requesterSigningPublicKey: Uint8Array;
+  requesterEphemeralPublicKey: Uint8Array;
+  requesterDomain: string;
+  requestedTimeoutMs: number;
+  requestedAtMs: number;
+  providerPeerId: string;
+}): Uint8Array;
+
+export function decodeLicensingChallengeMessage(
+  bytes: Uint8Array | ArrayBuffer | ArrayBufferView,
+): LicensingChallengeMessage;
+
+export function encodeLicensingProof(options: {
+  reqId: string;
+  moduleId: string;
+  moduleVersion?: string;
+  requesterPeerId: string;
+  requesterXpub?: string;
+  requesterDomain: string;
+  requestedTimeoutMs: number;
+  requesterEphemeralPublicKey: Uint8Array;
+  challengeNonce: Uint8Array;
+  challengeExpiresAtMs: number;
+  providerPeerId: string;
+  signature: Uint8Array;
+  requesterSigningPublicKey: Uint8Array;
+  timestampMs: number;
+}): Uint8Array;
+
+export function decodeLicensingProofMessage(
+  bytes: Uint8Array | ArrayBuffer | ArrayBufferView,
+): LicensingProofMessage;
+
+export function decodeLicensingGrant(
+  bytes: Uint8Array | ArrayBuffer | ArrayBufferView,
+): LicensingGrantMessage;
+
+export function validateLicensingGrant(
+  grant: LicensingGrantMessage,
+  options?: {
+    reqId?: string;
+    moduleId?: string;
+    moduleVersion?: string;
+    expectedDomain?: string;
+    requestedTimeoutMs?: number;
+    grantVerifierPublicKeyLength?: number;
+  },
+): LicensingGrantMessage;
+
+export function extractGrantModuleDescriptor(
+  grant: LicensingGrantMessage,
+): LicensingGrantModuleDescriptor;
+
+export function extractWrappedContentKey(
+  grant: LicensingGrantMessage,
+): LicensingWrappedContentKey;
+
 // --- Runtime constants ---
 
 export const DefaultManifestExports: {

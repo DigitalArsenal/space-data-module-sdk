@@ -1,6 +1,6 @@
 {
   "name": "space-data-module-sdk",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Module SDK for building, validating, signing, and deploying WebAssembly modules on the Space Data Network.",
   "type": "module",
   "types": "./src/index.d.ts",
@@ -25,6 +25,10 @@
     "./compliance": "./src/compliance/index.js",
     "./auth": "./src/auth/index.js",
     "./transport": "./src/transport/index.js",
+    "./licensing": {
+      "types": "./src/licensing/index.d.ts",
+      "default": "./src/licensing/index.js"
+    },
     "./compiler": "./src/compiler/index.js",
     "./compiler/emception": "./src/compiler/emception.js",
     "./bundle": "./src/bundle/index.js",
@@ -68,7 +72,7 @@
     "flatsql": "^0.4.0",
     "hd-wallet-wasm": "1.6.0",
     "sdn-emception": "1.0.0",
-    "spacedatastandards.org": "git+https://github.com/DigitalArsenal/spacedatastandards.org.git#09af351a1"
+    "spacedatastandards.org": "git+https://github.com/DigitalArsenal/spacedatastandards.org.git#c43c766bf4e8b18af125ed73b993e79c6ce20b24"
   },
   "devDependencies": {
     "express": "^4.21.2"
