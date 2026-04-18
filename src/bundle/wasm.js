@@ -7,10 +7,10 @@ import { createDeploymentPlanBundleEntry } from "../deployment/index.js";
 import {
   DEFAULT_MANIFEST_EXPORT_SYMBOL,
   DEFAULT_MANIFEST_SIZE_SYMBOL,
-  SDS_BUNDLE_SECTION_NAME,
   SDS_CUSTOM_SECTION_PREFIX,
   SDS_DEPLOYMENT_ENTRY_ID,
   SDS_DEPLOYMENT_SECTION_NAME,
+  SDS_MBL_CONTAINER_NAME,
 } from "./constants.js";
 import {
   decodeModuleBundle,
@@ -20,7 +20,11 @@ import {
   moduleBundleEncodingToName,
   moduleBundleRoleToName,
 } from "./codec.js";
-import { extractPublicationRecordCollection } from "../transport/records.js";
+import {
+  appendPublicationRecordCollection,
+  encodePublicationRecordCollection,
+  extractPublicationRecordCollection,
+} from "../transport/records.js";
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -392,7 +396,7 @@ export async function createSingleFileBundle(options = {}) {
     version: 1,
     strippedCustomSectionPrefix:
       options.customSectionPrefix ?? SDS_CUSTOM_SECTION_PREFIX,
-    bundleSectionName: options.bundleSectionName ?? SDS_BUNDLE_SECTION_NAME,
+    bundleSectionName: options.bundleSectionName ?? SDS_MBL_CONTAINER_NAME,
     hashAlgorithm: "sha256",
   };
   const canonical = await computeCanonicalModuleHash(wasmBytes, {
@@ -415,10 +419,14 @@ export async function createSingleFileBundle(options = {}) {
   const baseWasmBytes = stripWasmCustomSections(wasmBytes, (section) =>
     section.name.startsWith(canonicalization.strippedCustomSectionPrefix),
   );
-  const outputWasmBytes = appendWasmCustomSection(
+  const outputWasmBytes = appendPublicationRecordCollection(
     baseWasmBytes,
-    canonicalization.bundleSectionName,
-    bundleBytes,
+    encodePublicationRecordCollection({
+      version: protectedArtifact?.version,
+      mbl: bundle,
+      enc: protectedArtifact?.enc,
+      pnm: protectedArtifact?.pnm,
+    }),
   );
   return {
     bundle,
@@ -434,25 +442,16 @@ export async function createSingleFileBundle(options = {}) {
 
 export async function parseSingleFileBundle(bytes, options = {}) {
   const protectedArtifact = extractPublicationRecordCollection(bytes);
+  if (!protectedArtifact?.mbl) {
+    throw new Error("Missing required REC trailer containing an MBL record.");
+  }
   const wasmBytes = normalizeBytes(
-    protectedArtifact?.payloadBytes ?? bytes,
+    protectedArtifact.payloadBytes,
     "wasm bytes",
   );
   const customSections = listWasmCustomSections(wasmBytes);
-  const bundleSectionName = String(
-    options.bundleSectionName ?? SDS_BUNDLE_SECTION_NAME,
-  );
-  const bundleSections = customSections.filter(
-    (section) => section.name === bundleSectionName,
-  );
-  if (bundleSections.length === 0) {
-    throw new Error(`Missing required custom section "${bundleSectionName}".`);
-  }
-  if (bundleSections.length > 1) {
-    throw new Error(`Expected one "${bundleSectionName}" section, found ${bundleSections.length}.`);
-  }
-  const bundleBytes = bundleSections[0].dataBytes;
-  const bundle = decodeModuleBundle(bundleBytes);
+  const bundle = protectedArtifact.mbl;
+  const bundleBytes = protectedArtifact.mblBytes ?? encodeModuleBundle(bundle);
   const prefix =
     bundle.canonicalization?.strippedCustomSectionPrefix ??
     SDS_CUSTOM_SECTION_PREFIX;
@@ -477,8 +476,8 @@ export async function parseSingleFileBundle(bytes, options = {}) {
     ) ?? null;
   return {
     wasmBytes,
-    protectedArtifactBytes: protectedArtifact?.protectedBytes ?? null,
-    publicationRecords: protectedArtifact ?? null,
+    protectedArtifactBytes: protectedArtifact.protectedBytes,
+    publicationRecords: protectedArtifact,
     bundleBytes,
     bundle,
     entries: parsedEntries,

@@ -11,7 +11,7 @@ This repository is the source of truth for module-level concerns:
 - embedded manifest exports inside `.wasm` modules
 - standards-aware compliance and capability validation
 - module compilation and protection
-- the `sds.bundle` single-file container
+- the REC+MBL single-file container
 - deployment authorization plus SDS publication records (`REC`, `PNM`, `ENC`)
 - the first canonical module hostcall/import ABI surface
 - the canonical runtime-host model for append-only standards rows, host-managed
@@ -80,20 +80,21 @@ A compliant module built with this SDK is always a valid `.wasm` artifact with:
   - `plugin_alloc`
   - `plugin_free`
 - an exported `_start` entry when the artifact supports WASI command mode
-- optional `sds.bundle` custom-section payloads for:
+- optional `MBL` bundle metadata carried in one appended SDS `REC` trailer for:
   - manifest bytes
   - resolved deployment plans and input bindings
   - deployment authorization
   - auxiliary FlatBuffer or raw payloads
-- optional appended SDS FlatBuffer publication records in a trailing `REC`
-  container carrying:
+- optional appended SDS FlatBuffer publication records in that same trailing
+  `REC` container carrying:
+  - `MBL` single-file bundle metadata
   - `PNM` digital-signature/publication metadata
   - `ENC` encrypted-delivery metadata
 
-Single-file bundling does not append arbitrary bytes to the end of the wasm
-module. The one-file module container is `sds.bundle`, stored as a standard
-wasm custom section. Appended bytes are reserved for SDS publication records
-such as `PNM` and `ENC`, wrapped in a trailing `REC` FlatBuffer collection.
+Single-file bundling appends one SDS `REC` trailer to the end of the wasm
+payload. That trailer carries an `MBL` record for the bundle contents and may
+also carry `PNM` / `ENC` publication metadata when the artifact is signed or
+encrypted.
 
 The module contract stays the same whether the artifact is loaded directly,
 wrapped in a deployment envelope, or shipped as one bundled `.wasm` file.
@@ -171,11 +172,8 @@ This repo currently includes:
 
 - the JavaScript reference implementation for manifest, compliance, auth,
   transport, bundle handling, and compilation
-- deterministic `sds.bundle` conformance vectors under
+- deterministic REC+MBL conformance vectors under
   [`examples/single-file-bundle/vectors`](./examples/single-file-bundle/vectors)
-- non-JS bundle reference clients in
-  [`examples/single-file-bundle/go`](./examples/single-file-bundle/go) and
-  [`examples/single-file-bundle/python`](./examples/single-file-bundle/python)
 - reference Node and browser hosts plus the legacy sync `sdn_host` bridge for
   sync-safe guest hostcalls
 
@@ -385,20 +383,18 @@ This repo exposes that deployment surface from
 
 - validate resolved protocol installations
 - describe input and publication bindings by declared `interfaceId`
-- attach a deployment plan to `sds.bundle`
+- attach a deployment plan to the bundle `MBL` record
 
 The full contract split is documented in
 [`docs/protocol-installation.md`](./docs/protocol-installation.md).
 
 ## Single-File Bundles
 
-`sds.bundle` keeps module delivery to one file without changing WebAssembly
-loadability for the runtime payload itself. The SDK writes the bundle as a
-standard custom section inside the wasm module. When the artifact is signed or
-encrypted for publication, SDS appends FlatBuffer publication records after the
-wasm bytes in a trailing `REC` container. Loaders must scan from the end,
-resolve `PNM` / `ENC`, strip or decrypt as needed, and only then hand the
-remaining raw wasm bytes to a runtime such as WasmEdge.
+REC+MBL keeps module delivery to one file without changing the runtime payload
+itself. The SDK appends one trailing `REC` container after the wasm bytes.
+Loaders must scan from the end, resolve `MBL` / `PNM` / `ENC`, strip or decrypt
+as needed, and only then hand the remaining raw wasm bytes to a runtime such as
+WasmEdge.
 
 The reference path lives in
 [`examples/single-file-bundle`](./examples/single-file-bundle):
@@ -407,8 +403,6 @@ The reference path lives in
   bundled module
 - [`generate-vectors.mjs`](./examples/single-file-bundle/generate-vectors.mjs)
   regenerates the checked-in conformance vectors
-- the `go` and `python` directories show non-JS readers against the same
-  bundle contract
 
 Standard bundle payloads now include the optional `deployment-plan` JSON entry
 for resolved protocol installations and producer input bindings.
@@ -419,7 +413,6 @@ Digital signature and encrypted-delivery metadata are publication-layer
 extensions, not a second module format. The canonical module is still:
 
 - valid `.wasm`
-- optionally carrying `sds.bundle` as a wasm custom section
 - optionally carrying one appended SDS `REC` trailer after the wasm bytes
 
 That trailing `REC` FlatBuffer is the standards-backed container for

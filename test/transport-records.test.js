@@ -14,7 +14,35 @@ import {
   decodePublicationRecordCollection,
   encodePublicationRecordCollection,
   extractPublicationRecordCollection,
-} from "../src/index.js";
+} from "../src/transport/records.js";
+
+function createMblRecord() {
+  return {
+    bundleVersion: 1,
+    moduleFormat: "space-data-module",
+    canonicalization: {
+      version: 1,
+      strippedCustomSectionPrefix: "sds.",
+      bundleSectionName: "rec.mbl",
+      hashAlgorithm: "sha256",
+    },
+    canonicalModuleHash: Uint8Array.from({ length: 32 }, (_, index) => index),
+    manifestHash: Uint8Array.from({ length: 32 }, (_, index) => 255 - index),
+    manifestExportSymbol: "plugin_get_manifest_flatbuffer",
+    manifestSizeSymbol: "plugin_get_manifest_flatbuffer_size",
+    entries: [
+      {
+        entryId: "manifest",
+        role: "manifest",
+        sectionName: "sds.manifest",
+        typeRef: { schemaName: "PluginManifest.fbs", fileIdentifier: "PMAN" },
+        payloadEncoding: "flatbuffer",
+        payload: Uint8Array.of(1, 2, 3, 4),
+        description: "Canonical plugin manifest.",
+      },
+    ],
+  };
+}
 
 function createEncRecord() {
   return {
@@ -32,7 +60,7 @@ function createEncRecord() {
   };
 }
 
-test("publication record collections round-trip through REC validation", async () => {
+test("publication record collections round-trip through REC validation with MBL", async () => {
   const payloadBytes = Uint8Array.of(0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00);
   const pnm = await createPublicationNotice({
     payloadBytes,
@@ -40,6 +68,7 @@ test("publication record collections round-trip through REC validation", async (
     fileId: "com.digitalarsenal.examples.transport-records",
   });
   const recordCollectionBytes = encodePublicationRecordCollection({
+    mbl: createMblRecord(),
     enc: createEncRecord(),
     pnm,
   });
@@ -50,6 +79,10 @@ test("publication record collections round-trip through REC validation", async (
   const parsed = extractPublicationRecordCollection(protectedBytes);
   assert.ok(parsed);
   assert.deepEqual(Array.from(parsed.payloadBytes), Array.from(payloadBytes));
+  assert.deepEqual(
+    parsed.records.map((record) => record.standard),
+    ["MBL", "ENC", "PNM"],
+  );
   assert.equal(parsed.enc?.context, "transport-records-test");
   assert.equal(parsed.pnm?.fileName, "module.wasm");
 });

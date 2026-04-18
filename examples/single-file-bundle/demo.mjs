@@ -1,8 +1,8 @@
 import {
   compileModuleFromSource,
-  parseSingleFileBundle,
   protectModuleArtifact,
-} from "../../src/index.js";
+} from "../../src/compiler/compileModule.js";
+import { parseSingleFileBundle as parseBundle } from "../../src/bundle/wasm.js";
 
 const manifest = {
   pluginId: "com.digitalarsenal.examples.single-file-demo",
@@ -71,7 +71,7 @@ const protectedArtifact = await protectModuleArtifact({
   singleFileBundle: true,
 });
 
-const parsed = await parseSingleFileBundle(
+const parsed = await parseBundle(
   protectedArtifact.singleFileBundle.wasmBytes,
 );
 

@@ -2,7 +2,7 @@
 
 This repo is the source of truth for authors building compliant Space Data
 modules. Use it to learn the contract, compile modules, validate artifacts,
-package `sds.bundle` files, sign or encrypt delivery records, and verify
+package REC+MBL single-file artifacts, sign or encrypt delivery records, and verify
 browser/WasmEdge portability.
 
 Nearest-file wins: read this file first, then follow the most specific child
@@ -16,7 +16,7 @@ Nearest-file wins: read this file first, then follow the most specific child
 - `src/compliance/AGENTS.md`: compliance policy and artifact validation.
 - `src/compiler/AGENTS.md`: source-to-wasm compile rules, toolchains, embedded
   manifests, and isomorphic artifact layout.
-- `src/bundle/AGENTS.md`: `sds.bundle` and single-file wasm packaging.
+- `src/bundle/AGENTS.md`: REC+MBL single-file packaging.
 - `src/auth/AGENTS.md`: signing, deployment authorization, and related record
   handling.
 - `src/host/AGENTS.md`: Node host, browser shims, the legacy sync `sdn_host`
@@ -44,7 +44,7 @@ Use this repo when you need to:
 - Compile source into a compliant `.wasm` artifact.
 - Validate a manifest or built artifact.
 - Follow the canonical `dist/isomorphic/module.wasm` layout.
-- Build one-file `sds.bundle` delivery artifacts.
+- Build one-file REC+MBL delivery artifacts.
 - Use browser or WasmEdge harnesses to test the same artifact.
 - Apply signing, deployment authorization, or encrypted transport helpers.
 - Follow the binary FlatBuffer streaming contract.
@@ -77,7 +77,8 @@ Every compliant module produced here should satisfy all of the following:
 - The compiled artifact passes `validatePluginArtifact(...)`.
 - The module exports the canonical manifest accessor symbols.
 - Declared capability IDs come from this repo's vocabulary.
-- Single-file delivery uses `sds.bundle`; do not append raw bytes after wasm.
+- Single-file delivery appends one `REC` trailer carrying `MBL` and any
+  publication metadata after the wasm payload.
 - Sync guest hostcalls use the `sdn_host` import module and the bridge in
   `src/host` for sync-safe operations only.
 - The raw `sdn_host` bridge remains fail-closed and sync-only.
@@ -138,7 +139,7 @@ change is correct:
   validation:
   - `node --test test/module-sdk.test.js test/compliance.test.js`
 - If you changed bundle or single-file packaging behavior:
-  - `node --test test/module-bundle.test.js test/module-bundle-vectors.test.js test/module-bundle-cli.test.js test/module-bundle-go.test.js test/module-bundle-python.test.js`
+  - `node --test test/module-bundle.test.js test/module-bundle-vectors.test.js test/module-bundle-cli.test.js test/deployment-plan.test.js test/transport-records.test.js`
   - `npm run generate:vectors` when bundle vectors change
 - If you changed host capabilities, Node host behavior, browser/WasmEdge
   portability, or the sync host ABI:
@@ -154,7 +155,7 @@ change is correct:
 - `src/manifest`: manifest schema codecs and normalization.
 - `src/compliance`: module compliance and standards validation.
 - `src/compiler`: source-to-wasm compile flow and target selection.
-- `src/bundle`: `sds.bundle` encoding, parsing, and wasm custom sections.
+- `src/bundle`: REC trailer encoding/parsing, MBL bundle metadata, and wasm custom sections.
 - `src/host`: Node host, browser shims, the legacy sync `sdn_host` subset,
   async host adapters, and isomorphic loaders.
 - `src/runtime-host`: FlatSQL-backed row/region storage and stream ingest.

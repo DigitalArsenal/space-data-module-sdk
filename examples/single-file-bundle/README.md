@@ -3,9 +3,9 @@
 This example shows the JavaScript reference path for:
 
 1. compiling a wasm module
-2. creating a single-file bundle by appending `sds.bundle`
-3. parsing the bundle back out of the wasm file
-4. generating deterministic conformance vectors for other runtimes
+2. creating a single-file bundle by appending one `REC` trailer carrying `MBL`
+3. parsing the bundle back out of the protected artifact
+4. generating deterministic REC+MBL conformance vectors
 
 Run it from the repo root:
 
@@ -13,7 +13,7 @@ Run it from the repo root:
 node ./examples/single-file-bundle/demo.mjs
 ```
 
-The resulting output is the reference behavior that the non-JS runtimes should match.
+The resulting output is the reference behavior for the SDK-owned REC+MBL path.
 
 To regenerate the checked-in vectors under `examples/single-file-bundle/vectors/`:
 

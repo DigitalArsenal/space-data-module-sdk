@@ -9,7 +9,7 @@ is intended to be used.
   toolchain requirements.
 - `examples/isomorphic-loader` must demonstrate loading the exact same compiled
   artifact in both the browser and WasmEdge.
-- `examples/single-file-bundle` is the reference for `sds.bundle`.
+- `examples/single-file-bundle` is the reference for REC+MBL single-file delivery.
 - `examples/flatsql-store-local` and related examples should reflect the
   canonical binary FlatBuffer ingest path when they demonstrate streaming or
   storage.

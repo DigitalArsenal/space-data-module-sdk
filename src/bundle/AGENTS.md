@@ -1,13 +1,14 @@
 # AGENTS
 
-This directory is the reference implementation for `sds.bundle` and wasm
-custom-section packaging.
+This directory is the reference implementation for REC+MBL single-file module
+packaging and wasm section handling.
 
 ## What Authors Should Use It For
 
-- `sds.bundle` is the single-file delivery format.
-- Put bundle data in a wasm custom section; do not append raw bytes after the
-  wasm binary.
+- Single-file delivery uses one appended `REC` trailer carrying an `MBL`
+  record.
+- Keep the runtime payload canonical `.wasm`; publication/container metadata
+  lives in the REC trailer.
 - Use the public bundle helpers and CLI from this repo rather than inventing a
   custom one-file format.
 

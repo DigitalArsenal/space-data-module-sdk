@@ -937,7 +937,7 @@ export function validateManifestAgainstStandardsCatalog(
 
 // --- Bundle ---
 
-export const SDS_BUNDLE_SECTION_NAME: string;
+export const SDS_MBL_CONTAINER_NAME: string;
 export const DEFAULT_HASH_ALGORITHM: string;
 export const SDS_GUEST_LINK_OBJECT_ENTRY_ID: string;
 export const SDS_GUEST_LINK_METADATA_ENTRY_ID: string;

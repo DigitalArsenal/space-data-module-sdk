@@ -5,10 +5,13 @@ import path from "node:path";
 
 import {
   compileModuleFromSource,
+} from "../src/compiler/compileModule.js";
+import {
   createSingleFileBundle,
   getWasmCustomSections,
   parseSingleFileBundle,
-} from "../src/index.js";
+} from "../src/bundle/wasm.js";
+import { extractPublicationRecordCollection } from "../src/transport/records.js";
 import { sha256Bytes } from "../src/utils/crypto.js";
 import { bytesToHex } from "../src/utils/encoding.js";
 
@@ -156,8 +159,13 @@ test("checked-in single-file bundle vectors recreate exactly", async () => {
     Array.from(bundleResult.wasmBytes),
     Array.from(expectedBundledModule),
   );
-  assert.equal(WebAssembly.validate(bundleResult.wasmBytes), true);
-  assert.equal(getWasmCustomSections(bundleResult.wasmBytes, "sds.bundle").length, 1);
+  const protectedBundle = extractPublicationRecordCollection(bundleResult.wasmBytes);
+  assert.ok(protectedBundle);
+  assert.equal(WebAssembly.validate(protectedBundle.payloadBytes), true);
+  assert.equal(
+    getWasmCustomSections(protectedBundle.payloadBytes, "sds.bundle").length,
+    0,
+  );
 
   const parsedBundle = await parseSingleFileBundle(bundleResult.wasmBytes);
   const summary = buildParsedSummary(

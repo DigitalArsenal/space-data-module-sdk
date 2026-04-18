@@ -14,6 +14,6 @@ The old document is no longer current because:
 Current rule summary:
 
 - the executable artifact is still canonical `.wasm`
-- `sds.bundle` remains the custom-section bundle mechanism when needed
-- publication/signature/encryption metadata is carried in appended `REC` records
+- single-file bundle metadata is carried by an `MBL` record inside one appended `REC` trailer
+- publication/signature/encryption metadata is carried in that same appended `REC` trailer when present
 - runtime hosting is defined by the SDK runtime host, not by the bundle container itself

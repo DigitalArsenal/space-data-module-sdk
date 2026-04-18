@@ -6,13 +6,15 @@ import { readFile, writeFile } from "node:fs/promises";
 
 import {
   compileModuleFromSource,
-  loadComplianceConfig,
   protectModuleArtifact,
+} from "../src/compiler/index.js";
+import {
+  loadComplianceConfig,
+  loadManifestFromFile,
   resolveManifestFiles,
   validateArtifactWithStandards,
   validateManifestWithStandards,
-  loadManifestFromFile,
-} from "../src/index.js";
+} from "../src/compliance/index.js";
 import { bytesToBase64 } from "../src/utils/encoding.js";
 
 async function main(argv) {

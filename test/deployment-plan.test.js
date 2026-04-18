@@ -2,14 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  compileModuleFromSource,
-  createDeploymentPlanBundleEntry,
   createSingleFileBundle,
-  normalizeDeploymentPlan,
+  getWasmCustomSections,
   parseSingleFileBundle,
+} from "../src/bundle/wasm.js";
+import { compileModuleFromSource } from "../src/compiler/compileModule.js";
+import {
+  createDeploymentPlanBundleEntry,
+  normalizeDeploymentPlan,
   readDeploymentPlanFromBundle,
   validateDeploymentPlan,
-} from "../src/index.js";
+} from "../src/deployment/index.js";
+import { extractPublicationRecordCollection } from "../src/transport/records.js";
 
 function createManifest() {
   return {
@@ -359,7 +363,7 @@ test("deployment plans accept interface-keyed bindings without a manifest", () =
   assert.deepEqual(report.errors, []);
 });
 
-test("deployment plans round-trip through sds.bundle entries", async () => {
+test("deployment plans round-trip through REC+MBL entries", async () => {
   const manifest = createManifest();
   const compilation = await compileModuleFromSource({
     manifest,
@@ -374,6 +378,9 @@ test("deployment plans round-trip through sds.bundle entries", async () => {
     manifest,
     deploymentPlan: plan,
   });
+  const protectedBundle = extractPublicationRecordCollection(bundle.wasmBytes);
+  assert.ok(protectedBundle);
+  assert.equal(getWasmCustomSections(protectedBundle.payloadBytes, "sds.bundle").length, 0);
   const parsed = await parseSingleFileBundle(bundle.wasmBytes);
 
   assert.deepEqual(parsed.deploymentPlan, normalizedPlan);

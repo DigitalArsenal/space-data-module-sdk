@@ -1,8 +1,8 @@
 {
-  "bundleSectionName": "sds.bundle",
+  "bundleSectionName": "rec.mbl",
   "baseModuleSha256Hex": "b76c89bbc1e3b91f3dd06aa47f569d7d910253b64a994a75be0eb2a7cf6ff3b5",
-  "bundleSha256Hex": "098a37dab26a27aeab57416ca422408774eee053a5d9a687756191df754b2c90",
-  "bundledModuleSha256Hex": "2ead739f3856a22db597a078379b836e3cee8cae4e92990ae4167f789ec0743c",
+  "bundleSha256Hex": "347e5842f9ea60daccd3d961e62e77f4ebdd50657e3a6fea86dda7a022c6dea0",
+  "bundledModuleSha256Hex": "903da2ebe1b47096f65b2763a17ff648c9263695181185a02ba8c5056ec415c6",
   "canonicalModuleHashHex": "b76c89bbc1e3b91f3dd06aa47f569d7d910253b64a994a75be0eb2a7cf6ff3b5",
   "manifestHashHex": "30b65eb6c853bb84c9c2fda86da2ef13dfeda50ff2956b0f1cad9ce44c493045",
   "manifestPluginId": "com.digitalarsenal.examples.single-file-vector",

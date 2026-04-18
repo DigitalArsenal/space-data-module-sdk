@@ -2,13 +2,12 @@ import * as flatbuffers from "flatbuffers/mjs/flatbuffers.js";
 
 import {
   CanonicalizationRuleT,
-  ModuleBundle,
+  MBL,
+  MBLT,
   ModuleBundleEntryRole,
   ModuleBundleEntryT,
-  ModuleBundleT,
   ModulePayloadEncoding,
-} from "../generated/orbpro/module.js";
-import { FlatBufferTypeRefT } from "../generated/orbpro/stream/flat-buffer-type-ref.js";
+} from "spacedatastandards.org/lib/js/MBL/main.js";
 import { canonicalBytes } from "../auth/canonicalize.js";
 import { toUint8Array as toBufferLikeUint8Array } from "../runtime/bufferLike.js";
 import {
@@ -16,10 +15,11 @@ import {
   DEFAULT_MANIFEST_EXPORT_SYMBOL,
   DEFAULT_MANIFEST_SIZE_SYMBOL,
   DEFAULT_MODULE_FORMAT,
-  SDS_BUNDLE_SECTION_NAME,
   SDS_CUSTOM_SECTION_PREFIX,
+  SDS_MBL_CONTAINER_NAME,
 } from "./constants.js";
 
+const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
 
 const ROLE_NAME_TO_ENUM = new Map([
@@ -64,6 +64,15 @@ function normalizeString(value, fallback = null) {
     return fallback;
   }
   return String(value);
+}
+
+function firstDefined(...values) {
+  for (const value of values) {
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
 }
 
 function normalizePayloadWireFormat(value) {
@@ -131,24 +140,47 @@ function normalizePayloadEncoding(value) {
   );
 }
 
-function normalizeTypeRef(value) {
-  if (!value) {
+function stringifyTypeRef(value) {
+  if (value === undefined || value === null) {
     return null;
   }
-  if (value instanceof FlatBufferTypeRefT) {
+  if (typeof value === "string") {
     return value;
   }
-  return new FlatBufferTypeRefT(
-    normalizeString(value.schemaName),
-    normalizeString(value.fileIdentifier),
-    normalizeByteArray(value.schemaHash),
-    Boolean(value.acceptsAnyFlatbuffer),
-    normalizePayloadWireFormat(value.wireFormat),
-    normalizeString(value.rootTypeName),
-    normalizeUnsignedInteger(value.fixedStringLength),
-    normalizeUnsignedInteger(value.byteLength),
-    normalizeUnsignedInteger(value.requiredAlignment),
-  );
+  const bytes = toBufferLikeUint8Array(value);
+  if (bytes) {
+    return textDecoder.decode(bytes);
+  }
+  return textDecoder.decode(canonicalBytes(value));
+}
+
+function parseTypeRef(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return {
+      ...value,
+      wireFormat: normalizePayloadWireFormat(value.wireFormat),
+      fixedStringLength: normalizeUnsignedInteger(value.fixedStringLength),
+      byteLength: normalizeUnsignedInteger(value.byteLength),
+      requiredAlignment: normalizeUnsignedInteger(value.requiredAlignment),
+    };
+  }
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(normalized);
+    if (parsed && typeof parsed === "object") {
+      return {
+        ...parsed,
+        wireFormat: normalizePayloadWireFormat(parsed.wireFormat),
+        fixedStringLength: normalizeUnsignedInteger(parsed.fixedStringLength),
+        byteLength: normalizeUnsignedInteger(parsed.byteLength),
+        requiredAlignment: normalizeUnsignedInteger(parsed.requiredAlignment),
+      };
+    }
+  } catch {}
+  return normalized;
 }
 
 function normalizeCanonicalization(value = {}) {
@@ -161,7 +193,7 @@ function normalizeCanonicalization(value = {}) {
       value.strippedCustomSectionPrefix,
       SDS_CUSTOM_SECTION_PREFIX,
     ),
-    normalizeString(value.bundleSectionName, SDS_BUNDLE_SECTION_NAME),
+    normalizeString(value.bundleSectionName, SDS_MBL_CONTAINER_NAME),
     normalizeString(value.hashAlgorithm, DEFAULT_HASH_ALGORITHM),
   );
 }
@@ -175,7 +207,7 @@ function normalizeEntry(value = {}) {
     normalizeString(value.entryId),
     normalizeRole(value.role),
     normalizeString(value.sectionName),
-    normalizeTypeRef(value.typeRef),
+    stringifyTypeRef(value.typeRef),
     payloadEncoding,
     normalizeString(value.mediaType),
     Number(value.flags ?? 0),
@@ -185,38 +217,122 @@ function normalizeEntry(value = {}) {
   );
 }
 
+function normalizeDecodedEntry(entry = {}) {
+  return {
+    entryId: firstDefined(entry.entryId, entry.entry_id) ?? null,
+    role: entry.role ?? ModuleBundleEntryRole.AUXILIARY,
+    sectionName: firstDefined(entry.sectionName, entry.section_name) ?? null,
+    typeRef: parseTypeRef(firstDefined(entry.typeRef, entry.type_ref)),
+    payloadEncoding:
+      firstDefined(entry.payloadEncoding, entry.payload_encoding) ??
+      ModulePayloadEncoding.RAW_BYTES,
+    mediaType: firstDefined(entry.mediaType, entry.media_type) ?? null,
+    flags: Number(entry.flags ?? 0),
+    sha256: normalizeByteArray(entry.sha256),
+    payload: normalizeByteArray(firstDefined(entry.payload, entry.PAYLOAD)),
+    description: entry.description ?? null,
+  };
+}
+
+function normalizeDecodedCanonicalization(canonicalization = null) {
+  if (!canonicalization || typeof canonicalization !== "object") {
+    return null;
+  }
+  return {
+    version: Number(canonicalization.version ?? 1),
+    strippedCustomSectionPrefix: normalizeString(
+      firstDefined(
+        canonicalization.strippedCustomSectionPrefix,
+        canonicalization.stripped_custom_section_prefix,
+      ),
+      SDS_CUSTOM_SECTION_PREFIX,
+    ),
+    bundleSectionName: normalizeString(
+      firstDefined(
+        canonicalization.bundleSectionName,
+        canonicalization.bundle_section_name,
+      ),
+      SDS_MBL_CONTAINER_NAME,
+    ),
+    hashAlgorithm: normalizeString(
+      firstDefined(
+        canonicalization.hashAlgorithm,
+        canonicalization.hash_algorithm,
+      ),
+      DEFAULT_HASH_ALGORITHM,
+    ),
+  };
+}
+
+function normalizeDecodedBundle(bundle = {}) {
+  return {
+    bundleVersion: Number(
+      firstDefined(bundle.bundleVersion, bundle.bundle_version) ?? 1,
+    ),
+    moduleFormat: normalizeString(
+      firstDefined(bundle.moduleFormat, bundle.module_format),
+      DEFAULT_MODULE_FORMAT,
+    ),
+    canonicalization: normalizeDecodedCanonicalization(bundle.canonicalization),
+    canonicalModuleHash: normalizeByteArray(
+      firstDefined(bundle.canonicalModuleHash, bundle.canonical_module_hash),
+    ),
+    manifestHash: normalizeByteArray(
+      firstDefined(bundle.manifestHash, bundle.manifest_hash),
+    ),
+    manifestExportSymbol: normalizeString(
+      firstDefined(bundle.manifestExportSymbol, bundle.manifest_export_symbol),
+      DEFAULT_MANIFEST_EXPORT_SYMBOL,
+    ),
+    manifestSizeSymbol: normalizeString(
+      firstDefined(bundle.manifestSizeSymbol, bundle.manifest_size_symbol),
+      DEFAULT_MANIFEST_SIZE_SYMBOL,
+    ),
+    entries: Array.isArray(bundle.entries)
+      ? bundle.entries.map(normalizeDecodedEntry)
+      : [],
+  };
+}
+
+export function moduleBundleTableFromObject(bundle = {}) {
+  return bundle instanceof MBLT
+    ? bundle
+    : new MBLT(
+        Number(bundle?.bundleVersion ?? 1),
+        normalizeString(bundle?.moduleFormat, DEFAULT_MODULE_FORMAT),
+        normalizeCanonicalization(bundle?.canonicalization),
+        normalizeByteArray(bundle?.canonicalModuleHash),
+        normalizeByteArray(bundle?.manifestHash),
+        normalizeString(
+          bundle?.manifestExportSymbol,
+          DEFAULT_MANIFEST_EXPORT_SYMBOL,
+        ),
+        normalizeString(
+          bundle?.manifestSizeSymbol,
+          DEFAULT_MANIFEST_SIZE_SYMBOL,
+        ),
+        Array.isArray(bundle?.entries)
+          ? bundle.entries.map(normalizeEntry)
+          : [],
+      );
+}
+
 export function decodeModuleBundle(data) {
   const bb = toByteBuffer(data);
-  if (!ModuleBundle.bufferHasIdentifier(bb)) {
+  if (!MBL.bufferHasIdentifier(bb)) {
     throw new Error("Module bundle buffer identifier mismatch.");
   }
-  return ModuleBundle.getRootAsModuleBundle(bb).unpack();
+  return normalizeDecodedBundle(MBL.getRootAsMBL(bb).unpack());
+}
+
+export function decodeModuleBundleTable(table) {
+  return normalizeDecodedBundle(table?.unpack?.() ?? {});
 }
 
 export function encodeModuleBundle(bundle) {
-  const value =
-    bundle instanceof ModuleBundleT
-      ? bundle
-      : new ModuleBundleT(
-          Number(bundle?.bundleVersion ?? 1),
-          normalizeString(bundle?.moduleFormat, DEFAULT_MODULE_FORMAT),
-          normalizeCanonicalization(bundle?.canonicalization),
-          normalizeByteArray(bundle?.canonicalModuleHash),
-          normalizeByteArray(bundle?.manifestHash),
-          normalizeString(
-            bundle?.manifestExportSymbol,
-            DEFAULT_MANIFEST_EXPORT_SYMBOL,
-          ),
-          normalizeString(
-            bundle?.manifestSizeSymbol,
-            DEFAULT_MANIFEST_SIZE_SYMBOL,
-          ),
-          Array.isArray(bundle?.entries)
-            ? bundle.entries.map(normalizeEntry)
-            : [],
-        );
+  const value = moduleBundleTableFromObject(bundle);
   const builder = new flatbuffers.Builder(1024);
-  ModuleBundle.finishModuleBundleBuffer(builder, value.pack(builder));
+  MBL.finishMBLBuffer(builder, value.pack(builder));
   return builder.asUint8Array();
 }
 
@@ -259,10 +375,9 @@ export function findModuleBundleEntry(bundle, match) {
 
 export {
   CanonicalizationRuleT,
-  FlatBufferTypeRefT,
-  ModuleBundle,
+  MBL,
+  MBLT,
   ModuleBundleEntryRole,
   ModuleBundleEntryT,
-  ModuleBundleT,
   ModulePayloadEncoding,
 };

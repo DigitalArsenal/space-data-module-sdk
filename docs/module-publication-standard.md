@@ -33,18 +33,17 @@ defined by this repo:
 - manifest accessors
   - `plugin_get_manifest_flatbuffer`
   - `plugin_get_manifest_flatbuffer_size`
-- optional `sds.bundle` custom-section metadata
-- optional appended SDS `REC` trailer carrying `PNM` and optional `ENC`
+- optional appended SDS `REC` trailer carrying `MBL`, `PNM`, and optional `ENC`
 
 ## Core Rules
 
 1. The runtime payload before any publication trailer MUST remain valid `.wasm`.
 2. If signatures or encrypted-delivery metadata are carried in the same file,
    they MUST be appended after the wasm bytes as an SDS `REC` trailer.
-3. `REC` trailers MUST carry standards-sourced `PNM` and optional `ENC`
-   records.
-4. `sds.bundle` remains the in-wasm container for bundle metadata and does not
-   replace the `REC` trailer for publication protection records.
+3. `REC` trailers MUST carry standards-sourced `MBL` metadata plus `PNM` and
+   optional `ENC` records where applicable.
+4. Single-file bundle metadata MUST be read from the appended `REC` trailer,
+   not from an in-wasm custom section.
 5. Sidecar FlatBuffers are allowed when a package chooses not to append those
    metadata payloads to the module artifact.
 6. Paths in publication metadata are package-relative, never absolute.
@@ -55,6 +54,7 @@ Publication protection metadata is expressed as standards-backed FlatBuffer
 extensions layered on top of the canonical module artifact.
 
 - `REC.fbs` is the trailing collection wrapper with file identifier `$REC`
+- `MBL.fbs` is the module bundle metadata record
 - `PNM.fbs` is the signature/publication notice record
 - `ENC.fbs` is the encrypted-delivery record
 
@@ -63,6 +63,7 @@ use the generated message classes from `spacedatastandards.org` and preserve the
 standard file identifiers:
 
 - `REC` => `$REC`
+- `MBL` => `$MBL`
 - `PNM` => `$PNM`
 - `ENC` => `$ENC`
 
@@ -72,8 +73,8 @@ The runtime-facing rule stays strict:
 2. Instantiate the remaining raw wasm module.
 3. Read the embedded `PluginManifest.fbs`.
 
-`PNM` and `ENC` extend publication and transport handling only. They do not
-change the canonical module ABI, manifest exports, or `sds.bundle` layout.
+`MBL`, `PNM`, and `ENC` extend publication and transport handling only. They do
+not change the canonical module ABI or manifest exports.
 
 ### `PNM` digital-signature extension
 
@@ -438,23 +439,24 @@ A loader consuming this standard SHOULD:
 4. resolve `PNM` / `ENC` from that trailer before runtime startup
 5. if `ENC` is present, decrypt and strip the trailer before passing bytes to
    WasmEdge or any other runtime
-6. inspect the stripped wasm for `sds.bundle`
+6. inspect the stripped artifact's `REC` trailer for `MBL`
 7. resolve any `package-file` metadata through relative paths
 8. validate manifest exports and any declared integrity hashes
 
 If `module.packaging` is `sds-bundled-wasm`, loaders SHOULD treat the stripped
-wasm payload as the artifact to inspect for `sds.bundle`.
+wasm payload as the runtime artifact and the appended `REC` trailer as the
+single-file bundle/publication metadata container.
 
 ## Relationship To Existing Bundle Format
 
-This standard does not replace `sds.bundle`. It explains how a package publishes
-and points to the module artifact plus any appended SDS publication trailer.
+This standard uses the appended `REC` trailer as the single-file publication
+container. It explains how a package publishes and points to the module
+artifact plus any appended SDS publication trailer.
 
-- `sds.bundle` stays the single-file in-wasm container
-- `REC` stays the appended publication record container for `PNM` / `ENC`
+- `REC` stays the appended single-file/publication record container
+- `MBL` carries bundle metadata inside that trailer
 - `sdn-module` is the package-discovery descriptor
 
-Use `sds.bundle` when you want one self-describing wasm payload. Use the
-appended `REC` trailer when you need sign/encrypt publication metadata. Use
-`sdn-module` when you want package managers and loaders to discover that file
-reliably.
+Use the appended `REC` trailer when you want one self-describing protected
+artifact. Use `sdn-module` when you want package managers and loaders to
+discover that file reliably.

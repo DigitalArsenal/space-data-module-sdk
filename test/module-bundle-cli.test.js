@@ -7,10 +7,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import {
-  extractPublicationRecordCollection,
   getWasmCustomSections,
   parseSingleFileBundle,
-} from "../src/index.js";
+} from "../src/bundle/wasm.js";
+import { extractPublicationRecordCollection } from "../src/transport/records.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -60,7 +60,7 @@ test("CLI protect can emit a single-file bundle wasm", async () => {
   const protectedBundle = extractPublicationRecordCollection(bundledBytes);
   assert.ok(protectedBundle);
   assert.equal(WebAssembly.validate(protectedBundle.payloadBytes), true);
-  assert.equal(getWasmCustomSections(bundledBytes, "sds.bundle").length, 1);
+  assert.equal(getWasmCustomSections(protectedBundle.payloadBytes, "sds.bundle").length, 0);
 
   const parsed = await parseSingleFileBundle(bundledBytes);
   assert.equal(

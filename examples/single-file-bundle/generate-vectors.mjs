@@ -4,9 +4,11 @@ import { fileURLToPath } from "node:url";
 
 import {
   compileModuleFromSource,
+} from "../../src/compiler/compileModule.js";
+import {
   createSingleFileBundle,
   parseSingleFileBundle,
-} from "../../src/index.js";
+} from "../../src/bundle/wasm.js";
 import { canonicalBytes } from "../../src/auth/index.js";
 import { bytesToHex } from "../../src/utils/encoding.js";
 import { sha256Bytes } from "../../src/utils/crypto.js";

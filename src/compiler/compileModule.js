@@ -894,6 +894,7 @@ export async function protectModuleArtifact(options = {}) {
   };
 
   let singleFileBundle = null;
+  let singleFileBundleRecords = null;
   if (options.singleFileBundle === true) {
     const additionalEntries = [
       ...(Array.isArray(options.bundleEntries) ? options.bundleEntries : []),
@@ -905,9 +906,13 @@ export async function protectModuleArtifact(options = {}) {
       authorization: signedAuthorization,
       entries: additionalEntries,
     });
+    singleFileBundleRecords = extractPublicationRecordCollection(
+      singleFileBundle.wasmBytes,
+    );
   }
 
-  const bundleBytes = singleFileBundle?.wasmBytes ?? wasmBytes;
+  const bundleBytes = singleFileBundleRecords?.payloadBytes ?? wasmBytes;
+  const bundleRecord = singleFileBundleRecords?.mbl ?? null;
   let publicationNotice = null;
   let publicationRecordsBytes = null;
   let protectedArtifactBytes = null;
@@ -931,6 +936,7 @@ export async function protectModuleArtifact(options = {}) {
       signer,
     });
     publicationRecordsBytes = encodePublicationRecordCollection({
+      mbl: bundleRecord,
       enc: parsedEncryptedBase.enc,
       pnm: publicationNotice,
     });
@@ -943,6 +949,7 @@ export async function protectModuleArtifact(options = {}) {
       parsedProtectedBlob: {
         payloadBytes: parsedEncryptedBase.payloadBytes,
         recordCollectionBytes: publicationRecordsBytes,
+        mbl: bundleRecord,
         enc: parsedEncryptedBase.enc,
         pnm: publicationNotice,
       },
@@ -959,6 +966,7 @@ export async function protectModuleArtifact(options = {}) {
       signer,
     });
     publicationRecordsBytes = encodePublicationRecordCollection({
+      mbl: bundleRecord,
       pnm: publicationNotice,
     });
     protectedArtifactBytes = appendPublicationRecordCollection(

@@ -47,7 +47,8 @@ Examples:
 Those values vary per environment and should not change the identity of a
 signed `.wasm` artifact.
 
-Instead, attach them as a deployment-plan payload in `sds.bundle`.
+Instead, attach them as a deployment-plan payload inside the bundle `MBL`
+record carried by the appended `REC` trailer.
 
 Deployment plans should use `protocolId` as the required identifier for a
 resolved protocol installation. `wireId` is optional deployment metadata for

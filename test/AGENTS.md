@@ -14,7 +14,7 @@ module authors can borrow from.
   - `node --test test/node-host.test.js test/host-abi.test.js`
   - `node --test test/browser-harness.test.js test/isomorphic-loader.test.js`
 - Bundle changes:
-  - `node --test test/module-bundle.test.js test/module-bundle-vectors.test.js test/module-bundle-cli.test.js test/module-bundle-go.test.js test/module-bundle-python.test.js`
+  - `node --test test/module-bundle.test.js test/module-bundle-vectors.test.js test/module-bundle-cli.test.js test/deployment-plan.test.js test/transport-records.test.js`
 - Runtime-host or binary stream changes:
   - `npm run test:stream-ingest`
   - `npm run test:module-stream`

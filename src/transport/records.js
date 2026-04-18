@@ -7,10 +7,16 @@ import {
   KeyExchange,
   SymmetricAlgo,
 } from "spacedatastandards.org/lib/js/ENC/main.js";
+import { MBL } from "spacedatastandards.org/lib/js/MBL/main.js";
 import { PNM, PNMT } from "spacedatastandards.org/lib/js/PNM/main.js";
 import { REC, RECT } from "spacedatastandards.org/lib/js/REC/REC.js";
 import { Record, RecordT } from "spacedatastandards.org/lib/js/REC/Record.js";
 import { RecordType } from "spacedatastandards.org/lib/js/REC/RecordType.js";
+import {
+  decodeModuleBundleTable,
+  encodeModuleBundle,
+  moduleBundleTableFromObject,
+} from "../bundle/codec.js";
 
 import {
   base64ToBytes,
@@ -51,6 +57,7 @@ const KDF_NAME_BY_VALUE = Object.freeze(
   ),
 );
 const RECORD_TYPE_BY_STANDARD = Object.freeze({
+  MBL: RecordType.MBL,
   ENC: RecordType.ENC,
   PNM: RecordType.PNM,
 });
@@ -567,6 +574,15 @@ export function decodePnmRecord(bytes) {
 
 export function encodePublicationRecordCollection(options = {}) {
   const records = [];
+  if (options.mbl) {
+    records.push(
+      new RecordT(
+        RECORD_TYPE_BY_STANDARD.MBL,
+        moduleBundleTableFromObject(options.mbl),
+        "MBL",
+      ),
+    );
+  }
   if (options.enc) {
     records.push(new RecordT(RECORD_TYPE_BY_STANDARD.ENC, encTableFromObject(options.enc), "ENC"));
   }
@@ -574,9 +590,9 @@ export function encodePublicationRecordCollection(options = {}) {
     records.push(new RecordT(RECORD_TYPE_BY_STANDARD.PNM, pnmTableFromObject(options.pnm), "PNM"));
   }
   if (records.length === 0) {
-    throw new Error("At least one ENC or PNM record is required.");
+    throw new Error("At least one MBL, ENC, or PNM record is required.");
   }
-  const builder = new flatbuffers.Builder(512);
+  const builder = new flatbuffers.Builder(1024);
   const root = new RECT(
     normalizeStringField(options.version) ?? DEFAULT_RECORD_COLLECTION_VERSION,
     records,
@@ -606,6 +622,8 @@ export function decodePublicationRecordCollection(bytes) {
     throw new Error("REC trailer does not contain any records.");
   }
   const records = [];
+  let mbl = null;
+  let mblBytes = null;
   let enc = null;
   let pnm = null;
   for (let index = 0; index < recordTables.length; index += 1) {
@@ -647,7 +665,18 @@ export function decodePublicationRecordCollection(bytes) {
       throw new Error(`REC trailer record ${index} is missing a value.`);
     }
     let value = null;
-    if (standard === "ENC") {
+    if (standard === "MBL") {
+      const mblTable = recordTable.value(new MBL());
+      if (!mblTable) {
+        throw new Error(`REC trailer record ${index} MBL payload is missing.`);
+      }
+      if (mbl) {
+        throw new Error("REC trailer contains multiple MBL records.");
+      }
+      mbl = decodeModuleBundleTable(mblTable);
+      mblBytes = encodeModuleBundle(mbl);
+      value = mbl;
+    } else if (standard === "ENC") {
       const encTable = recordTable.value(new ENC());
       if (!encTable) {
         throw new Error(`REC trailer record ${index} ENC payload is missing.`);
@@ -687,6 +716,8 @@ export function decodePublicationRecordCollection(bytes) {
       normalizeStringField(collectionTable.version()) ??
       DEFAULT_RECORD_COLLECTION_VERSION,
     records,
+    mbl,
+    mblBytes,
     enc,
     pnm,
     recordCollectionBytes: buffer,
