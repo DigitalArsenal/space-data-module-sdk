@@ -16,6 +16,11 @@ import {
   RecommendedCapabilityIds,
   StandaloneWasiCapabilityIds,
 } from "../capabilities.js";
+import {
+  PLG_FILE_IDENTIFIER,
+  decodePlgManifest,
+  isPlgManifestBuffer,
+} from "../manifest/plgCodec.js";
 
 const RecommendedCapabilitySet = new Set(RecommendedCapabilityIds);
 const StandaloneWasiCapabilitySet = new Set(StandaloneWasiCapabilityIds);
@@ -1356,11 +1361,143 @@ export async function getWasmExportNamesFromFile(wasmPath) {
   return getWasmExportNames(wasmBytes);
 }
 
+const PLG_IDENTIFIER_BYTES = Uint8Array.from(
+  Array.from(PLG_FILE_IDENTIFIER, (ch) => ch.charCodeAt(0)),
+);
+const LEGACY_PMAN_IDENTIFIER_BYTES = Uint8Array.from([0x50, 0x4d, 0x41, 0x4e]);
+
+function indexOfBytes(haystack, needle, startIndex = 0) {
+  if (!haystack || needle.length === 0 || haystack.length < needle.length) {
+    return -1;
+  }
+  for (let i = startIndex; i <= haystack.length - needle.length; i += 1) {
+    let matched = true;
+    for (let j = 0; j < needle.length; j += 1) {
+      if (haystack[i + j] !== needle[j]) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Scan wasm bytes for the canonical `$PLG` FlatBuffer identifier and, when
+ * found, return both the raw offset and the smallest aligned candidate buffer
+ * that a downstream decoder can try to parse. The wasm `data` sections embed
+ * the manifest bytes verbatim; FlatBuffer headers are `<root_offset:u32><$PLG>`
+ * so we walk backwards one 4-byte word and hand the caller a slice starting
+ * there.
+ */
+export function locateEmbeddedPlgManifest(wasmBytes) {
+  const bytes = wasmBytes instanceof Uint8Array
+    ? wasmBytes
+    : new Uint8Array(wasmBytes);
+  const identifierOffset = indexOfBytes(bytes, PLG_IDENTIFIER_BYTES);
+  if (identifierOffset < 4) {
+    return null;
+  }
+  const start = identifierOffset - 4;
+  // Upper bound on the manifest size — grab up to 64KB and let the caller
+  // decide how much to trim. FlatBuffer decoders only read what they need.
+  const end = Math.min(bytes.length, start + 65536);
+  const candidate = bytes.subarray(start, end);
+  if (!isPlgManifestBuffer(candidate)) {
+    return null;
+  }
+  return { start, identifierOffset, bytes: candidate };
+}
+
+export function hasLegacyPmanManifest(wasmBytes) {
+  const bytes = wasmBytes instanceof Uint8Array
+    ? wasmBytes
+    : new Uint8Array(wasmBytes);
+  return indexOfBytes(bytes, LEGACY_PMAN_IDENTIFIER_BYTES) !== -1;
+}
+
+function validateEmbeddedManifestBytes({
+  wasmBytes,
+  manifest,
+  issues,
+  sourceLabel,
+}) {
+  if (hasLegacyPmanManifest(wasmBytes)) {
+    pushIssue(
+      issues,
+      "error",
+      "legacy-pman-manifest-embedded",
+      "Plugin artifact embeds legacy PMAN manifest bytes — rebuild with the PLG codec.",
+      sourceLabel,
+    );
+  }
+
+  const located = locateEmbeddedPlgManifest(wasmBytes);
+  if (!located) {
+    pushIssue(
+      issues,
+      "error",
+      "missing-plg-manifest-bytes",
+      `Plugin artifact does not embed a canonical \"${PLG_FILE_IDENTIFIER}\" manifest buffer.`,
+      sourceLabel,
+    );
+    return;
+  }
+
+  let decoded;
+  try {
+    decoded = decodePlgManifest(located.bytes);
+  } catch (error) {
+    pushIssue(
+      issues,
+      "error",
+      "plg-manifest-decode-failed",
+      `Failed to decode embedded PLG manifest: ${error?.message ?? error}`,
+      sourceLabel,
+    );
+    return;
+  }
+
+  const sourcePluginId = manifest?.pluginId ?? manifest?.plugin_id ?? null;
+  if (
+    isNonEmptyString(sourcePluginId) &&
+    isNonEmptyString(decoded?.pluginId) &&
+    sourcePluginId !== decoded.pluginId
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "plg-manifest-plugin-id-mismatch",
+      `Embedded PLG manifest pluginId \"${decoded.pluginId}\" does not match source manifest pluginId \"${sourcePluginId}\".`,
+      sourceLabel,
+    );
+  }
+
+  const sourceVersion = manifest?.version ?? null;
+  if (
+    isNonEmptyString(sourceVersion) &&
+    isNonEmptyString(decoded?.version) &&
+    sourceVersion !== decoded.version
+  ) {
+    pushIssue(
+      issues,
+      "warning",
+      "plg-manifest-version-mismatch",
+      `Embedded PLG manifest version \"${decoded.version}\" does not match source manifest version \"${sourceVersion}\".`,
+      sourceLabel,
+    );
+  }
+}
+
 export async function validatePluginArtifact(options) {
   const {
     manifest,
     manifestPath = null,
     wasmPath = null,
+    wasmBytes: inputWasmBytes = null,
     exportNames = null,
     sourceName = manifestPath ?? "manifest",
   } = options;
@@ -1368,15 +1505,26 @@ export async function validatePluginArtifact(options) {
   const issues = [...report.issues];
   let resolvedExportNames = [];
   let checkedArtifact = false;
+  let loadedWasmBytes = null;
   const declaredInvokeSurfaces = Array.isArray(manifest?.invokeSurfaces)
     ? manifest.invokeSurfaces.filter((surface) => InvokeSurfaceSet.has(surface))
     : [];
 
-  if (Array.isArray(exportNames)) {
+  if (inputWasmBytes) {
+    loadedWasmBytes =
+      inputWasmBytes instanceof Uint8Array
+        ? inputWasmBytes
+        : new Uint8Array(inputWasmBytes);
+    resolvedExportNames = Array.isArray(exportNames)
+      ? [...exportNames]
+      : getWasmExportNames(loadedWasmBytes);
+    checkedArtifact = true;
+  } else if (Array.isArray(exportNames)) {
     resolvedExportNames = [...exportNames];
     checkedArtifact = true;
   } else if (isNonEmptyString(wasmPath)) {
-    resolvedExportNames = await getWasmExportNamesFromFile(wasmPath);
+    loadedWasmBytes = new Uint8Array(await readFile(wasmPath));
+    resolvedExportNames = getWasmExportNames(loadedWasmBytes);
     checkedArtifact = true;
   }
 
@@ -1423,6 +1571,14 @@ export async function validatePluginArtifact(options) {
         `Plugin artifact is missing required command export "${DefaultInvokeExports.commandSymbol}".`,
         wasmPath ?? sourceName,
       );
+    }
+    if (loadedWasmBytes) {
+      validateEmbeddedManifestBytes({
+        wasmBytes: loadedWasmBytes,
+        manifest,
+        issues,
+        sourceLabel: wasmPath ?? sourceName,
+      });
     }
   } else {
     pushIssue(

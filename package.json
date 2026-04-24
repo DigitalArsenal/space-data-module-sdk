@@ -72,7 +72,7 @@
     "flatsql": "^0.4.0",
     "hd-wallet-wasm": "1.6.0",
     "sdn-emception": "1.0.0",
-    "spacedatastandards.org": "1.85.0"
+    "spacedatastandards.org": "^1.92.0"
   },
   "devDependencies": {
     "express": "^4.21.2"

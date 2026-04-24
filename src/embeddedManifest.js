@@ -2,8 +2,19 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { encodePluginManifest } from "./manifest/index.js";
+import { legacyManifestToPlg } from "./manifest/legacyToPlg.js";
+import { encodePlgManifest } from "./manifest/plgCodec.js";
 
-function toManifestBytes(manifest) {
+/**
+ * Convert a manifest input to the raw FlatBuffer bytes that will be
+ * embedded in the plugin artifact.
+ *
+ * The embedded manifest is the canonical spacedatastandards.org PLG
+ * schema (`$PLG` file_identifier) by default. Pass `format: "pman"` to
+ * emit the internal PluginManifest schema instead (legacy path, retained
+ * for tests that still compare against PMAN bytes).
+ */
+function toManifestBytes(manifest, format = "plg") {
   if (manifest instanceof Uint8Array) {
     return manifest;
   }
@@ -17,7 +28,13 @@ function toManifestBytes(manifest) {
       manifest.byteLength,
     );
   }
-  return encodePluginManifest(manifest);
+  if (format === "pman") {
+    return encodePluginManifest(manifest);
+  }
+  // Default: PLG. Accept both PLG-shaped and legacy PluginManifest-shaped
+  // inputs; the converter is a no-op for PLG-native shapes.
+  const plgShape = legacyManifestToPlg(manifest);
+  return encodePlgManifest(plgShape);
 }
 
 function renderByteRows(bytes) {
@@ -34,7 +51,10 @@ function renderByteRows(bytes) {
 }
 
 export function generateEmbeddedManifestSource(options = {}) {
-  const manifestBytes = toManifestBytes(options.manifest);
+  const manifestBytes = toManifestBytes(
+    options.manifest,
+    options.format ?? "plg",
+  );
   if (manifestBytes.length === 0) {
     throw new Error("generateEmbeddedManifestSource requires manifest bytes.");
   }
@@ -91,7 +111,7 @@ export function writeEmbeddedManifestArtifacts(options = {}) {
     throw new Error("writeEmbeddedManifestArtifacts requires outputDir.");
   }
 
-  const manifestBytes = toManifestBytes(manifest);
+  const manifestBytes = toManifestBytes(manifest, options.format ?? "plg");
   fs.mkdirSync(outputDir, { recursive: true });
 
   const binaryPath = path.join(outputDir, binaryFileName);

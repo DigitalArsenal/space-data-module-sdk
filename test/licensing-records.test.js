@@ -19,7 +19,7 @@ import {
 } from "spacedatastandards.org/lib/js/LCH/main.js";
 import { KMF, keyMaterialAlgorithm, keyMaterialEncoding, keyMaterialRole } from "spacedatastandards.org/lib/js/KMF/main.js";
 import { LPF, licensingProofMessageType } from "spacedatastandards.org/lib/js/LPF/main.js";
-import { pluginType } from "spacedatastandards.org/lib/js/PLG/main.js";
+import { pluginCategory } from "spacedatastandards.org/lib/js/PLG/main.js";
 
 import {
   LicensingProtocolError,
@@ -378,7 +378,7 @@ function createModuleDescriptorOffset(builder, contentHash) {
   PLG.addName(builder, nameOffset);
   PLG.addVersion(builder, versionOffset);
   PLG.addDescription(builder, descriptionOffset);
-  PLG.addPluginType(builder, pluginType.Analysis);
+  PLG.addPluginType(builder, pluginCategory.Analysis);
   PLG.addAbiVersion(builder, 1);
   PLG.addWasmHash(builder, wasmHashOffset);
   PLG.addWasmSize(builder, 4n);

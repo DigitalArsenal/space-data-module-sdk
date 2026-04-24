@@ -1,0 +1,191 @@
+// Canonical plugin manifest schema.
+//
+// Upstream source: https://github.com/DigitalArsenal/spacedatastandards.org
+// Path:            schema/PLG/main.fbs
+// Version:         1.0.6
+// Upstream hash:   2c9ca90ec923b2476832517dee715559c45dd198d3bdd4b5b3dfe0a4d05c4882
+//
+// This is the canonical spacedatastandards.org "PLG" manifest.
+// It is vendored here verbatim so the plugin SDK can depend on a stable copy
+// without adding a network or submodule fetch at build time. Keep this file
+// byte-for-byte identical to the upstream version; if a refresh is needed,
+// re-vendor from the upstream path above rather than hand-editing.
+
+// Hash: 2c9ca90ec923b2476832517dee715559c45dd198d3bdd4b5b3dfe0a4d05c4882
+// Version: 1.0.6
+// -----------------------------------END_HEADER
+/// Plugin type category
+enum pluginCategory : byte {
+  /// Sensor simulation and analysis
+  Sensor,
+  /// Orbital propagation algorithms
+  Propagator,
+  /// Custom rendering/visualization
+  Renderer,
+  /// Data analysis and processing
+  Analysis,
+  /// External data source integration
+  DataSource,
+  /// Electronic warfare simulation
+  EW,
+  /// Communications modeling
+  Comms,
+  /// Physics simulation
+  Physics,
+  /// GLSL shader plugins for custom visualization
+  Shader
+}
+
+/// Storefront payment model for the plugin listing
+enum purchaseTier : byte {
+  /// No payment required
+  Free,
+  /// Single one-time purchase
+  OneTime,
+  /// Recurring subscription purchase
+  Subscription
+}
+
+/// Publication visibility for the plugin listing
+enum publicationState : byte {
+  /// Discoverable in public storefront listings
+  Public,
+  /// Addressable directly but hidden from public browse surfaces
+  Unlisted,
+  /// No longer offered for new installs or purchases
+  Retired
+}
+
+/// Plugin capability declaration
+table PluginCapability {
+  /// Capability name, e.g., "gpu_compute", "wasm_simd"
+  NAME: string;
+  /// Capability version
+  VERSION: string;
+  /// Whether this capability is required
+  REQUIRED: bool;
+}
+
+/// Plugin dependency on another plugin
+table PluginDependency {
+  /// Plugin ID of the dependency
+  PLUGIN_ID: string;
+  /// Minimum version required (semver)
+  MIN_VERSION: string;
+  /// Maximum version allowed (optional)
+  MAX_VERSION: string;
+}
+
+/// Plugin entry point function definition
+table EntryFunction {
+  /// Function name as exported from WASM
+  NAME: string (required);
+  /// Human-readable description
+  DESCRIPTION: string;
+  /// Input parameter types (FlatBuffer schema names)
+  INPUT_SCHEMAS: [string];
+  /// Output type (FlatBuffer schema name)
+  OUTPUT_SCHEMA: string;
+}
+
+/// Plugin Manifest - canonical signed storefront and WASM distribution record
+table PLG {
+  /// Unique identifier for the plugin
+  PLUGIN_ID: string (required);
+  /// Human-readable plugin name
+  NAME: string (required);
+  /// Plugin version (semver format)
+  VERSION: string (required);
+  /// Detailed description of plugin functionality
+  DESCRIPTION: string;
+  /// Short marketing summary shown in storefront listings
+  TAGLINE: string;
+  /// Type/category of the plugin
+  PLUGIN_TYPE: pluginCategory;
+  /// Human-readable publisher or organization name
+  PUBLISHER_NAME: string;
+  /// Publisher handle or username
+  PUBLISHER_HANDLE: string;
+  /// Canonical publisher website
+  PUBLISHER_URL: string;
+  /// Support or helpdesk URL for this plugin
+  SUPPORT_URL: string;
+  /// Search and categorization tags for discovery
+  TAGS: [string];
+  /// Short feature bullets highlighted in storefront listings
+  FEATURES: [string];
+  /// Screenshot URLs showing the plugin in use
+  SCREENSHOT_URLS: [string];
+  /// Optional hero/banner image URL for the listing
+  BANNER_URL: string;
+
+  /// ABI version for compatibility checking
+  ABI_VERSION: uint32 = 1;
+
+  /// SHA256 hash of the decrypted WASM binary
+  WASM_HASH: [ubyte];
+  /// Size of decrypted WASM binary in bytes
+  WASM_SIZE: uint64;
+  /// IPFS CID of the encrypted WASM binary
+  WASM_CID: string;
+  /// SHA256 hash of the encrypted delivery artifact bytes
+  ENCRYPTED_WASM_HASH: [ubyte];
+  /// Size of the encrypted delivery artifact in bytes
+  ENCRYPTED_WASM_SIZE: uint64;
+
+  /// Entry point functions exported by the plugin
+  ENTRY_FUNCTIONS: [EntryFunction];
+  /// FlatBuffer schemas required by this plugin
+  REQUIRED_SCHEMAS: [string];
+  /// Other plugins this depends on
+  DEPENDENCIES: [PluginDependency];
+  /// Capabilities provided by this plugin
+  CAPABILITIES: [PluginCapability];
+
+  /// Peer ID of the plugin provider
+  PROVIDER_PEER_ID: string;
+  /// IPFS CID of provider's EPM (Entity Profile Message)
+  PROVIDER_EPM_CID: string;
+
+  /// Whether the WASM binary is encrypted
+  ENCRYPTED: bool = true;
+  /// Canonical required scope for grant issuance
+  REQUIRED_SCOPE: string;
+  /// Provider-local identifier for the module content key
+  KEY_ID: string;
+  /// Allowed requester domains for module grants
+  ALLOWED_DOMAINS: [string];
+  /// Maximum grant timeout allowed for this module publication
+  MAX_GRANT_TIMEOUT_MS: uint64;
+  /// Minimum permissions required to run
+  MIN_PERMISSIONS: [string];
+
+  /// Unix timestamp when plugin was created
+  CREATED_AT: uint64;
+  /// Unix timestamp when plugin was last updated
+  UPDATED_AT: uint64;
+  /// URL to plugin documentation
+  DOCUMENTATION_URL: string;
+  /// URL to plugin changelog or release notes
+  CHANGELOG_URL: string;
+  /// URL to plugin icon/logo
+  ICON_URL: string;
+  /// License identifier (SPDX format)
+  LICENSE: string;
+  /// Commercial model used for storefront purchase flows
+  PAYMENT_MODEL: purchaseTier = Free;
+  /// Price in USD cents for one-time purchase or subscription period
+  PRICE_USD_CENTS: uint32;
+  /// Subscription billing period length in days
+  SUBSCRIPTION_PERIOD_DAYS: uint32;
+  /// Accepted payment methods, e.g. "stripe", "sol", "usdc"
+  ACCEPTED_PAYMENT_METHODS: [string];
+  /// Storefront publication state for this manifest version
+  LISTING_STATUS: publicationState = Public;
+
+  /// Ed25519 signature from provider over manifest
+  SIGNATURE: [ubyte];
+}
+
+root_type PLG;
+file_identifier "$PLG";

@@ -5,6 +5,13 @@ export {
   FlatBufferTypeRefT as PayloadTypeRef,
 } from "../generated/orbpro/stream/flat-buffer-type-ref.js";
 export { decodePluginManifest, encodePluginManifest } from "./codec.js";
+export {
+  PLG_FILE_IDENTIFIER,
+  decodePlgManifest,
+  encodePlgManifest,
+  isPlgManifestBuffer,
+} from "./plgCodec.js";
+export { legacyManifestToPlg } from "./legacyToPlg.js";
 export { toEmbeddedPluginManifest } from "./normalize.js";
 export {
   clonePayloadTypeRef,
