@@ -33,6 +33,24 @@ test("sdk source never imports flatbuffers through relative node_modules paths",
   assert.deepEqual(offenders, []);
 });
 
+test("worker-safe invoke runtime files do not require bare flatbuffers imports", async () => {
+  const workerSafeFiles = [
+    "src/invoke/codec.js",
+    "src/generated/orbpro/invoke/plugin-invoke-request.js",
+    "src/generated/orbpro/invoke/plugin-invoke-response.js",
+    "src/generated/orbpro/stream/flat-buffer-type-ref.js",
+    "src/generated/orbpro/stream/typed-arena-buffer.js",
+  ];
+  const offenders = [];
+  for (const relativePath of workerSafeFiles) {
+    const source = await readFile(path.join(SDK_ROOT, relativePath), "utf8");
+    if (/from\s+["']flatbuffers(?:\/|["'])/.test(source)) {
+      offenders.push(relativePath);
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
 test("sdk source never imports workspace dependencies through relative paths", async () => {
   const offenders = [];
   for await (const file of walk(SRC_ROOT)) {

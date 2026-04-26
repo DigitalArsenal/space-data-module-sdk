@@ -1,5 +1,11 @@
 import { canonicalBytes } from "../auth/canonicalize.js";
-import { decodePluginManifest, encodePluginManifest } from "../manifest/index.js";
+import {
+  decodePluginManifest,
+  decodePlgManifest,
+  encodePlgManifest,
+  isPlgManifestBuffer,
+  legacyManifestToPlg,
+} from "../manifest/index.js";
 import { toUint8Array } from "../runtime/bufferLike.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { bytesToHex } from "../utils/encoding.js";
@@ -226,20 +232,36 @@ function normalizeJsonPayload(value) {
   return new Uint8Array(canonicalBytes(value));
 }
 
+function encodeBundleManifest(manifest) {
+  return encodePlgManifest(legacyManifestToPlg(manifest));
+}
+
+function decodeBundleManifest(payloadBytes) {
+  return isPlgManifestBuffer(payloadBytes)
+    ? decodePlgManifest(payloadBytes)
+    : decodePluginManifest(payloadBytes);
+}
+
 function normalizeManifestEntry(manifest, manifestBytes) {
   if (!manifest && !manifestBytes) {
     return null;
   }
-  const payload = manifestBytes ?? encodePluginManifest(manifest);
+  const payload = manifestBytes ?? encodeBundleManifest(manifest);
+  const isPlg = isPlgManifestBuffer(payload);
   return {
     entryId: "manifest",
     role: "manifest",
     sectionName: "sds.manifest",
     payloadEncoding: "flatbuffer",
-    typeRef: {
-      schemaName: "PluginManifest.fbs",
-      fileIdentifier: "PMAN",
-    },
+    typeRef: isPlg
+      ? {
+          schemaName: "PLG.fbs",
+          fileIdentifier: "$PLG",
+        }
+      : {
+          schemaName: "PluginManifest.fbs",
+          fileIdentifier: "PMAN",
+        },
     payload,
     description: "Canonical plugin manifest.",
   };
@@ -330,7 +352,7 @@ function buildParsedEntries(bundle) {
       parsedEntry.payloadEncodingName === "flatbuffer"
     ) {
       try {
-        parsedEntry.decodedManifest = decodePluginManifest(payloadBytes);
+        parsedEntry.decodedManifest = decodeBundleManifest(payloadBytes);
       } catch {
         parsedEntry.decodedManifest = null;
       }
@@ -380,7 +402,7 @@ export async function createSingleFileBundle(options = {}) {
     options.manifestBytes !== undefined
       ? normalizeBytes(options.manifestBytes, "manifestBytes")
       : options.manifest
-        ? encodePluginManifest(options.manifest)
+        ? encodeBundleManifest(options.manifest)
         : null;
   const manifestEntry = normalizeManifestEntry(options.manifest, manifestBytes);
   const rawEntries = [
@@ -463,7 +485,7 @@ export async function parseSingleFileBundle(bytes, options = {}) {
   let manifest = null;
   if (manifestEntry) {
     try {
-      manifest = decodePluginManifest(new Uint8Array(manifestEntry.payload ?? []));
+      manifest = decodeBundleManifest(new Uint8Array(manifestEntry.payload ?? []));
     } catch {
       manifest = null;
     }

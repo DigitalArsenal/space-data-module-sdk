@@ -1,4 +1,4 @@
-import * as flatbuffers from "flatbuffers/mjs/flatbuffers.js";
+import * as flatbuffers from "../vendor/flatbuffers/flatbuffers.js";
 
 import {
   PluginInvokeRequest,

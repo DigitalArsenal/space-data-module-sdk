@@ -6,6 +6,7 @@ import {
   compileModuleFromSource,
   ModuleThreadModel,
   createRecipientKeypairHex,
+  decodePlgManifest,
   decodePluginManifest,
   encodePluginManifest,
   generateEmbeddedManifestSource,
@@ -307,7 +308,7 @@ test("source compile emits a compliant wasm module", async () => {
   );
 });
 
-test("artifact compliance can validate a built module from its embedded manifest bytes", async () => {
+test("artifact compliance can validate a built module from its embedded PLG manifest bytes", async () => {
   const manifest = {
     ...createTestManifest(),
     capabilities: ["clock", "random"],
@@ -333,19 +334,19 @@ test("artifact compliance can validate a built module from its embedded manifest
   const manifestSize = Number(
     instance.exports.plugin_get_manifest_flatbuffer_size(),
   );
-  const embeddedManifest = decodePluginManifest(
+  const embeddedManifest = decodePlgManifest(
     new Uint8Array(memory.buffer, manifestPtr, manifestSize).slice(),
   );
 
-  assert.equal(embeddedManifest.pluginFamily, manifest.pluginFamily);
-  assert.deepEqual(embeddedManifest.capabilities, manifest.capabilities);
-  assert.equal(
-    embeddedManifest.methods[0].drainPolicy,
-    manifest.methods[0].drainPolicy,
+  assert.equal(embeddedManifest.pluginId, manifest.pluginId);
+  assert.equal(embeddedManifest.version, manifest.version);
+  assert.deepEqual(
+    embeddedManifest.capabilities.map((capability) => capability.name),
+    manifest.capabilities,
   );
 
   const validation = await validateArtifactWithStandards({
-    manifest: embeddedManifest,
+    manifest,
     wasmPath: result.outputPath,
   });
   assert.equal(validation.ok, true);

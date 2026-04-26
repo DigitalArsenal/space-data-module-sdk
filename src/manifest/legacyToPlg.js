@@ -21,6 +21,8 @@
  *     folded into the capability name as `kind#scope` if present.)
  */
 
+import { CapabilityKind } from "../generated/orbpro/manifest/capability-kind.js";
+
 const FAMILY_TO_PLUGIN_TYPE = Object.freeze({
   sensor: "sensor",
   propagator: "propagator",
@@ -42,6 +44,16 @@ function normalizePluginTypeFromFamily(family) {
   }
   const key = family.trim().toLowerCase().replace(/-/g, "_");
   return FAMILY_TO_PLUGIN_TYPE[key] ?? "analysis";
+}
+
+function normalizeCapabilityName(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" && typeof CapabilityKind[value] === "string") {
+    return CapabilityKind[value].toLowerCase();
+  }
+  return null;
 }
 
 function firstTypeName(port) {
@@ -106,13 +118,9 @@ function toPluginCapability(capability) {
     return null;
   }
   const kind =
-    typeof capability.capability === "string"
-      ? capability.capability
-      : typeof capability.kind === "string"
-        ? capability.kind
-        : typeof capability.name === "string"
-          ? capability.name
-          : null;
+    normalizeCapabilityName(capability.capability) ??
+    normalizeCapabilityName(capability.kind) ??
+    normalizeCapabilityName(capability.name);
   if (!kind) {
     return null;
   }
