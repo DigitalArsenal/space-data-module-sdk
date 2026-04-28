@@ -10,6 +10,11 @@ import {
   getWasmCustomSections,
   parseSingleFileBundle,
 } from "../src/bundle/wasm.js";
+import {
+  createCidV1Raw,
+  createRecipientKeypairHex,
+  decryptProtectedBytes,
+} from "../src/index.js";
 import { extractPublicationRecordCollection } from "../src/transport/records.js";
 
 const execFileAsync = promisify(execFile);
@@ -67,4 +72,72 @@ test("CLI protect can emit a single-file bundle wasm", async () => {
     parsed.manifest?.pluginId,
     "com.digitalarsenal.examples.single-file-vector",
   );
+});
+
+test("CLI protect can emit an encrypted binary with an appended REC trailer", async () => {
+  const tempDir = await mkdtemp(
+    path.join(os.tmpdir(), "space-data-module-sdk-cli-encrypted-"),
+  );
+  const manifestPath = path.resolve(
+    "examples",
+    "single-file-bundle",
+    "vectors",
+    "manifest.json",
+  );
+  const sourcePath = path.resolve(
+    "examples",
+    "single-file-bundle",
+    "vectors",
+    "module.c",
+  );
+  const wasmPath = path.join(tempDir, "module.wasm");
+  const encryptedPath = path.join(tempDir, "module.wasm.enc");
+  const recipient = await createRecipientKeypairHex();
+
+  await execFileAsync(process.execPath, [
+    path.resolve("bin", "space-data-module.js"),
+    "compile",
+    "--manifest",
+    manifestPath,
+    "--source",
+    sourcePath,
+    "--out",
+    wasmPath,
+  ]);
+
+  await execFileAsync(process.execPath, [
+    path.resolve("bin", "space-data-module.js"),
+    "protect",
+    "--manifest",
+    manifestPath,
+    "--wasm",
+    wasmPath,
+    "--recipient-public-key",
+    recipient.publicKeyHex,
+    "--out",
+    encryptedPath,
+  ]);
+
+  const [wasmBytes, encryptedBytes] = await Promise.all([
+    readFile(wasmPath),
+    readFile(encryptedPath),
+  ]);
+  const publication = extractPublicationRecordCollection(
+    new Uint8Array(encryptedBytes),
+  );
+  assert.ok(publication);
+  assert.ok(publication.enc);
+  assert.ok(publication.pnm);
+  assert.equal(WebAssembly.validate(publication.payloadBytes), false);
+  assert.equal(
+    publication.pnm.cid,
+    await createCidV1Raw(publication.payloadBytes),
+  );
+
+  const decryptedBytes = await decryptProtectedBytes({
+    protectedBytes: new Uint8Array(encryptedBytes),
+    recipientPrivateKey: recipient.privateKeyHex,
+  });
+  assert.deepEqual(Array.from(decryptedBytes), Array.from(wasmBytes));
+  assert.equal(WebAssembly.validate(decryptedBytes), true);
 });

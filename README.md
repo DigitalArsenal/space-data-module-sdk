@@ -410,10 +410,21 @@ for resolved protocol installations and producer input bindings.
 ## Publication Protection Extensions
 
 Digital signature and encrypted-delivery metadata are publication-layer
-extensions, not a second module format. The canonical module is still:
+extensions. The canonical runtime module is still:
 
 - valid `.wasm`
 - optionally carrying one appended SDS `REC` trailer after the wasm bytes
+
+The same-file protected delivery layout is:
+
+```text
+protected-payload-bytes || REC-flatbuffer-bytes || uint32le(REC length) || "$REC"
+```
+
+For signed-only delivery, the protected payload bytes are the wasm bytes. For
+encrypted binary delivery, the protected payload bytes are ciphertext and the
+appended `REC` trailer carries `ENC` so a loader can decrypt them back to the
+canonical wasm before runtime startup.
 
 That trailing `REC` FlatBuffer is the standards-backed container for
 publication records:
@@ -435,7 +446,7 @@ The loader contract is always:
    FlatBuffers from `spacedatastandards.org`.
 4. Resolve `PNM` for signature/publication metadata.
 5. Resolve `ENC` if the delivery was encrypted.
-6. Strip the trailer or decrypt the protected payload.
+6. Strip the trailer or decrypt the protected payload bytes.
 7. Hand the remaining raw wasm bytes to the runtime.
 
 Aligned-binary payloads are a separate invoke-ABI optimization. They do not
@@ -547,8 +558,11 @@ npx space-data-module check --manifest ./manifest.json --wasm ./dist/isomorphic/
 # Compile C/C++ source and embed the manifest
 npx space-data-module compile --manifest ./manifest.json --source ./src/module.c --out ./dist/isomorphic/module.wasm
 
-# Sign and encrypt a deployment payload
+# Sign a deployment payload and print JSON metadata
 npx space-data-module protect --manifest ./manifest.json --wasm ./dist/isomorphic/module.wasm --json
+
+# Emit an encrypted binary with an appended REC trailer
+npx space-data-module protect --manifest ./manifest.json --wasm ./dist/isomorphic/module.wasm --recipient-public-key <hex> --out ./dist/module.wasm.enc
 
 # Emit a single-file bundled wasm
 npx space-data-module protect --manifest ./manifest.json --wasm ./dist/isomorphic/module.wasm --single-file-bundle --out ./dist/module.bundle.wasm

@@ -11,6 +11,7 @@ import {
 import { normalizeInvokeSurfaceName } from "../invoke/codec.js";
 import { toUint8Array } from "../runtime/bufferLike.js";
 import { toEmbeddedPluginManifest } from "./normalize.js";
+import { decodePlgManifest, isPlgManifestBuffer } from "./plgCodec.js";
 
 function toByteBuffer(data) {
   if (data instanceof flatbuffers.ByteBuffer) {
@@ -107,7 +108,79 @@ function normalizeDecodedMethod(method = {}) {
   };
 }
 
+function typeRefFromSchemaName(schemaName) {
+  return typeof schemaName === "string" && schemaName.length > 0
+    ? { schemaName }
+    : null;
+}
+
+function portFromSchemaName(schemaName, index, direction) {
+  const typeRef = typeRefFromSchemaName(schemaName);
+  if (!typeRef) {
+    return null;
+  }
+  return {
+    portId: `${direction}-${index + 1}`,
+    acceptedTypeSets: [
+      {
+        setId: schemaName,
+        allowedTypes: [typeRef],
+      },
+    ],
+    minStreams: 0,
+    maxStreams: 1,
+    required: false,
+  };
+}
+
+function methodFromPlgEntry(entry = {}) {
+  const methodId = entry.name;
+  if (typeof methodId !== "string" || methodId.length === 0) {
+    return null;
+  }
+  const inputPorts = Array.isArray(entry.inputSchemas)
+    ? entry.inputSchemas
+        .map((schemaName, index) => portFromSchemaName(schemaName, index, "input"))
+        .filter(Boolean)
+    : [];
+  const outputPort = portFromSchemaName(entry.outputSchema, 0, "output");
+  return {
+    methodId,
+    displayName: methodId,
+    description: entry.description,
+    inputPorts,
+    outputPorts: outputPort ? [outputPort] : [],
+    maxBatch: 1,
+    drainPolicy: "single-shot",
+  };
+}
+
+function normalizeDecodedPlgManifest(manifest = {}) {
+  const methods = Array.isArray(manifest.entryFunctions)
+    ? manifest.entryFunctions.map((entry) => methodFromPlgEntry(entry)).filter(Boolean)
+    : [];
+  return {
+    ...manifest,
+    methods,
+    capabilities: Array.isArray(manifest.capabilities)
+      ? manifest.capabilities
+      : [],
+    invokeSurfaces: Array.isArray(manifest.invokeSurfaces)
+      ? manifest.invokeSurfaces
+          .map((value) => normalizeInvokeSurfaceName(value))
+          .filter(Boolean)
+      : [],
+    runtimeTargets: Array.isArray(manifest.runtimeTargets)
+      ? manifest.runtimeTargets
+      : [],
+  };
+}
+
 export function decodePluginManifest(data) {
+  const bytes = toUint8Array(data);
+  if (bytes && isPlgManifestBuffer(bytes)) {
+    return normalizeDecodedPlgManifest(decodePlgManifest(bytes));
+  }
   const bb = toByteBuffer(data);
   if (!PluginManifest.bufferHasIdentifier(bb)) {
     throw new Error("Plugin manifest buffer identifier mismatch.");

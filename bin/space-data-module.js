@@ -106,6 +106,7 @@ function printUsage() {
   space-data-module check --manifest ./manifest.json --wasm ./dist/module.wasm
   space-data-module compile --manifest ./manifest.json --source ./src/module.c --out ./dist/module.wasm
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
+  space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --recipient-public-key <hex> --out ./dist/module.wasm.enc
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --single-file-bundle --out ./dist/module.bundle.wasm
 `);
 }
@@ -213,9 +214,6 @@ async function runProtect(argv) {
   if (!options.manifestPath || !options.wasmPath) {
     throw new Error("protect requires --manifest and --wasm.");
   }
-  if (options.outputPath && options.singleFileBundle !== true) {
-    throw new Error("protect only supports --out together with --single-file-bundle.");
-  }
   const manifest = await loadManifestFromFile(options.manifestPath);
   const wasmBytes = new Uint8Array(await readFile(options.wasmPath));
   const result = await protectModuleArtifact({
@@ -225,8 +223,11 @@ async function runProtect(argv) {
     mnemonic: options.mnemonic,
     singleFileBundle: options.singleFileBundle,
   });
-  if (options.singleFileBundle && options.outputPath && result.bundledWasmBytes) {
-    await writeFile(options.outputPath, result.bundledWasmBytes);
+  if (options.outputPath) {
+    await writeFile(
+      options.outputPath,
+      result.bundledWasmBytes ?? result.protectedArtifactBytes,
+    );
   }
   if (options.json) {
     console.log(JSON.stringify(result, null, 2));
@@ -235,7 +236,8 @@ async function runProtect(argv) {
     console.log(`signingPublicKeyHex=${result.signingPublicKeyHex}`);
     console.log(`encrypted=${result.encrypted}`);
     console.log(`wasmBase64Length=${bytesToBase64(wasmBytes).length}`);
-    if (result.bundledWasmBytes) {
+    console.log(`protectedArtifactBytes=${result.protectedArtifactBytes.length}`);
+    if (options.singleFileBundle && result.bundledWasmBytes) {
       console.log(`singleFileBundle=true`);
       console.log(`bundledWasmBytes=${result.bundledWasmBytes.length}`);
     }

@@ -127,14 +127,25 @@ test("real sibling standalone plugin artifacts load through the browser harness"
         new Set(inspection.imports.map((entry) => entry.module)),
       ).sort();
 
-      assert.equal(inspection.profile, "standalone");
-      assert.deepEqual(importedModuleNames, ["wasi_snapshot_preview1"]);
+      assert.equal(
+        inspection.profile,
+        spec.expectedIsomorphicProfile ?? "standalone",
+      );
+      assert.deepEqual(
+        importedModuleNames,
+        spec.expectedImportModules ?? ["wasi_snapshot_preview1"],
+      );
 
       const report = await validatePluginArtifact({
         manifest,
         wasmPath: spec.standaloneArtifactPath,
       });
       assert.equal(report.ok, true, JSON.stringify(report.issues, null, 2));
+
+      if (spec.skipBrowserHarness) {
+        t.skip(spec.skipBrowserHarness);
+        return;
+      }
 
       const harness = await createBrowserModuleHarness({
         wasmSource: standaloneBytes,

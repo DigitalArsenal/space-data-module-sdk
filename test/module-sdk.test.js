@@ -8,8 +8,10 @@ import {
   createRecipientKeypairHex,
   decodePlgManifest,
   decodePluginManifest,
+  encodePlgManifest,
   encodePluginManifest,
   generateEmbeddedManifestSource,
+  legacyManifestToPlg,
   loadKnownTypeCatalog,
   protectModuleArtifact,
   toEmbeddedPluginManifest,
@@ -126,6 +128,20 @@ test("plugin manifests round-trip through FlatBuffer encoding", () => {
     decoded.methods[0].drainPolicy,
     manifest.methods[0].drainPolicy,
   );
+});
+
+test("plugin manifest decoder accepts canonical PLG artifact buffers", () => {
+  const manifest = createTestManifest();
+  const embeddedManifest = legacyManifestToPlg(manifest);
+  const encoded = encodePlgManifest(embeddedManifest);
+  const decoded = decodePluginManifest(encoded);
+  assert.equal(decoded.pluginId, manifest.pluginId);
+  assert.equal(decoded.name, manifest.name);
+  assert.equal(decoded.version, manifest.version);
+  assert.equal(decoded.methods[0].methodId, "propagate");
+  assert.deepEqual(decoded.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes, [
+    { schemaName: "omm" },
+  ]);
 });
 
 test("plugin manifest invoke surfaces round-trip through FlatBuffer encoding", () => {

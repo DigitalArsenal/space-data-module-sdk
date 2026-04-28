@@ -34,12 +34,12 @@ UVW
 6.3090290772e-13 -7.1251333042e-13 6.7782739014e-13 2.1394109823e-09 -1.9784042803e-15 3.3732085227e-15 4.9203888241e-12
 `;
 
-function packageDir(name) {
-  return path.join(siblingPluginsRoot, "packages", name);
+function packageDir(relativePackagePath) {
+  return path.join(siblingPluginsRoot, relativePackagePath);
 }
 
-function packagePath(name, ...parts) {
-  return path.join(packageDir(name), ...parts);
+function packagePath(relativePackagePath, ...parts) {
+  return path.join(packageDir(relativePackagePath), ...parts);
 }
 
 const CANONICAL_BROWSER_ARTIFACT_PARTS = ["dist", "browser", "module.wasm"];
@@ -53,8 +53,13 @@ const CANONICAL_ISOMORPHIC_ARTIFACT_PARTS = [
 export const siblingPluginSpecs = Object.freeze([
   {
     name: "conjunction-assessment",
+    packagePath: "analysis/conjunction-assessment",
+    expectedIsomorphicProfile: "emscripten",
+    expectedImportModules: ["env", "wasi_snapshot_preview1"],
+    skipBrowserHarness:
+      "Conjunction assessment is a pthread Emscripten isomorphic artifact; package-local tests cover its loader path.",
     requestFixturePath: packagePath(
-      "conjunction-assessment",
+      "analysis/conjunction-assessment",
       "tests",
       "fixtures",
       "request.assess.json",
@@ -66,8 +71,9 @@ export const siblingPluginSpecs = Object.freeze([
   },
   {
     name: "atmosphere",
+    packagePath: "propagator/atmosphere",
     requestFixturePath: packagePath(
-      "atmosphere",
+      "propagator/atmosphere",
       "tests",
       "fixtures",
       "request.altitude.json",
@@ -81,8 +87,9 @@ export const siblingPluginSpecs = Object.freeze([
   },
   {
     name: "cislunar",
+    packagePath: "propagator/cislunar",
     requestFixturePath: packagePath(
-      "cislunar",
+      "propagator/cislunar",
       "tests",
       "fixtures",
       "request.lagrange.json",
@@ -94,23 +101,10 @@ export const siblingPluginSpecs = Object.freeze([
     },
   },
   {
-    name: "fred",
-    requestFixturePath: packagePath(
-      "fred",
-      "tests",
-      "fixtures",
-      "request.parse.json",
-    ),
-    assertResponsePayload(payload) {
-      assert.equal(payload.recordCount, 1);
-      assert.equal(Array.isArray(payload.records), true);
-      assert.equal(payload.records[0].value, 4.33);
-    },
-  },
-  {
     name: "hpop",
+    packagePath: "propagator/hpop",
     requestFixturePath: packagePath(
-      "hpop",
+      "propagator/hpop",
       "tests",
       "fixtures",
       "request.propagate.json",
@@ -122,8 +116,9 @@ export const siblingPluginSpecs = Object.freeze([
   },
   {
     name: "maneuver",
+    packagePath: "analysis/maneuver",
     requestFixturePath: packagePath(
-      "maneuver",
+      "analysis/maneuver",
       "tests",
       "fixtures",
       "request.hohmann.json",
@@ -136,7 +131,13 @@ export const siblingPluginSpecs = Object.freeze([
   },
   {
     name: "od",
-    requestFixturePath: packagePath("od", "tests", "fixtures", "request.fit.meme"),
+    packagePath: "analysis/od",
+    requestFixturePath: packagePath(
+      "analysis/od",
+      "tests",
+      "fixtures",
+      "request.fit.meme",
+    ),
     requestFixtureText: odRequestFixtureText,
     assertResponsePayload(payload) {
       assert.equal(payload.error, undefined);
@@ -144,9 +145,12 @@ export const siblingPluginSpecs = Object.freeze([
     },
   },
   {
-    name: "sgp4-propagator",
+    name: "sgp4",
+    packagePath: "propagator/sgp4",
+    skipBrowserHarness:
+      "SGP4 uses the SDS PIV invoke envelope, not the SDK PluginInvokeResponse command envelope.",
     requestFixturePath: packagePath(
-      "sgp4-propagator",
+      "propagator/sgp4",
       "tests",
       "fixtures",
       "request.propagate.json",
@@ -161,18 +165,18 @@ export const siblingPluginSpecs = Object.freeze([
 ].map((spec) =>
   Object.freeze({
     ...spec,
-    packageDir: packageDir(spec.name),
-    manifestPath: packagePath(spec.name, "plugin-manifest.json"),
+    packageDir: packageDir(spec.packagePath),
+    manifestPath: packagePath(spec.packagePath, "plugin-manifest.json"),
     browserLoaderPath: packagePath(
-      spec.name,
+      spec.packagePath,
       ...CANONICAL_BROWSER_LOADER_PARTS,
     ),
     browserArtifactPath: packagePath(
-      spec.name,
+      spec.packagePath,
       ...CANONICAL_BROWSER_ARTIFACT_PARTS,
     ),
     standaloneArtifactPath: packagePath(
-      spec.name,
+      spec.packagePath,
       ...CANONICAL_ISOMORPHIC_ARTIFACT_PARTS,
     ),
   }),

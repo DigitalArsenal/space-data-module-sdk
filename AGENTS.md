@@ -79,6 +79,8 @@ Every compliant module produced here should satisfy all of the following:
 - Declared capability IDs come from this repo's vocabulary.
 - Single-file delivery appends one `REC` trailer carrying `MBL` and any
   publication metadata after the wasm payload.
+- Same-file signing or encrypted binary delivery appends an SDS `REC` trailer
+  carrying standards-backed `PNM` and optional `ENC` publication records.
 - Sync guest hostcalls use the `sdn_host` import module and the bridge in
   `src/host` for sync-safe operations only.
 - The raw `sdn_host` bridge remains fail-closed and sync-only.

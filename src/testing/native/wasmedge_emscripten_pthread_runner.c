@@ -682,6 +682,14 @@ static void register_env_host_functions(
       WasmEdge_ValTypeGenI32(),
       WasmEdge_ValTypeGenI32(),
       WasmEdge_ValTypeGenI32()};
+  const WasmEdge_ValType seven_i32_params[7] = {
+      WasmEdge_ValTypeGenI32(),
+      WasmEdge_ValTypeGenI32(),
+      WasmEdge_ValTypeGenI32(),
+      WasmEdge_ValTypeGenI32(),
+      WasmEdge_ValTypeGenI32(),
+      WasmEdge_ValTypeGenI32(),
+      WasmEdge_ValTypeGenI32()};
   const WasmEdge_ValType f64_return[1] = {WasmEdge_ValTypeGenF64()};
   const WasmEdge_ValType i32_return[1] = {WasmEdge_ValTypeGenI32()};
 
@@ -735,8 +743,14 @@ static void register_env_host_functions(
       "_emscripten_receive_on_main_thread_js",
       stub_receive_on_main_thread,
       runner,
-      receive_on_main_thread_param_len == 4 ? four_i32_params : five_i32_params,
-      receive_on_main_thread_param_len == 4 ? 4 : 5,
+      receive_on_main_thread_param_len == 4
+          ? four_i32_params
+          : receive_on_main_thread_param_len == 7
+              ? seven_i32_params
+              : five_i32_params,
+      receive_on_main_thread_param_len == 4
+          ? 4
+          : receive_on_main_thread_param_len == 7 ? 7 : 5,
       f64_return,
       1);
   add_host_func(
@@ -3072,7 +3086,7 @@ int main(int argc, char **argv) {
       &runner,
       import_config.receive_on_main_thread_param_len == 4
           ? 4
-          : 5,
+          : import_config.receive_on_main_thread_param_len == 7 ? 7 : 5,
       import_config.notify_mailbox_postmessage_param_len == 3
           ? 3
           : 2);

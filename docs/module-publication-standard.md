@@ -13,7 +13,7 @@ language package ecosystems used around the SDK runtime surface:
 
 The goal is simple: a loader should be able to inspect a package, locate the
 module artifact, and determine whether signatures or encrypted transport
-metadata are appended as SDS publication records after the module bytes or
+metadata are appended as SDS publication records in the module delivery file or
 shipped as sidecar FlatBuffers.
 
 ## Scope
@@ -28,7 +28,8 @@ In both cases the module artifact remains the same canonical format already
 defined by this repo:
 
 - a runtime payload that is valid WebAssembly bytes once any SDS publication
-  trailer has been stripped
+  trailer has been stripped and any encrypted delivery payload has been
+  decrypted
 - embedded `PluginManifest.fbs`
 - manifest accessors
   - `plugin_get_manifest_flatbuffer`
@@ -37,16 +38,20 @@ defined by this repo:
 
 ## Core Rules
 
-1. The runtime payload before any publication trailer MUST remain valid `.wasm`.
-2. If signatures or encrypted-delivery metadata are carried in the same file,
-   they MUST be appended after the wasm bytes as an SDS `REC` trailer.
-3. `REC` trailers MUST carry standards-sourced `MBL` metadata plus `PNM` and
+1. A signed-only or unencrypted artifact payload before any publication trailer
+   MUST remain valid `.wasm`.
+2. An encrypted binary delivery file MUST be encoded as encrypted payload bytes
+   followed by an appended SDS `REC` trailer. The bytes before the trailer are
+   ciphertext and are not required to validate as wasm until decrypted.
+3. If bundle, signature, or encrypted-delivery metadata are carried in the same
+   file, they MUST be appended as an SDS `REC` trailer at the end of that file.
+4. `REC` trailers MUST carry standards-sourced `MBL` metadata plus `PNM` and
    optional `ENC` records where applicable.
-4. Single-file bundle metadata MUST be read from the appended `REC` trailer,
+5. Single-file bundle metadata MUST be read from the appended `REC` trailer,
    not from an in-wasm custom section.
-5. Sidecar FlatBuffers are allowed when a package chooses not to append those
+6. Sidecar FlatBuffers are allowed when a package chooses not to append those
    metadata payloads to the module artifact.
-6. Paths in publication metadata are package-relative, never absolute.
+7. Paths in publication metadata are package-relative, never absolute.
 
 ## Publication Record Extensions
 
@@ -75,6 +80,25 @@ The runtime-facing rule stays strict:
 
 `MBL`, `PNM`, and `ENC` extend publication and transport handling only. They do
 not change the canonical module ABI or manifest exports.
+
+## Protected Binary Layout
+
+The official same-file protection layout is:
+
+```text
+protected-payload-bytes || REC-flatbuffer-bytes || uint32le(REC length) || "$REC"
+```
+
+For signed-only delivery, `protected-payload-bytes` are the wasm bytes. For
+encrypted delivery, `protected-payload-bytes` are ciphertext and the appended
+`REC` MUST contain an `ENC` record with the decryption parameters. Loaders MUST
+decrypt those ciphertext bytes before attempting wasm validation, manifest
+inspection, or bundle metadata parsing.
+
+The `PNM` content identity applies to the protected payload bytes as stored in
+the file. For encrypted delivery this means the `PNM.CID` identifies the
+ciphertext payload, while the decrypted bytes remain the canonical wasm module
+that is passed to the runtime.
 
 ### `PNM` digital-signature extension
 
@@ -437,15 +461,16 @@ A loader consuming this standard SHOULD:
 2. read `module.path`
 3. scan the artifact from the end for an appended SDS `REC` trailer
 4. resolve `PNM` / `ENC` from that trailer before runtime startup
-5. if `ENC` is present, decrypt and strip the trailer before passing bytes to
-   WasmEdge or any other runtime
-6. inspect the stripped artifact's `REC` trailer for `MBL`
-7. resolve any `package-file` metadata through relative paths
-8. validate manifest exports and any declared integrity hashes
+5. if `ENC` is present, decrypt the protected payload bytes before passing bytes
+   to WasmEdge or any other runtime
+6. if `ENC` is absent, strip the trailer and use the remaining wasm payload
+7. inspect the parsed `REC` trailer for `MBL`
+8. resolve any `package-file` metadata through relative paths
+9. validate manifest exports and any declared integrity hashes
 
-If `module.packaging` is `sds-bundled-wasm`, loaders SHOULD treat the stripped
-wasm payload as the runtime artifact and the appended `REC` trailer as the
-single-file bundle/publication metadata container.
+If `module.packaging` is `sds-bundled-wasm`, loaders SHOULD treat the decrypted
+or stripped wasm payload as the runtime artifact and the appended `REC` trailer
+as the single-file bundle/publication metadata container.
 
 ## Relationship To Existing Bundle Format
 
