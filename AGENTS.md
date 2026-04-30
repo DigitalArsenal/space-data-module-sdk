@@ -58,7 +58,7 @@ Use this repo when you need to:
 - Only change SDK internals when you are explicitly changing the standard for
   all module authors.
 - Flow composition, runtime orchestration, flow launch plans, or workspace
-  startup belong in `sdn-flow`.
+  startup belong in host runtime repos such as OrbPro and Space Data Network.
 - Application behavior, scene integration, UI flows, and standards ingestion in
   OrbPro belong in `OrbPro`, even when that work consumes helpers from this
   repo.

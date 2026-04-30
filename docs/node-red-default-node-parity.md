@@ -1,6 +1,6 @@
 # Node-RED Default Node Parity Matrix
 
-This matrix defines the deployment intent for compiled `sdn-flow` artifacts.
+This matrix defines the deployment intent for compiled hosted-runtime artifacts.
 
 Use three buckets:
 

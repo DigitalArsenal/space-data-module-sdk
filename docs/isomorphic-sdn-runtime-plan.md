@@ -16,7 +16,7 @@ The runtime differences are host differences, not module differences.
 - the canonical dynamic runtime host
 - the canonical WasmEdge/browser/server harness model
 
-`sdn-flow` is layered on top of that runtime host as:
+Host runtime packages are layered on top of that runtime host as:
 
 - graph/program compiler
 - deployment planner
@@ -161,7 +161,7 @@ This runtime model is complete when:
 - the SDK ships one canonical runtime host surface
 - the SDK host surface exposes row-handle, region, and registry services
 - OrbPro, browser/server SDN nodes, and WasmEdge all consume that same host
-- `sdn-flow` compiles and deploys into that host rather than re-owning runtime behavior
+- host runtime packages compile and deploy into that host rather than re-owning runtime behavior
 - standards identity is always `($SCHEMA_FILE_ID, rowId)`
 - aligned-binary runtime identity is always `(regionId, recordIndex)`
 - Aerospace and SOCRATES validation pass on the composed host path

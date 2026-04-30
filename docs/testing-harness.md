@@ -135,7 +135,7 @@ does not require a separate flow-only code path. A flow manifest still produces
 method-level invoke cases and capability classifications.
 
 For runtime execution, flows should target the same dynamic runtime-host model.
-`sdn-flow` may still compile or bundle flows for deployment, but the harness
+Host runtime packages may still compile or bundle flows for deployment, but the harness
 contract in this repo is now the canonical host surface for:
 
 - installing multiple modules into one host

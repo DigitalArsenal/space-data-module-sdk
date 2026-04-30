@@ -32,8 +32,8 @@ This repo owns the generic module-side runtime harnesses used across the stack:
 - `buildWasmEdgeEmscriptenPthreadRunner(...)` plus the shared native runner
   source and runner-level pthread smoke test
 
-Flow-specific standalone harnessing lives in `sdn-flow`, which layers flow
-enqueue/drain behavior on top of its compiled standalone runtime host. Package-
+Flow-specific standalone harnessing now lives in host runtime packages that
+layer flow enqueue/drain behavior on top of the SDK runtime host. Package-
 specific validation suites, including conjunction replay/V&V, are expected to
 sit on top of these shared harnesses instead of defining their own runtime
 process model.
@@ -586,7 +586,6 @@ inspect the parsed `REC`, `PNM`, and `ENC` records produced by the real
 ## Related Projects
 
 - [`spacedatastandards.org`](https://spacedatastandards.org)
-- [`sdn-flow`](https://github.com/DigitalArsenal/sdn-flow)
 - [`hd-wallet-wasm`](https://github.com/nicktj-dev/hd-wallet-wasm)
 
 ## Development

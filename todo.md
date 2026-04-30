@@ -9,7 +9,7 @@ with the active architecture.
 ## Core Direction
 
 - [ ] Ship the canonical dynamic runtime host from `space-data-module-sdk`
-- [ ] Keep `sdn-flow` as compiler/editor/deployment tooling layered on that host
+- [ ] Keep compiler/editor/deployment tooling layered on the SDK runtime host
 - [ ] Keep `emception` as an optional build tool, not the defining runtime model
 
 ## Runtime Host
@@ -34,12 +34,12 @@ with the active architecture.
 - [ ] Route SGP4 and HPOP runtime state through host-managed aligned-binary regions
 - [ ] Keep conjunction consuming generic propagator outputs only
 
-## `sdn-flow`
+## Hosted Runtime Tooling
 
-- [ ] Re-scope `sdn-flow` docs and code so it clearly depends on the SDK runtime host
+- [ ] Re-scope hosted runtime docs and code so they clearly depend on the SDK runtime host
 - [ ] Keep graph compilation, editor runtime, deployment planning, and flow packaging there
 - [ ] Keep optional `emception` compile support there or re-export it cleanly from the SDK repo
-- [ ] Stop describing `sdn-flow` as the owner of a separate runtime model
+- [ ] Stop describing hosted runtime tooling as the owner of a separate runtime model
 
 ## Validation
 
