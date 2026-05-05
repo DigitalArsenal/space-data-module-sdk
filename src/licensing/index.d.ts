@@ -3,11 +3,13 @@ export {
   decodeLicensingChallengeMessage,
   decodeLicensingGrant,
   decodeLicensingProofMessage,
+  encodeUnsignedLicensingGrantForProviderSignature,
   encodeLicensingChallengeRequest,
   encodeLicensingProof,
   extractGrantModuleDescriptor,
   extractWrappedContentKey,
   validateLicensingGrant,
+  verifyLicensingGrantProviderSignature,
 } from "../index.js";
 
 export type {

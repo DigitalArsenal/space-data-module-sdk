@@ -437,6 +437,82 @@ export function validateLicensingGrant(grant, options = {}) {
   return grant;
 }
 
+export function encodeUnsignedLicensingGrantForProviderSignature(grant) {
+  if (!grant || typeof grant !== "object") {
+    throw new TypeError("grant is required");
+  }
+
+  const rawBytes = cloneOptionalBytes(grant.rawBytes);
+  if (rawBytes.length > 0) {
+    const root = LGR.getRootAsLGR(new flatbuffers.ByteBuffer(rawBytes));
+    if (root.MESSAGE_TYPE() !== licensingGrantMessageType.Granted) {
+      throw new LicensingProtocolError(
+        "invalid_grant",
+        "expected granted licensing record",
+      );
+    }
+    return encodeUnsignedGrantFromRawRoot(root, rawBytes.length);
+  }
+
+  return encodeUnsignedGrantFromDecodedMessage(grant);
+}
+
+export async function verifyLicensingGrantProviderSignature(grant, options = {}) {
+  const providerSignature = cloneOptionalBytes(grant?.providerSignature);
+  if (providerSignature.length !== 64) {
+    throw new LicensingProtocolError(
+      "invalid_grant",
+      "licensing grant provider signature must be 64 bytes",
+    );
+  }
+  if (providerSignature.every((byte) => byte === 0)) {
+    throw new LicensingProtocolError(
+      "invalid_grant",
+      "licensing grant provider signature must not be all zeroes",
+    );
+  }
+  if (
+    Number.isFinite(options.requestedAtMs) &&
+    grant.expiresAtMs > 0 &&
+    grant.expiresAtMs <= options.requestedAtMs
+  ) {
+    throw new LicensingProtocolError(
+      "grant_expired",
+      "licensing grant has expired",
+    );
+  }
+  const status = trimOptional(grant.grantStatus)?.toLowerCase();
+  if (status === "revoked") {
+    throw new LicensingProtocolError(
+      "grant_revoked",
+      "licensing grant has been revoked",
+    );
+  }
+  if (status && status !== "active" && status !== "granted") {
+    throw new LicensingProtocolError(
+      "grant_status_invalid",
+      `licensing grant status is not active: ${status}`,
+    );
+  }
+
+  if (typeof options.verify !== "function") {
+    throw new TypeError("verifyLicensingGrantProviderSignature requires verify.");
+  }
+  const unsignedGrant = encodeUnsignedLicensingGrantForProviderSignature(grant);
+  const signatureValid = await options.verify(
+    cloneOptionalBytes(grant.grantVerifierPublicKey),
+    unsignedGrant,
+    providerSignature,
+  );
+  if (!signatureValid) {
+    throw new LicensingProtocolError(
+      "invalid_grant_signature",
+      "licensing grant provider signature verification failed",
+    );
+  }
+  return grant;
+}
+
 export function extractGrantModuleDescriptor(grant) {
   if (!grant?.moduleDescriptor) {
     throw new LicensingProtocolError(
@@ -445,6 +521,192 @@ export function extractGrantModuleDescriptor(grant) {
     );
   }
   return grant.moduleDescriptor;
+}
+
+function encodeUnsignedGrantFromRawRoot(root, bufferLength) {
+  const builder = new flatbuffers.Builder(Math.max(2048, bufferLength));
+  const requestIdOffset = builder.createString(root.REQUEST_ID() || "");
+  const moduleIdOffset = builder.createString(root.MODULE_ID() || "");
+  const moduleVersionOffset = createOptionalString(builder, root.MODULE_VERSION());
+  const requesterPeerIdOffset = createOptionalString(builder, root.REQUESTER_PEER_ID());
+  const requesterXpubOffset = createOptionalString(builder, root.REQUESTER_XPUB());
+  const requestedDomainOffset = createOptionalString(builder, root.REQUESTED_DOMAIN());
+  const grantedDomainOffset = createOptionalString(builder, root.GRANTED_DOMAIN());
+  const requiredScopeOffset = createOptionalString(builder, root.REQUIRED_SCOPE());
+  const grantStatusOffset = createOptionalString(builder, root.GRANT_STATUS());
+  const denialReasonOffset = createOptionalString(builder, root.DENIAL_REASON());
+  const capabilityTokenOffset = createOptionalVector(
+    builder,
+    LGR.createCapabilityTokenVector,
+    root.capabilityTokenArray(),
+  );
+  const moduleDescriptorOffset = root.MODULE_DESCRIPTOR()
+    ? root.MODULE_DESCRIPTOR().unpack().pack(builder)
+    : 0;
+  const wrappedHeaderOffset = root.WRAPPED_CONTENT_KEY_HEADER()
+    ? root.WRAPPED_CONTENT_KEY_HEADER().unpack().pack(builder)
+    : 0;
+  const wrappedPayloadOffset = createOptionalVector(
+    builder,
+    LGR.createWrappedContentKeyPayloadVector,
+    root.wrappedContentKeyPayloadArray(),
+  );
+  const verifierPubkeyOffset = createOptionalVector(
+    builder,
+    LGR.createGrantVerifierPubkeyVector,
+    root.grantVerifierPubkeyArray(),
+  );
+
+  LGR.startLGR(builder);
+  LGR.addMessageType(builder, licensingGrantMessageType.Granted);
+  LGR.addRequestId(builder, requestIdOffset);
+  LGR.addModuleId(builder, moduleIdOffset);
+  if (moduleVersionOffset !== 0) LGR.addModuleVersion(builder, moduleVersionOffset);
+  if (requesterPeerIdOffset !== 0) LGR.addRequesterPeerId(builder, requesterPeerIdOffset);
+  if (requesterXpubOffset !== 0) LGR.addRequesterXpub(builder, requesterXpubOffset);
+  if (requestedDomainOffset !== 0) LGR.addRequestedDomain(builder, requestedDomainOffset);
+  LGR.addRequestedTimeoutMs(builder, root.REQUESTED_TIMEOUT_MS());
+  if (grantedDomainOffset !== 0) LGR.addGrantedDomain(builder, grantedDomainOffset);
+  LGR.addGrantedTimeoutMs(builder, root.GRANTED_TIMEOUT_MS());
+  LGR.addExpiresAt(builder, root.EXPIRES_AT());
+  if (requiredScopeOffset !== 0) LGR.addRequiredScope(builder, requiredScopeOffset);
+  if (grantStatusOffset !== 0) LGR.addGrantStatus(builder, grantStatusOffset);
+  if (denialReasonOffset !== 0) LGR.addDenialReason(builder, denialReasonOffset);
+  if (capabilityTokenOffset !== 0) LGR.addCapabilityToken(builder, capabilityTokenOffset);
+  if (moduleDescriptorOffset !== 0) LGR.addModuleDescriptor(builder, moduleDescriptorOffset);
+  if (wrappedHeaderOffset !== 0) LGR.addWrappedContentKeyHeader(builder, wrappedHeaderOffset);
+  if (wrappedPayloadOffset !== 0) LGR.addWrappedContentKeyPayload(builder, wrappedPayloadOffset);
+  if (verifierPubkeyOffset !== 0) LGR.addGrantVerifierPubkey(builder, verifierPubkeyOffset);
+  const rootOffset = LGR.endLGR(builder);
+  LGR.finishLGRBuffer(builder, rootOffset);
+  return builder.asUint8Array();
+}
+
+function encodeUnsignedGrantFromDecodedMessage(grant) {
+  const builder = new flatbuffers.Builder(2048);
+  const requestIdOffset = builder.createString(grant.reqId || "");
+  const moduleIdOffset = builder.createString(grant.moduleId || "");
+  const moduleVersionOffset = createOptionalString(builder, grant.moduleVersion);
+  const requesterPeerIdOffset = createOptionalString(builder, grant.requesterPeerId);
+  const requesterXpubOffset = createOptionalString(builder, grant.requesterXpub);
+  const requestedDomainOffset = createOptionalString(builder, grant.requestedDomain);
+  const grantedDomainOffset = createOptionalString(builder, grant.grantedDomain);
+  const requiredScopeOffset = createOptionalString(builder, grant.requiredScope);
+  const grantStatusOffset = createOptionalString(builder, grant.grantStatus);
+  const denialReasonOffset = createOptionalString(builder, grant.denialReason);
+  const capabilityTokenOffset = createOptionalVector(
+    builder,
+    LGR.createCapabilityTokenVector,
+    grant.capabilityToken,
+  );
+  const moduleDescriptorOffset = grant.moduleDescriptor
+    ? encodeDecodedModuleDescriptor(builder, grant.moduleDescriptor)
+    : 0;
+  const wrappedHeaderOffset = grant.wrappedContentKey?.header
+    ? encodeDecodedWrappedHeader(builder, grant.wrappedContentKey.header)
+    : 0;
+  const wrappedPayloadOffset = createOptionalVector(
+    builder,
+    LGR.createWrappedContentKeyPayloadVector,
+    grant.wrappedContentKey?.encryptedPayload,
+  );
+  const verifierPubkeyOffset = createOptionalVector(
+    builder,
+    LGR.createGrantVerifierPubkeyVector,
+    grant.grantVerifierPublicKey,
+  );
+
+  LGR.startLGR(builder);
+  LGR.addMessageType(builder, licensingGrantMessageType.Granted);
+  LGR.addRequestId(builder, requestIdOffset);
+  LGR.addModuleId(builder, moduleIdOffset);
+  if (moduleVersionOffset !== 0) LGR.addModuleVersion(builder, moduleVersionOffset);
+  if (requesterPeerIdOffset !== 0) LGR.addRequesterPeerId(builder, requesterPeerIdOffset);
+  if (requesterXpubOffset !== 0) LGR.addRequesterXpub(builder, requesterXpubOffset);
+  if (requestedDomainOffset !== 0) LGR.addRequestedDomain(builder, requestedDomainOffset);
+  LGR.addRequestedTimeoutMs(builder, BigInt(grant.requestedTimeoutMs ?? 0));
+  if (grantedDomainOffset !== 0) LGR.addGrantedDomain(builder, grantedDomainOffset);
+  LGR.addGrantedTimeoutMs(builder, BigInt(grant.grantedTimeoutMs ?? 0));
+  LGR.addExpiresAt(builder, BigInt(grant.expiresAtMs ?? 0));
+  if (requiredScopeOffset !== 0) LGR.addRequiredScope(builder, requiredScopeOffset);
+  if (grantStatusOffset !== 0) LGR.addGrantStatus(builder, grantStatusOffset);
+  if (denialReasonOffset !== 0) LGR.addDenialReason(builder, denialReasonOffset);
+  if (capabilityTokenOffset !== 0) LGR.addCapabilityToken(builder, capabilityTokenOffset);
+  if (moduleDescriptorOffset !== 0) LGR.addModuleDescriptor(builder, moduleDescriptorOffset);
+  if (wrappedHeaderOffset !== 0) LGR.addWrappedContentKeyHeader(builder, wrappedHeaderOffset);
+  if (wrappedPayloadOffset !== 0) LGR.addWrappedContentKeyPayload(builder, wrappedPayloadOffset);
+  if (verifierPubkeyOffset !== 0) LGR.addGrantVerifierPubkey(builder, verifierPubkeyOffset);
+  const rootOffset = LGR.endLGR(builder);
+  LGR.finishLGRBuffer(builder, rootOffset);
+  return builder.asUint8Array();
+}
+
+function encodeDecodedModuleDescriptor(builder, descriptor) {
+  const pluginIdOffset = builder.createString(descriptor.moduleId || "");
+  const nameOffset = createOptionalString(builder, descriptor.moduleId);
+  const versionOffset = createOptionalString(builder, descriptor.moduleVersion);
+  const wasmHashOffset = createOptionalVector(builder, PLG.createWasmHashVector, descriptor.contentHash);
+  const wasmCidOffset = createOptionalString(builder, descriptor.cid);
+  const requiredScopeOffset = createOptionalString(builder, descriptor.requiredScope);
+  const keyIdOffset = createOptionalString(builder, descriptor.keyId);
+  const allowedDomainsOffset = createOptionalStringVector(
+    builder,
+    PLG.createAllowedDomainsVector,
+    descriptor.allowedDomains ?? [],
+  );
+
+  PLG.startPLG(builder);
+  PLG.addPluginId(builder, pluginIdOffset);
+  if (nameOffset !== 0) PLG.addName(builder, nameOffset);
+  if (versionOffset !== 0) PLG.addVersion(builder, versionOffset);
+  if (wasmHashOffset !== 0) PLG.addWasmHash(builder, wasmHashOffset);
+  PLG.addWasmSize(builder, BigInt(descriptor.sizeBytes ?? 0));
+  if (wasmCidOffset !== 0) PLG.addWasmCid(builder, wasmCidOffset);
+  PLG.addEncrypted(builder, Boolean(descriptor.encrypted));
+  if (requiredScopeOffset !== 0) PLG.addRequiredScope(builder, requiredScopeOffset);
+  if (keyIdOffset !== 0) PLG.addKeyId(builder, keyIdOffset);
+  if (allowedDomainsOffset !== 0) PLG.addAllowedDomains(builder, allowedDomainsOffset);
+  PLG.addMaxGrantTimeoutMs(builder, BigInt(descriptor.maxGrantTimeoutMs ?? 0));
+  return PLG.endPLG(builder);
+}
+
+function encodeDecodedWrappedHeader(builder, header) {
+  const ephemeralPublicKeyOffset = createOptionalVector(
+    builder,
+    ENC.createEphemeralPublicKeyVector,
+    header.ephemeralPublicKey,
+  );
+  const nonceStartOffset = createOptionalVector(
+    builder,
+    ENC.createNonceStartVector,
+    header.nonceStart,
+  );
+  const recipientKeyIdOffset = createOptionalVector(
+    builder,
+    ENC.createRecipientKeyIdVector,
+    header.recipientKeyId,
+  );
+  const contextOffset = createOptionalString(builder, header.context);
+  const schemaHashOffset = createOptionalVector(
+    builder,
+    ENC.createSchemaHashVector,
+    header.schemaHash,
+  );
+  const rootTypeOffset = createOptionalString(builder, header.rootType);
+  return ENC.createENC(
+    builder,
+    Number(header.version ?? 1),
+    normalizeKeyExchange(header.keyExchange),
+    normalizeSymmetricAlgorithm(header.symmetric),
+    normalizeKeyDerivation(header.keyDerivation),
+    ephemeralPublicKeyOffset,
+    nonceStartOffset,
+    recipientKeyIdOffset,
+    contextOffset,
+    schemaHashOffset,
+    rootTypeOffset,
+    BigInt(header.timestamp ?? 0),
+  );
 }
 
 export function extractWrappedContentKey(grant) {
@@ -606,6 +868,19 @@ function createOptionalString(builder, value) {
   return normalized ? builder.createString(normalized) : 0;
 }
 
+function createOptionalVector(builder, createVector, value) {
+  const bytes = cloneOptionalBytes(value);
+  return bytes.length > 0 ? createVector.call(LGR, builder, bytes) : 0;
+}
+
+function createOptionalStringVector(builder, createVector, values) {
+  const offsets = (values ?? [])
+    .map((value) => trimOptional(value))
+    .filter(Boolean)
+    .map((value) => builder.createString(value));
+  return offsets.length > 0 ? createVector.call(PLG, builder, offsets) : 0;
+}
+
 function toUint8Array(value, label) {
   if (value instanceof Uint8Array) {
     return value;
@@ -679,6 +954,46 @@ function numberFromUint64(value, name) {
 function normalizeProtocolCode(value, fallback) {
   const normalized = String(value ?? "").trim();
   return normalized || fallback;
+}
+
+function normalizeKeyExchange(value) {
+  if (typeof value === "number") {
+    return value;
+  }
+  switch (String(value ?? "X25519").trim().toUpperCase()) {
+    case "X25519":
+      return KeyExchange.X25519;
+    case "SECP256K1":
+      return KeyExchange.Secp256k1;
+    case "P256":
+      return KeyExchange.P256;
+    default:
+      return KeyExchange.X25519;
+  }
+}
+
+function normalizeSymmetricAlgorithm(value) {
+  if (typeof value === "number") {
+    return value;
+  }
+  switch (String(value ?? "AES_256_CTR").trim().toUpperCase()) {
+    case "AES_256_CTR":
+      return SymmetricAlgo.AES_256_CTR;
+    default:
+      return SymmetricAlgo.AES_256_CTR;
+  }
+}
+
+function normalizeKeyDerivation(value) {
+  if (typeof value === "number") {
+    return value;
+  }
+  switch (String(value ?? "HKDF_SHA256").trim().toUpperCase()) {
+    case "HKDF_SHA256":
+      return KDF.HKDF_SHA256;
+    default:
+      return KDF.HKDF_SHA256;
+  }
 }
 
 function challengeMessageTypeName(value) {

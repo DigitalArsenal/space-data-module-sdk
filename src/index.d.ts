@@ -1969,6 +1969,22 @@ export function validateLicensingGrant(
   },
 ): LicensingGrantMessage;
 
+export function encodeUnsignedLicensingGrantForProviderSignature(
+  grant: LicensingGrantMessage,
+): Uint8Array;
+
+export function verifyLicensingGrantProviderSignature(
+  grant: LicensingGrantMessage,
+  options: {
+    requestedAtMs?: number;
+    verify(
+      publicKey: Uint8Array,
+      payload: Uint8Array,
+      signature: Uint8Array,
+    ): boolean | Promise<boolean>;
+  },
+): Promise<LicensingGrantMessage>;
+
 export function extractGrantModuleDescriptor(
   grant: LicensingGrantMessage,
 ): LicensingGrantModuleDescriptor;
