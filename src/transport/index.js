@@ -1,11 +1,14 @@
 export {
+  createMarketplaceContentAad,
   decryptProtectedBytes,
   decryptPublicationRecordCollection,
   decryptBytesFromEnvelope,
+  decryptMarketplaceContentKeyWrap,
   decryptJsonFromEnvelope,
   encryptBytesForRecipient,
   encryptJsonForRecipient,
   generateX25519Keypair,
+  protectMarketplaceContent,
 } from "./pki.js";
 
 export {

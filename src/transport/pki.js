@@ -1,7 +1,10 @@
 import { canonicalBytes } from "../auth/canonicalize.js";
+import * as flatbuffers from "flatbuffers";
+import { KMF, keyMaterialAlgorithm, keyMaterialEncoding, keyMaterialRole } from "spacedatastandards.org/lib/js/KMF/main.js";
 import {
   base64ToBytes,
   bytesToBase64,
+  bytesToHex,
   hexToBytes,
   toUint8Array,
 } from "../utils/encoding.js";
@@ -53,6 +56,130 @@ async function deriveAesKey(sharedSecret, salt, context) {
   );
 }
 
+function normalizeOptionalBytes(value) {
+  if (value === null || value === undefined) {
+    return new Uint8Array(0);
+  }
+  if (typeof value === "string") {
+    return hexToBytes(value);
+  }
+  return toUint8Array(value);
+}
+
+function normalizeRequiredString(value, name) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    throw new Error(`${name} is required.`);
+  }
+  return normalized;
+}
+
+function normalizeArtifactBinding(artifact = {}) {
+  const listingId = normalizeRequiredString(artifact.listingId, "artifact.listingId");
+  const moduleId = normalizeRequiredString(artifact.moduleId, "artifact.moduleId");
+  const version = normalizeRequiredString(artifact.version, "artifact.version");
+  const encryptedCid = normalizeRequiredString(
+    artifact.encryptedCid,
+    "artifact.encryptedCid",
+  );
+  const providerId = normalizeRequiredString(artifact.providerId, "artifact.providerId");
+  const policyId = normalizeRequiredString(artifact.policyId, "artifact.policyId");
+  const keyEpoch = normalizeRequiredString(artifact.keyEpoch, "artifact.keyEpoch");
+  const contentKeyId =
+    String(artifact.contentKeyId ?? "").trim() ||
+    `${listingId}:${moduleId}:${version}:${keyEpoch}`;
+  const encryptedHash = normalizeOptionalBytes(artifact.encryptedHash);
+  if (encryptedHash.length !== 32) {
+    throw new Error("artifact.encryptedHash must be 32 bytes.");
+  }
+  const manifestHash = normalizeOptionalBytes(artifact.manifestHash);
+  if (manifestHash.length !== 32) {
+    throw new Error("artifact.manifestHash must be 32 bytes.");
+  }
+  return {
+    listingId,
+    moduleId,
+    version,
+    encryptedCid,
+    encryptedHash: bytesToHex(encryptedHash),
+    providerId,
+    policyId,
+    keyEpoch,
+    manifestHash: bytesToHex(manifestHash),
+    contentKeyId,
+  };
+}
+
+export function createMarketplaceContentAad(artifact = {}) {
+  const binding = normalizeArtifactBinding(artifact);
+  return canonicalBytes({
+    encryptedCid: binding.encryptedCid,
+    encryptedHash: binding.encryptedHash,
+    keyEpoch: binding.keyEpoch,
+    listingId: binding.listingId,
+    manifestHash: binding.manifestHash,
+    moduleId: binding.moduleId,
+    policyId: binding.policyId,
+    providerId: binding.providerId,
+    version: binding.version,
+  });
+}
+
+function createWrapAad({ artifact, recipient, algorithm }) {
+  return canonicalBytes({
+    algorithm,
+    contentKeyId: artifact.contentKeyId,
+    encryptedCid: artifact.encryptedCid,
+    expiresAtMs: Number(recipient.expiresAtMs ?? 0),
+    grantId: normalizeRequiredString(recipient.grantId, "recipient.grantId"),
+    keyEpoch: artifact.keyEpoch,
+    providerId: artifact.providerId,
+    recipientKeyId: normalizeRequiredString(
+      recipient.recipientKeyId,
+      "recipient.recipientKeyId",
+    ),
+    scope: normalizeRequiredString(recipient.scope, "recipient.scope"),
+  });
+}
+
+function encodeContentKeyMaterial({ keyId, keyBytes, expiresAtMs }) {
+  const builder = new flatbuffers.Builder(256);
+  const keyIdOffset = builder.createString(keyId);
+  const keyBytesOffset = KMF.createKeyBytesVector(builder, keyBytes);
+  const root = KMF.createKMF(
+    builder,
+    keyIdOffset,
+    keyMaterialRole.PublicationContent,
+    keyMaterialAlgorithm.Aes256Gcm,
+    keyMaterialEncoding.RawBytes,
+    keyBytesOffset,
+    1,
+    BigInt(Number(expiresAtMs ?? 0)),
+  );
+  KMF.finishKMFBuffer(builder, root);
+  return builder.asUint8Array();
+}
+
+function decodeContentKeyMaterial(bytes) {
+  const payload = toUint8Array(bytes);
+  const bb = new flatbuffers.ByteBuffer(payload);
+  if (!KMF.bufferHasIdentifier(bb)) {
+    throw new Error("Wrapped marketplace content key payload is not a KMF record.");
+  }
+  const kmf = KMF.getRootAsKMF(bb);
+  if (kmf.ROLE() !== keyMaterialRole.PublicationContent) {
+    throw new Error("Wrapped marketplace key material is not a publication content key.");
+  }
+  if (kmf.ALGORITHM() !== keyMaterialAlgorithm.Aes256Gcm) {
+    throw new Error("Wrapped marketplace key material is not an AES-256-GCM key.");
+  }
+  const keyBytes = kmf.keyBytesArray();
+  if (!keyBytes || keyBytes.length !== 32) {
+    throw new Error("Wrapped marketplace content key must be 32 bytes.");
+  }
+  return new Uint8Array(keyBytes);
+}
+
 export async function generateX25519Keypair() {
   const privateKey = await randomBytes(32);
   const publicKey = await x25519PublicKey(privateKey);
@@ -60,6 +187,121 @@ export async function generateX25519Keypair() {
     publicKey,
     privateKey,
   };
+}
+
+export async function protectMarketplaceContent({
+  plaintext,
+  artifact,
+  recipients = [],
+  contentKey = null,
+  contentNonce = null,
+  providerWrapKeyPair = null,
+  wrapNonce = null,
+} = {}) {
+  if (!Array.isArray(recipients) || recipients.length === 0) {
+    throw new Error("protectMarketplaceContent requires at least one recipient.");
+  }
+  const binding = normalizeArtifactBinding(artifact);
+  const keyBytes = contentKey ? toUint8Array(contentKey) : await randomBytes(32);
+  if (keyBytes.length !== 32) {
+    throw new Error("Marketplace content keys must be 32 bytes.");
+  }
+  const nonce = contentNonce ? toUint8Array(contentNonce) : await randomBytes(12);
+  if (nonce.length !== 12) {
+    throw new Error("AES-256-GCM content encryption requires a 12-byte nonce.");
+  }
+  const aad = createMarketplaceContentAad(binding);
+  const encrypted = await aesGcmEncrypt(
+    keyBytes,
+    toUint8Array(plaintext),
+    nonce,
+    aad,
+  );
+  const wrappedKeys = [];
+  for (const recipient of recipients) {
+    const sender = providerWrapKeyPair ?? (await generateX25519Keypair());
+    const recipientPublicKey = normalizePublicKey(recipient.publicKey);
+    const wrapIv = wrapNonce ? toUint8Array(wrapNonce) : await randomBytes(12);
+    if (wrapIv.length !== 12) {
+      throw new Error("AES-256-GCM key wrapping requires a 12-byte nonce.");
+    }
+    const wrapAad = createWrapAad({
+      artifact: binding,
+      recipient,
+      algorithm: "X25519-HKDF-SHA256-AES-256-GCM-KMF",
+    });
+    const sharedSecret = await deriveSharedSecret(
+      sender.privateKey,
+      recipientPublicKey,
+    );
+    const wrapContext = `marketplace-content-key:${binding.providerId}:${binding.contentKeyId}:${recipient.recipientKeyId}`;
+    const wrapKey = await deriveAesKey(sharedSecret, new Uint8Array(0), wrapContext);
+    const keyMaterial = encodeContentKeyMaterial({
+      keyId: binding.contentKeyId,
+      keyBytes,
+      expiresAtMs: recipient.expiresAtMs,
+    });
+    const wrapped = await aesGcmEncrypt(wrapKey, keyMaterial, wrapIv, wrapAad);
+    wrappedKeys.push({
+      algorithm: "X25519-HKDF-SHA256-AES-256-GCM-KMF",
+      contentKeyId: binding.contentKeyId,
+      recipientPeerId: normalizeRequiredString(
+        recipient.recipientPeerId,
+        "recipient.recipientPeerId",
+      ),
+      recipientKeyId: normalizeRequiredString(
+        recipient.recipientKeyId,
+        "recipient.recipientKeyId",
+      ),
+      providerId: binding.providerId,
+      encryptedCid: binding.encryptedCid,
+      grantId: normalizeRequiredString(recipient.grantId, "recipient.grantId"),
+      scope: normalizeRequiredString(recipient.scope, "recipient.scope"),
+      expiresAtMs: Number(recipient.expiresAtMs ?? 0),
+      providerEphemeralPublicKey: sender.publicKey,
+      nonce: wrapIv,
+      aad: wrapAad,
+      ciphertext: wrapped.ciphertext,
+      tag: wrapped.tag,
+    });
+  }
+  return {
+    algorithm: "AES-256-GCM",
+    contentKeyId: binding.contentKeyId,
+    artifact: binding,
+    aad,
+    encryptedPayload: {
+      algorithm: "AES-256-GCM",
+      nonce,
+      aad,
+      ciphertext: encrypted.ciphertext,
+      tag: encrypted.tag,
+    },
+    wrappedKeys,
+  };
+}
+
+export async function decryptMarketplaceContentKeyWrap({
+  wrap,
+  recipientPrivateKey,
+} = {}) {
+  if (!wrap) {
+    throw new Error("decryptMarketplaceContentKeyWrap requires wrap.");
+  }
+  const sharedSecret = await deriveSharedSecret(
+    recipientPrivateKey,
+    wrap.providerEphemeralPublicKey,
+  );
+  const wrapContext = `marketplace-content-key:${wrap.providerId}:${wrap.contentKeyId}:${wrap.recipientKeyId}`;
+  const wrapKey = await deriveAesKey(sharedSecret, new Uint8Array(0), wrapContext);
+  const keyMaterial = await aesGcmDecrypt(
+    wrapKey,
+    wrap.ciphertext,
+    wrap.tag,
+    wrap.nonce,
+    wrap.aad,
+  );
+  return decodeContentKeyMaterial(keyMaterial);
 }
 
 async function encryptBytesLegacy({

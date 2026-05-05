@@ -19,12 +19,15 @@ import {
   appendPublicationRecordCollection,
   createEncryptedEnvelopePayload,
   createPublicationNotice,
+  decryptMarketplaceContentKeyWrap,
   decodeLicensingGrant,
   encodeUnsignedLicensingGrantForProviderSignature,
   encodePublicationRecordCollection,
   extractGrantModuleDescriptor,
   extractPublicationRecordCollection,
   extractWrappedContentKey,
+  generateX25519Keypair,
+  protectMarketplaceContent,
   validateLicensingGrant,
   verifyLicensingGrantProviderSignature,
 } from "../src/index.js";
@@ -213,6 +216,77 @@ test("marketplace DPM query metadata binds replay query, result hash, CIDs, encr
   assert.equal(decoded.ENCRYPTION().POLICY_ID(), "paid-group");
   assert.equal(decoded.providerSignatureLength(), 64);
   assert.equal(decoded.SIGNATURE_TYPE(), "Ed25519");
+});
+
+test("marketplace content protection encrypts once and wraps one generated content key per recipient", async () => {
+  const alphaKeyPair = await generateX25519Keypair();
+  const betaKeyPair = await generateX25519Keypair();
+  const providerKeyPair = await generateX25519Keypair();
+  const recipients = [
+    {
+      recipientPeerId: "peer-alpha",
+      recipientKeyId: "alpha-key-2026-05-05",
+      publicKey: alphaKeyPair.publicKey,
+      grantId: "grant-alpha",
+      scope: "dataset.read",
+      expiresAtMs: 1_800_000_000_000,
+    },
+    {
+      recipientPeerId: "peer-beta",
+      recipientKeyId: "beta-key-2026-05-05",
+      publicKey: betaKeyPair.publicKey,
+      grantId: "grant-beta",
+      scope: "dataset.read",
+      expiresAtMs: 1_800_000_000_000,
+    },
+  ];
+  const result = await protectMarketplaceContent({
+    plaintext: textEncoder.encode("single immutable artifact bytes"),
+    contentNonce: new Uint8Array(12).fill(32),
+    wrapNonce: new Uint8Array(12).fill(33),
+    providerWrapKeyPair: providerKeyPair,
+    artifact: {
+      listingId: "celestrak-full-catalog",
+      moduleId: "com.space-data-network.protected-catalog",
+      version: "2026-05-05T13:47:02Z",
+      encryptedCid: "bafy-single-copy-protected-bundle",
+      encryptedHash: new Uint8Array(32).fill(0x42),
+      providerId: "celestrak.eth",
+      policyId: "paid-group",
+      keyEpoch: "2026-05-05",
+      manifestHash: new Uint8Array(32).fill(0x77),
+      contentKeyId: "dataset:celestrak:full-catalog:2026-05-05",
+    },
+    recipients,
+  });
+
+  assert.equal(result.algorithm, "AES-256-GCM");
+  assert.equal(result.contentKeyId, "dataset:celestrak:full-catalog:2026-05-05");
+  assert.equal(result.encryptedPayload.ciphertext.length, "single immutable artifact bytes".length);
+  assert.equal(result.encryptedPayload.tag.length, 16);
+  assert.equal(result.wrappedKeys.length, recipients.length);
+  assert.equal(
+    new Set(result.wrappedKeys.map((wrap) => wrap.contentKeyId)).size,
+    1,
+  );
+  assert.equal(
+    new Set(result.wrappedKeys.map((wrap) => wrap.recipientKeyId)).size,
+    recipients.length,
+  );
+  assert.match(new TextDecoder().decode(result.aad), /bafy-single-copy-protected-bundle/);
+  assert.match(new TextDecoder().decode(result.aad), /celestrak.eth/);
+  assert.match(new TextDecoder().decode(result.aad), /paid-group/);
+
+  const unwrappedKeys = await Promise.all(
+    result.wrappedKeys.map((wrap, index) =>
+      decryptMarketplaceContentKeyWrap({
+        wrap,
+        recipientPrivateKey: index === 0 ? alphaKeyPair.privateKey : betaKeyPair.privateKey,
+      }),
+    ),
+  );
+  assert.equal(unwrappedKeys[0].length, 32);
+  assert.deepEqual(unwrappedKeys[1], unwrappedKeys[0]);
 });
 
 function encodeGrantResponse(options) {

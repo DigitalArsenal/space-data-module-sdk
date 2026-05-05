@@ -641,6 +641,90 @@ export interface EncryptedEnvelope {
 
 export function generateX25519Keypair(): Promise<X25519Keypair>;
 
+export interface MarketplaceArtifactBinding {
+  listingId: string;
+  moduleId: string;
+  version: string;
+  encryptedCid: string;
+  encryptedHash: Uint8Array | ArrayBuffer | ArrayBufferView | number[] | string;
+  providerId: string;
+  policyId: string;
+  keyEpoch: string;
+  manifestHash: Uint8Array | ArrayBuffer | ArrayBufferView | number[] | string;
+  contentKeyId?: string;
+}
+
+export interface MarketplaceContentRecipient {
+  recipientPeerId: string;
+  recipientKeyId: string;
+  publicKey: Uint8Array | ArrayBuffer | ArrayBufferView | number[] | string;
+  grantId: string;
+  scope: string;
+  expiresAtMs?: number;
+}
+
+export interface MarketplaceContentKeyWrap {
+  algorithm: string;
+  contentKeyId: string;
+  recipientPeerId: string;
+  recipientKeyId: string;
+  providerId: string;
+  encryptedCid: string;
+  grantId: string;
+  scope: string;
+  expiresAtMs: number;
+  providerEphemeralPublicKey: Uint8Array;
+  nonce: Uint8Array;
+  aad: Uint8Array;
+  ciphertext: Uint8Array;
+  tag: Uint8Array;
+}
+
+export interface MarketplaceProtectedContent {
+  algorithm: "AES-256-GCM";
+  contentKeyId: string;
+  artifact: {
+    listingId: string;
+    moduleId: string;
+    version: string;
+    encryptedCid: string;
+    encryptedHash: string;
+    providerId: string;
+    policyId: string;
+    keyEpoch: string;
+    manifestHash: string;
+    contentKeyId: string;
+  };
+  aad: Uint8Array;
+  encryptedPayload: {
+    algorithm: "AES-256-GCM";
+    nonce: Uint8Array;
+    aad: Uint8Array;
+    ciphertext: Uint8Array;
+    tag: Uint8Array;
+  };
+  wrappedKeys: MarketplaceContentKeyWrap[];
+}
+
+export function createMarketplaceContentAad(
+  artifact: MarketplaceArtifactBinding,
+): Uint8Array;
+
+export function protectMarketplaceContent(options: {
+  plaintext: Uint8Array | ArrayBuffer | ArrayBufferView | number[];
+  artifact: MarketplaceArtifactBinding;
+  recipients: MarketplaceContentRecipient[];
+  contentKey?: Uint8Array | ArrayBuffer | ArrayBufferView | number[] | null;
+  contentNonce?: Uint8Array | ArrayBuffer | ArrayBufferView | number[] | null;
+  providerWrapKeyPair?: X25519Keypair | null;
+  wrapNonce?: Uint8Array | ArrayBuffer | ArrayBufferView | number[] | null;
+}): Promise<MarketplaceProtectedContent>;
+
+export function decryptMarketplaceContentKeyWrap(options: {
+  wrap: MarketplaceContentKeyWrap;
+  recipientPrivateKey: Uint8Array | ArrayBuffer | ArrayBufferView | number[] | string;
+}): Promise<Uint8Array>;
+
 export function encryptBytesForRecipient(options: {
   plaintext: Uint8Array | ArrayBuffer;
   recipientPublicKey: Uint8Array | string;
