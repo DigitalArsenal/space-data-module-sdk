@@ -133,6 +133,9 @@ test("plugin manifests round-trip through FlatBuffer encoding", () => {
 test("plugin manifest decoder accepts canonical PLG artifact buffers", () => {
   const manifest = createTestManifest();
   const embeddedManifest = legacyManifestToPlg(manifest);
+  assert.deepEqual(embeddedManifest.requiredSchemas, ["OMM.fbs", "CAT.fbs"]);
+  assert.deepEqual(embeddedManifest.entryFunctions[0].inputSchemas, ["OMM.fbs"]);
+  assert.equal(embeddedManifest.entryFunctions[0].outputSchema, "CAT.fbs");
   const encoded = encodePlgManifest(embeddedManifest);
   const decoded = decodePluginManifest(encoded);
   assert.equal(decoded.pluginId, manifest.pluginId);
@@ -140,7 +143,10 @@ test("plugin manifest decoder accepts canonical PLG artifact buffers", () => {
   assert.equal(decoded.version, manifest.version);
   assert.equal(decoded.methods[0].methodId, "propagate");
   assert.deepEqual(decoded.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes, [
-    { schemaName: "omm" },
+    { schemaName: "OMM.fbs" },
+  ]);
+  assert.deepEqual(decoded.methods[0].outputPorts[0].acceptedTypeSets[0].allowedTypes, [
+    { schemaName: "CAT.fbs" },
   ]);
 });
 

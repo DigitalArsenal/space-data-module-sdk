@@ -72,7 +72,12 @@ function firstTypeName(port) {
         return entry;
       }
       if (entry && typeof entry === "object") {
-        const name = entry.name ?? entry.typeName ?? entry.type_name;
+        const name =
+          entry.schemaName ??
+          entry.schema_name ??
+          entry.name ??
+          entry.typeName ??
+          entry.type_name;
         if (typeof name === "string" && name.length > 0) {
           return name;
         }
@@ -144,7 +149,12 @@ function toRequiredSchemas(schemasUsed) {
     if (typeof entry === "string" && entry.length > 0) {
       names.push(entry);
     } else if (entry && typeof entry === "object") {
-      const name = entry.name ?? entry.typeName ?? entry.type_name;
+      const name =
+        entry.schemaName ??
+        entry.schema_name ??
+        entry.name ??
+        entry.typeName ??
+        entry.type_name;
       if (typeof name === "string" && name.length > 0) {
         names.push(name);
       }
@@ -152,6 +162,23 @@ function toRequiredSchemas(schemasUsed) {
   }
   // De-duplicate while preserving order.
   return Array.from(new Set(names));
+}
+
+function collectEntrySchemas(entryFunctions) {
+  const names = [];
+  for (const entry of Array.isArray(entryFunctions) ? entryFunctions : []) {
+    for (const name of Array.isArray(entry?.inputSchemas)
+      ? entry.inputSchemas
+      : []) {
+      if (typeof name === "string" && name.length > 0) {
+        names.push(name);
+      }
+    }
+    if (typeof entry?.outputSchema === "string" && entry.outputSchema.length > 0) {
+      names.push(entry.outputSchema);
+    }
+  }
+  return names;
 }
 
 /**
@@ -184,7 +211,12 @@ export function legacyManifestToPlg(input = {}) {
 
   const requiredSchemas = Array.isArray(input.requiredSchemas)
     ? input.requiredSchemas
-    : toRequiredSchemas(input.schemasUsed ?? input.schemas_used);
+    : Array.from(
+        new Set([
+          ...toRequiredSchemas(input.schemasUsed ?? input.schemas_used),
+          ...collectEntrySchemas(entryFunctions),
+        ]),
+      );
 
   const capabilities = Array.isArray(input.capabilities)
     ? input.capabilities.map((cap) => toPluginCapability(cap)).filter(Boolean)
