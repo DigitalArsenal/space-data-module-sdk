@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { WASI } from "node:wasi";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import {
   compileModuleFromSource,
@@ -13,6 +16,7 @@ import {
   generateEmbeddedManifestSource,
   legacyManifestToPlg,
   loadKnownTypeCatalog,
+  loadStandardsCatalog,
   protectModuleArtifact,
   toEmbeddedPluginManifest,
   validateArtifactWithStandards,
@@ -739,5 +743,51 @@ test("known type catalog includes shared module and SDS entries", async () => {
     catalog.some(
       (entry) => entry.schemaName === "OMM.fbs" && entry.fileIdentifier === "OMM",
     ),
+  );
+});
+
+test("standards catalogs can load from an explicit standards root", async () => {
+  const standardsRoot = await mkdtemp(path.join(os.tmpdir(), "sdn-standards-"));
+  await mkdir(path.join(standardsRoot, "dist"));
+  await writeFile(
+    path.join(standardsRoot, "dist", "manifest.json"),
+    JSON.stringify({
+      STANDARDS: {
+        TMX: {
+          IDL: 'namespace spacedata;\ntable TMX {}\nroot_type TMX;\nfile_identifier "$TMX";\n',
+          files: ["schema/TMX/main.fbs"],
+        },
+      },
+    }),
+  );
+
+  const standardsCatalog = await loadStandardsCatalog({ standardsRoot });
+  assert.ok(
+    standardsCatalog.some(
+      (entry) => entry.schemaName === "TMX.fbs" && entry.fileIdentifier === "TMX",
+    ),
+  );
+
+  const manifest = createTestManifest();
+  const tmxType = { schemaName: "spacedata.TMX", fileIdentifier: "TMX" };
+  manifest.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [tmxType];
+  manifest.methods[0].outputPorts[0].acceptedTypeSets[0].allowedTypes = [tmxType];
+  manifest.schemasUsed = [tmxType];
+
+  const report = await validateManifestWithStandards(manifest, { standardsRoot });
+  assert.equal(
+    report.warnings.some((warning) => warning.code === "unresolved-standards-type"),
+    false,
+  );
+
+  const artifactReport = await validateArtifactWithStandards({
+    manifest,
+    standardsRoot,
+  });
+  assert.equal(
+    artifactReport.warnings.some(
+      (warning) => warning.code === "unresolved-standards-type",
+    ),
+    false,
   );
 });

@@ -240,7 +240,7 @@ export function validatePluginArtifact(options: {
 
 export function validateManifestWithStandards(
   manifest: PluginManifest,
-  options?: { sourceName?: string },
+  options?: { sourceName?: string; catalog?: StandardsEntry[]; standardsRoot?: string },
 ): Promise<ComplianceReport>;
 
 export function validateArtifactWithStandards(options: {
@@ -249,6 +249,8 @@ export function validateArtifactWithStandards(options: {
   wasmPath?: string;
   exportNames?: string[];
   sourceName?: string;
+  catalog?: StandardsEntry[];
+  standardsRoot?: string;
 }): Promise<ComplianceReport>;
 
 export function loadManifestFromFile(manifestPath: string): Promise<PluginManifest>;
@@ -924,15 +926,19 @@ export interface StandardsEntry {
   files: string[];
 }
 
-export function loadStandardsCatalog(): Promise<StandardsEntry[]>;
-export function loadKnownTypeCatalog(): Promise<StandardsEntry[]>;
+export function loadStandardsCatalog(options?: {
+  standardsRoot?: string;
+}): Promise<StandardsEntry[]>;
+export function loadKnownTypeCatalog(options?: {
+  standardsRoot?: string;
+}): Promise<StandardsEntry[]>;
 export function resolveStandardsTypeRef(
   typeRef: PayloadTypeRef,
   catalog?: StandardsEntry[],
 ): StandardsEntry | null;
 export function validateManifestAgainstStandardsCatalog(
   manifest: PluginManifest,
-  options?: { sourceName?: string; catalog?: StandardsEntry[] },
+  options?: { sourceName?: string; catalog?: StandardsEntry[]; standardsRoot?: string },
 ): Promise<{ catalog: StandardsEntry[]; issues: ComplianceIssue[] }>;
 
 // --- Bundle ---

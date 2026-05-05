@@ -42,7 +42,7 @@ export async function validateArtifactWithStandards(options = {}) {
   const baseReport = await validatePluginArtifact(options);
   const standards = await validateManifestAgainstStandardsCatalog(
     options.manifest,
-    { sourceName: baseReport.sourceName },
+    { ...options, sourceName: baseReport.sourceName },
   );
   return mergeReport(baseReport, standards.issues);
 }
