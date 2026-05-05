@@ -448,6 +448,7 @@ async function compileWithEmception(options = {}) {
             "-c",
             sourcePath,
             `-I${workDir}`,
+            `-I${runtimeIncludeDir}`,
             "-o",
             sourceObjectPath,
           ],
@@ -476,6 +477,7 @@ async function compileWithEmception(options = {}) {
           "-c",
           sourcePath,
           `-I${workDir}`,
+          `-I${runtimeIncludeDir}`,
           ...guestLink.renameArgs,
           "-o",
           linkObjectPath,
@@ -634,6 +636,7 @@ async function compileWithSystemEmscripten(options = {}) {
       "-c",
       sourcePath,
       `-I${tempDir}`,
+      `-I${runtimeIncludeDir}`,
       ...(compileOptions.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS
         ? ["-pthread"]
         : []),
@@ -655,6 +658,7 @@ async function compileWithSystemEmscripten(options = {}) {
       "-c",
       sourcePath,
       `-I${tempDir}`,
+      `-I${runtimeIncludeDir}`,
       ...(compileOptions.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS
         ? ["-pthread"]
         : []),
