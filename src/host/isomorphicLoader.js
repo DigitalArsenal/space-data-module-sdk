@@ -3,7 +3,7 @@
  *
  * Unified entry point that detects the runtime environment and artifact
  * profile, then loads the module through the appropriate path:
- *   - Browser: createBrowserModuleHarness (WASI shim + optional sdn_host)
+ *   - Browser: createBrowserModuleHarness (WASI shim + optional space_data_module_host)
  *   - Node/WasmEdge: createModuleHarness (subprocess)
  *
  * The same compiled .wasm artifact works in both environments.
@@ -187,7 +187,7 @@ export async function loadModule(options = {}) {
       const { readFile } = await import("node:fs/promises");
       const inspection = await inspectModule(await readFile(source));
       if (
-        (inspection.profile === "standalone" || inspection.profile === "sdn-abi") &&
+        (inspection.profile === "standalone" || inspection.profile === "module-host-abi") &&
         inspection.exports.includes("_start")
       ) {
         return attachHostDispatch(

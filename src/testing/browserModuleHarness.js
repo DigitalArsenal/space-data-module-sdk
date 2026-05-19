@@ -2,7 +2,7 @@
  * Browser-side module harness.
  *
  * Loads the same standalone WASI .wasm artifact that WasmEdge runs,
- * instantiating it in the browser with the WASI shim + optional sdn_host
+ * instantiating it in the browser with the WASI shim + optional space_data_module_host
  * bridge. Matches the createModuleHarness() API surface.
  *
  * Supports two invoke paths:
@@ -32,7 +32,7 @@ import {
 
 /**
  * Detect artifact profile from WebAssembly.Module imports.
- * Returns "standalone" (WASI-only), "sdn-abi" (WASI + sdn_host),
+ * Returns "standalone" (WASI-only), "module-host-abi" (WASI + space_data_module_host),
  * or "emscripten" (env.* with invoke trampolines).
  */
 export function detectArtifactProfile(wasmModule) {
@@ -51,7 +51,7 @@ export function detectArtifactProfile(wasmModule) {
   }
 
   if (moduleNames.has(DEFAULT_HOSTCALL_IMPORT_MODULE)) {
-    return "sdn-abi";
+    return "module-host-abi";
   }
 
   if (moduleNames.has("wasi_snapshot_preview1") || moduleNames.has("wasi_unstable")) {
@@ -152,7 +152,7 @@ export async function createBrowserModuleHarness(options = {}) {
     options.surface ?? (hasDirectInvoke ? "direct" : hasCommand ? "command" : "direct");
   if (profile === "emscripten") {
     throw new Error(
-      "Browser harness only supports standalone WASI or sdn_host artifacts. " +
+      "Browser harness only supports standalone WASI or space_data_module_host artifacts. " +
         'Compile shared browser/WasmEdge modules with runtimeTargets: ["browser", "wasmedge"] ' +
         'or override threadModel to "single-thread".',
     );

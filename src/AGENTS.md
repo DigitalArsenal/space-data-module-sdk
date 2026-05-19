@@ -12,7 +12,7 @@ the SDK source, not a prompt to edit SDK internals by default.
 - `src/compiler`: compile flow, manifest embedding, runtime targets, toolchains,
   and artifact layout.
 - `src/bundle`: REC+MBL single-file packaging, wasm section handling, and vector compatibility.
-- `src/host`: Node host, browser shims, `sdn_host`, WasmEdge runners, and
+- `src/host`: Node host, browser shims, `space_data_module_host`, WasmEdge runners, and
   isomorphic loaders.
 - `src/runtime-host`: FlatSQL-backed runtime host, row/region identity, and
   binary stream ingest.

@@ -13,14 +13,14 @@ import {
 } from "../src/index.js";
 
 const ABI_GUEST_SOURCE = `
-__attribute__((import_module("sdn_host"), import_name("call_json")))
-extern int sdn_host_call_json(const char *operation_ptr, int operation_len, const char *payload_ptr, int payload_len);
+__attribute__((import_module("space_data_module_host"), import_name("call_json")))
+extern int space_data_module_host_call_json(const char *operation_ptr, int operation_len, const char *payload_ptr, int payload_len);
 
-__attribute__((import_module("sdn_host"), import_name("response_len")))
-extern int sdn_host_response_len(void);
+__attribute__((import_module("space_data_module_host"), import_name("response_len")))
+extern int space_data_module_host_response_len(void);
 
-__attribute__((import_module("sdn_host"), import_name("read_response")))
-extern int sdn_host_read_response(char *dst_ptr, int dst_len);
+__attribute__((import_module("space_data_module_host"), import_name("read_response")))
+extern int space_data_module_host_read_response(char *dst_ptr, int dst_len);
 
 static const char OP_CLOCK_NOW[] = "clock.now";
 static const char OP_RANDOM_BYTES[] = "random.bytes";
@@ -35,14 +35,14 @@ static char response_buffer[2048];
 static int response_length = 0;
 
 static int copy_last_response(void) {
-  int len = sdn_host_response_len();
+  int len = space_data_module_host_response_len();
   if (len < 0) {
     return len;
   }
   if (len > (int)(sizeof(response_buffer) - 1)) {
     len = (int)(sizeof(response_buffer) - 1);
   }
-  int copied = sdn_host_read_response(response_buffer, len);
+  int copied = space_data_module_host_read_response(response_buffer, len);
   if (copied < 0) {
     return copied;
   }
@@ -52,7 +52,7 @@ static int copy_last_response(void) {
 }
 
 int guest_call_clock_now(void) {
-  int status = sdn_host_call_json(
+  int status = space_data_module_host_call_json(
     OP_CLOCK_NOW,
     (int)(sizeof(OP_CLOCK_NOW) - 1),
     EMPTY_JSON,
@@ -63,7 +63,7 @@ int guest_call_clock_now(void) {
 }
 
 int guest_call_schedule_matches(void) {
-  int status = sdn_host_call_json(
+  int status = space_data_module_host_call_json(
     OP_SCHEDULE_MATCHES,
     (int)(sizeof(OP_SCHEDULE_MATCHES) - 1),
     SCHEDULE_MATCHES_JSON,
@@ -74,7 +74,7 @@ int guest_call_schedule_matches(void) {
 }
 
 int guest_call_random_bytes(void) {
-  int status = sdn_host_call_json(
+  int status = space_data_module_host_call_json(
     OP_RANDOM_BYTES,
     (int)(sizeof(OP_RANDOM_BYTES) - 1),
     RANDOM_BYTES_JSON,
@@ -85,7 +85,7 @@ int guest_call_random_bytes(void) {
 }
 
 int guest_call_denied_filesystem(void) {
-  int status = sdn_host_call_json(
+  int status = space_data_module_host_call_json(
     OP_FILESYSTEM_RESOLVE,
     (int)(sizeof(OP_FILESYSTEM_RESOLVE) - 1),
     FILESYSTEM_JSON,

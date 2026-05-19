@@ -19,7 +19,7 @@ Nearest-file wins: read this file first, then follow the most specific child
 - `src/bundle/AGENTS.md`: REC+MBL single-file packaging.
 - `src/auth/AGENTS.md`: signing, deployment authorization, and related record
   handling.
-- `src/host/AGENTS.md`: Node host, browser shims, the legacy sync `sdn_host`
+- `src/host/AGENTS.md`: Node host, browser shims, the legacy sync `space_data_module_host`
   subset, async host adapters, and isomorphic loaders.
 - `src/runtime-host/AGENTS.md`: FlatSQL-backed runtime-host storage, row/region
   identity, and binary FlatBuffer ingest.
@@ -81,9 +81,9 @@ Every compliant module produced here should satisfy all of the following:
   publication metadata after the wasm payload.
 - Same-file signing or encrypted binary delivery appends an SDS `REC` trailer
   carrying standards-backed `PNM` and optional `ENC` publication records.
-- Sync guest hostcalls use the `sdn_host` import module and the bridge in
+- Sync guest hostcalls use the `space_data_module_host` import module and the bridge in
   `src/host` for sync-safe operations only.
-- The raw `sdn_host` bridge remains fail-closed and sync-only.
+- The raw `space_data_module_host` bridge remains fail-closed and sync-only.
 - The generic async filesystem, network, IPFS, and protocol capability
   boundary lives in `NodeHost`, `BrowserHost`, `createRuntimeHost()`
   capability registries, and harness `callHost(...)` dispatch. Keep that
@@ -158,7 +158,7 @@ change is correct:
 - `src/compliance`: module compliance and standards validation.
 - `src/compiler`: source-to-wasm compile flow and target selection.
 - `src/bundle`: REC trailer encoding/parsing, MBL bundle metadata, and wasm custom sections.
-- `src/host`: Node host, browser shims, the legacy sync `sdn_host` subset,
+- `src/host`: Node host, browser shims, the legacy sync `space_data_module_host` subset,
   async host adapters, and isomorphic loaders.
 - `src/runtime-host`: FlatSQL-backed row/region storage and stream ingest.
 - `src/testing`: browser harnesses, process invoke clients, and streaming pumps.

@@ -211,7 +211,7 @@ The matrix and the existing Node host tests together cover:
 - args and environment wiring
 - filesystem path smoke through WASI/preopen setup
 - WASI clock/time smoke
-- sync `sdn_host` byte-envelope coverage for `random.bytes`
+- sync `space_data_module_host` byte-envelope coverage for `random.bytes`
 - host capability surface classification
 - the Node host API suite for HTTP, TCP, UDP, TLS, WebSocket, MQTT, exec,
   context, crypto, timers, and filesystem semantics
@@ -302,7 +302,7 @@ correctly but does not hard-fail the matrix on a specific libc randomness call.
 
 ### 8. The sync guest hostcall ABI is intentionally narrow
 
-The current `sdn_host` sync ABI is JSON-over-memory and only supports
+The current `space_data_module_host` sync ABI is JSON-over-memory and only supports
 synchronous operations cleanly. That makes these capabilities practical for
 WASM guests today:
 
@@ -357,7 +357,7 @@ names. If you override reference behavior, do it with explicit
 `capabilityAdapters` keyed by canonical capability id rather than inventing a
 repo-local host API variant.
 
-This JSON-over-memory note applies only to the current sync `sdn_host` guest
+This JSON-over-memory note applies only to the current sync `space_data_module_host` guest
 ABI. It is not the canonical FlatBuffer stream-ingest contract, which uses
 direct size-prefixed FlatBuffer frames and keeps payload bytes binary end-to-end.
 

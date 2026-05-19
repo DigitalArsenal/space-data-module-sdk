@@ -3,7 +3,7 @@ import { bytesToBase64 } from "../utils/encoding.js";
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
 
-export const DEFAULT_HOSTCALL_IMPORT_MODULE = "sdn_host";
+export const DEFAULT_HOSTCALL_IMPORT_MODULE = "space_data_module_host";
 export const HOSTCALL_STATUS_OK = 0;
 export const HOSTCALL_STATUS_ERROR = 1;
 

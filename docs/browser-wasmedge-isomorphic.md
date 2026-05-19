@@ -105,7 +105,7 @@ One binary can load in both browser and WasmEdge today when it stays within the
 shared profile:
 
 - standalone WASI imports
-- optional sync `sdn_host` imports
+- optional sync `space_data_module_host` imports
 - command invoke surfaces through `_start` on WasmEdge and direct or command
   invoke surfaces in the browser harness
 - no Emscripten pthread imports
@@ -115,11 +115,11 @@ Not browser-portable from the same raw guest binary:
 - WasmEdge-native socket/TLS extension imports
 - pthread-oriented `env.*` imports
 - raw guest async hostcalls that need a broader ABI than the current sync
-  `sdn_host` bridge
+  `space_data_module_host` bridge
 
 Today’s portable split is:
 
-- the guest-visible `sdn_host` import remains a sync-only subset for sync-safe
+- the guest-visible `space_data_module_host` import remains a sync-only subset for sync-safe
   operations
 - the host and harness APIs can still await filesystem, network, IPFS, and
   protocol adapters through the generic async capability boundary in both

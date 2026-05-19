@@ -174,12 +174,12 @@ This repo currently includes:
   transport, bundle handling, and compilation
 - deterministic REC+MBL conformance vectors under
   [`examples/single-file-bundle/vectors`](./examples/single-file-bundle/vectors)
-- reference Node and browser hosts plus the legacy sync `sdn_host` bridge for
+- reference Node and browser hosts plus the legacy sync `space_data_module_host` bridge for
   sync-safe guest hostcalls
 
 The current host/runtime contract is two-tiered:
 
-- raw guest `sdn_host` imports stay sync-only
+- raw guest `space_data_module_host` imports stay sync-only
 - generic async capabilities such as filesystem, network, IPFS, and protocol
   adapters are exposed through `NodeHost`, `BrowserHost`,
   `createRuntimeHost()` capability registries, and the browser/module harness
@@ -285,7 +285,7 @@ This repo now exposes a manifest-driven harness generator from
     clock/time smoke
 - `npm run test:host-surfaces`
   - authoritative Node-host coverage for HTTP, TCP, UDP, TLS, WebSocket, MQTT,
-    process execution, timers, filesystem, and the sync `sdn_host` ABI
+    process execution, timers, filesystem, and the sync `space_data_module_host` ABI
 - `npm run test:stream-ingest`
   - correctness coverage for chunked size-prefixed FlatBuffer ingest into the
     runtime-host row store
@@ -506,7 +506,7 @@ the remaining raw wasm bytes.
 ## Host ABI
 
 This repo also defines the module-facing capability vocabulary and the first
-synchronous hostcall bridge under the import module `sdn_host`.
+synchronous hostcall bridge under the import module `space_data_module_host`.
 
 The current sync import surface is:
 

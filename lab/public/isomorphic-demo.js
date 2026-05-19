@@ -2,7 +2,7 @@
  * Isomorphic WASM Plugin Demo — browser entry point.
  *
  * Loads the same standalone .wasm artifact in:
- *   1. Browser via createBrowserModuleHarness (WASI shim + sdn_host bridge)
+ *   1. Browser via createBrowserModuleHarness (WASI shim + space_data_module_host bridge)
  *   2. WasmEdge via server-side /api/wasmedge-invoke endpoint
  *
  * Compares the results side-by-side.

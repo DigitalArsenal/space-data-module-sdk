@@ -5,7 +5,7 @@ host/runtime boundary that compliant modules can rely on.
 
 ## What Authors Should Take From This Directory
 
-- The portable shared path is standalone WASI, optionally plus `sdn_host`.
+- The portable shared path is standalone WASI, optionally plus `space_data_module_host`.
 - Browser helpers here are host-side shims and harnesses, not proof that raw
   WasmEdge-native guest imports are browser-portable.
 - The isomorphic loader and browser harness show how the same artifact is meant
@@ -14,7 +14,7 @@ host/runtime boundary that compliant modules can rely on.
 ## Host Rules Authors Should Follow
 
 - Shared browser/WasmEdge artifacts must stay within standalone WASI plus the
-  optional `sdn_host` bridge. Raw WasmEdge-native extension imports are not
+  optional `space_data_module_host` bridge. Raw WasmEdge-native extension imports are not
   browser-isomorphic.
 - Browser shims are host-side replacements, not a promise that the guest can
   import WasmEdge-native sockets, TLS, or filesystem extensions directly.
