@@ -11,9 +11,9 @@ import {
 test("resolveWasmEdgeRunnerSourcePath points at the shared SDK pthread runner source", () => {
   const sourcePath = resolveWasmEdgeRunnerSourcePath();
 
-  assert.match(
+  assert.equal(
     sourcePath,
-    /space-data-module-sdk\/src\/testing\/native\/wasmedge_emscripten_pthread_runner\.c$/,
+    path.resolve("src", "testing", "native", "wasmedge_emscripten_pthread_runner.c"),
   );
 });
 

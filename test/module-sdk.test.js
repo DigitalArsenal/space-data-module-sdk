@@ -746,6 +746,196 @@ test("known type catalog includes shared module and SDS entries", async () => {
   );
 });
 
+test("reentry launch-ascent and hypersonics SDS type refs resolve without warnings", async () => {
+  const catalog = await loadKnownTypeCatalog();
+  for (const expected of [
+    ["HFC.fbs", "HFC"],
+    ["REM.fbs", "REM"],
+    ["LAM.fbs", "LAM"],
+  ]) {
+    assert.ok(
+      catalog.some(
+        (entry) =>
+          entry.schemaName === expected[0] && entry.fileIdentifier === expected[1],
+      ),
+      `${expected[0]} should resolve from the standards catalog`,
+    );
+  }
+
+  const manifest = {
+    pluginId: "com.digitalarsenal.examples.reentry-launch-hypersonics-contract",
+    name: "Reentry Launch Hypersonics Contract",
+    version: "0.1.0",
+    pluginFamily: "analysis",
+    capabilities: [],
+    externalInterfaces: [],
+    invokeSurfaces: ["command"],
+    methods: [
+      {
+        methodId: "query_atmosphere_state_batch",
+        displayName: "Query Atmosphere State Batch",
+        inputPorts: [
+          {
+            portId: "atmosphere",
+            acceptedTypeSets: [
+              {
+                setId: "atm",
+                allowedTypes: [{ schemaName: "ATM.fbs", fileIdentifier: "$ATM" }],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        outputPorts: [
+          {
+            portId: "conditions",
+            acceptedTypeSets: [
+              {
+                setId: "hfc",
+                allowedTypes: [{ schemaName: "HFC.fbs", fileIdentifier: "$HFC" }],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        maxBatch: 1024,
+        drainPolicy: "drain-to-empty",
+      },
+      {
+        methodId: "evaluate_hypersonic_state_batch",
+        displayName: "Evaluate Hypersonic State Batch",
+        inputPorts: [
+          {
+            portId: "trajectory",
+            acceptedTypeSets: [
+              {
+                setId: "trajectory",
+                allowedTypes: [
+                  { schemaName: "OEM.fbs", fileIdentifier: "$OEM" },
+                  { schemaName: "OCM.fbs", fileIdentifier: "$OCM" },
+                ],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+          {
+            portId: "atmosphere",
+            acceptedTypeSets: [
+              {
+                setId: "atm",
+                allowedTypes: [{ schemaName: "ATM.fbs", fileIdentifier: "$ATM" }],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        outputPorts: [
+          {
+            portId: "conditions",
+            acceptedTypeSets: [
+              {
+                setId: "hfc",
+                allowedTypes: [{ schemaName: "HFC.fbs", fileIdentifier: "$HFC" }],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        maxBatch: 1024,
+        drainPolicy: "drain-to-empty",
+      },
+      {
+        methodId: "simulate_reentry",
+        displayName: "Simulate Reentry",
+        inputPorts: [
+          {
+            portId: "reentry",
+            acceptedTypeSets: [
+              {
+                setId: "rdm",
+                allowedTypes: [{ schemaName: "RDM.fbs", fileIdentifier: "$RDM" }],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        outputPorts: [
+          {
+            portId: "evaluation",
+            acceptedTypeSets: [
+              {
+                setId: "rem",
+                allowedTypes: [{ schemaName: "REM.fbs", fileIdentifier: "$REM" }],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        maxBatch: 128,
+        drainPolicy: "drain-to-empty",
+      },
+      {
+        methodId: "simulate_launch_ascent",
+        displayName: "Simulate Launch Ascent",
+        inputPorts: [
+          {
+            portId: "launch",
+            acceptedTypeSets: [
+              {
+                setId: "ldm",
+                allowedTypes: [{ schemaName: "LDM.fbs", fileIdentifier: "$LDM" }],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        outputPorts: [
+          {
+            portId: "ascent",
+            acceptedTypeSets: [
+              {
+                setId: "lam",
+                allowedTypes: [{ schemaName: "LAM.fbs", fileIdentifier: "$LAM" }],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        maxBatch: 128,
+        drainPolicy: "drain-to-empty",
+      },
+    ],
+    schemasUsed: [
+      { schemaName: "ATM.fbs", fileIdentifier: "$ATM" },
+      { schemaName: "HFC.fbs", fileIdentifier: "$HFC" },
+      { schemaName: "REM.fbs", fileIdentifier: "$REM" },
+      { schemaName: "LAM.fbs", fileIdentifier: "$LAM" },
+    ],
+  };
+
+  const report = await validateManifestWithStandards(manifest);
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.warnings, []);
+});
+
 test("standards catalogs can load from an explicit standards root", async () => {
   const standardsRoot = await mkdtemp(path.join(os.tmpdir(), "sdn-standards-"));
   await mkdir(path.join(standardsRoot, "dist"));

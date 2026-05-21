@@ -169,19 +169,55 @@ test("marketplace protected bundles carry one encrypted payload with REC ENC and
 });
 
 test("marketplace DPM query metadata binds replay query, result hash, CIDs, encryption, and provider signature", async () => {
-  const { DPM, DPMT, DPMAssetT, DPMEncryptionBindingT, DPMQueryBindingT, publicationAssetKind } =
-    await import("../../../main-packages/spacedatastandards.org/lib/js/DPM/main.js");
+  const {
+    DPM,
+    DPMT,
+    DPMAssetT,
+    DPMEncryptionBindingT,
+    DPMQueryBindingT,
+    dpmTransportKind,
+    publicationAssetKind,
+  } = await import("spacedatastandards.org/lib/js/DPM/main.js");
 
   const manifest = new DPMT(
     "1.0.0",
     "celestrak-full-catalog",
     "update-2026-05-05T13:47:02Z",
+    "celestrak-full-catalog.dpm",
     "celestrak.eth",
     "bafy-provider-epm",
     "2026-05-05T13:47:02Z",
     [
-      new DPMAssetT(publicationAssetKind.DATA_SHARD, "bafy-data-shard", "/ipfs/bafy-data-shard", "OMM.fbs.bin", 128n, "a".repeat(64), "OMM.fbs", "b".repeat(64), "dataset-key-epoch-2026-05-05"),
-      new DPMAssetT(publicationAssetKind.QUERY_INDEX, "bafy-query-index", "/ipfs/bafy-query-index", "index.json", 64n, "c".repeat(64), "DPM.index.json", "d".repeat(64), "dataset-key-epoch-2026-05-05"),
+      new DPMAssetT(
+        publicationAssetKind.DATA_SHARD,
+        dpmTransportKind.CONTENT_ADDRESS,
+        "bafy-data-shard",
+        "/ipfs/bafy-data-shard",
+        "OMM.fbs.bin",
+        "OMM.fbs.bin",
+        null,
+        128n,
+        "a".repeat(64),
+        null,
+        "OMM.fbs",
+        "b".repeat(64),
+        "dataset-key-epoch-2026-05-05",
+      ),
+      new DPMAssetT(
+        publicationAssetKind.QUERY_INDEX,
+        dpmTransportKind.CONTENT_ADDRESS,
+        "bafy-query-index",
+        "/ipfs/bafy-query-index",
+        "index.json",
+        "index.json",
+        null,
+        64n,
+        "c".repeat(64),
+        null,
+        "DPM.index.json",
+        "d".repeat(64),
+        "dataset-key-epoch-2026-05-05",
+      ),
     ],
     [],
     new DPMQueryBindingT(
@@ -197,6 +233,7 @@ test("marketplace DPM query metadata binds replay query, result hash, CIDs, encr
       "2026-05-05T00:00:00Z",
       "2026-05-05T13:47:02Z",
     ),
+    [],
     new DPMEncryptionBindingT(true, "AES-256-GCM", "dataset-key-epoch-2026-05-05", "2026-05-05", "paid-group", "1".repeat(64)),
     Array.from(new Uint8Array(64).fill(0x99)),
     "Ed25519",
