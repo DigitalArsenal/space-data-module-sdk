@@ -30,6 +30,56 @@ import {
   decodePluginInvokeResponse,
 } from "../invoke/codec.js";
 
+const STANDALONE_SHARED_MEMORY_ENV_STUBS = Object.freeze({
+  pthread_mutex_lock: () => 0,
+  pthread_mutex_unlock: () => 0,
+  pthread_cond_broadcast: () => 0,
+  pthread_cond_wait: () => 0,
+  emscripten_thread_sleep: () => {},
+  __do_set_thread_state: () => {},
+});
+const STANDALONE_SHARED_MEMORY_ENV_IMPORTS = new Set([
+  "memory",
+  ...Object.keys(STANDALONE_SHARED_MEMORY_ENV_STUBS),
+]);
+
+function isStandaloneSharedMemoryEnvImport(entry) {
+  return (
+    entry.module === "env" &&
+    STANDALONE_SHARED_MEMORY_ENV_IMPORTS.has(entry.name) &&
+    (entry.name === "memory"
+      ? entry.kind === "memory"
+      : entry.kind === "function")
+  );
+}
+
+function usesOnlyStandaloneSharedMemoryEnvImports(envImports) {
+  return (
+    envImports.length > 0 &&
+    envImports.every((entry) => isStandaloneSharedMemoryEnvImport(entry))
+  );
+}
+
+function addStandaloneSharedMemoryEnvStubs(importObject, moduleImports) {
+  const envImports = moduleImports.filter((entry) => entry.module === "env");
+  if (!usesOnlyStandaloneSharedMemoryEnvImports(envImports)) {
+    return;
+  }
+
+  const envNamespace = {
+    ...(importObject.env ?? {}),
+  };
+  for (const entry of envImports) {
+    if (entry.kind !== "function") {
+      continue;
+    }
+    if (typeof envNamespace[entry.name] !== "function") {
+      envNamespace[entry.name] = STANDALONE_SHARED_MEMORY_ENV_STUBS[entry.name];
+    }
+  }
+  importObject.env = envNamespace;
+}
+
 /**
  * Detect artifact profile from WebAssembly.Module imports.
  * Returns "standalone" (WASI-only), "module-host-abi" (WASI + space_data_module_host),
@@ -38,15 +88,21 @@ import {
 export function detectArtifactProfile(wasmModule) {
   const imports = WebAssembly.Module.imports(wasmModule);
   const moduleNames = new Set(imports.map((i) => i.module));
+  const envImports = imports.filter((i) => i.module === "env");
+  const usesStandaloneSharedMemoryEnv =
+    usesOnlyStandaloneSharedMemoryEnvImports(envImports);
 
   if (moduleNames.has("env")) {
-    const envImports = imports.filter((i) => i.module === "env");
-    const hasInvokeTrampolines = envImports.some((i) => i.name.startsWith("invoke_"));
-    const hasPthreads = envImports.some(
-      (i) => i.name.includes("pthread") || i.name.includes("thread"),
-    );
-    if (hasInvokeTrampolines || hasPthreads) {
-      return "emscripten";
+    if (!usesStandaloneSharedMemoryEnv) {
+      const hasInvokeTrampolines = envImports.some((i) =>
+        i.name.startsWith("invoke_"),
+      );
+      const hasPthreads = envImports.some(
+        (i) => i.name.includes("pthread") || i.name.includes("thread"),
+      );
+      if (hasInvokeTrampolines || hasPthreads) {
+        return "emscripten";
+      }
     }
   }
 
@@ -55,6 +111,10 @@ export function detectArtifactProfile(wasmModule) {
   }
 
   if (moduleNames.has("wasi_snapshot_preview1") || moduleNames.has("wasi_unstable")) {
+    return "standalone";
+  }
+
+  if (usesStandaloneSharedMemoryEnv) {
     return "standalone";
   }
 
@@ -75,7 +135,55 @@ async function compileWasmModule(source) {
   return WebAssembly.compile(bytes);
 }
 
+const WASM_PAGE_BYTES = 65536;
+const DEFAULT_IMPORTED_MEMORY_INITIAL_BYTES = 64 * 1024 * 1024;
+const DEFAULT_IMPORTED_MEMORY_MAXIMUM_BYTES = 2 * 1024 * 1024 * 1024;
+
+function bytesToPages(value, fallbackBytes) {
+  const bytes =
+    Number.isFinite(value) && value > 0 ? Number(value) : fallbackBytes;
+  return Math.ceil(bytes / WASM_PAGE_BYTES);
+}
+
+function createImportedMemory(options = {}) {
+  const initialPages = bytesToPages(
+    options.initialMemoryBytes,
+    DEFAULT_IMPORTED_MEMORY_INITIAL_BYTES,
+  );
+  const maximumPages = Math.max(
+    initialPages,
+    bytesToPages(
+      options.maximumMemoryBytes,
+      DEFAULT_IMPORTED_MEMORY_MAXIMUM_BYTES,
+    ),
+  );
+  const descriptor = {
+    initial: initialPages,
+    maximum: maximumPages,
+  };
+
+  if (options.sharedMemory === true) {
+    if (typeof SharedArrayBuffer !== "function") {
+      throw new Error(
+        "Browser module harness shared imported memory requires SharedArrayBuffer.",
+      );
+    }
+    descriptor.shared = true;
+  }
+
+  return new WebAssembly.Memory(descriptor);
+}
+
 async function instantiateBrowserModule(options = {}) {
+  let providedMemory = options.wasmMemory ?? options.memory ?? null;
+  if (
+    providedMemory !== null &&
+    !(providedMemory instanceof WebAssembly.Memory)
+  ) {
+    throw new TypeError(
+      "Browser module harness memory must be a WebAssembly.Memory.",
+    );
+  }
   const wasi = createBrowserWasiShim({
     args: options.args ?? [],
     env: options.env ?? {},
@@ -88,21 +196,39 @@ async function instantiateBrowserModule(options = {}) {
   const needsHostBridge = moduleImports.some(
     (entry) => entry.module === DEFAULT_HOSTCALL_IMPORT_MODULE,
   );
+  const memoryImports = moduleImports.filter((entry) => entry.kind === "memory");
+  if (!providedMemory && memoryImports.length > 0) {
+    providedMemory = createImportedMemory(options);
+  }
+  for (const entry of memoryImports) {
+    if (!providedMemory) {
+      throw new Error(
+        `Browser module imports ${entry.module}.${entry.name} memory; pass a WebAssembly.Memory as the memory option.`,
+      );
+    }
+    importObject[entry.module] = {
+      ...(importObject[entry.module] ?? {}),
+      [entry.name]: providedMemory,
+    };
+  }
+  addStandaloneSharedMemoryEnvStubs(importObject, moduleImports);
 
   let instance = null;
   let bridge = null;
+  let memory = providedMemory;
   if (needsHostBridge) {
     const dispatch = createHostSyncDispatcher(options.host);
     bridge = createJsonHostcallBridge({
       dispatch,
-      getMemory: () => instance.exports.memory,
+      getMemory: () => memory ?? instance?.exports?.memory,
     });
     Object.assign(importObject, bridge.imports);
   }
 
   instance = await WebAssembly.instantiate(options.wasmModule, importObject);
-  if (instance.exports.memory) {
-    wasi.setMemory(instance.exports.memory);
+  memory = instance.exports.memory ?? providedMemory;
+  if (memory) {
+    wasi.setMemory(memory);
   }
   if (instance.exports._initialize) {
     instance.exports._initialize();
@@ -112,6 +238,7 @@ async function instantiateBrowserModule(options = {}) {
     instance,
     bridge,
     wasi,
+    memory,
   };
 }
 
@@ -125,6 +252,11 @@ async function instantiateBrowserModule(options = {}) {
  * @param {string[]} [options.args] - WASI args passed to the module.
  * @param {Object} [options.env] - WASI environment variables.
  * @param {string} [options.surface] - "direct" or "command" (default: auto-detect).
+ * @param {WebAssembly.Memory} [options.wasmMemory] - Explicit imported memory.
+ * @param {WebAssembly.Memory} [options.memory] - Alias for wasmMemory.
+ * @param {boolean} [options.sharedMemory] - Create SharedArrayBuffer-backed imported memory.
+ * @param {number} [options.initialMemoryBytes] - Initial imported memory size.
+ * @param {number} [options.maximumMemoryBytes] - Maximum imported memory size.
  */
 export async function createBrowserModuleHarness(options = {}) {
   const wasmModule = await compileWasmModule(options.wasmSource);
@@ -165,15 +297,19 @@ export async function createBrowserModuleHarness(options = {}) {
     env: options.env,
     performance: options.performance ?? host?.performance,
     logOutput: options.logOutput === true,
+    wasmMemory: options.wasmMemory,
+    memory: options.memory,
+    sharedMemory: options.sharedMemory,
+    initialMemoryBytes: options.initialMemoryBytes,
+    maximumMemoryBytes: options.maximumMemoryBytes,
   });
-  const { instance, bridge, wasi } = activeContext;
+  const { instance, bridge, wasi, memory } = activeContext;
 
   // --- Invoke helpers ---
   function invokeDirectRaw(requestBytes) {
     const alloc = instance.exports[DefaultInvokeExports.allocSymbol];
     const free = instance.exports[DefaultInvokeExports.freeSymbol];
     const invokeStream = instance.exports[DefaultInvokeExports.invokeSymbol];
-    const memory = instance.exports.memory;
     if (
       typeof alloc !== "function" ||
       typeof free !== "function" ||
@@ -220,6 +356,11 @@ export async function createBrowserModuleHarness(options = {}) {
       stdinBytes,
       performance: options.performance ?? host?.performance,
       logOutput: false,
+      wasmMemory: options.wasmMemory,
+      memory: options.memory,
+      sharedMemory: options.sharedMemory,
+      initialMemoryBytes: options.initialMemoryBytes,
+      maximumMemoryBytes: options.maximumMemoryBytes,
     });
     try {
       const commandExport = commandContext.instance.exports[DefaultInvokeExports.commandSymbol];
@@ -267,7 +408,9 @@ export async function createBrowserModuleHarness(options = {}) {
     const size = getSizeExport();
     if (!ptr || !size) return null;
 
-    return new Uint8Array(instance.exports.memory.buffer, ptr, size).slice();
+    if (!memory) return null;
+
+    return new Uint8Array(memory.buffer, ptr, size).slice();
   }
 
   function destroy() {
@@ -285,6 +428,7 @@ export async function createBrowserModuleHarness(options = {}) {
     host,
     bridge,
     wasi,
+    memory,
     callHost,
     invoke,
     invokeRaw,

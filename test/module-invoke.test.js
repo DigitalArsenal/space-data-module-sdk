@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { WASI } from "node:wasi";
 
+import * as flatbuffers from "../src/vendor/flatbuffers/flatbuffers.js";
 import {
   cleanupCompilation,
   compileModuleFromSource,
@@ -336,6 +337,75 @@ test("plugin invoke envelopes round-trip large payload arenas without stack over
     Array.from(decodedResponse.outputs[0].payload),
     Array.from(payload),
   );
+});
+
+test("plugin invoke codecs decode payload arenas without generated scalar-list unpacking", () => {
+  const payload = Uint8Array.from(
+    { length: 256000 },
+    (_, index) => (index * 17) & 0xff,
+  );
+  const encodedRequest = encodePluginInvokeRequest({
+    methodId: "zero-copy-input",
+    inputs: [
+      {
+        portId: "blob",
+        typeRef: {
+          schemaName: "Blob.fbs",
+          fileIdentifier: "BLOB",
+          wireFormat: "aligned-binary",
+          rootTypeName: "Blob",
+          requiredAlignment: 16,
+          byteLength: payload.length,
+        },
+        payload,
+      },
+    ],
+  });
+  const encodedResponse = encodePluginInvokeResponse({
+    statusCode: 0,
+    outputs: [
+      {
+        portId: "blob",
+        typeRef: {
+          schemaName: "Blob.fbs",
+          fileIdentifier: "BLOB",
+          wireFormat: "aligned-binary",
+          rootTypeName: "Blob",
+          requiredAlignment: 16,
+          byteLength: payload.length,
+        },
+        payload,
+      },
+    ],
+  });
+
+  const originalCreateScalarList =
+    flatbuffers.ByteBuffer.prototype.createScalarList;
+  flatbuffers.ByteBuffer.prototype.createScalarList = () => {
+    throw new Error("generated scalar-list unpacking was used");
+  };
+  try {
+    const decodedRequest = decodePluginInvokeRequest(encodedRequest);
+    const decodedResponse = decodePluginInvokeResponse(encodedResponse);
+
+    assert.equal(decodedRequest.inputs.length, 1);
+    assert.equal(decodedResponse.outputs.length, 1);
+    assert.equal(decodedRequest.payloadArena.buffer, encodedRequest.buffer);
+    assert.equal(decodedResponse.payloadArena.buffer, encodedResponse.buffer);
+    assert.equal(decodedRequest.inputs[0].payload.buffer, encodedRequest.buffer);
+    assert.equal(decodedResponse.outputs[0].payload.buffer, encodedResponse.buffer);
+    assert.deepEqual(
+      Array.from(decodedRequest.inputs[0].payload.subarray(0, 32)),
+      Array.from(payload.subarray(0, 32)),
+    );
+    assert.deepEqual(
+      Array.from(decodedResponse.outputs[0].payload.subarray(-32)),
+      Array.from(payload.subarray(-32)),
+    );
+  } finally {
+    flatbuffers.ByteBuffer.prototype.createScalarList =
+      originalCreateScalarList;
+  }
 });
 
 test("source compile exports canonical direct invoke ABI", async () => {

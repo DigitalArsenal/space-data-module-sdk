@@ -423,6 +423,11 @@ export function createBrowserModuleHarness(options?: {
     now(): number;
     timeOrigin: number;
   };
+  wasmMemory?: WebAssembly.Memory;
+  memory?: WebAssembly.Memory;
+  sharedMemory?: boolean;
+  initialMemoryBytes?: number;
+  maximumMemoryBytes?: number;
   logOutput?: boolean;
 }): Promise<BrowserModuleHarness>;
 

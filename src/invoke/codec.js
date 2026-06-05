@@ -12,6 +12,7 @@ import { InvokeSurface } from "../generated/orbpro/manifest/invoke-surface.js";
 import { BufferMutability } from "../generated/orbpro/stream/buffer-mutability.js";
 import { BufferOwnership } from "../generated/orbpro/stream/buffer-ownership.js";
 import { FlatBufferTypeRefT } from "../generated/orbpro/stream/flat-buffer-type-ref.js";
+import { PayloadWireFormat } from "../generated/orbpro/stream/payload-wire-format.js";
 import { TypedArenaBufferT } from "../generated/orbpro/stream/typed-arena-buffer.js";
 import { toUint8Array } from "../runtime/bufferLike.js";
 
@@ -82,6 +83,12 @@ function normalizePayloadWireFormat(value) {
     return "aligned-binary";
   }
   return "flatbuffer";
+}
+
+function payloadWireFormatName(value) {
+  return value === PayloadWireFormat.ALIGNED_BINARY
+    ? "aligned-binary"
+    : "flatbuffer";
 }
 
 function toFlatBufferTypeRefT(value = {}, payloadLength = 0) {
@@ -172,13 +179,61 @@ function materializeArenaFrames(frames = [], arenaBytes) {
   return frames.map((frame) => {
     const offset = normalizeUnsignedInteger(frame.offset);
     const size = normalizeUnsignedInteger(frame.size);
-    const payload = new Uint8Array(arenaBytes.slice(offset, offset + size));
+    const payload = arenaBytes.subarray(offset, offset + size);
     return {
       ...frame,
       payload,
       typeRef: frame.typeRef ?? null,
     };
   });
+}
+
+function decodeFlatBufferTypeRef(typeRef) {
+  if (!typeRef) {
+    return null;
+  }
+  return {
+    schemaName: typeRef.schemaName(),
+    fileIdentifier: typeRef.fileIdentifier(),
+    schemaHash: Array.from(typeRef.schemaHashArray() ?? []),
+    acceptsAnyFlatbuffer: typeRef.acceptsAnyFlatbuffer(),
+    wireFormat: payloadWireFormatName(typeRef.wireFormat()),
+    rootTypeName: typeRef.rootTypeName(),
+    fixedStringLength: typeRef.fixedStringLength(),
+    byteLength: typeRef.byteLength(),
+    requiredAlignment: typeRef.requiredAlignment(),
+  };
+}
+
+function decodeTypedArenaBuffer(frame) {
+  if (!frame) {
+    return null;
+  }
+  return {
+    typeRef: decodeFlatBufferTypeRef(frame.typeRef()),
+    portId: frame.portId(),
+    alignment: frame.alignment(),
+    offset: frame.offset(),
+    size: frame.size(),
+    ownership: frame.ownership(),
+    generation: frame.generation(),
+    mutability: frame.mutability(),
+    traceId: frame.traceId(),
+    streamId: frame.streamId(),
+    sequence: frame.sequence(),
+    endOfStream: frame.endOfStream(),
+  };
+}
+
+function decodeArenaFrames(length, accessor) {
+  const frames = [];
+  for (let index = 0; index < length; index++) {
+    const frame = decodeTypedArenaBuffer(accessor(index));
+    if (frame) {
+      frames.push(frame);
+    }
+  }
+  return frames;
 }
 
 function encodeRoot(builderFactory, finish, value) {
@@ -193,7 +248,7 @@ export function encodePluginInvokeRequest(request = {}) {
   );
   return encodeRoot(
     (value) =>
-      new PluginInvokeRequestT(value.methodId ?? null, frames, Array.from(arena)),
+      new PluginInvokeRequestT(value.methodId ?? null, frames, arena),
     PluginInvokeRequest.finishPluginInvokeRequestBuffer,
     request,
   );
@@ -204,11 +259,14 @@ export function decodePluginInvokeRequest(data) {
   if (!PluginInvokeRequest.bufferHasIdentifier(bb)) {
     throw new Error("Plugin invoke request buffer identifier mismatch.");
   }
-  const unpacked = PluginInvokeRequest.getRootAsPluginInvokeRequest(bb).unpack();
-  const arena = Uint8Array.from(unpacked.payloadArena ?? []);
-  const inputs = materializeArenaFrames(unpacked.inputFrames ?? [], arena);
+  const root = PluginInvokeRequest.getRootAsPluginInvokeRequest(bb);
+  const arena = root.payloadArenaArray() ?? new Uint8Array();
+  const inputFrames = decodeArenaFrames(root.inputFramesLength(), (index) =>
+    root.inputFrames(index),
+  );
+  const inputs = materializeArenaFrames(inputFrames, arena);
   return {
-    methodId: unpacked.methodId ?? null,
+    methodId: root.methodId() ?? null,
     inputFrames: inputs,
     inputs,
     payloadArena: arena,
@@ -226,7 +284,7 @@ export function encodePluginInvokeResponse(response = {}) {
         value.yielded === true,
         normalizeUnsignedInteger(value.backlogRemaining),
         frames,
-        Array.from(arena),
+        arena,
         value.errorCode ?? null,
         value.errorMessage ?? null,
       ),
@@ -240,18 +298,21 @@ export function decodePluginInvokeResponse(data) {
   if (!PluginInvokeResponse.bufferHasIdentifier(bb)) {
     throw new Error("Plugin invoke response buffer identifier mismatch.");
   }
-  const unpacked = PluginInvokeResponse.getRootAsPluginInvokeResponse(bb).unpack();
-  const arena = Uint8Array.from(unpacked.payloadArena ?? []);
-  const outputs = materializeArenaFrames(unpacked.outputFrames ?? [], arena);
+  const root = PluginInvokeResponse.getRootAsPluginInvokeResponse(bb);
+  const arena = root.payloadArenaArray() ?? new Uint8Array();
+  const outputFrames = decodeArenaFrames(root.outputFramesLength(), (index) =>
+    root.outputFrames(index),
+  );
+  const outputs = materializeArenaFrames(outputFrames, arena);
   return {
-    statusCode: unpacked.statusCode ?? 0,
-    yielded: unpacked.yielded === true,
-    backlogRemaining: unpacked.backlogRemaining ?? 0,
+    statusCode: root.statusCode() ?? 0,
+    yielded: root.yielded() === true,
+    backlogRemaining: root.backlogRemaining() ?? 0,
     outputFrames: outputs,
     outputs,
     payloadArena: arena,
-    errorCode: unpacked.errorCode ?? null,
-    errorMessage: unpacked.errorMessage ?? null,
+    errorCode: root.errorCode() ?? null,
+    errorMessage: root.errorMessage() ?? null,
   };
 }
 
