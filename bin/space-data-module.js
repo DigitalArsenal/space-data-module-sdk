@@ -16,6 +16,10 @@ import {
   validateManifestWithStandards,
 } from "../src/compliance/index.js";
 import { bytesToBase64 } from "../src/utils/encoding.js";
+import {
+  signModuleArtifact,
+  verifyModuleArtifact,
+} from "../src/bundle/signing.js";
 
 async function main(argv) {
   const [command, ...rest] = argv;
@@ -26,6 +30,10 @@ async function main(argv) {
       return runCompile(rest);
     case "protect":
       return runProtect(rest);
+    case "sign":
+      return runSign(rest);
+    case "verify":
+      return runVerify(rest);
     case "help":
     case "--help":
     case "-h":
@@ -84,6 +92,15 @@ function parseArgs(argv) {
       case "--mnemonic":
         options.mnemonic = requireValue(argv, ++index, value);
         break;
+      case "--key":
+        options.keyPath = path.resolve(requireValue(argv, ++index, value));
+        break;
+      case "--trusted":
+        options.trustedKeys = requireValue(argv, ++index, value);
+        break;
+      case "--require-signature":
+        options.requireSignature = true;
+        break;
       default:
         throw new Error(`Unknown argument: ${value}`);
     }
@@ -108,6 +125,9 @@ function printUsage() {
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --recipient-public-key <hex> --out ./dist/module.wasm.enc
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --single-file-bundle --out ./dist/module.bundle.wasm
+  space-data-module sign --wasm ./dist/module.wasm --key ./test/support/dev-module-signing-keypair.json [--out ./dist/module.signed.wasm]
+  space-data-module verify --wasm ./dist/module.wasm --trusted <pubKeyHex[,pubKeyHex...]> [--require-signature]
+  space-data-module verify --wasm ./dist/module.wasm --key ./test/support/dev-module-signing-keypair.json
 `);
 }
 
@@ -246,6 +266,70 @@ async function runProtect(argv) {
     }
   }
   return 0;
+}
+
+async function runSign(argv) {
+  const options = parseArgs(argv);
+  if (!options.wasmPath || !options.keyPath) {
+    throw new Error("sign requires --wasm and --key <keypair.json>.");
+  }
+  const keypair = JSON.parse(await readFile(options.keyPath, "utf8"));
+  if (!keypair.privateKeySeedHex) {
+    throw new Error("key file must contain privateKeySeedHex.");
+  }
+  const wasmBytes = new Uint8Array(await readFile(options.wasmPath));
+  const result = await signModuleArtifact(wasmBytes, {
+    privateKeySeedHex: keypair.privateKeySeedHex,
+    keyId: keypair.keyId ?? null,
+  });
+  const outputPath = options.outputPath ?? options.wasmPath;
+  await writeFile(outputPath, result.wasmBytes);
+  if (options.json) {
+    console.log(
+      JSON.stringify(
+        {
+          outputPath,
+          keyId: result.signature.keyId,
+          publicKeyHex: result.signature.publicKeyHex,
+          canonicalModuleHashHex: result.canonicalModuleHashHex,
+        },
+        null,
+        2,
+      ),
+    );
+  } else {
+    console.log(`signed=${outputPath}`);
+    console.log(`keyId=${result.signature.keyId}`);
+    console.log(`publicKeyHex=${result.signature.publicKeyHex}`);
+    console.log(`canonicalModuleHashHex=${result.canonicalModuleHashHex}`);
+  }
+  return 0;
+}
+
+async function runVerify(argv) {
+  const options = parseArgs(argv);
+  if (!options.wasmPath) {
+    throw new Error("verify requires --wasm.");
+  }
+  let trustedPublicKeys = options.trustedKeys;
+  if (!trustedPublicKeys && options.keyPath) {
+    const keypair = JSON.parse(await readFile(options.keyPath, "utf8"));
+    trustedPublicKeys = keypair.publicKeyHex;
+  }
+  const wasmBytes = new Uint8Array(await readFile(options.wasmPath));
+  const result = await verifyModuleArtifact(wasmBytes, {
+    trustedPublicKeys,
+    requireSignature: options.requireSignature ?? true,
+  });
+  if (options.json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    console.log(`verified=${result.verified}`);
+    console.log(`signed=${result.signed}`);
+    if (result.keyId) console.log(`keyId=${result.keyId}`);
+    if (result.publicKeyHex) console.log(`publicKeyHex=${result.publicKeyHex}`);
+  }
+  return result.verified ? 0 : 1;
 }
 
 main(process.argv.slice(2))

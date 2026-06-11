@@ -1,0 +1,7 @@
+{
+  "comment": "DEVELOPMENT/TEST module signing keypair. Tracked in-repo on purpose for test fixtures and local dev signing. NEVER use in production; production signers come from operator HD wallets.",
+  "algorithm": "ed25519",
+  "keyId": "sdm-dev-test-2026",
+  "privateKeySeedHex": "70e865e8af4d3c9a1c1f4d93468871109384f28ed53af82cf627011a4499427c",
+  "publicKeyHex": "cf4625795484d8efe18860141cfdeaaaed7bbee9209488405b6ddeac7543fe78"
+}

@@ -14,6 +14,10 @@ import {
   detectArtifactProfile,
 } from "../testing/browserModuleHarness.js";
 import { createAsyncHostDispatcher } from "./abi.js";
+import {
+  resolveModuleSignaturePolicy,
+  verifyModuleArtifact,
+} from "../bundle/signing.js";
 
 const isBrowser =
   typeof globalThis.window !== "undefined" &&
@@ -164,6 +168,7 @@ async function createWasmEdgeCommandHarness(options = {}) {
  * @returns {Promise<Object>} Harness with invoke(), readManifest(), destroy().
  */
 export async function loadModule(options = {}) {
+  const signaturePolicy = resolveModuleSignaturePolicy(options);
   if (isBrowser) {
     return createBrowserModuleHarness(options);
   }
@@ -174,6 +179,11 @@ export async function loadModule(options = {}) {
     throw new TypeError(
       "Server-side isomorphic loader expects a file path string for wasmSource.",
     );
+  }
+
+  if (signaturePolicy) {
+    const { readFile } = await import("node:fs/promises");
+    await verifyModuleArtifact(await readFile(source), signaturePolicy);
   }
 
   const runtimeKind = options.runtimeKind ?? "wasmedge";

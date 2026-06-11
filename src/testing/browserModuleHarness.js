@@ -29,6 +29,11 @@ import {
   encodePluginInvokeRequest,
   decodePluginInvokeResponse,
 } from "../invoke/codec.js";
+import {
+  ModuleSignatureError,
+  resolveModuleSignaturePolicy,
+  verifyModuleArtifact,
+} from "../bundle/signing.js";
 
 const STANDALONE_SHARED_MEMORY_ENV_STUBS = Object.freeze({
   pthread_mutex_lock: () => 0,
@@ -259,7 +264,36 @@ async function instantiateBrowserModule(options = {}) {
  * @param {number} [options.maximumMemoryBytes] - Maximum imported memory size.
  */
 export async function createBrowserModuleHarness(options = {}) {
-  const wasmModule = await compileWasmModule(options.wasmSource);
+  let wasmSource = options.wasmSource;
+  const signaturePolicy = resolveModuleSignaturePolicy(options);
+  if (signaturePolicy) {
+    if (wasmSource instanceof WebAssembly.Module) {
+      throw new ModuleSignatureError(
+        "unverifiable_source",
+        "Cannot verify a precompiled WebAssembly.Module; pass bytes, a URL, or a Response when signature verification is enabled.",
+      );
+    }
+    let artifactBytes;
+    if (wasmSource instanceof Response) {
+      artifactBytes = new Uint8Array(await wasmSource.arrayBuffer());
+    } else if (typeof wasmSource === "string") {
+      const response = await fetch(wasmSource);
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch module artifact for verification: ${response.status}`,
+        );
+      }
+      artifactBytes = new Uint8Array(await response.arrayBuffer());
+    } else {
+      artifactBytes =
+        wasmSource instanceof ArrayBuffer
+          ? new Uint8Array(wasmSource)
+          : new Uint8Array(wasmSource);
+    }
+    await verifyModuleArtifact(artifactBytes, signaturePolicy);
+    wasmSource = artifactBytes;
+  }
+  const wasmModule = await compileWasmModule(wasmSource);
   const moduleImports = WebAssembly.Module.imports(wasmModule);
   const needsHostBridge = moduleImports.some(
     (entry) => entry.module === DEFAULT_HOSTCALL_IMPORT_MODULE,
