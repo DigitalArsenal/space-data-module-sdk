@@ -510,7 +510,7 @@ synchronous hostcall bridge under the import module `space_data_module_host`.
 
 The current sync import surface is:
 
-- `call_json(operation_ptr, operation_len, payload_ptr, payload_len) -> i32`
+- `call(request_ptr, request_len) -> i32`
 - `response_len() -> i32`
 - `read_response(dst_ptr, dst_len) -> i32`
 - `last_status_code() -> i32`
