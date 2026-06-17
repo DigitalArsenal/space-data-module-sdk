@@ -486,9 +486,19 @@ static bool InputTypeMatches(const AcceptedTypeRef &accepted, const InputFrameOw
       frame.view.wire_format != static_cast<uint32_t>(kPayloadWireFormatFlatbuffer)) {
     return false;
   }
-  return CStringMatchesIfPresent(accepted.schema_name, frame.schema_name) &&
-    CStringMatchesIfPresent(accepted.file_identifier, frame.file_identifier) &&
-    CStringMatchesIfPresent(accepted.root_type_name, frame.root_type_name);
+  const bool schema_matches = CStringMatchesIfPresent(accepted.schema_name, frame.schema_name);
+  const bool file_identifier_matches =
+    CStringMatchesIfPresent(accepted.file_identifier, frame.file_identifier);
+  if (!schema_matches || !file_identifier_matches) {
+    return false;
+  }
+  if (CStringEmpty(accepted.root_type_name)) {
+    return true;
+  }
+  if (!frame.root_type_name.empty()) {
+    return frame.root_type_name == accepted.root_type_name;
+  }
+  return !CStringEmpty(accepted.schema_name) || !CStringEmpty(accepted.file_identifier);
 }
 
 static bool InputTypeAllowed(const PortRequirement &port, const InputFrameOwned &frame) {

@@ -734,6 +734,58 @@ test("direct invoke ABI routes multi-port frames and round-trips payload bytes",
   }
 });
 
+test("direct invoke ABI accepts PIV frames with omitted root type when schema identity matches", async () => {
+  const manifest = {
+    ...createInvokeManifest({
+      pluginId: "com.digitalarsenal.examples.invoke-root-type-optional",
+      invokeSurfaces: ["direct"],
+      methodId: "fanout",
+      inputPortIds: ["alpha"],
+      outputPortIds: ["alpha"],
+    }),
+  };
+  manifest.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
+    {
+      schemaName: "PluginManifest.fbs",
+      fileIdentifier: "PMAN",
+      rootTypeName: "PluginManifest",
+    },
+  ];
+
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: FANOUT_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    const payload = createPayload("root-type-optional");
+    const { response } = invokeDirect(
+      instance,
+      encodePluginInvokeRequest({
+        methodId: "fanout",
+        inputs: [
+          {
+            portId: "alpha",
+            typeRef: {
+              schemaName: "PluginManifest.fbs",
+              fileIdentifier: "PMAN",
+            },
+            payload,
+          },
+        ],
+      }),
+    );
+
+    assert.equal(response.statusCode, 0);
+    assert.equal(response.outputs.length, 1);
+    assert.deepEqual(Array.from(response.outputs[0].payload), Array.from(payload));
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
 test("direct invoke ABI preserves SDS PIV/TAB aligned layout metadata", async () => {
   const manifest = createInvokeManifest({
     pluginId: "com.digitalarsenal.examples.invoke-aligned-metadata",
