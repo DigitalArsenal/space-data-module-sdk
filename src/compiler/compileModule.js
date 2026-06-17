@@ -66,6 +66,9 @@ import { getWasmWallet } from "../utils/wasmCrypto.js";
 
 const C_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const execFileAsync = promisify(execFile);
+const EMSCRIPTEN_MEMORY_GROWTH_NOTIFY_SHIM = `
+extern "C" __attribute__((weak)) void emscripten_notify_memory_growth(int) {}
+`;
 
 export const ModuleThreadModel = Object.freeze({
   SINGLE_THREAD: "single-thread",
@@ -103,6 +106,9 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
   }
   if (options.allowUndefinedImports === true) {
     extraArgs.push("-s", "ERROR_ON_UNDEFINED_SYMBOLS=0", "-Wl,--allow-undefined");
+  }
+  if (options.threadModel !== ModuleThreadModel.EMSCRIPTEN_PTHREADS) {
+    extraArgs.push("-s", "ALLOW_MEMORY_GROWTH=1");
   }
   const args = [
     "-O2",
@@ -750,10 +756,12 @@ export async function compileModuleFromSource(options = {}) {
     manifest: embeddedManifest,
   });
   const invokeHeaderSource = generateInvokeSupportHeader();
-  const invokeSource = generateInvokeSupportSource({
-    manifest,
-    includeCommandMain,
-  });
+  const invokeSource =
+    EMSCRIPTEN_MEMORY_GROWTH_NOTIFY_SHIM +
+    generateInvokeSupportSource({
+      manifest,
+      includeCommandMain,
+    });
 
   const exportedSymbols = [
     "plugin_get_manifest_flatbuffer",

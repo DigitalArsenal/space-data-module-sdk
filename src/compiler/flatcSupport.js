@@ -1,12 +1,9 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 
 import { FlatcRunner } from "flatc-wasm";
 
-const SDK_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SCHEMA_DIR = path.join(SDK_ROOT, "schemas");
 const require = createRequire(import.meta.url);
 const SDS_ROOT = path.dirname(require.resolve("spacedatastandards.org/package.json"));
 const SDS_SCHEMA_DIR = path.join(SDS_ROOT, "schema");
@@ -20,21 +17,6 @@ function loadFlatcRunner() {
     flatcRunnerPromise = FlatcRunner.init();
   }
   return flatcRunnerPromise;
-}
-
-async function loadInvokeSchemaFiles() {
-  const filenames = [
-    "TypedArenaBuffer.fbs",
-    "PluginInvokeRequest.fbs",
-    "PluginInvokeResponse.fbs",
-  ];
-  const entries = await Promise.all(
-    filenames.map(async (filename) => [
-      `/schemas/${filename}`,
-      await readFile(path.join(SCHEMA_DIR, filename), "utf8"),
-    ]),
-  );
-  return Object.fromEntries(entries);
 }
 
 async function loadSdsInvokeSchemaFiles() {
@@ -68,18 +50,7 @@ export async function getInvokeCppSchemaHeaders() {
   if (!invokeCppSchemaHeadersPromise) {
     invokeCppSchemaHeadersPromise = (async () => {
       const flatc = await loadFlatcRunner();
-      const schemaFiles = await loadInvokeSchemaFiles();
       const generatedHeaders = {};
-      for (const entry of Object.keys(schemaFiles)) {
-        Object.assign(
-          generatedHeaders,
-          flatc.generateCode(
-            { entry, files: schemaFiles },
-            "cpp",
-            { genObjectApi: true },
-          ),
-        );
-      }
       const sdsSchemaFiles = await loadSdsInvokeSchemaFiles();
       const tabHeaders = flatc.generateCode(
         { entry: "/sds/TAB/main.fbs", files: sdsSchemaFiles },

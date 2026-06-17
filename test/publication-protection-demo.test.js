@@ -41,10 +41,14 @@ test("publication protection demo summary uses standards-backed REC, PNM, and EN
   assert.equal(summary.encryptedDelivery.enc.context, "space-data-module-sdk/package");
   assert.equal(summary.encryptedDelivery.enc.rootType, "WASM");
   assert.equal(summary.encryptedDelivery.enc.keyExchange, "X25519");
-  assert.equal(summary.encryptedDelivery.enc.symmetric, "AES_256_CTR");
+  assert.equal(summary.encryptedDelivery.enc.symmetric, "AES_256_GCM");
   assert.equal(summary.encryptedDelivery.enc.keyDerivation, "HKDF_SHA256");
   assert.equal(summary.encryptedDelivery.enc.nonceLength, 12);
   assert.ok(summary.encryptedDelivery.enc.ephemeralPublicKeyLength >= 32);
+  assert.equal(
+    summary.encryptedDelivery.envelope.scheme,
+    "x25519-hkdf-aes-256-gcm-rec",
+  );
   assert.ok(summary.encryptedDelivery.envelope.hasEncRecord);
   assert.ok(summary.encryptedDelivery.envelope.hasPnmRecord);
 });

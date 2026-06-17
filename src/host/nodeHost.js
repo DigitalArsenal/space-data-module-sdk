@@ -146,11 +146,15 @@ function assertNonNegativeInteger(value, label) {
 }
 
 function normalizeGrantedCapabilities(options) {
+  // Default-deny: a NodeHost constructed without an explicit grant exposes no
+  // capabilities. Every capability must be granted via grantedCapabilities,
+  // capabilities, or manifest.capabilities; requests then fail closed through
+  // assertCapability().
   const source =
     options.grantedCapabilities ??
     options.capabilities ??
     options.manifest?.capabilities ??
-    NodeHostSupportedCapabilities;
+    [];
   if (!Array.isArray(source)) {
     throw new TypeError(
       "Node host capabilities must be an array when provided.",

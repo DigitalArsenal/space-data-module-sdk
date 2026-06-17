@@ -11,7 +11,7 @@ Use three layers, not one:
 1. Transport stream:
    little-endian `u32` size prefix + one FlatBuffer payload per frame
 2. Module invoke ABI:
-   `PluginInvokeRequest` / `PluginInvokeResponse` with `TypedArenaBuffer`
+   SDS `$PIV` request/response envelopes with `TAB` frame descriptors
 3. Durable storage identity:
    host-owned append-only row handles and host-owned runtime regions
 
@@ -40,7 +40,7 @@ right shape for:
 - local file replay
 - browser worker or server-side stream processing
 
-It is not the same thing as `PluginInvokeRequest`.
+It is not the same thing as a SDS `$PIV` invoke envelope.
 
 ## Canonical Durable Storage
 
@@ -76,9 +76,9 @@ The stable storage ABI lives in [`schemas/HostStorageAbi.fbs`](../schemas/HostSt
 
 When streamed payloads must cross into a module, use the invoke ABI:
 
-- `PluginInvokeRequest`
-- `PluginInvokeResponse`
-- `TypedArenaBuffer`
+- SDS `$PIV` `REQUEST`
+- SDS `$PIV` `RESPONSE`
+- SDS `TAB` frame descriptors
 
 Each input frame should preserve:
 
@@ -98,7 +98,7 @@ buffer-oriented:
 - the full request is materialized before `plugin_invoke_stream(...)`
 - the full response is materialized before it is returned
 
-So a single 1 GiB `PluginInvokeRequest` is not the intended path.
+So a single 1 GiB SDS `$PIV` invoke request is not the intended path.
 
 ## FlatSQL-Specific Rules
 
@@ -170,7 +170,7 @@ That helper:
 
 - accepts the same outer size-prefixed FlatBuffer stream chunks
 - decodes frames incrementally
-- emits small `PluginInvokeRequest` batches into a live module instance
+- emits small SDS `$PIV` request batches into a live module instance
 - preserves `streamId`, `sequence`, and final `endOfStream`
 - never routes payloads through JSON
 

@@ -14,12 +14,12 @@ import { FlatBufferTypeRefT } from "spacedatastandards.org/lib/js/PIV/FlatBuffer
 import { bufferMutability as SdsBufferMutability } from "spacedatastandards.org/lib/js/PIV/bufferMutability.js";
 import { bufferOwnership as SdsBufferOwnership } from "spacedatastandards.org/lib/js/PIV/bufferOwnership.js";
 
+import * as sdk from "../src/index.js";
 import {
   cleanupCompilation,
   compileModuleFromSource,
   decodePluginInvokeRequest,
   decodePluginInvokeResponse,
-  encodeLegacyPluginInvokeRequest,
   encodePluginInvokeRequest,
   encodePluginInvokeResponse,
   encodePluginManifest,
@@ -85,6 +85,14 @@ function createPayload(label) {
 function hasPivIdentifier(bytes) {
   return PIV.bufferHasIdentifier(new flatbuffers.ByteBuffer(bytes));
 }
+
+test("public invoke API exposes only SDS PIV envelopes", () => {
+  assert.equal(typeof sdk.encodePluginInvokeRequest, "function");
+  assert.equal(typeof sdk.decodePluginInvokeRequest, "function");
+  assert.equal(typeof sdk.encodeLegacyPluginInvokeRequest, "undefined");
+  assert.equal(typeof sdk.decodeLegacyPluginInvokeRequest, "undefined");
+  assert.equal(typeof sdk.LegacyPluginInvokeRequest, "undefined");
+});
 
 function getPivRequest(bytes) {
   const bb = new flatbuffers.ByteBuffer(bytes);
@@ -577,6 +585,75 @@ test("plugin invoke envelopes round-trip large payload arenas without stack over
   );
 });
 
+test("plugin invoke codecs decode payload arenas without generated scalar-list unpacking", () => {
+  const payload = Uint8Array.from(
+    { length: 256000 },
+    (_, index) => (index * 17) & 0xff,
+  );
+  const encodedRequest = encodePluginInvokeRequest({
+    methodId: "zero-copy-input",
+    inputs: [
+      {
+        portId: "blob",
+        typeRef: {
+          schemaName: "Blob.fbs",
+          fileIdentifier: "BLOB",
+          wireFormat: "aligned-binary",
+          rootTypeName: "Blob",
+          requiredAlignment: 16,
+          byteLength: payload.length,
+        },
+        payload,
+      },
+    ],
+  });
+  const encodedResponse = encodePluginInvokeResponse({
+    statusCode: 0,
+    outputs: [
+      {
+        portId: "blob",
+        typeRef: {
+          schemaName: "Blob.fbs",
+          fileIdentifier: "BLOB",
+          wireFormat: "aligned-binary",
+          rootTypeName: "Blob",
+          requiredAlignment: 16,
+          byteLength: payload.length,
+        },
+        payload,
+      },
+    ],
+  });
+
+  const originalCreateScalarList =
+    flatbuffers.ByteBuffer.prototype.createScalarList;
+  flatbuffers.ByteBuffer.prototype.createScalarList = () => {
+    throw new Error("generated scalar-list unpacking was used");
+  };
+  try {
+    const decodedRequest = decodePluginInvokeRequest(encodedRequest);
+    const decodedResponse = decodePluginInvokeResponse(encodedResponse);
+
+    assert.equal(decodedRequest.inputs.length, 1);
+    assert.equal(decodedResponse.outputs.length, 1);
+    assert.equal(decodedRequest.payloadArena.buffer, encodedRequest.buffer);
+    assert.equal(decodedResponse.payloadArena.buffer, encodedResponse.buffer);
+    assert.equal(decodedRequest.inputs[0].payload.buffer, encodedRequest.buffer);
+    assert.equal(decodedResponse.outputs[0].payload.buffer, encodedResponse.buffer);
+    assert.deepEqual(
+      Array.from(decodedRequest.inputs[0].payload.subarray(0, 32)),
+      Array.from(payload.subarray(0, 32)),
+    );
+    assert.deepEqual(
+      Array.from(decodedResponse.outputs[0].payload.subarray(-32)),
+      Array.from(payload.subarray(-32)),
+    );
+  } finally {
+    flatbuffers.ByteBuffer.prototype.createScalarList =
+      originalCreateScalarList;
+  }
+});
+
 test("source compile exports canonical direct invoke ABI", async () => {
   const manifest = createInvokeManifest({ invokeSurfaces: ["direct"] });
   const compilation = await compileModuleFromSource({
@@ -652,23 +729,6 @@ test("direct invoke ABI routes multi-port frames and round-trips payload bytes",
     assert.deepEqual(Array.from(response.outputs[0].payload), Array.from(payloadAlpha));
     assert.deepEqual(Array.from(response.outputs[1].payload), Array.from(payloadBeta));
 
-    const legacyRequestBytes = encodeLegacyPluginInvokeRequest({
-      methodId: "fanout",
-      inputs: [
-        {
-          portId: "alpha",
-          typeRef: {
-            schemaName: "PluginManifest.fbs",
-            fileIdentifier: "PMAN",
-          },
-          payload: payloadAlpha,
-        },
-      ],
-    });
-    const legacyResult = invokeDirect(instance, legacyRequestBytes);
-    assert.equal(hasPivIdentifier(legacyResult.responseBytes), true);
-    assert.equal(legacyResult.response.statusCode, 400);
-    assert.equal(legacyResult.response.errorCode, "missing-required-input");
   } finally {
     await cleanupCompilation(compilation);
   }

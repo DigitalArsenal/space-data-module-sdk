@@ -116,12 +116,23 @@ published and which signer attested to it.
 
 `ENC` carries the decryption parameters for a transport-protected module:
 
-- key exchange algorithm
-- symmetric algorithm
-- key-derivation function
+- key exchange algorithm (`X25519`)
+- symmetric algorithm (`AES_256_GCM`; wire enum value `1`)
+- key-derivation function (`HKDF_SHA256`)
 - ephemeral public key
-- nonce start
-- optional context and root type
+- nonce start (the 12-byte AES-GCM IV)
+- optional context, schema hash, recipient key id, and root type
+
+Encrypted delivery is authenticated:
+
+- The protected payload bytes are laid out as `ciphertext || 16-byte GCM tag`
+  (the `ENC` schema has no dedicated tag field).
+- The encoded `ENC` FlatBuffer record itself is the GCM additional
+  authenticated data (AAD), so the context, schema hash, root type, recipient
+  key id, nonce, and ephemeral key are all bound to the ciphertext. Tampering
+  with either the payload or the `ENC` record MUST cause decryption to fail.
+- Records labelled `AES_256_CTR` are rejected; the SDK neither produces nor
+  decrypts unauthenticated CTR payloads.
 
 It describes how to decrypt the protected delivery payload. It does not imply a
 different module file format after decryption.

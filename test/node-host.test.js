@@ -397,6 +397,39 @@ async function withTlsServer(connectionHandler, callback) {
   }
 }
 
+test("node host denies every capability when no grant is provided", async () => {
+  const host = createNodeHost();
+
+  assert.deepEqual(host.listCapabilities(), []);
+  for (const capability of ["clock", "random", "filesystem", "http"]) {
+    assert.equal(host.hasCapability(capability), false);
+  }
+
+  assert.throws(
+    () => host.clock.now(),
+    (error) =>
+      error instanceof HostCapabilityError &&
+      error.code === "host-capability-denied" &&
+      error.capability === "clock",
+  );
+
+  await assert.rejects(
+    () => host.filesystem.readFile("anything.txt"),
+    (error) =>
+      error instanceof HostCapabilityError &&
+      error.code === "host-capability-denied" &&
+      error.capability === "filesystem",
+  );
+
+  await assert.rejects(
+    () => host.http.request({ url: "http://example.com" }),
+    (error) =>
+      error instanceof HostCapabilityError &&
+      error.code === "host-capability-denied" &&
+      error.capability === "http",
+  );
+});
+
 test("node host enforces granted capabilities", async () => {
   const host = createNodeHost({
     capabilities: ["clock"],

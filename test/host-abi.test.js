@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { WASI } from "node:wasi";
 
+import { decodeHostcallValueEnvelope } from "../src/host/hostcallWire.js";
 import {
   cleanupCompilation,
   compileModuleFromSource,
@@ -13,8 +14,10 @@ import {
 } from "../src/index.js";
 
 const ABI_GUEST_SOURCE = `
-__attribute__((import_module("space_data_module_host"), import_name("call_json")))
-extern int space_data_module_host_call_json(const char *operation_ptr, int operation_len, const char *payload_ptr, int payload_len);
+#include <string.h>
+
+__attribute__((import_module("space_data_module_host"), import_name("call")))
+extern int space_data_module_host_call(const char *operation_ptr, int operation_len, const char *payload_ptr, int payload_len);
 
 __attribute__((import_module("space_data_module_host"), import_name("response_len")))
 extern int space_data_module_host_response_len(void);
@@ -31,68 +34,67 @@ static const char RANDOM_BYTES_JSON[] = "{\\"length\\":16}";
 static const char SCHEDULE_MATCHES_JSON[] = "{\\"expression\\":\\"*/15 9-17 * * MON-FRI\\",\\"date\\":\\"2026-03-16T09:15:00\\"}";
 static const char FILESYSTEM_JSON[] = "{\\"path\\":\\"demo.txt\\"}";
 
-static char response_buffer[2048];
+static char request_buffer[512];
+static char response_buffer[4096];
 static int response_length = 0;
+
+static void write_u32_le(char *dst, unsigned int value) {
+  dst[0] = (char)(value & 0xffu);
+  dst[1] = (char)((value >> 8) & 0xffu);
+  dst[2] = (char)((value >> 16) & 0xffu);
+  dst[3] = (char)((value >> 24) & 0xffu);
+}
+
+/* Binary hostcall envelope: [u32 metaLen][meta JSON][u32 segmentCount = 0]. */
+static int build_request_envelope(const char *meta_json, int meta_len) {
+  write_u32_le(request_buffer, (unsigned int)meta_len);
+  memcpy(request_buffer + 4, meta_json, (unsigned int)meta_len);
+  write_u32_le(request_buffer + 4 + meta_len, 0u);
+  return 4 + meta_len + 4;
+}
 
 static int copy_last_response(void) {
   int len = space_data_module_host_response_len();
   if (len < 0) {
     return len;
   }
-  if (len > (int)(sizeof(response_buffer) - 1)) {
-    len = (int)(sizeof(response_buffer) - 1);
+  if (len > (int)sizeof(response_buffer)) {
+    len = (int)sizeof(response_buffer);
   }
   int copied = space_data_module_host_read_response(response_buffer, len);
   if (copied < 0) {
     return copied;
   }
-  response_buffer[copied] = '\\0';
   response_length = copied;
   return copied;
 }
 
-int guest_call_clock_now(void) {
-  int status = space_data_module_host_call_json(
-    OP_CLOCK_NOW,
-    (int)(sizeof(OP_CLOCK_NOW) - 1),
-    EMPTY_JSON,
-    (int)(sizeof(EMPTY_JSON) - 1)
+static int call_with_meta(const char *operation, int operation_len, const char *meta_json, int meta_len) {
+  const int envelope_len = build_request_envelope(meta_json, meta_len);
+  int status = space_data_module_host_call(
+    operation,
+    operation_len,
+    request_buffer,
+    envelope_len
   );
   copy_last_response();
   return status;
+}
+
+int guest_call_clock_now(void) {
+  return call_with_meta(OP_CLOCK_NOW, (int)(sizeof(OP_CLOCK_NOW) - 1), EMPTY_JSON, (int)(sizeof(EMPTY_JSON) - 1));
 }
 
 int guest_call_schedule_matches(void) {
-  int status = space_data_module_host_call_json(
-    OP_SCHEDULE_MATCHES,
-    (int)(sizeof(OP_SCHEDULE_MATCHES) - 1),
-    SCHEDULE_MATCHES_JSON,
-    (int)(sizeof(SCHEDULE_MATCHES_JSON) - 1)
-  );
-  copy_last_response();
-  return status;
+  return call_with_meta(OP_SCHEDULE_MATCHES, (int)(sizeof(OP_SCHEDULE_MATCHES) - 1), SCHEDULE_MATCHES_JSON, (int)(sizeof(SCHEDULE_MATCHES_JSON) - 1));
 }
 
 int guest_call_random_bytes(void) {
-  int status = space_data_module_host_call_json(
-    OP_RANDOM_BYTES,
-    (int)(sizeof(OP_RANDOM_BYTES) - 1),
-    RANDOM_BYTES_JSON,
-    (int)(sizeof(RANDOM_BYTES_JSON) - 1)
-  );
-  copy_last_response();
-  return status;
+  return call_with_meta(OP_RANDOM_BYTES, (int)(sizeof(OP_RANDOM_BYTES) - 1), RANDOM_BYTES_JSON, (int)(sizeof(RANDOM_BYTES_JSON) - 1));
 }
 
 int guest_call_denied_filesystem(void) {
-  int status = space_data_module_host_call_json(
-    OP_FILESYSTEM_RESOLVE,
-    (int)(sizeof(OP_FILESYSTEM_RESOLVE) - 1),
-    FILESYSTEM_JSON,
-    (int)(sizeof(FILESYSTEM_JSON) - 1)
-  );
-  copy_last_response();
-  return status;
+  return call_with_meta(OP_FILESYSTEM_RESOLVE, (int)(sizeof(OP_FILESYSTEM_RESOLVE) - 1), FILESYSTEM_JSON, (int)(sizeof(FILESYSTEM_JSON) - 1));
 }
 
 int guest_response_ptr(void) {
@@ -165,8 +167,8 @@ function decodeGuestResponse(instance) {
   const memory = instance.exports.memory;
   const responsePtr = instance.exports.guest_response_ptr();
   const responseLen = instance.exports.guest_response_len();
-  const bytes = new Uint8Array(memory.buffer, responsePtr, responseLen);
-  return JSON.parse(new TextDecoder().decode(bytes));
+  const bytes = new Uint8Array(memory.buffer, responsePtr, responseLen).slice();
+  return decodeHostcallValueEnvelope(bytes);
 }
 
 test("sync hostcall ABI bridges a wasm guest into the reference Node host", async () => {
@@ -212,11 +214,8 @@ test("sync hostcall ABI bridges a wasm guest into the reference Node host", asyn
     assert.equal(instance.exports.guest_call_random_bytes(), 0);
     const randomEnvelope = decodeGuestResponse(instance);
     assert.equal(randomEnvelope.ok, true);
-    assert.equal(randomEnvelope.result.__type, "bytes");
-    assert.equal(
-      Buffer.from(randomEnvelope.result.base64, "base64").length,
-      16,
-    );
+    assert.ok(randomEnvelope.result instanceof Uint8Array);
+    assert.equal(randomEnvelope.result.length, 16);
 
     assert.equal(instance.exports.guest_call_schedule_matches(), 0);
     const scheduleEnvelope = decodeGuestResponse(instance);
@@ -230,7 +229,7 @@ test("sync hostcall ABI bridges a wasm guest into the reference Node host", asyn
     assert.equal(deniedEnvelope.error.capability, "filesystem");
 
     assert.deepEqual(
-      bridge.getLastResponseJson(),
+      bridge.getLastResponseEnvelope(),
       deniedEnvelope,
     );
   } finally {

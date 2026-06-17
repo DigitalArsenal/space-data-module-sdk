@@ -2,7 +2,7 @@
  * Browser host adapter for the SDN host contract.
  *
  * Mirrors the NodeHost public interface using browser-native Web APIs.
- * Plugs into createJsonHostcallBridge() exactly like NodeHost does.
+ * Plugs into createHostcallBridge() exactly like NodeHost does.
  */
 
 import { RuntimeTarget } from "../runtime/constants.js";

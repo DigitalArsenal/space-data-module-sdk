@@ -475,6 +475,35 @@ test("source compile emits a compliant wasm module", async () => {
   );
 });
 
+test("source compile emits growable memory for dense browser module outputs", async () => {
+  const manifest = createTestManifest();
+  const result = await compileModuleFromSource({
+    manifest,
+    sourceCode: "int propagate(void) { return 7; }\n",
+    language: "c",
+  });
+  const wasmModule = new WebAssembly.Module(result.wasmBytes);
+  const importModules = Array.from(
+    new Set(WebAssembly.Module.imports(wasmModule).map((entry) => entry.module)),
+  ).sort();
+  const wasi = new WASI({
+    version: "preview1",
+    args: ["growable-memory"],
+    env: {},
+    preopens: {},
+    returnOnExit: true,
+  });
+  const instance = await WebAssembly.instantiate(
+    wasmModule,
+    wasi.getImportObject(),
+  );
+  const memory = instance.exports.memory;
+
+  assert.deepEqual(importModules, ["wasi_snapshot_preview1"]);
+  assert.equal(memory instanceof WebAssembly.Memory, true);
+  assert.doesNotThrow(() => memory.grow(1));
+});
+
 test("artifact compliance can validate a built module from its embedded PLG manifest bytes", async () => {
   const manifest = {
     ...createTestManifest(),

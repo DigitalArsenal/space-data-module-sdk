@@ -1,7 +1,11 @@
-import { bytesToBase64 } from "../utils/encoding.js";
+import {
+  attachBinaryValues,
+  decodeHostcallEnvelope,
+  detachBinaryValues,
+  encodeHostcallEnvelope,
+} from "./hostcallWire.js";
 
 const textDecoder = new TextDecoder();
-const textEncoder = new TextEncoder();
 
 export const DEFAULT_HOSTCALL_IMPORT_MODULE = "space_data_module_host";
 export const HOSTCALL_STATUS_OK = 0;
@@ -152,15 +156,12 @@ function writeMemoryBytes(getMemory, ptr, bytes, maxLen) {
   return bytesToCopy;
 }
 
-function parseJsonPayload(bytes) {
+function parseHostcallParams(bytes) {
   if (bytes.length === 0) {
     return null;
   }
-  const text = textDecoder.decode(bytes);
-  if (!text.trim()) {
-    return null;
-  }
-  return JSON.parse(text);
+  const { meta, segments } = decodeHostcallEnvelope(bytes);
+  return attachBinaryValues(meta, segments);
 }
 
 function serializeHostcallError(error, operation = null) {
@@ -185,47 +186,6 @@ function assertSyncHostcallResult(value, operation) {
   if (isPromiseLike(value)) {
     throw new Error(
       `Operation "${operation}" is not available in the synchronous hostcall ABI.`,
-    );
-  }
-  return value;
-}
-
-function encodeHostcallValue(value) {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (
-    value instanceof Uint8Array ||
-    value instanceof ArrayBuffer ||
-    ArrayBuffer.isView(value)
-  ) {
-    const bytes =
-      value instanceof Uint8Array
-        ? value
-        : new Uint8Array(
-            value.buffer ?? value,
-            value.byteOffset ?? 0,
-            value.byteLength ?? value.byteLength,
-          );
-    return {
-      __type: "bytes",
-      base64: bytesToBase64(bytes),
-    };
-  }
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-  if (typeof value === "bigint") {
-    return value.toString();
-  }
-  if (Array.isArray(value)) {
-    return value.map((entry) => encodeHostcallValue(entry));
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([, entry]) => entry !== undefined)
-        .map(([key, entry]) => [key, encodeHostcallValue(entry)]),
     );
   }
   return value;
@@ -379,10 +339,18 @@ export function createAsyncHostDispatcher(host) {
     dispatchHostOperation(host, operation, params);
 }
 
-export function createJsonHostcallBridge(options = {}) {
+/**
+ * Synchronous hostcall bridge using the binary hostcall wire format.
+ *
+ * Modules import `space_data_module_host.call` with a binary envelope
+ * payload (length-prefixed meta JSON + raw byte segments — see
+ * hostcallWire.js). Binary values never round-trip through base64/JSON;
+ * the JSON meta document carries only small control metadata.
+ */
+export function createHostcallBridge(options = {}) {
   const dispatch = options.dispatch;
   if (typeof dispatch !== "function") {
-    throw new TypeError("createJsonHostcallBridge requires a dispatch function.");
+    throw new TypeError("createHostcallBridge requires a dispatch function.");
   }
 
   const getMemory = options.getMemory;
@@ -392,17 +360,19 @@ export function createJsonHostcallBridge(options = {}) {
   );
   const maxRequestBytes = Number.isInteger(options.maxRequestBytes)
     ? options.maxRequestBytes
-    : 64 * 1024;
+    : 16 * 1024 * 1024;
   const maxResponseBytes = Number.isInteger(options.maxResponseBytes)
     ? options.maxResponseBytes
-    : 1024 * 1024;
+    : 64 * 1024 * 1024;
 
   let lastStatusCode = HOSTCALL_STATUS_OK;
   let lastEnvelope = { ok: true, result: null };
-  let lastResponseBytes = textEncoder.encode(JSON.stringify(lastEnvelope));
+  let lastResponseBytes = encodeHostcallEnvelope(lastEnvelope, []);
 
   function setEnvelope(statusCode, envelope) {
-    const encoded = textEncoder.encode(JSON.stringify(envelope));
+    const segments = [];
+    const meta = detachBinaryValues(envelope, segments);
+    const encoded = encodeHostcallEnvelope(meta, segments);
     if (encoded.length > maxResponseBytes) {
       throw new Error(
         `Hostcall response exceeds ${maxResponseBytes} byte limit.`,
@@ -413,7 +383,7 @@ export function createJsonHostcallBridge(options = {}) {
     lastResponseBytes = encoded;
   }
 
-  function callJson(operationPtr, operationLen, payloadPtr, payloadLen) {
+  function call(operationPtr, operationLen, payloadPtr, payloadLen) {
     try {
       if (payloadLen > maxRequestBytes) {
         throw new Error(
@@ -423,7 +393,7 @@ export function createJsonHostcallBridge(options = {}) {
       const operation = textDecoder.decode(
         readMemoryBytes(getMemory, operationPtr, operationLen, "Operation"),
       );
-      const params = parseJsonPayload(
+      const params = parseHostcallParams(
         readMemoryBytes(getMemory, payloadPtr, payloadLen, "Payload"),
       );
       const result = dispatch(operation, params);
@@ -434,7 +404,7 @@ export function createJsonHostcallBridge(options = {}) {
       }
       setEnvelope(HOSTCALL_STATUS_OK, {
         ok: true,
-        result: encodeHostcallValue(result),
+        result: result === undefined ? null : result,
       });
       return HOSTCALL_STATUS_OK;
     } catch (error) {
@@ -477,7 +447,7 @@ export function createJsonHostcallBridge(options = {}) {
     moduleName,
     imports: {
       [moduleName]: {
-        call_json: callJson,
+        call,
         response_len: responseLen,
         read_response: readResponse,
         clear_response: clearResponse,
@@ -490,11 +460,9 @@ export function createJsonHostcallBridge(options = {}) {
     getLastResponseBytes() {
       return new Uint8Array(lastResponseBytes);
     },
-    getLastResponseText() {
-      return textDecoder.decode(lastResponseBytes);
-    },
-    getLastResponseJson() {
-      return JSON.parse(this.getLastResponseText());
+    getLastResponseEnvelope() {
+      const { meta, segments } = decodeHostcallEnvelope(lastResponseBytes);
+      return attachBinaryValues(meta, segments);
     },
   };
 }
@@ -507,7 +475,7 @@ export function createNodeHostSyncHostcallBridge(options = {}) {
     );
   }
 
-  return createJsonHostcallBridge({
+  return createHostcallBridge({
     ...options,
     dispatch: createNodeHostSyncDispatcher(host),
   });

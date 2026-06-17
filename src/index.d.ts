@@ -190,12 +190,12 @@ export interface PluginInvokeResponseEnvelope {
 
 export interface DecodedPluginInvokeRequestEnvelope
   extends PluginInvokeRequestEnvelope {
-  envelope: "PIV" | "PINQ";
+  envelope: "PIV";
 }
 
 export interface DecodedPluginInvokeResponseEnvelope
   extends PluginInvokeResponseEnvelope {
-  envelope: "PIV" | "PINS";
+  envelope: "PIV";
 }
 
 export interface DecodePluginInvokeEnvelopeOptions {
@@ -216,25 +216,26 @@ export function decodePluginInvokeResponse(
   data: Uint8Array | ArrayBuffer | ArrayBufferView,
   options?: DecodePluginInvokeEnvelopeOptions,
 ): DecodedPluginInvokeResponseEnvelope;
-export function encodeLegacyPluginInvokeRequest(
-  request: PluginInvokeRequestEnvelope,
-): Uint8Array;
-export function decodeLegacyPluginInvokeRequest(
-  data: Uint8Array | ArrayBuffer | ArrayBufferView,
-): PluginInvokeRequestEnvelope;
-export function encodeLegacyPluginInvokeResponse(
-  response: PluginInvokeResponseEnvelope,
-): Uint8Array;
-export function decodeLegacyPluginInvokeResponse(
-  data: Uint8Array | ArrayBuffer | ArrayBufferView,
-): PluginInvokeResponseEnvelope;
-
-export {
-  PluginInvokeRequest as LegacyPluginInvokeRequest,
-  PluginInvokeRequestT as LegacyPluginInvokeRequestT,
-  PluginInvokeResponse as LegacyPluginInvokeResponse,
-  PluginInvokeResponseT as LegacyPluginInvokeResponseT,
-} from "./generated/orbpro/invoke.js";
+/**
+ * Alignment (bytes) guaranteed for the payload arena base of every encoded
+ * invoke envelope, as an absolute address at every host<->module hop.
+ */
+export const INVOKE_ARENA_ALIGNMENT: number;
+export function assertAlignedInvokeBuffer(
+  bytes: Uint8Array,
+  arenaArray: Uint8Array | null,
+  kind: "request" | "response",
+  arenaAlignment?: number,
+): void;
+/**
+ * Zero-copy module-to-module hop: reuse a decoded output frame (payload view
+ * and type metadata) as an input frame for the next invocation without any
+ * decode/re-serialize round-trip.
+ */
+export function forwardOutputFrameAsInput(
+  outputFrame: InvokeFrame,
+  overrides?: Partial<InvokeFrame>,
+): InvokeFrame;
 export function normalizeInvokeSurfaceName(
   value: InvokeSurface | number | string | null | undefined,
 ): InvokeSurface | null;
@@ -1217,8 +1218,7 @@ export interface HostcallBridge {
   imports: Record<string, Record<string, (...args: number[]) => number>>;
   getLastEnvelope(): unknown;
   getLastResponseBytes(): Uint8Array;
-  getLastResponseText(): string;
-  getLastResponseJson(): unknown;
+  getLastResponseEnvelope(): unknown;
 }
 
 export interface BrowserFilesystemShim {
@@ -1755,7 +1755,7 @@ export function dispatchNodeHostSyncOperation(
 export function createNodeHostSyncDispatcher(
   host: NodeHost,
 ): (operation: string, params?: unknown) => unknown;
-export function createJsonHostcallBridge(options: {
+export function createHostcallBridge(options: {
   dispatch: (operation: string, params?: unknown) => unknown;
   getMemory: () => { buffer: ArrayBuffer | SharedArrayBuffer };
   moduleName?: string;
@@ -1821,20 +1821,20 @@ export function detectArtifactProfile(wasmModule: WebAssembly.Module): string;
 export function createBrowserModuleHarness(options?: {
   wasmSource: Uint8Array | ArrayBuffer | string | WebAssembly.Module | unknown;
   host?: BrowserHost | RuntimeHost | Record<string, unknown>;
-	  hostOptions?: BrowserHostOptions;
-	  args?: string[];
-	  env?: Record<string, string>;
-	  manifest?: PluginManifest | Record<string, unknown>;
-	  surface?: "direct" | "command";
-	  wasmMemory?: WebAssembly.Memory;
-	  memory?: WebAssembly.Memory;
-	  sharedMemory?: boolean;
-	  initialMemoryBytes?: number;
-	  maximumMemoryBytes?: number;
-	  performance?: {
-	    now(): number;
-	    timeOrigin: number;
-	  };
+  hostOptions?: BrowserHostOptions;
+  args?: string[];
+  env?: Record<string, string>;
+  manifest?: PluginManifest | Record<string, unknown>;
+  surface?: "direct" | "command";
+  performance?: {
+    now(): number;
+    timeOrigin: number;
+  };
+  wasmMemory?: WebAssembly.Memory;
+  memory?: WebAssembly.Memory;
+  sharedMemory?: boolean;
+  initialMemoryBytes?: number;
+  maximumMemoryBytes?: number;
   logOutput?: boolean;
 }): Promise<BrowserModuleHarness>;
 export interface ModuleFlatBufferStreamPumpStats {

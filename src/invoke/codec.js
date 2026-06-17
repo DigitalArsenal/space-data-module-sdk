@@ -1,22 +1,12 @@
 import * as flatbuffers from "../vendor/flatbuffers/flatbuffers.js";
 
-import {
-  PluginInvokeRequest,
-  PluginInvokeRequestT,
-} from "../generated/orbpro/invoke/plugin-invoke-request.js";
-import {
-  PluginInvokeResponse,
-  PluginInvokeResponseT,
-} from "../generated/orbpro/invoke/plugin-invoke-response.js";
 import { InvokeSurface } from "../generated/orbpro/manifest/invoke-surface.js";
 import { BufferMutability } from "../generated/orbpro/stream/buffer-mutability.js";
 import { BufferOwnership } from "../generated/orbpro/stream/buffer-ownership.js";
-import { FlatBufferTypeRefT } from "../generated/orbpro/stream/flat-buffer-type-ref.js";
-import { TypedArenaBufferT } from "../generated/orbpro/stream/typed-arena-buffer.js";
 import { toUint8Array } from "../runtime/bufferLike.js";
-import { PIV, PIVT } from "spacedatastandards.org/lib/js/PIV/PIV.js";
-import { PIVRequestT } from "spacedatastandards.org/lib/js/PIV/PIVRequest.js";
-import { PIVResponseT } from "spacedatastandards.org/lib/js/PIV/PIVResponse.js";
+import { PIV } from "spacedatastandards.org/lib/js/PIV/PIV.js";
+import { PIVRequest } from "spacedatastandards.org/lib/js/PIV/PIVRequest.js";
+import { PIVResponse } from "spacedatastandards.org/lib/js/PIV/PIVResponse.js";
 import { TABT as SdsTABT } from "spacedatastandards.org/lib/js/PIV/TAB.js";
 import { FlatBufferTypeRefT as SdsFlatBufferTypeRefT } from "spacedatastandards.org/lib/js/PIV/FlatBufferTypeRef.js";
 import { bufferMutability as SdsBufferMutability } from "spacedatastandards.org/lib/js/PIV/bufferMutability.js";
@@ -35,30 +25,6 @@ function toByteBuffer(data) {
   throw new TypeError(
     "Expected ByteBuffer, Uint8Array, ArrayBufferView, or ArrayBuffer.",
   );
-}
-
-function normalizeSchemaHash(value) {
-  if (!value) {
-    return [];
-  }
-  if (value instanceof Uint8Array) {
-    return Array.from(value);
-  }
-  if (ArrayBuffer.isView(value)) {
-    return Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
-  }
-  if (Array.isArray(value)) {
-    return value.map((byte) => Number(byte) & 0xff);
-  }
-  const normalized = String(value).trim().replace(/^0x/i, "");
-  if (!normalized || normalized.length % 2 !== 0) {
-    return [];
-  }
-  const bytes = [];
-  for (let index = 0; index < normalized.length; index += 2) {
-    bytes.push(parseInt(normalized.slice(index, index + 2), 16));
-  }
-  return bytes;
 }
 
 function normalizeUnsignedInteger(value, fallback = 0) {
@@ -91,35 +57,12 @@ function normalizePayloadWireFormat(value) {
   if (
     value === 1 ||
     normalized === "aligned-binary" ||
-    normalized === "aligned_binary"
+    normalized === "aligned_binary" ||
+    normalized === "alignedbinary"
   ) {
     return "aligned-binary";
   }
   return "flatbuffer";
-}
-
-function toLegacyFlatBufferTypeRefT(value = {}, payloadLength = 0) {
-  if (value instanceof FlatBufferTypeRefT) {
-    return value;
-  }
-  const wireFormat = normalizePayloadWireFormat(value.wireFormat);
-  const requiredAlignment = normalizeUnsignedInteger(value.requiredAlignment);
-  const fixedStringLength = normalizeUnsignedInteger(value.fixedStringLength);
-  const byteLength =
-    wireFormat === "aligned-binary"
-      ? normalizeUnsignedInteger(value.byteLength, payloadLength)
-      : normalizeUnsignedInteger(value.byteLength);
-  return new FlatBufferTypeRefT(
-    value.schemaName ?? null,
-    value.fileIdentifier ?? null,
-    normalizeSchemaHash(value.schemaHash),
-    value.acceptsAnyFlatbuffer === true,
-    wireFormat,
-    value.rootTypeName ?? null,
-    fixedStringLength,
-    byteLength,
-    requiredAlignment,
-  );
 }
 
 function toSdsWireFormat(value) {
@@ -171,10 +114,7 @@ function toSdsOwnership(value) {
   ) {
     return SdsBufferOwnership.PLUGIN_OWNED;
   }
-  if (
-    value === "transferred" ||
-    value === "TRANSFERRED"
-  ) {
+  if (value === "transferred" || value === "TRANSFERRED") {
     return SdsBufferOwnership.TRANSFERRED;
   }
   return SdsBufferOwnership.HOST_OWNED;
@@ -183,6 +123,9 @@ function toSdsOwnership(value) {
 function fromSdsOwnership(value) {
   if (value === SdsBufferOwnership.PLUGIN_OWNED) {
     return BufferOwnership.PRODUCER_OWNED;
+  }
+  if (value === SdsBufferOwnership.TRANSFERRED) {
+    return BufferOwnership.SHARED;
   }
   return BufferOwnership.HOST_OWNED;
 }
@@ -235,35 +178,8 @@ function arenaFrameSize(frame) {
   return normalizeUnsignedInteger(frame?.size ?? frame?.SIZE);
 }
 
-function normalizeLegacyArenaFrame(frame = {}, offset) {
-  const payload = toUint8Array(frame.payload ?? new Uint8Array()) ?? new Uint8Array();
-  const typeRef = toLegacyFlatBufferTypeRefT(frame.typeRef ?? frame.allowedType ?? {}, payload.length);
-  const alignment = Math.max(
-    1,
-    normalizeUnsignedInteger(
-      frame.alignment,
-      typeRef.requiredAlignment > 0 ? typeRef.requiredAlignment : 8,
-    ),
-  );
-  const alignedOffset = alignOffset(offset, alignment);
-  return {
-    payload,
-    padding: alignedOffset - offset,
-    buffer: new TypedArenaBufferT(
-      typeRef,
-      frame.portId ?? null,
-      alignment,
-      alignedOffset,
-      payload.length,
-      frame.ownership ?? BufferOwnership.BORROWED,
-      normalizeUnsignedInteger(frame.generation),
-      frame.mutability ?? BufferMutability.IMMUTABLE,
-      normalizeBigInt(frame.traceId),
-      normalizeUnsignedInteger(frame.streamId),
-      normalizeBigInt(frame.sequence),
-      frame.endOfStream === true,
-    ),
-  };
+function arenaFrameAlignment(frame) {
+  return Math.max(1, normalizeUnsignedInteger(frame?.alignment ?? frame?.ALIGNMENT, 1));
 }
 
 function normalizeSdsArenaFrame(frame = {}, offset) {
@@ -274,8 +190,9 @@ function normalizeSdsArenaFrame(frame = {}, offset) {
     typeRefInput.requiredAlignment ?? frame.requiredAlignment,
   );
   const alignment = Math.max(
-    1,
-    normalizeUnsignedInteger(frame.alignment, requiredAlignment > 0 ? requiredAlignment : 8),
+    INVOKE_ARENA_ALIGNMENT,
+    normalizeUnsignedInteger(frame.alignment),
+    requiredAlignment,
   );
   const alignedOffset = alignOffset(offset, alignment);
   return {
@@ -295,13 +212,58 @@ function normalizeSdsArenaFrame(frame = {}, offset) {
   };
 }
 
+/**
+ * Alignment guaranteed for the payload arena base of every encoded PIV request
+ * or response, measured as an absolute byte address.
+ */
+export const INVOKE_ARENA_ALIGNMENT = 8;
+
+/**
+ * Create a ubyte vector whose data is aligned to `alignment` bytes relative to
+ * the finished buffer. Generated `createPayloadArenaVector` aligns to one byte.
+ */
+function createAlignedByteVector(builder, bytes, alignment) {
+  builder.startVector(1, bytes.length, alignment);
+  builder.bb.setPosition((builder.space -= bytes.length));
+  builder.bb.bytes().set(bytes, builder.space);
+  return builder.endVector();
+}
+
+function describeInvokeBufferKind(kind) {
+  return kind === "request" ? "PIV request" : "PIV response";
+}
+
+export function assertAlignedInvokeBuffer(
+  bytes,
+  arenaArray,
+  kind,
+  arenaAlignment = INVOKE_ARENA_ALIGNMENT,
+) {
+  if (bytes.byteOffset % INVOKE_ARENA_ALIGNMENT !== 0) {
+    throw new Error(
+      `${describeInvokeBufferKind(kind)} buffer base is not ${INVOKE_ARENA_ALIGNMENT}-byte aligned (byteOffset ${bytes.byteOffset}).`,
+    );
+  }
+  if (
+    arenaArray &&
+    arenaArray.length > 0 &&
+    arenaArray.byteOffset % arenaAlignment !== 0
+  ) {
+    throw new Error(
+      `${describeInvokeBufferKind(kind)} payload arena base is not ${arenaAlignment}-byte aligned (byteOffset ${arenaArray.byteOffset}).`,
+    );
+  }
+}
+
 function packArenaFrames(frames = [], normalizeFrame = normalizeSdsArenaFrame) {
   const packedFrames = [];
   const normalizedFrames = [];
   let offset = 0;
+  let arenaAlignment = INVOKE_ARENA_ALIGNMENT;
   for (const frame of frames) {
     const normalized = normalizeFrame(frame, offset);
     offset = arenaFrameOffset(normalized.buffer) + arenaFrameSize(normalized.buffer);
+    arenaAlignment = Math.max(arenaAlignment, arenaFrameAlignment(normalized.buffer));
     packedFrames.push(normalized.buffer);
     normalizedFrames.push(normalized);
   }
@@ -313,30 +275,69 @@ function packArenaFrames(frames = [], normalizeFrame = normalizeSdsArenaFrame) {
   return {
     frames: packedFrames,
     arena,
+    arenaAlignment,
   };
 }
 
-function materializeArenaFrames(frames = [], arenaBytes) {
-  return frames.map((frame) => {
-    const offset = normalizeUnsignedInteger(frame.offset);
-    const size = normalizeUnsignedInteger(frame.size);
-    if (offset > arenaBytes.length || size > arenaBytes.length - offset) {
-      throw new Error("Plugin invoke payload range exceeds payload arena.");
+function decodeSdsTypeRef(typeRef, wireFormat, size, alignment) {
+  if (!typeRef) {
+    return null;
+  }
+  return {
+    schemaName: typeRef.SCHEMA_NAME() ?? null,
+    fileIdentifier: typeRef.FILE_IDENTIFIER() ?? null,
+    schemaVersion: typeRef.SCHEMA_VERSION() ?? null,
+    wireFormat,
+    rootTypeName: typeRef.ROOT_TYPE() ?? null,
+    fixedStringLength: 0,
+    byteLength: wireFormat === "aligned-binary" ? size : 0,
+    requiredAlignment: alignment,
+  };
+}
+
+function decodeSdsTabFrame(frame) {
+  if (!frame) {
+    return null;
+  }
+  const offset = normalizeUnsignedInteger(frame.OFFSET());
+  const size = normalizeUnsignedInteger(frame.SIZE());
+  const alignment = arenaFrameAlignment({ ALIGNMENT: frame.ALIGNMENT() });
+  const wireFormat = fromSdsWireFormat(frame.WIRE_FORMAT());
+  const frameId = normalizeBigInt(frame.FRAME_ID());
+  const streamFrame = decodeSdsFrameId(frameId);
+  return {
+    typeRef: decodeSdsTypeRef(frame.TYPE_REF(), wireFormat, size, alignment),
+    portId: frame.PORT_ID() ?? null,
+    alignment,
+    offset,
+    size,
+    ownership: fromSdsOwnership(frame.OWNERSHIP()),
+    generation: 0,
+    mutability: fromSdsMutability(frame.MUTABILITY()),
+    traceId: frameId,
+    streamId: 0,
+    sequence: streamFrame.sequence,
+    endOfStream: streamFrame.endOfStream,
+    wireFormat,
+  };
+}
+
+function decodeSdsArenaFrames(length, accessor) {
+  const frames = [];
+  for (let index = 0; index < length; index++) {
+    const frame = decodeSdsTabFrame(accessor(index));
+    if (frame) {
+      frames.push(frame);
     }
-    const payload = new Uint8Array(arenaBytes.slice(offset, offset + size));
-    return {
-      ...frame,
-      payload,
-      typeRef: frame.typeRef ?? null,
-    };
-  });
+  }
+  return frames;
 }
 
 function materializeSdsArenaFrames(frames = [], arenaBytes, options = {}) {
   const externalArena = toUint8Array(options.externalArena);
   return frames.map((frame) => {
-    const offset = normalizeUnsignedInteger(frame.OFFSET);
-    const size = normalizeUnsignedInteger(frame.SIZE);
+    const offset = arenaFrameOffset(frame);
+    const size = arenaFrameSize(frame);
     const sourceArena = arenaBytes.length > 0 ? arenaBytes : externalArena;
     const sourceDescription =
       arenaBytes.length > 0 ? "PAYLOAD_ARENA" : "external arena";
@@ -351,124 +352,91 @@ function materializeSdsArenaFrames(frames = [], arenaBytes, options = {}) {
     ) {
       throw new Error(`SDS PIV TAB payload range exceeds ${sourceDescription}.`);
     }
+    const alignment = arenaFrameAlignment(frame);
+    if (sourceArena && alignment > 1 && size > 0) {
+      const absoluteOffset = sourceArena.byteOffset + offset;
+      if (absoluteOffset % alignment !== 0) {
+        throw new Error(
+          `SDS PIV TAB "${frame.portId ?? ""}" payload is misaligned: absolute offset ${absoluteOffset} violates alignment ${alignment}.`,
+        );
+      }
+    }
     const payload = sourceArena
-      ? new Uint8Array(sourceArena.slice(offset, offset + size))
+      ? sourceArena.subarray(offset, offset + size)
       : new Uint8Array();
-    const wireFormat = fromSdsWireFormat(frame.WIRE_FORMAT);
-    const alignment = normalizeUnsignedInteger(frame.ALIGNMENT, 1);
-    const streamFrame = decodeSdsFrameId(frame.FRAME_ID);
     return {
-      portId: frame.PORT_ID ?? null,
-      alignment,
-      offset,
-      size,
-      ownership: fromSdsOwnership(frame.OWNERSHIP),
-      generation: 0,
-      mutability: fromSdsMutability(frame.MUTABILITY),
-      traceId: normalizeBigInt(frame.FRAME_ID),
-      streamId: 0,
-      sequence: streamFrame.sequence,
-      endOfStream: streamFrame.endOfStream,
+      ...frame,
       payload,
-      typeRef: frame.TYPE_REF
-        ? {
-            schemaName: frame.TYPE_REF.SCHEMA_NAME ?? null,
-            fileIdentifier: frame.TYPE_REF.FILE_IDENTIFIER ?? null,
-            schemaVersion: frame.TYPE_REF.SCHEMA_VERSION ?? null,
-            wireFormat,
-            rootTypeName: frame.TYPE_REF.ROOT_TYPE ?? null,
-            fixedStringLength: 0,
-            byteLength: wireFormat === "aligned-binary" ? size : 0,
-            requiredAlignment: alignment,
-          }
-        : null,
+      typeRef: frame.typeRef ?? null,
     };
   });
 }
 
-function encodeRoot(builderFactory, finish, value) {
-  const builder = new flatbuffers.Builder(1024);
-  finish(builder, builderFactory(value).pack(builder));
-  return builder.asUint8Array();
-}
-
-export function encodeLegacyPluginInvokeRequest(request = {}) {
-  const { frames, arena } = packArenaFrames(
-    Array.isArray(request.inputs) ? request.inputs : request.inputFrames ?? [],
-    normalizeLegacyArenaFrame,
-  );
-  return encodeRoot(
-    (value) =>
-      new PluginInvokeRequestT(value.methodId ?? null, frames, Array.from(arena)),
-    PluginInvokeRequest.finishPluginInvokeRequestBuffer,
-    request,
-  );
-}
-
-export function decodeLegacyPluginInvokeRequest(data) {
-  const bb = toByteBuffer(data);
-  if (!PluginInvokeRequest.bufferHasIdentifier(bb)) {
-    throw new Error("Plugin invoke request buffer identifier mismatch.");
-  }
-  const unpacked = PluginInvokeRequest.getRootAsPluginInvokeRequest(bb).unpack();
-  const arena = Uint8Array.from(unpacked.payloadArena ?? []);
-  const inputs = materializeArenaFrames(unpacked.inputFrames ?? [], arena);
-  return {
-    methodId: unpacked.methodId ?? null,
-    inputFrames: inputs,
-    inputs,
-    payloadArena: arena,
-  };
+function packFrameOffsets(builder, frames) {
+  return frames.map((frame) => frame.pack(builder));
 }
 
 export function encodePluginInvokeRequest(request = {}) {
-  const { frames, arena } = packArenaFrames(
+  const { frames, arena, arenaAlignment } = packArenaFrames(
     Array.isArray(request.inputs) ? request.inputs : request.inputFrames ?? [],
-    normalizeSdsArenaFrame,
   );
-  return encodeRoot(
-    (value) =>
-      new PIVT(
-        new PIVRequestT(
-          value.methodId ?? null,
-          frames,
-          Array.from(arena),
-          normalizeBigInt(value.traceId),
-          normalizeUnsignedInteger(value.outputStreamCap),
-        ),
-        null,
-      ),
-    PIV.finishPIVBuffer,
-    request,
+  const builder = new flatbuffers.Builder(1024);
+  const methodIdOffset =
+    request.methodId !== null && request.methodId !== undefined
+      ? builder.createString(String(request.methodId))
+      : 0;
+  const framesVector = PIVRequest.createInputsVector(
+    builder,
+    packFrameOffsets(builder, frames),
   );
+  const arenaVector = createAlignedByteVector(builder, arena, arenaAlignment);
+  PIVRequest.startPIVRequest(builder);
+  PIVRequest.addMethodId(builder, methodIdOffset);
+  PIVRequest.addInputs(builder, framesVector);
+  PIVRequest.addPayloadArena(builder, arenaVector);
+  PIVRequest.addTraceId(builder, normalizeBigInt(request.traceId));
+  PIVRequest.addOutputStreamCap(
+    builder,
+    normalizeUnsignedInteger(request.outputStreamCap),
+  );
+  const requestOffset = PIVRequest.endPIVRequest(builder);
+  PIV.startPIV(builder);
+  PIV.addRequest(builder, requestOffset);
+  PIV.finishPIVBuffer(builder, PIV.endPIV(builder));
+  const bytes = builder.asUint8Array();
+  const root = PIV.getRootAsPIV(new flatbuffers.ByteBuffer(bytes));
+  assertAlignedInvokeBuffer(
+    bytes,
+    root.REQUEST()?.payloadArenaArray(),
+    "request",
+    arenaAlignment,
+  );
+  return bytes;
 }
 
 export function decodePluginInvokeRequest(data, options = {}) {
   const bb = toByteBuffer(data);
-  if (PIV.bufferHasIdentifier(bb)) {
-    const unpacked = PIV.getRootAsPIV(bb).unpack();
-    if (!unpacked.REQUEST) {
-      throw new Error("SDS PIV invoke envelope does not contain a request.");
-    }
-    const arena = Uint8Array.from(unpacked.REQUEST.PAYLOAD_ARENA ?? []);
-    const inputs = materializeSdsArenaFrames(
-      unpacked.REQUEST.INPUTS ?? [],
-      arena,
-      options,
-    );
-    return {
-      methodId: unpacked.REQUEST.METHOD_ID ?? null,
-      inputFrames: inputs,
-      inputs,
-      payloadArena: arena,
-      traceId: unpacked.REQUEST.TRACE_ID ?? BigInt(0),
-      outputStreamCap: unpacked.REQUEST.OUTPUT_STREAM_CAP ?? 0,
-      envelope: "PIV",
-    };
+  if (!PIV.bufferHasIdentifier(bb)) {
+    throw new Error("SDS PIV invoke request buffer identifier mismatch.");
   }
+  const root = PIV.getRootAsPIV(bb);
+  const request = root.REQUEST();
+  if (!request) {
+    throw new Error("SDS PIV invoke envelope does not contain a request.");
+  }
+  const arena = request.payloadArenaArray() ?? new Uint8Array();
+  const inputFrames = decodeSdsArenaFrames(request.inputsLength(), (index) =>
+    request.INPUTS(index),
+  );
+  const inputs = materializeSdsArenaFrames(inputFrames, arena, options);
   return {
-    ...decodeLegacyPluginInvokeRequest(bb),
-    envelope: "PINQ",
+    methodId: request.METHOD_ID() ?? null,
+    inputFrames: inputs,
+    inputs,
+    payloadArena: arena,
+    traceId: request.TRACE_ID() ?? BigInt(0),
+    outputStreamCap: request.OUTPUT_STREAM_CAP() ?? 0,
+    envelope: "PIV",
   };
 }
 
@@ -485,103 +453,118 @@ function resolvePivStatus(response = {}) {
   return SdsPivStatus.OK;
 }
 
-export function encodeLegacyPluginInvokeResponse(response = {}) {
-  const { frames, arena } = packArenaFrames(
-    Array.isArray(response.outputs) ? response.outputs : response.outputFrames ?? [],
-    normalizeLegacyArenaFrame,
-  );
-  return encodeRoot(
-    (value) =>
-      new PluginInvokeResponseT(
-        Number(value.statusCode ?? 0),
-        value.yielded === true,
-        normalizeUnsignedInteger(value.backlogRemaining),
-        frames,
-        Array.from(arena),
-        value.errorCode ?? null,
-        value.errorMessage ?? null,
-      ),
-    PluginInvokeResponse.finishPluginInvokeResponseBuffer,
-    response,
-  );
-}
-
-export function decodeLegacyPluginInvokeResponse(data) {
-  const bb = toByteBuffer(data);
-  if (!PluginInvokeResponse.bufferHasIdentifier(bb)) {
-    throw new Error("Plugin invoke response buffer identifier mismatch.");
-  }
-  const unpacked = PluginInvokeResponse.getRootAsPluginInvokeResponse(bb).unpack();
-  const arena = Uint8Array.from(unpacked.payloadArena ?? []);
-  const outputs = materializeArenaFrames(unpacked.outputFrames ?? [], arena);
-  return {
-    statusCode: unpacked.statusCode ?? 0,
-    yielded: unpacked.yielded === true,
-    backlogRemaining: unpacked.backlogRemaining ?? 0,
-    outputFrames: outputs,
-    outputs,
-    payloadArena: arena,
-    errorCode: unpacked.errorCode ?? null,
-    errorMessage: unpacked.errorMessage ?? null,
-  };
-}
-
 export function encodePluginInvokeResponse(response = {}) {
-  const { frames, arena } = packArenaFrames(
+  const { frames, arena, arenaAlignment } = packArenaFrames(
     Array.isArray(response.outputs) ? response.outputs : response.outputFrames ?? [],
-    normalizeSdsArenaFrame,
   );
-  return encodeRoot(
-    (value) =>
-      new PIVT(
-        null,
-        new PIVResponseT(
-          Number(value.statusCode ?? 0),
-          resolvePivStatus(value),
-          value.yielded === true,
-          normalizeUnsignedInteger(value.backlogRemaining),
-          frames,
-          Array.from(arena),
-          value.errorCode ?? null,
-          value.errorMessage ?? null,
-          normalizeBigInt(value.traceId),
-        ),
-      ),
-    PIV.finishPIVBuffer,
-    response,
+  const builder = new flatbuffers.Builder(1024);
+  const errorCodeOffset =
+    response.errorCode !== null && response.errorCode !== undefined
+      ? builder.createString(String(response.errorCode))
+      : 0;
+  const errorMessageOffset =
+    response.errorMessage !== null && response.errorMessage !== undefined
+      ? builder.createString(String(response.errorMessage))
+      : 0;
+  const framesVector = PIVResponse.createOutputsVector(
+    builder,
+    packFrameOffsets(builder, frames),
   );
+  const arenaVector = createAlignedByteVector(builder, arena, arenaAlignment);
+  PIVResponse.startPIVResponse(builder);
+  PIVResponse.addStatusCode(builder, Number(response.statusCode ?? 0));
+  PIVResponse.addStatus(builder, resolvePivStatus(response));
+  PIVResponse.addYielded(builder, response.yielded === true);
+  PIVResponse.addBacklogRemaining(
+    builder,
+    normalizeUnsignedInteger(response.backlogRemaining),
+  );
+  PIVResponse.addOutputs(builder, framesVector);
+  PIVResponse.addPayloadArena(builder, arenaVector);
+  PIVResponse.addErrorCode(builder, errorCodeOffset);
+  PIVResponse.addErrorMessage(builder, errorMessageOffset);
+  PIVResponse.addTraceId(builder, normalizeBigInt(response.traceId));
+  const responseOffset = PIVResponse.endPIVResponse(builder);
+  PIV.startPIV(builder);
+  PIV.addResponse(builder, responseOffset);
+  PIV.finishPIVBuffer(builder, PIV.endPIV(builder));
+  const bytes = builder.asUint8Array();
+  const root = PIV.getRootAsPIV(new flatbuffers.ByteBuffer(bytes));
+  assertAlignedInvokeBuffer(
+    bytes,
+    root.RESPONSE()?.payloadArenaArray(),
+    "response",
+    arenaAlignment,
+  );
+  return bytes;
 }
 
 export function decodePluginInvokeResponse(data, options = {}) {
   const bb = toByteBuffer(data);
-  if (PIV.bufferHasIdentifier(bb)) {
-    const unpacked = PIV.getRootAsPIV(bb).unpack();
-    if (!unpacked.RESPONSE) {
-      throw new Error("SDS PIV invoke envelope does not contain a response.");
-    }
-    const arena = Uint8Array.from(unpacked.RESPONSE.PAYLOAD_ARENA ?? []);
-    const outputs = materializeSdsArenaFrames(
-      unpacked.RESPONSE.OUTPUTS ?? [],
-      arena,
-      options,
+  if (!PIV.bufferHasIdentifier(bb)) {
+    throw new Error("SDS PIV invoke response buffer identifier mismatch.");
+  }
+  const root = PIV.getRootAsPIV(bb);
+  const response = root.RESPONSE();
+  if (!response) {
+    throw new Error("SDS PIV invoke envelope does not contain a response.");
+  }
+  const arena = response.payloadArenaArray() ?? new Uint8Array();
+  const outputFrames = decodeSdsArenaFrames(response.outputsLength(), (index) =>
+    response.OUTPUTS(index),
+  );
+  const outputs = materializeSdsArenaFrames(outputFrames, arena, options);
+  return {
+    statusCode: response.STATUS_CODE() ?? 0,
+    status: response.STATUS() ?? SdsPivStatus.OK,
+    yielded: response.YIELDED() === true,
+    backlogRemaining: response.BACKLOG_REMAINING() ?? 0,
+    outputFrames: outputs,
+    outputs,
+    payloadArena: arena,
+    errorCode: response.ERROR_CODE() ?? null,
+    errorMessage: response.ERROR_MESSAGE() ?? null,
+    traceId: response.TRACE_ID() ?? BigInt(0),
+    envelope: "PIV",
+  };
+}
+
+/**
+ * Forward a decoded output frame of one module invocation directly as an input
+ * frame for the next invocation. The returned descriptor references the same
+ * payload bytes, so no payload decode or re-serialization happens on the hop.
+ */
+export function forwardOutputFrameAsInput(outputFrame, overrides = {}) {
+  if (!outputFrame || typeof outputFrame !== "object") {
+    throw new TypeError(
+      "forwardOutputFrameAsInput requires a decoded output frame.",
     );
-    return {
-      statusCode: unpacked.RESPONSE.STATUS_CODE ?? 0,
-      status: unpacked.RESPONSE.STATUS ?? SdsPivStatus.OK,
-      yielded: unpacked.RESPONSE.YIELDED === true,
-      backlogRemaining: unpacked.RESPONSE.BACKLOG_REMAINING ?? 0,
-      outputFrames: outputs,
-      outputs,
-      payloadArena: arena,
-      errorCode: unpacked.RESPONSE.ERROR_CODE ?? null,
-      errorMessage: unpacked.RESPONSE.ERROR_MESSAGE ?? null,
-      traceId: unpacked.RESPONSE.TRACE_ID ?? BigInt(0),
-      envelope: "PIV",
-    };
+  }
+  const payload = toUint8Array(outputFrame.payload);
+  if (!payload) {
+    throw new TypeError(
+      "forwardOutputFrameAsInput requires an output frame with payload bytes.",
+    );
+  }
+  const portId = overrides.portId ?? outputFrame.portId ?? null;
+  if (!portId) {
+    throw new TypeError(
+      "forwardOutputFrameAsInput requires a portId (from the frame or overrides).",
+    );
   }
   return {
-    ...decodeLegacyPluginInvokeResponse(bb),
-    envelope: "PINS",
+    portId,
+    payload,
+    typeRef: overrides.typeRef ?? outputFrame.typeRef ?? null,
+    alignment:
+      overrides.alignment ??
+      (outputFrame.alignment > 0 ? outputFrame.alignment : undefined),
+    generation: overrides.generation ?? outputFrame.generation,
+    traceId: overrides.traceId ?? outputFrame.traceId,
+    streamId: overrides.streamId ?? outputFrame.streamId,
+    sequence: overrides.sequence ?? outputFrame.sequence,
+    endOfStream:
+      overrides.endOfStream ?? (outputFrame.endOfStream === true || undefined),
   };
 }
 

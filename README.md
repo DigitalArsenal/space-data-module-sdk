@@ -125,18 +125,11 @@ allocated by `plugin_alloc`; otherwise it fails closed with
 empty-arena TAB offsets by passing `{ externalArena }` to
 `decodePluginInvokeRequest` or `decodePluginInvokeResponse`.
 
-The older SDK-local `PluginInvokeRequest` / `PluginInvokeResponse` envelopes
-(`PINQ` / `PINS`) are legacy compatibility adapters. Public SDK encoders now
-emit `PIV` by default; public decoders accept `PIV` first and fall back to
-`PINQ` / `PINS` only for existing artifacts or tests that explicitly use the
-legacy helpers.
-
 SDS `TAB` is the canonical transport descriptor. It preserves port id, payload
 offset/size, alignment, wire format, type identity, ownership, mutability, and
-frame id. SDK-local `TABF` fields such as generation, stream id, sequence,
-fixed string length, and declared byte length are legacy-only unless SDS adds
-first-class fields for them later. For stream-pump compatibility, the SDK uses
-`TAB.FRAME_ID` as packed stream bookkeeping: `(sequence << 1) | endOfStream`.
+frame id. Older SDK-local invoke descriptors and fields are not part of the
+wire ABI. For stream-pump compatibility, the SDK uses `TAB.FRAME_ID` as packed
+stream bookkeeping: `(sequence << 1) | endOfStream`.
 Source-built modules can set this on an emitted output frame with
 `plugin_set_output_stream_frame(outputIndex, sequence, endOfStream)` or set the
 raw frame id with `plugin_set_output_frame_id(outputIndex, frameId)`.
@@ -533,7 +526,7 @@ synchronous hostcall bridge under the import module `space_data_module_host`.
 
 The current sync import surface is:
 
-- `call_json(operation_ptr, operation_len, payload_ptr, payload_len) -> i32`
+- `call(request_ptr, request_len) -> i32`
 - `response_len() -> i32`
 - `read_response(dst_ptr, dst_len) -> i32`
 - `last_status_code() -> i32`

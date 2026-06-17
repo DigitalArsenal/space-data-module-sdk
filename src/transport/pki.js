@@ -9,8 +9,6 @@ import {
   toUint8Array,
 } from "../utils/encoding.js";
 import {
-  aesCtrDecrypt,
-  aesCtrEncrypt,
   aesGcmDecrypt,
   aesGcmEncrypt,
   hkdfBytes,
@@ -22,9 +20,35 @@ import {
   appendPublicationRecordCollection,
   createEncryptedEnvelopePayload,
   decodeEncRecord,
+  encodeEncRecord,
   encodePublicationRecordCollection,
   extractPublicationRecordCollection,
 } from "./records.js";
+
+const GCM_TAG_LENGTH = 16;
+
+// The authenticated payload layout is ciphertext || 16-byte GCM tag. The ENC
+// FlatBuffer schema has no dedicated tag field, so the tag travels appended to
+// the ciphertext, mirroring the packed layout already used by the legacy
+// salt-based envelope format.
+function splitGcmPayload(payloadBytes) {
+  const payload = toUint8Array(payloadBytes);
+  if (payload.length < GCM_TAG_LENGTH) {
+    throw new Error("AES-256-GCM protected payload is truncated.");
+  }
+  return {
+    ciphertext: payload.subarray(0, payload.length - GCM_TAG_LENGTH),
+    tag: payload.subarray(payload.length - GCM_TAG_LENGTH),
+  };
+}
+
+function assertGcmEncRecord(enc) {
+  if (enc?.symmetric !== "AES_256_GCM") {
+    throw new Error(
+      `Unsupported ENC symmetric algorithm "${enc?.symmetric}"; only AES_256_GCM is supported.`,
+    );
+  }
+}
 
 function normalizePublicKey(value) {
   if (typeof value === "string") {
@@ -345,6 +369,7 @@ export async function decryptProtectedBytes({
   if (!parsed?.enc) {
     return toUint8Array(protectedBytes);
   }
+  assertGcmEncRecord(parsed.enc);
   const sharedSecret = await deriveSharedSecret(
     recipientPrivateKey,
     parsed.enc.ephemeralPublicKey,
@@ -354,7 +379,14 @@ export async function decryptProtectedBytes({
     new Uint8Array(0),
     parsed.enc.context ?? "",
   );
-  return aesCtrDecrypt(aesKey, parsed.payloadBytes, parsed.enc.nonceStart);
+  const { ciphertext, tag } = splitGcmPayload(parsed.payloadBytes);
+  return aesGcmDecrypt(
+    aesKey,
+    ciphertext,
+    tag,
+    parsed.enc.nonceStart,
+    encodeEncRecord(parsed.enc),
+  );
 }
 
 export async function encryptBytesForRecipient({
@@ -376,11 +408,10 @@ export async function encryptBytesForRecipient({
     recipientPublicKey,
   );
   const aesKey = await deriveAesKey(sharedSecret, new Uint8Array(0), context);
-  const ciphertext = await aesCtrEncrypt(aesKey, toUint8Array(plaintext), nonceStart);
   const enc = {
     version: 1,
     keyExchange: "X25519",
-    symmetric: "AES_256_CTR",
+    symmetric: "AES_256_GCM",
     keyDerivation: "HKDF_SHA256",
     ephemeralPublicKey: sender.publicKey,
     nonceStart,
@@ -390,15 +421,29 @@ export async function encryptBytesForRecipient({
     rootType,
     timestamp: Date.now(),
   };
+  // The encoded ENC record doubles as the GCM AAD so every delivery parameter
+  // (context, schema hash, root type, recipient key id, nonce, ephemeral key)
+  // is authenticated alongside the ciphertext. encodeEncRecord() is
+  // deterministic for a normalized record, so decrypt paths recompute the
+  // identical bytes from the parsed ENC record.
+  const { ciphertext, tag } = await aesGcmEncrypt(
+    aesKey,
+    toUint8Array(plaintext),
+    nonceStart,
+    encodeEncRecord(enc),
+  );
+  const payloadBytes = new Uint8Array(ciphertext.length + tag.length);
+  payloadBytes.set(ciphertext, 0);
+  payloadBytes.set(tag, ciphertext.length);
   const recordCollectionBytes = encodePublicationRecordCollection({ enc });
   const protectedBlobBytes = appendPublicationRecordCollection(
-    ciphertext,
+    payloadBytes,
     recordCollectionBytes,
   );
   return createEncryptedEnvelopePayload({
     protectedBlobBytes,
     parsedProtectedBlob: {
-      payloadBytes: ciphertext,
+      payloadBytes,
       recordCollectionBytes,
       enc,
       pnm: null,
@@ -424,7 +469,9 @@ export async function decryptBytesFromEnvelope({
     });
   }
   if (envelope.ciphertextBase64 && envelope.encRecordBase64) {
-    const enc = decodeEncRecord(base64ToBytes(envelope.encRecordBase64));
+    const encRecordBytes = base64ToBytes(envelope.encRecordBase64);
+    const enc = decodeEncRecord(encRecordBytes);
+    assertGcmEncRecord(enc);
     const sharedSecret = await deriveSharedSecret(
       recipientPrivateKey,
       enc.ephemeralPublicKey,
@@ -434,11 +481,10 @@ export async function decryptBytesFromEnvelope({
       new Uint8Array(0),
       enc.context ?? envelope.context ?? "",
     );
-    return aesCtrDecrypt(
-      aesKey,
+    const { ciphertext, tag } = splitGcmPayload(
       base64ToBytes(envelope.ciphertextBase64),
-      enc.nonceStart,
     );
+    return aesGcmDecrypt(aesKey, ciphertext, tag, enc.nonceStart, encRecordBytes);
   }
   const sharedSecret = await deriveSharedSecret(
     recipientPrivateKey,

@@ -16,7 +16,7 @@ import { createBrowserWasiShim, WasiExitError } from "../host/wasiShim.js";
 import { createBrowserHost } from "../host/browserHost.js";
 import { getWasmWallet } from "../utils/wasmCrypto.js";
 import {
-  createJsonHostcallBridge,
+  createHostcallBridge,
   createAsyncHostDispatcher,
   createHostSyncDispatcher,
   DEFAULT_HOSTCALL_IMPORT_MODULE,
@@ -26,9 +26,42 @@ import {
   DefaultManifestExports,
 } from "../runtime/constants.js";
 import {
+  INVOKE_ARENA_ALIGNMENT,
   encodePluginInvokeRequest,
   decodePluginInvokeResponse,
 } from "../invoke/codec.js";
+import {
+  ModuleSignatureError,
+  resolveModuleSignaturePolicy,
+  verifyModuleArtifact,
+} from "../bundle/signing.js";
+import { extractPublicationRecordCollection } from "../transport/records.js";
+
+/**
+ * Reduce a module artifact to the bytes a wasm engine can compile.
+ *
+ * Signed/published artifacts carry an appended publication record collection
+ * (MBL bundle with the sds.signature entry, PNM/REC trailers). Wasm engines
+ * reject those trailing bytes ("unknown section code"), so the canonical
+ * module payload must be extracted before compile. ENC-protected payloads
+ * cannot be loaded here — decryption is a host concern.
+ *
+ * @param {Uint8Array} bytes - raw artifact bytes
+ * @returns {Uint8Array} compilable wasm bytes
+ */
+export function toLoadableWasmBytes(bytes) {
+  const publication = extractPublicationRecordCollection(bytes);
+  if (!publication) {
+    return bytes;
+  }
+  if (publication.enc) {
+    throw new ModuleSignatureError(
+      "encrypted_artifact",
+      "Module artifact payload is ENC-protected; decrypt it before loading.",
+    );
+  }
+  return publication.payloadBytes;
+}
 
 const STANDALONE_SHARED_MEMORY_ENV_STUBS = Object.freeze({
   pthread_mutex_lock: () => 0,
@@ -125,14 +158,21 @@ async function compileWasmModule(source) {
   if (source instanceof WebAssembly.Module) {
     return source;
   }
+  let bytes;
   if (source instanceof Response) {
-    return WebAssembly.compileStreaming(source);
+    bytes = new Uint8Array(await source.arrayBuffer());
+  } else if (typeof source === "string") {
+    const response = await fetch(source);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch module artifact: ${response.status}`);
+    }
+    bytes = new Uint8Array(await response.arrayBuffer());
+  } else {
+    bytes = source instanceof ArrayBuffer ? new Uint8Array(source) : source;
   }
-  if (typeof source === "string") {
-    return WebAssembly.compileStreaming(fetch(source));
-  }
-  const bytes = source instanceof ArrayBuffer ? new Uint8Array(source) : source;
-  return WebAssembly.compile(bytes);
+  // Strip any appended publication record collection (signature/PNM/REC
+  // trailers) — wasm engines reject trailing non-section bytes.
+  return WebAssembly.compile(toLoadableWasmBytes(bytes));
 }
 
 const WASM_PAGE_BYTES = 65536;
@@ -231,7 +271,7 @@ async function instantiateBrowserModule(options = {}) {
   let memory = providedMemory;
   if (needsHostBridge) {
     const dispatch = createHostSyncDispatcher(options.host);
-    bridge = createJsonHostcallBridge({
+    bridge = createHostcallBridge({
       dispatch,
       getMemory: () => memory ?? instance?.exports?.memory,
     });
@@ -281,7 +321,36 @@ async function instantiateBrowserModule(options = {}) {
  * @param {number} [options.maximumMemoryBytes] - Maximum imported memory size.
  */
 export async function createBrowserModuleHarness(options = {}) {
-  const wasmModule = await compileWasmModule(options.wasmSource);
+  let wasmSource = options.wasmSource;
+  const signaturePolicy = resolveModuleSignaturePolicy(options);
+  if (signaturePolicy) {
+    if (wasmSource instanceof WebAssembly.Module) {
+      throw new ModuleSignatureError(
+        "unverifiable_source",
+        "Cannot verify a precompiled WebAssembly.Module; pass bytes, a URL, or a Response when signature verification is enabled.",
+      );
+    }
+    let artifactBytes;
+    if (wasmSource instanceof Response) {
+      artifactBytes = new Uint8Array(await wasmSource.arrayBuffer());
+    } else if (typeof wasmSource === "string") {
+      const response = await fetch(wasmSource);
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch module artifact for verification: ${response.status}`,
+        );
+      }
+      artifactBytes = new Uint8Array(await response.arrayBuffer());
+    } else {
+      artifactBytes =
+        wasmSource instanceof ArrayBuffer
+          ? new Uint8Array(wasmSource)
+          : new Uint8Array(wasmSource);
+    }
+    await verifyModuleArtifact(artifactBytes, signaturePolicy);
+    wasmSource = artifactBytes;
+  }
+  const wasmModule = await compileWasmModule(wasmSource);
   const moduleImports = WebAssembly.Module.imports(wasmModule);
   const needsHostBridge = moduleImports.some(
     (entry) => entry.module === DEFAULT_HOSTCALL_IMPORT_MODULE,
@@ -348,6 +417,11 @@ export async function createBrowserModuleHarness(options = {}) {
     const reqLen = requestBytes.length;
     const reqPtr = alloc(reqLen);
     if (!reqPtr) throw new Error("plugin_alloc returned null for request.");
+    if (reqPtr % INVOKE_ARENA_ALIGNMENT !== 0) {
+      throw new Error(
+        `plugin_alloc returned a request pointer (${reqPtr}) that is not ${INVOKE_ARENA_ALIGNMENT}-byte aligned.`,
+      );
+    }
 
     new Uint8Array(memory.buffer, reqPtr, reqLen).set(requestBytes);
 
@@ -365,6 +439,11 @@ export async function createBrowserModuleHarness(options = {}) {
 
     if (!resPtr || !resLen) {
       throw new Error("plugin_invoke_stream returned null response.");
+    }
+    if (resPtr % INVOKE_ARENA_ALIGNMENT !== 0) {
+      throw new Error(
+        `plugin_invoke_stream returned a response pointer (${resPtr}) that is not ${INVOKE_ARENA_ALIGNMENT}-byte aligned.`,
+      );
     }
 
     const responseBytes = new Uint8Array(memory.buffer, resPtr, resLen).slice();

@@ -48,7 +48,7 @@ function createEncRecord() {
   return {
     version: 1,
     keyExchange: "X25519",
-    symmetric: "AES_256_CTR",
+    symmetric: "AES_256_GCM",
     keyDerivation: "HKDF_SHA256",
     ephemeralPublicKey: Uint8Array.from({ length: 32 }, (_, index) => index + 1),
     nonceStart: Uint8Array.from({ length: 12 }, (_, index) => 200 - index),
@@ -84,6 +84,7 @@ test("publication record collections round-trip through REC validation with MBL"
     ["MBL", "ENC", "PNM"],
   );
   assert.equal(parsed.enc?.context, "transport-records-test");
+  assert.equal(parsed.enc?.symmetric, "AES_256_GCM");
   assert.equal(parsed.pnm?.fileName, "module.wasm");
 });
 

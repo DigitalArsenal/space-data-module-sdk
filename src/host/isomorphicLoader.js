@@ -12,8 +12,13 @@
 import {
   createBrowserModuleHarness,
   detectArtifactProfile,
+  toLoadableWasmBytes,
 } from "../testing/browserModuleHarness.js";
 import { createAsyncHostDispatcher } from "./abi.js";
+import {
+  resolveModuleSignaturePolicy,
+  verifyModuleArtifact,
+} from "../bundle/signing.js";
 
 const isBrowser =
   typeof globalThis.window !== "undefined" &&
@@ -54,7 +59,13 @@ async function createWasmEdgeCommandHarness(options = {}) {
   const path = pathModule.default ?? pathModule;
   const wasmPath = path.resolve(String(options.wasmSource));
   const wasmBytes = await readFile(wasmPath);
-  const inspection = await inspectModule(wasmBytes);
+  // Signed/published artifacts carry an appended publication record
+  // collection that WasmEdge rejects ("malformed section id"). Strip to the
+  // canonical module payload; if anything was stripped, launch WasmEdge from
+  // a temp copy of the stripped bytes (signature verification, when
+  // requested, already ran against the full artifact in loadModule()).
+  const loadableBytes = toLoadableWasmBytes(wasmBytes);
+  const inspection = await inspectModule(loadableBytes);
 
   if (!inspection.exports.includes(DefaultInvokeExports.commandSymbol)) {
     throw new Error(
@@ -62,10 +73,23 @@ async function createWasmEdgeCommandHarness(options = {}) {
     );
   }
 
+  let launchWasmPath = wasmPath;
+  let tempArtifactDir = null;
+  if (loadableBytes.byteLength !== wasmBytes.byteLength) {
+    const [{ mkdtemp, writeFile }, osModule] = await Promise.all([
+      import("node:fs/promises"),
+      import("node:os"),
+    ]);
+    const os = osModule.default ?? osModule;
+    tempArtifactDir = await mkdtemp(path.join(os.tmpdir(), "sdm-module-"));
+    launchWasmPath = path.join(tempArtifactDir, "module.wasm");
+    await writeFile(launchWasmPath, loadableBytes);
+  }
+
   const command = options.wasmEdgeBinary ?? "wasmedge";
   const args = [
     ...(options.enableThreads === false ? [] : ["--enable-threads"]),
-    wasmPath,
+    launchWasmPath,
     ...(Array.isArray(options.args) ? options.args : []),
   ];
   const launchPlan = {
@@ -73,7 +97,7 @@ async function createWasmEdgeCommandHarness(options = {}) {
     args,
     env: buildWasmEdgeSpawnEnv(options.env),
     cwd: options.cwd ?? process.cwd(),
-    wasmPath,
+    wasmPath: launchWasmPath,
   };
 
   async function invokeRaw(requestBytes) {
@@ -146,7 +170,13 @@ async function createWasmEdgeCommandHarness(options = {}) {
     readManifest() {
       return null;
     },
-    async destroy() {},
+    async destroy() {
+      if (tempArtifactDir) {
+        const { rm } = await import("node:fs/promises");
+        await rm(tempArtifactDir, { recursive: true, force: true });
+        tempArtifactDir = null;
+      }
+    },
   };
 }
 
@@ -164,6 +194,7 @@ async function createWasmEdgeCommandHarness(options = {}) {
  * @returns {Promise<Object>} Harness with invoke(), readManifest(), destroy().
  */
 export async function loadModule(options = {}) {
+  const signaturePolicy = resolveModuleSignaturePolicy(options);
   if (isBrowser) {
     return createBrowserModuleHarness(options);
   }
@@ -174,6 +205,11 @@ export async function loadModule(options = {}) {
     throw new TypeError(
       "Server-side isomorphic loader expects a file path string for wasmSource.",
     );
+  }
+
+  if (signaturePolicy) {
+    const { readFile } = await import("node:fs/promises");
+    await verifyModuleArtifact(await readFile(source), signaturePolicy);
   }
 
   const runtimeKind = options.runtimeKind ?? "wasmedge";
@@ -247,7 +283,8 @@ export async function inspectModule(source) {
   } else {
     const bytes =
       source instanceof ArrayBuffer ? new Uint8Array(source) : source;
-    wasmModule = await WebAssembly.compile(bytes);
+    // Tolerate signed/published artifacts (appended publication records).
+    wasmModule = await WebAssembly.compile(toLoadableWasmBytes(bytes));
   }
 
   const profile = detectArtifactProfile(wasmModule);

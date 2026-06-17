@@ -415,20 +415,20 @@ export function detectArtifactProfile(wasmModule: WebAssembly.Module): string;
 export function createBrowserModuleHarness(options?: {
   wasmSource: Uint8Array | ArrayBuffer | string | WebAssembly.Module | unknown;
   host?: unknown;
-	  hostOptions?: unknown;
-	  args?: string[];
-	  env?: Record<string, string>;
-	  manifest?: Record<string, unknown>;
-	  surface?: "direct" | "command";
-	  wasmMemory?: WebAssembly.Memory;
-	  memory?: WebAssembly.Memory;
-	  sharedMemory?: boolean;
-	  initialMemoryBytes?: number;
-	  maximumMemoryBytes?: number;
-	  performance?: {
-	    now(): number;
-	    timeOrigin: number;
-	  };
+  hostOptions?: unknown;
+  args?: string[];
+  env?: Record<string, string>;
+  manifest?: Record<string, unknown>;
+  surface?: "direct" | "command";
+  performance?: {
+    now(): number;
+    timeOrigin: number;
+  };
+  wasmMemory?: WebAssembly.Memory;
+  memory?: WebAssembly.Memory;
+  sharedMemory?: boolean;
+  initialMemoryBytes?: number;
+  maximumMemoryBytes?: number;
   logOutput?: boolean;
 }): Promise<BrowserModuleHarness>;
 

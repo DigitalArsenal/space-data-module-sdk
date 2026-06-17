@@ -36,8 +36,6 @@ test("sdk source never imports flatbuffers through relative node_modules paths",
 test("worker-safe invoke runtime files do not require bare flatbuffers imports", async () => {
   const workerSafeFiles = [
     "src/invoke/codec.js",
-    "src/generated/orbpro/invoke/plugin-invoke-request.js",
-    "src/generated/orbpro/invoke/plugin-invoke-response.js",
     "src/generated/orbpro/stream/flat-buffer-type-ref.js",
     "src/generated/orbpro/stream/typed-arena-buffer.js",
   ];

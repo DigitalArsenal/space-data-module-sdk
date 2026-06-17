@@ -233,7 +233,7 @@ npm run benchmark:module-stream-1gib
 
 The 1 GiB path is env-gated and intended for local stress/perf work. It
 measures either outer transport ingest or chunked resident-module ingest, not
-one giant `PluginInvokeRequest`.
+one giant SDS `$PIV` invoke request.
 
 ## Important Edge Cases
 

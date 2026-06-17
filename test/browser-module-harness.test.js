@@ -10,6 +10,90 @@ import {
   detectArtifactProfile,
 } from "../src/testing/browserModuleHarness.js";
 
+const IMPORTED_SHARED_MEMORY_WASM_BYTES = new Uint8Array([
+  // (module
+  //   (import "env" "memory" (memory 1 1 shared))
+  //   (func (export "write_sentinel")
+  //     i32.const 16
+  //     i32.const 0x5a17c0de
+  //     i32.store)
+  //   (func (export "read_sentinel") (result i32)
+  //     i32.const 16
+  //     i32.load))
+  0, 97, 115, 109, 1, 0, 0, 0, 1, 8, 2, 96, 0, 0, 96, 0, 1, 127, 2,
+  16, 1, 3, 101, 110, 118, 6, 109, 101, 109, 111, 114, 121, 2, 3, 1,
+  1, 3, 3, 2, 0, 1, 7, 34, 2, 14, 119, 114, 105, 116, 101, 95, 115,
+  101, 110, 116, 105, 110, 101, 108, 0, 0, 13, 114, 101, 97, 100, 95,
+  115, 101, 110, 116, 105, 110, 101, 108, 0, 1, 10, 23, 2, 13, 0, 65,
+  16, 65, 222, 129, 223, 208, 5, 54, 2, 0, 11, 7, 0, 65, 16, 40, 2,
+  0, 11,
+]);
+
+const IMPORTED_SHARED_MEMORY_WITH_RUNTIME_STUBS_WASM_BYTES = new Uint8Array([
+  // (module
+  //   (import "env" "memory" (memory 1 1 shared))
+  //   (import "env" "pthread_mutex_lock" (func (param i32) (result i32)))
+  //   (import "env" "pthread_mutex_unlock" (func (param i32) (result i32)))
+  //   (import "env" "pthread_cond_broadcast" (func (param i32) (result i32)))
+  //   (import "env" "pthread_cond_wait" (func (param i32 i32) (result i32)))
+  //   (import "env" "emscripten_thread_sleep" (func (param i32)))
+  //   (import "env" "__do_set_thread_state" (func (param i32)))
+  //   (func (export "call_shared_memory_runtime_imports") (result i32)
+  //     i32.const 0
+  //     call 0
+  //     drop
+  //     i32.const 0
+  //     call 1
+  //     drop
+  //     i32.const 0
+  //     call 2
+  //     i32.const 0
+  //     call 3
+  //     drop
+  //     i32.const 0
+  //     call 4
+  //     i32.const 0
+  //     call 5
+  //     i32.const 7))
+  0, 97, 115, 109, 1, 0, 0, 0, 1, 20, 4, 96, 1, 127, 1, 127, 96,
+  2, 127, 127, 1, 127, 96, 1, 127, 0, 96, 0, 1, 127, 2, 179, 1,
+  7, 3, 101, 110, 118, 6, 109, 101, 109, 111, 114, 121, 2, 3, 1, 1,
+  3, 101, 110, 118, 18, 112, 116, 104, 114, 101, 97, 100, 95, 109, 117,
+  116, 101, 120, 95, 108, 111, 99, 107, 0, 0, 3, 101, 110, 118, 20,
+  112, 116, 104, 114, 101, 97, 100, 95, 109, 117, 116, 101, 120, 95,
+  117, 110, 108, 111, 99, 107, 0, 0, 3, 101, 110, 118, 22, 112, 116,
+  104, 114, 101, 97, 100, 95, 99, 111, 110, 100, 95, 98, 114, 111, 97,
+  100, 99, 97, 115, 116, 0, 0, 3, 101, 110, 118, 17, 112, 116, 104,
+  114, 101, 97, 100, 95, 99, 111, 110, 100, 95, 119, 97, 105, 116, 0,
+  1, 3, 101, 110, 118, 23, 101, 109, 115, 99, 114, 105, 112, 116, 101,
+  110, 95, 116, 104, 114, 101, 97, 100, 95, 115, 108, 101, 101, 112, 0,
+  2, 3, 101, 110, 118, 21, 95, 95, 100, 111, 95, 115, 101, 116, 95,
+  116, 104, 114, 101, 97, 100, 95, 115, 116, 97, 116, 101, 0, 2, 3,
+  2, 1, 3, 7, 38, 1, 34, 99, 97, 108, 108, 95, 115, 104, 97, 114,
+  101, 100, 95, 109, 101, 109, 111, 114, 121, 95, 114, 117, 110, 116,
+  105, 109, 101, 95, 105, 109, 112, 111, 114, 116, 115, 0, 6, 10, 36,
+  1, 34, 0, 65, 0, 16, 0, 26, 65, 0, 16, 1, 26, 65, 0, 16,
+  2, 26, 65, 0, 65, 0, 16, 3, 26, 65, 0, 16, 4, 65, 0, 16,
+  5, 65, 7, 11,
+]);
+
+function createSharedMemoryOrSkip(t) {
+  if (typeof SharedArrayBuffer !== "function") {
+    t.skip("SharedArrayBuffer is not available in this runtime.");
+    return null;
+  }
+  try {
+    return new WebAssembly.Memory({
+      initial: 1,
+      maximum: 1,
+      shared: true,
+    });
+  } catch {
+    t.skip("Shared WebAssembly.Memory is not available in this runtime.");
+    return null;
+  }
+}
+
 function createPort(portId, required = true) {
   return {
     portId,
@@ -243,7 +327,36 @@ test("browser module harness exposes awaited host dispatch alongside module invo
   });
 });
 
+test("browser module harness passes explicit shared imported memory to the module", async (t) => {
+  const memory = createSharedMemoryOrSkip(t);
+  if (!memory) return;
+
+  const harness = await createBrowserModuleHarness({
+    wasmSource: IMPORTED_SHARED_MEMORY_WASM_BYTES,
+    memory,
+  });
+  t.after(() => {
+    harness.destroy();
+  });
+
+  const view = new DataView(memory.buffer);
+  view.setUint32(16, 0, true);
+
+  harness.instance.exports.write_sentinel();
+
+  assert.equal(harness.wasi.getMemory(), memory);
+  assert.equal(memory.buffer instanceof SharedArrayBuffer, true);
+  assert.equal(view.getUint32(16, true), 0x5a17c0de);
+
+  view.setUint32(16, 0x13579bdf, true);
+  assert.equal(harness.instance.exports.read_sentinel(), 0x13579bdf);
+});
+
 test("browser module harness accepts shared imported memory for standalone modules", async (t) => {
+  if (typeof SharedArrayBuffer !== "function") {
+    t.skip("SharedArrayBuffer is not available in this runtime.");
+    return;
+  }
   const wasmSource = createEnvMemoryImportModuleBytes();
   const wasmModule = new WebAssembly.Module(wasmSource);
   const memory = new WebAssembly.Memory({
@@ -274,5 +387,79 @@ test("browser module harness fails early when shared memory is requested but the
       sharedMemory: true,
     }),
     /shared WebAssembly\.Memory/i,
+  );
+});
+
+test("browser module harness accepts wasmMemory as the imported memory option", async (t) => {
+  const wasmMemory = createSharedMemoryOrSkip(t);
+  if (!wasmMemory) return;
+
+  const harness = await createBrowserModuleHarness({
+    wasmSource: IMPORTED_SHARED_MEMORY_WASM_BYTES,
+    wasmMemory,
+  });
+  t.after(() => {
+    harness.destroy();
+  });
+
+  const view = new DataView(wasmMemory.buffer);
+  view.setUint32(16, 0, true);
+
+  harness.instance.exports.write_sentinel();
+
+  assert.equal(harness.memory, wasmMemory);
+  assert.equal(harness.wasi.getMemory(), wasmMemory);
+  assert.equal(view.getUint32(16, true), 0x5a17c0de);
+});
+
+test("browser module harness creates shared imported memory from memory sizing options", async (t) => {
+  if (typeof SharedArrayBuffer !== "function") {
+    t.skip("SharedArrayBuffer is not available in this runtime.");
+    return;
+  }
+
+  const harness = await createBrowserModuleHarness({
+    wasmSource: IMPORTED_SHARED_MEMORY_WASM_BYTES,
+    sharedMemory: true,
+    initialMemoryBytes: 65536,
+    maximumMemoryBytes: 65536,
+  });
+  t.after(() => {
+    harness.destroy();
+  });
+
+  harness.instance.exports.write_sentinel();
+
+  assert.ok(harness.memory instanceof WebAssembly.Memory);
+  assert.equal(harness.memory.buffer instanceof SharedArrayBuffer, true);
+  assert.equal(harness.memory.buffer.byteLength, 65536);
+  assert.equal(harness.wasi.getMemory(), harness.memory);
+  assert.equal(
+    new DataView(harness.memory.buffer).getUint32(16, true),
+    0x5a17c0de,
+  );
+});
+
+test("browser module harness stubs Emscripten shared-memory runtime imports", async (t) => {
+  if (typeof SharedArrayBuffer !== "function") {
+    t.skip("SharedArrayBuffer is not available in this runtime.");
+    return;
+  }
+
+  const harness = await createBrowserModuleHarness({
+    wasmSource: IMPORTED_SHARED_MEMORY_WITH_RUNTIME_STUBS_WASM_BYTES,
+    sharedMemory: true,
+    initialMemoryBytes: 65536,
+    maximumMemoryBytes: 65536,
+  });
+  t.after(() => {
+    harness.destroy();
+  });
+
+  assert.equal(harness.runtime.profile, "standalone");
+  assert.equal(harness.memory.buffer instanceof SharedArrayBuffer, true);
+  assert.equal(
+    harness.instance.exports.call_shared_memory_runtime_imports(),
+    7,
   );
 });

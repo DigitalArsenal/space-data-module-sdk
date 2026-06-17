@@ -40,8 +40,14 @@ const KEY_EXCHANGE_NAME_BY_VALUE = Object.freeze(
     Object.entries(KEY_EXCHANGE_BY_NAME).map(([name, value]) => [value, name]),
   ),
 );
+// AES_256_GCM is not yet published in the spacedatastandards.org generated
+// SymmetricAlgo enum (which only defines AES_256_CTR = 0). The SYMMETRIC field
+// is a plain byte on the wire, so value 1 is encoded directly until the schema
+// publishes the enum member.
+const SYMMETRIC_ALGO_AES_256_GCM = 1;
 const SYMMETRIC_ALGO_BY_NAME = Object.freeze({
   AES_256_CTR: SymmetricAlgo.AES_256_CTR,
+  AES_256_GCM: SYMMETRIC_ALGO_AES_256_GCM,
 });
 const SYMMETRIC_ALGO_NAME_BY_VALUE = Object.freeze(
   Object.fromEntries(
@@ -429,12 +435,15 @@ function normalizeSymmetricAlgorithm(value) {
   if (typeof value === "number") {
     return value;
   }
-  return SYMMETRIC_ALGO_BY_NAME[
-    String(value ?? "AES_256_CTR")
-      .trim()
-      .replace(/[^A-Za-z0-9]+/g, "_")
-      .toUpperCase()
-  ] ?? SymmetricAlgo.AES_256_CTR;
+  const normalized = String(value ?? "AES_256_GCM")
+    .trim()
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .toUpperCase();
+  const resolved = SYMMETRIC_ALGO_BY_NAME[normalized];
+  if (resolved === undefined) {
+    throw new Error(`Unsupported ENC symmetric algorithm "${value}".`);
+  }
+  return resolved;
 }
 
 function normalizeKdf(value) {
@@ -834,7 +843,7 @@ export function createEncryptedEnvelopePayload(options = {}) {
   const envelope = {
     version: Number(options.version ?? 2),
     scheme:
-      normalizeStringField(options.scheme) ?? "x25519-hkdf-aes-256-ctr-rec",
+      normalizeStringField(options.scheme) ?? "x25519-hkdf-aes-256-gcm-rec",
     context: normalizeStringField(options.context ?? enc?.context) ?? "",
     protectedBlobBase64: bytesToBase64(protectedBlob),
     recordCollectionBase64: parsed
