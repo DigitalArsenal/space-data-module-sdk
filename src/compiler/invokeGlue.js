@@ -275,6 +275,19 @@ ${renderMethodDeclarations(methods)}
 
 namespace {
 
+constexpr payloadWireFormat kPayloadWireFormatFlatbuffer =
+  static_cast<payloadWireFormat>(0);
+constexpr payloadWireFormat kPayloadWireFormatAlignedBinary =
+  static_cast<payloadWireFormat>(1);
+constexpr bufferMutability kBufferMutabilityImmutable =
+  static_cast<bufferMutability>(0);
+constexpr bufferOwnership kBufferOwnershipHostOwned =
+  static_cast<bufferOwnership>(0);
+constexpr pivStatus kPivStatusOk = static_cast<pivStatus>(0);
+constexpr pivStatus kPivStatusNotFound = static_cast<pivStatus>(1);
+constexpr pivStatus kPivStatusYielded = static_cast<pivStatus>(2);
+constexpr pivStatus kPivStatusFailed = static_cast<pivStatus>(3);
+
 struct AcceptedTypeRef {
   bool accepts_any_flatbuffer;
   const char *schema_name;
@@ -470,7 +483,7 @@ static bool InputTypeMatches(const AcceptedTypeRef &accepted, const InputFrameOw
     return false;
   }
   if (!accepted.has_wire_format &&
-      frame.view.wire_format != static_cast<uint32_t>(payloadWireFormat_FLATBUFFER)) {
+      frame.view.wire_format != static_cast<uint32_t>(kPayloadWireFormatFlatbuffer)) {
     return false;
   }
   return CStringMatchesIfPresent(accepted.schema_name, frame.schema_name) &&
@@ -723,15 +736,15 @@ static pivStatus ResolvePivStatus(
   const std::string &error_code
 ) {
   if (yielded) {
-    return pivStatus_YIELDED;
+    return kPivStatusYielded;
   }
   if (status_code == 404) {
-    return pivStatus_NOT_FOUND;
+    return kPivStatusNotFound;
   }
   if (status_code != 0 || !error_code.empty()) {
-    return pivStatus_FAILED;
+    return kPivStatusFailed;
   }
-  return pivStatus_OK;
+  return kPivStatusOk;
 }
 
 static std::vector<uint8_t> SerializePivResponse(
@@ -803,9 +816,9 @@ static std::vector<uint8_t> SerializePivResponse(
       output && !output->root_type_name.empty() ? output->root_type_name.c_str() : nullptr
     );
     const auto wire_format =
-      output && output->wire_format == static_cast<uint32_t>(payloadWireFormat_ALIGNED_BINARY)
-        ? payloadWireFormat_ALIGNED_BINARY
-        : payloadWireFormat_FLATBUFFER;
+      output && output->wire_format == static_cast<uint32_t>(kPayloadWireFormatAlignedBinary)
+        ? kPayloadWireFormatAlignedBinary
+        : kPayloadWireFormatFlatbuffer;
     output_frames.push_back(CreateTABDirect(
       builder,
       packed.offset,
@@ -813,8 +826,8 @@ static std::vector<uint8_t> SerializePivResponse(
       packed.alignment,
       wire_format,
       type_ref,
-      bufferMutability_IMMUTABLE,
-      bufferOwnership_HOST_OWNED,
+      kBufferMutabilityImmutable,
+      kBufferOwnershipHostOwned,
       output && output->has_frame_id ? output->frame_id : 0,
       output && !output->port_id.empty() ? output->port_id.c_str() : nullptr
     ));
@@ -1032,7 +1045,7 @@ static bool LoadRawShortcutInput(
   owned = InputFrameOwned{};
   owned.port_id = method->raw_input_port_id ? method->raw_input_port_id : "";
   owned.payload = stdin_bytes;
-  owned.view.wire_format = static_cast<uint32_t>(payloadWireFormat_FLATBUFFER);
+  owned.view.wire_format = static_cast<uint32_t>(kPayloadWireFormatFlatbuffer);
   owned.view.fixed_string_length = 0;
   owned.view.byte_length = static_cast<uint32_t>(stdin_bytes.size());
   owned.view.required_alignment = 1;
@@ -1110,7 +1123,7 @@ extern "C" int32_t plugin_push_output(
     port_id,
     schema_name,
     file_identifier,
-    static_cast<uint32_t>(payloadWireFormat_FLATBUFFER),
+    static_cast<uint32_t>(kPayloadWireFormatFlatbuffer),
     nullptr,
     0,
     0,
