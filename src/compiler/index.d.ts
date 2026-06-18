@@ -11,6 +11,8 @@ export {
   createRecipientKeypairHex,
   ModuleThreadModel,
   protectModuleArtifact,
+  getFlatbuffersCppRuntimeHeaders,
+  getInvokeCppSchemaHeaders,
 } from "../index.js";
 
 export type {

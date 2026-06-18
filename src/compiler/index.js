@@ -7,6 +7,11 @@ export {
 } from "./compileModule.js";
 
 export {
+  getFlatbuffersCppRuntimeHeaders,
+  getInvokeCppSchemaHeaders,
+} from "./flatcSupport.js";
+
+export {
   createIsolatedEmceptionSession,
   createSharedEmceptionSession,
   loadSharedEmception,

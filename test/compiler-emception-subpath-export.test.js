@@ -7,7 +7,10 @@ import {
   loadSharedEmception,
   withSharedEmception,
 } from "space-data-module-sdk/compiler/emception";
-import { createSharedEmceptionSession as createFromCompilerIndex } from "space-data-module-sdk/compiler";
+import {
+  createSharedEmceptionSession as createFromCompilerIndex,
+  getInvokeCppSchemaHeaders,
+} from "space-data-module-sdk/compiler";
 
 test("compiler emception helpers are exported from compiler surfaces", () => {
   assert.equal(typeof createSharedEmceptionSession, "function");
@@ -15,6 +18,15 @@ test("compiler emception helpers are exported from compiler surfaces", () => {
   assert.equal(typeof loadSharedEmception, "function");
   assert.equal(typeof withSharedEmception, "function");
   assert.equal(createFromCompilerIndex, createSharedEmceptionSession);
+});
+
+test("compiler surface exposes invoke schema header generation", async () => {
+  assert.equal(typeof getInvokeCppSchemaHeaders, "function");
+
+  const headers = await getInvokeCppSchemaHeaders();
+
+  assert.match(headers["sds/TAB/main_generated.h"], /struct TABT/);
+  assert.match(headers["sds/PIV/main_generated.h"], /struct PIVT/);
 });
 
 test("shared emception session exposes stable locked filesystem helpers", async () => {

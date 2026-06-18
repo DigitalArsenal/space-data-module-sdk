@@ -961,6 +961,12 @@ export function createRecipientKeypairHex(): Promise<{
   privateKeyHex: string;
 }>;
 
+export function getFlatbuffersCppRuntimeHeaders(): Promise<
+  Record<string, string>
+>;
+
+export function getInvokeCppSchemaHeaders(): Promise<Record<string, string>>;
+
 export type {
   EmceptionCommandResult,
   SharedEmceptionFileContent,
