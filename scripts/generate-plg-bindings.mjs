@@ -5,12 +5,9 @@ import { fileURLToPath } from "node:url";
 
 /**
  * Generate TS + JS bindings for the canonical spacedatastandards.org `PLG`
- * plugin manifest schema. The root table and the .fbs file share a name
- * (`PLG`), which causes the stock flatc TS backend to emit a barrel file
- * that collides with the class file. We sidestep that by feeding flatc a
- * virtual schema path whose basename differs from the root table; the
- * class file then ends up at `plg.ts` and the barrel at
- * `plg-manifest.ts`, which we rename to `index.ts` in the output tree.
+ * plugin manifest schema. SDS owns the schema and generated bindings; the
+ * SDK mirrors those artifacts so module manifest codecs use the exact SDS
+ * root table, import paths, and filename casing.
  */
 
 const __filename = fileURLToPath(import.meta.url);
