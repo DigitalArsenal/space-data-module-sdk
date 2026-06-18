@@ -18,6 +18,8 @@ import {
   legacyManifestToPlg,
   loadKnownTypeCatalog,
   loadStandardsCatalog,
+  PluginFamily,
+  PluginManifestT,
   protectModuleArtifact,
   toEmbeddedPluginManifest,
   validateArtifactWithStandards,
@@ -165,6 +167,22 @@ test("plugin manifest decoder accepts canonical PLG artifact buffers", () => {
       wireFormat: "flatbuffer",
     },
   ]);
+});
+
+test("plugin manifest encoder preserves numeric PMAN plugin families in PLG buffers", () => {
+  for (const [pluginFamily, expected] of [
+    [PluginFamily.PROPAGATOR, "propagator"],
+    [PluginFamily.SHADER, "shader"],
+  ]) {
+    const manifest = new PluginManifestT(
+      `com.digitalarsenal.examples.${expected}`,
+      `${expected} plugin`,
+      "0.1.0",
+      pluginFamily,
+    );
+    const decoded = decodePluginManifest(encodePluginManifest(manifest));
+    assert.equal(decoded.pluginFamily, expected);
+  }
 });
 
 test("plugin manifest encoder emits canonical PLG with rich invoke metadata", () => {

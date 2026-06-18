@@ -20,6 +20,7 @@
  */
 
 import { CapabilityKind } from "../generated/orbpro/manifest/capability-kind.js";
+import { PluginFamily } from "../generated/orbpro/manifest/plugin-family.js";
 
 const FAMILY_TO_PLUGIN_TYPE = Object.freeze({
   sensor: "sensor",
@@ -37,10 +38,14 @@ const FAMILY_TO_PLUGIN_TYPE = Object.freeze({
 });
 
 function normalizePluginTypeFromFamily(family) {
-  if (typeof family !== "string") {
+  let key;
+  if (typeof family === "number" && typeof PluginFamily[family] === "string") {
+    key = PluginFamily[family].toLowerCase();
+  } else if (typeof family === "string") {
+    key = family.trim().toLowerCase().replace(/-/g, "_");
+  } else {
     return "analysis";
   }
-  const key = family.trim().toLowerCase().replace(/-/g, "_");
   return FAMILY_TO_PLUGIN_TYPE[key] ?? "analysis";
 }
 
