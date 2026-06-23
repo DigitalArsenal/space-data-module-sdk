@@ -1392,6 +1392,51 @@ test("standards validation fails closed for stale SCV generated bindings", async
   );
 });
 
+test("standards validation rejects heatmap-era SCV coverage result contracts", async () => {
+  const standardsRoot = await mkdtemp(
+    path.join(os.tmpdir(), "sdn-heatmap-scv-"),
+  );
+  await mkdir(path.join(standardsRoot, "dist"));
+  await writeFile(
+    path.join(standardsRoot, "dist", "manifest.json"),
+    JSON.stringify({
+      STANDARDS: {
+        SCV: {
+          IDL: [
+            "// Hash: heatmap-era",
+            "// Version: 1.101.8",
+            "// -----------------------------------END_HEADER",
+            "enum scvEnvelopeKind : ubyte { REQUEST, RESULT }",
+            "enum scvSensorShapeKind : ubyte { CONIC, RECTANGULAR, CUSTOM_POLYGON, SAR_ANNULAR_SECTOR }",
+            "enum scvCoordinateFrame : ubyte { SENSOR_LOCAL }",
+            "table SCVHeatmapCell { VALUE:double; }",
+            "table SCVAggregateStatistics { TOTAL_CELLS:uint32; }",
+            "table SCVResult { HEATMAP:[SCVHeatmapCell]; AGGREGATE_STATISTICS:SCVAggregateStatistics; }",
+            "table SCV { RESULT:SCVResult; }",
+            "root_type SCV;",
+            'file_identifier "$SCV";',
+            "",
+          ].join("\n"),
+          files: ["schema/SCV/main.fbs"],
+        },
+      },
+    }),
+  );
+
+  const manifest = createTestManifest();
+  manifest.schemasUsed = [{ schemaName: "SCV.fbs", fileIdentifier: "$SCV" }];
+
+  const report = await validateManifestWithStandards(manifest, {
+    standardsRoot,
+  });
+
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some((error) => error.code === "stale-scv-contract"),
+    "heatmap-era SCV contracts must be compliance errors",
+  );
+});
+
 test("default standards dependency exposes the current SCV coverage result contract", async () => {
   const catalog = await loadStandardsCatalog();
   const scv = catalog.find((entry) => entry.schemaCode === "SCV");
@@ -1400,4 +1445,8 @@ test("default standards dependency exposes the current SCV coverage result contr
   assert.match(scv.idl, /\bSENSOR_LOCAL\b/);
   assert.match(scv.idl, /\btable SCVAggregateStatistics\b/);
   assert.match(scv.idl, /\bAGGREGATE_STATISTICS:SCVAggregateStatistics\b/);
+  assert.match(scv.idl, /\btable SCVPackedRasterProducts\b/);
+  assert.match(scv.idl, /\bRASTER_PRODUCTS:SCVPackedRasterProducts\b/);
+  assert.doesNotMatch(scv.idl, /\bSCVHeatmapCell\b/);
+  assert.doesNotMatch(scv.idl, /\bHEATMAP:/);
 });

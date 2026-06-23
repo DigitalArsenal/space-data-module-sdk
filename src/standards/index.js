@@ -11,6 +11,14 @@ const requiredCurrentScvTokens = Object.freeze([
   "SENSOR_LOCAL",
   "table SCVAggregateStatistics",
   "AGGREGATE_STATISTICS:SCVAggregateStatistics",
+  "table SCVPackedRasterProducts",
+  "table SCVPackedRasterBand",
+  "RASTER_PRODUCTS:SCVPackedRasterProducts",
+  "enum scvRasterProductKind",
+]);
+const forbiddenCurrentScvTokens = Object.freeze([
+  "table SCVHeatmapCell",
+  "HEATMAP:",
 ]);
 
 function resolveStandardsManifestPath(options = {}) {
@@ -80,6 +88,19 @@ function validateStandardsCatalogFreshness(catalog, sourceName) {
       message:
         "The loaded spacedatastandards.org SCV catalog is stale and does not " +
         `include required current coverage fields: ${missingTokens.join(", ")}.`,
+      location: `${sourceName}.standards.SCV`,
+    });
+  }
+  const retiredTokens = forbiddenCurrentScvTokens.filter((token) =>
+    scvEntry.idl.includes(token),
+  );
+  if (retiredTokens.length > 0) {
+    issues.push({
+      severity: "error",
+      code: "stale-scv-contract",
+      message:
+        "The loaded spacedatastandards.org SCV catalog preserves retired " +
+        `coverage fields that are not part of the current contract: ${retiredTokens.join(", ")}.`,
       location: `${sourceName}.standards.SCV`,
     });
   }
