@@ -7,6 +7,11 @@ import { sharedModuleCatalog } from "./sharedCatalog.js";
 const require = createRequire(import.meta.url);
 const standardsCatalogPromises = new Map();
 const knownTypeCatalogPromises = new Map();
+const requiredCurrentScvTokens = Object.freeze([
+  "SENSOR_LOCAL",
+  "table SCVAggregateStatistics",
+  "AGGREGATE_STATISTICS:SCVAggregateStatistics",
+]);
 
 function resolveStandardsManifestPath(options = {}) {
   const standardsRoot =
@@ -53,9 +58,32 @@ function parseStandardsEntry([schemaCode, entry]) {
       ? normalizeFileIdentifier(fileIdentifierMatch[1])
       : null,
     hash: hashMatch ? hashMatch[1].toLowerCase() : null,
+    idl,
     version: versionMatch ? versionMatch[1].trim() : null,
     files: Array.isArray(entry?.files) ? entry.files : [],
   };
+}
+
+function validateStandardsCatalogFreshness(catalog, sourceName) {
+  const issues = [];
+  const scvEntry = catalog.find((entry) => entry.schemaCode === "SCV");
+  if (!scvEntry) {
+    return issues;
+  }
+  const missingTokens = requiredCurrentScvTokens.filter(
+    (token) => !scvEntry.idl.includes(token),
+  );
+  if (missingTokens.length > 0) {
+    issues.push({
+      severity: "error",
+      code: "stale-scv-contract",
+      message:
+        "The loaded spacedatastandards.org SCV catalog is stale and does not " +
+        `include required current coverage fields: ${missingTokens.join(", ")}.`,
+      location: `${sourceName}.standards.SCV`,
+    });
+  }
+  return issues;
 }
 
 export async function loadStandardsCatalog(options = {}) {
@@ -144,7 +172,7 @@ export async function validateManifestAgainstStandardsCatalog(
 ) {
   const catalog = options.catalog ?? (await loadKnownTypeCatalog(options));
   const sourceName = options.sourceName ?? "manifest";
-  const issues = [];
+  const issues = validateStandardsCatalogFreshness(catalog, sourceName);
   for (const { source, typeRef } of collectTypeRefs(manifest)) {
     if (typeRef?.acceptsAnyFlatbuffer === true) {
       continue;

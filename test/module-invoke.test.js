@@ -530,6 +530,42 @@ test("public invoke decoder materializes SDS PIV external arenas only when provi
   );
 });
 
+test("public invoke encoder can describe SharedArrayBuffer external payload arenas without copying them into PIV", () => {
+  if (typeof SharedArrayBuffer !== "function") {
+    return;
+  }
+  const externalArena = new Uint8Array(new SharedArrayBuffer(64));
+  externalArena.set([9, 10, 11, 12], 16);
+
+  const encodedRequest = encodePluginInvokeRequest({
+    methodId: "external-arena",
+    externalArena,
+    inputs: [
+      {
+        portId: "coverage",
+        offset: 16,
+        size: 4,
+        alignment: 8,
+        typeRef: {
+          schemaName: "SCV/main.fbs",
+          fileIdentifier: "$SCV",
+          rootTypeName: "SCV",
+        },
+      },
+    ],
+  });
+
+  const request = getPivRequest(encodedRequest);
+  assert.equal(request.payloadArenaArray().length, 0);
+  assert.equal(request.INPUTS(0).OFFSET(), 16);
+  assert.equal(request.INPUTS(0).SIZE(), 4);
+
+  const decoded = decodePluginInvokeRequest(encodedRequest, { externalArena });
+  assert.equal(decoded.payloadArena.length, 0);
+  assert.equal(decoded.inputs[0].payload.buffer, externalArena.buffer);
+  assert.deepEqual(Array.from(decoded.inputs[0].payload), [9, 10, 11, 12]);
+});
+
 test("plugin invoke envelopes round-trip large payload arenas without stack overflow", () => {
   const payload = Uint8Array.from(
     { length: 200000 },

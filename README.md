@@ -124,6 +124,13 @@ allocated by `plugin_alloc`; otherwise it fails closed with
 `invalid-request-pointer`. Public JS decoders can materialize the same
 empty-arena TAB offsets by passing `{ externalArena }` to
 `decodePluginInvokeRequest` or `decodePluginInvokeResponse`.
+Public JS encoders can also emit empty-arena PIV descriptors by passing
+`externalArena` to `encodePluginInvokeRequest` or
+`encodePluginInvokeResponse` and supplying frame `offset`/`size` values into
+that arena. Browser direct-mode harness invocation uses this contract to copy
+the selected external arena frame bytes into `plugin_alloc`-owned guest memory
+before calling `plugin_invoke_stream`; command-mode invocation rejects
+`externalArena` because stdin has no guest-memory address space.
 
 SDS `TAB` is the canonical transport descriptor. It preserves port id, payload
 offset/size, alignment, wire format, type identity, ownership, mutability, and

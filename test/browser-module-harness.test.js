@@ -110,14 +110,14 @@ function createPort(portId, required = true) {
   };
 }
 
-function createManifest() {
+function createManifest({ invokeSurfaces = ["command"] } = {}) {
   return {
     pluginId: "com.digitalarsenal.examples.browser-module-harness",
     name: "Browser Module Harness Host Access Test",
     version: "0.1.0",
     pluginFamily: "analysis",
     runtimeTargets: ["browser", "wasmedge"],
-    invokeSurfaces: ["command"],
+    invokeSurfaces,
     methods: [
       {
         methodId: "echo",
@@ -341,6 +341,55 @@ test("browser module harness exposes awaited host dispatch alongside module invo
     dialed: "/space-data-network/module-delivery/1.0.0",
     peerId: "12D3KooWHarnessPeer",
   });
+});
+
+test("browser module harness direct invoke passes SharedArrayBuffer external arenas through allocated guest memory", async (t) => {
+  if (typeof SharedArrayBuffer !== "function") {
+    t.skip("SharedArrayBuffer is not available in this runtime.");
+    return;
+  }
+  const compilation = await compileModuleFromSource({
+    manifest: createManifest({ invokeSurfaces: ["direct"] }),
+    sourceCode: createEchoSource(),
+    language: "c",
+  });
+  t.after(async () => {
+    await cleanupCompilation(compilation);
+  });
+
+  const harness = await createBrowserModuleHarness({
+    wasmSource: compilation.wasmBytes,
+    surface: "direct",
+  });
+  t.after(() => {
+    harness.destroy();
+  });
+
+  const externalArena = new Uint8Array(new SharedArrayBuffer(64));
+  externalArena.set(new TextEncoder().encode("hello from external arena"), 16);
+
+  const invokeResponse = await harness.invoke({
+    methodId: "echo",
+    externalArena,
+    inputs: [
+      {
+        portId: "request",
+        offset: 16,
+        size: "hello from external arena".length,
+        alignment: 8,
+        typeRef: {
+          schemaName: "Blob.fbs",
+          fileIdentifier: "BLOB",
+        },
+      },
+    ],
+  });
+
+  assert.equal(invokeResponse.statusCode, 0);
+  assert.equal(
+    new TextDecoder().decode(invokeResponse.outputs[0].payload),
+    "hello from external arena",
+  );
 });
 
 test("browser module harness passes explicit shared imported memory to the module", async (t) => {

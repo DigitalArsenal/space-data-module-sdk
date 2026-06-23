@@ -30,6 +30,7 @@ import {
   encodePluginInvokeRequest,
   decodePluginInvokeResponse,
 } from "../invoke/codec.js";
+import { toUint8Array } from "../runtime/bufferLike.js";
 import {
   ModuleSignatureError,
   resolveModuleSignaturePolicy,
@@ -411,7 +412,7 @@ export async function createBrowserModuleHarness(options = {}) {
   const { instance, bridge, wasi, memory } = activeContext;
 
   // --- Invoke helpers ---
-  function invokeDirectRaw(requestBytes) {
+  function directInvokeRuntime() {
     const alloc = instance.exports[DefaultInvokeExports.allocSymbol];
     const free = instance.exports[DefaultInvokeExports.freeSymbol];
     const invokeStream = instance.exports[DefaultInvokeExports.invokeSymbol];
@@ -425,6 +426,11 @@ export async function createBrowserModuleHarness(options = {}) {
         "Direct browser invoke requires plugin_alloc, plugin_free, plugin_invoke_stream, and memory exports.",
       );
     }
+    return { alloc, free, invokeStream, memory };
+  }
+
+  function invokeDirectRaw(requestBytes) {
+    const { alloc, free, invokeStream, memory } = directInvokeRuntime();
     const reqLen = requestBytes.length;
     const reqPtr = alloc(reqLen);
     if (!reqPtr) throw new Error("plugin_alloc returned null for request.");
@@ -460,6 +466,80 @@ export async function createBrowserModuleHarness(options = {}) {
     const responseBytes = new Uint8Array(memory.buffer, resPtr, resLen).slice();
     free(resPtr, resLen);
     return responseBytes;
+  }
+
+  function externalArenaFramePayload(frame, externalArena) {
+    const directPayload = toUint8Array(frame?.payload);
+    if (directPayload) {
+      return directPayload;
+    }
+    const offset = Number(frame?.offset ?? frame?.OFFSET ?? 0);
+    const size = Number(frame?.size ?? frame?.SIZE ?? frame?.byteLength ?? 0);
+    if (
+      !Number.isInteger(offset) ||
+      !Number.isInteger(size) ||
+      offset < 0 ||
+      size < 0 ||
+      offset > externalArena.length ||
+      size > externalArena.length - offset
+    ) {
+      throw new Error("Direct external arena frame range exceeds externalArena.");
+    }
+    return externalArena.subarray(offset, offset + size);
+  }
+
+  function externalArenaInputFrames(request) {
+    return Array.isArray(request?.inputs)
+      ? request.inputs
+      : request?.inputFrames ?? [];
+  }
+
+  function invokeDirectExternalArena(request) {
+    const { alloc, free, memory } = directInvokeRuntime();
+    const externalArena = toUint8Array(request?.externalArena);
+    if (!externalArena) {
+      throw new TypeError(
+        "Direct external arena invoke requires request.externalArena bytes.",
+      );
+    }
+    const allocatedPayloads = [];
+    try {
+      const inputs = externalArenaInputFrames(request).map((frame) => {
+        const payload = externalArenaFramePayload(frame, externalArena);
+        const size = payload.byteLength;
+        const payloadPtr = size > 0 ? alloc(size) : 0;
+        if (size > 0 && !payloadPtr) {
+          throw new Error("plugin_alloc returned null for external arena payload.");
+        }
+        if (size > 0) {
+          if (payloadPtr % INVOKE_ARENA_ALIGNMENT !== 0) {
+            throw new Error(
+              `plugin_alloc returned an external arena pointer (${payloadPtr}) that is not ${INVOKE_ARENA_ALIGNMENT}-byte aligned.`,
+            );
+          }
+          new Uint8Array(memory.buffer, payloadPtr, size).set(payload);
+          allocatedPayloads.push({ ptr: payloadPtr, size });
+        }
+        const nextFrame = {
+          ...frame,
+          offset: payloadPtr,
+          size,
+        };
+        delete nextFrame.payload;
+        return nextFrame;
+      });
+      const requestBytes = encodePluginInvokeRequest({
+        ...request,
+        inputs,
+        inputFrames: undefined,
+        externalArena: new Uint8Array(memory.buffer),
+      });
+      return invokeDirectRaw(requestBytes);
+    } finally {
+      for (const { ptr, size } of allocatedPayloads) {
+        free(ptr, size);
+      }
+    }
   }
 
   async function invokeCommandRaw(stdinBytes) {
@@ -503,6 +583,15 @@ export async function createBrowserModuleHarness(options = {}) {
   }
 
   async function invoke(request) {
+    if (request?.externalArena !== undefined && surface === "direct") {
+      const responseBytes = invokeDirectExternalArena(request);
+      return decodePluginInvokeResponse(responseBytes);
+    }
+    if (request?.externalArena !== undefined) {
+      throw new Error(
+        "Browser module harness externalArena invoke requires the direct surface.",
+      );
+    }
     const requestBytes = encodePluginInvokeRequest(request);
     const responseBytes = await invokeRaw(requestBytes);
     return decodePluginInvokeResponse(responseBytes);

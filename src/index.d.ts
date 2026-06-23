@@ -170,6 +170,7 @@ export interface PluginInvokeRequestEnvelope {
   methodId: string;
   inputs?: InvokeFrame[];
   inputFrames?: InvokeFrame[];
+  externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
   payloadArena?: Uint8Array;
   traceId?: bigint | number | string;
   outputStreamCap?: number;
@@ -182,6 +183,7 @@ export interface PluginInvokeResponseEnvelope {
   backlogRemaining?: number;
   outputs?: InvokeFrame[];
   outputFrames?: InvokeFrame[];
+  externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
   payloadArena?: Uint8Array;
   errorCode?: string | null;
   errorMessage?: string | null;
@@ -934,6 +936,11 @@ export function compileModuleFromSource(options: {
   language?: string;
   threadModel?: ModuleThreadModelName;
   outputPath?: string;
+  importedMemory?: boolean;
+  sharedMemory?: boolean;
+  initialMemoryBytes?: number;
+  maximumMemoryBytes?: number;
+  emscriptenRoot?: string;
   allowUndefinedImports?: boolean;
 }): Promise<CompilationResult>;
 
@@ -1815,6 +1822,7 @@ export interface BrowserModuleHarness {
   ): Promise<Uint8Array>;
   invoke(request: {
     methodId?: string | null;
+    externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
     inputs?: HarnessInputFrame[];
   }): Promise<{
     statusCode: number;

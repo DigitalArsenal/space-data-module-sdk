@@ -32,8 +32,8 @@ import {
 test("SDK challenge request bytes match the canonical sdn-js LCH builder layout", () => {
   const options = {
     reqId: "req-123",
-    moduleId: "com.space-data-network.fastest-path",
-    moduleVersion: "0.5.22",
+    moduleId: "sensor-coverage-analysis",
+    moduleVersion: "0.1.0",
     requesterPeerId: "requester-peer-id",
     requesterXpub: "xpub-requester",
     requesterSigningPublicKey: new Uint8Array(32).fill(6),
@@ -53,8 +53,8 @@ test("SDK challenge request bytes match the canonical sdn-js LCH builder layout"
 test("SDK proof bytes match the canonical sdn-js LPF builder layout", () => {
   const options = {
     reqId: "req-123",
-    moduleId: "com.space-data-network.fastest-path",
-    moduleVersion: "0.5.22",
+    moduleId: "sensor-coverage-analysis",
+    moduleVersion: "0.1.0",
     requesterPeerId: "requester-peer-id",
     requesterXpub: "xpub-requester",
     requesterDomain: "app.example.com",
@@ -74,8 +74,8 @@ test("SDK proof bytes match the canonical sdn-js LPF builder layout", () => {
 test("SDK grant decoding reads the same SDS payload shape sdn-js currently consumes", () => {
   const bytes = encodeCanonicalGrantResponse({
     reqId: "req-123",
-    moduleId: "com.space-data-network.fastest-path",
-    moduleVersion: "0.5.22",
+    moduleId: "sensor-coverage-analysis",
+    moduleVersion: "0.1.0",
     requesterPeerId: "requester-peer-id",
     requesterXpub: "xpub-requester",
     requestedDomain: "app.example.com",
@@ -95,12 +95,12 @@ test("SDK grant decoding reads the same SDS payload shape sdn-js currently consu
 
   assert.equal(decoded.messageType, "granted");
   assert.equal(descriptor.cid, "bafyencryptedmodule");
-  assert.equal(descriptor.moduleId, "com.space-data-network.fastest-path");
-  assert.equal(descriptor.moduleVersion, "0.5.22");
+  assert.equal(descriptor.moduleId, "sensor-coverage-analysis");
+  assert.equal(descriptor.moduleVersion, "0.1.0");
   assert.deepEqual(descriptor.allowedDomains, ["app.example.com"]);
   assert.equal(wrappedContentKey.header.rootType, "$KMF");
-  assert.equal(wrappedContentKey.header.context, "license-grant:com.space-data-network.fastest-path:0.5.22");
-  assert.equal(kmf.KEY_ID(), "com.space-data-network.fastest-path:0.5.22");
+  assert.equal(wrappedContentKey.header.context, "license-grant:sensor-coverage-analysis:0.1.0");
+  assert.equal(kmf.KEY_ID(), "sensor-coverage-analysis:0.1.0");
   assert.deepEqual(kmf.keyBytesArray(), new Uint8Array([4, 5, 6]));
 });
 
@@ -241,8 +241,8 @@ function encodeCanonicalGrantResponse(options) {
 }
 
 function createModuleDescriptorOffset(builder, contentHash) {
-  const moduleId = "com.space-data-network.fastest-path";
-  const moduleVersion = "0.5.22";
+  const moduleId = "sensor-coverage-analysis";
+  const moduleVersion = "0.1.0";
   const pluginIdOffset = builder.createString(moduleId);
   const nameOffset = builder.createString(moduleId);
   const versionOffset = builder.createString(moduleVersion);

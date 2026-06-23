@@ -8,6 +8,9 @@ import type {
 export interface HarnessInputFrame {
   portId?: string | null;
   typeRef?: PayloadTypeRef | null;
+  alignment?: number;
+  offset?: number;
+  size?: number;
   payload?: Uint8Array | ArrayBuffer | ArrayBufferView | string | null;
 }
 
@@ -187,6 +190,7 @@ export interface PluginInvokeProcessClient {
   invokeRaw(requestBytes: Uint8Array | ArrayBuffer | ArrayBufferView): Promise<Uint8Array>;
   invoke(request: {
     methodId?: string | null;
+    externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
     inputs?: HarnessInputFrame[];
   }): Promise<{
       statusCode: number;
@@ -250,6 +254,7 @@ export interface ModuleHarness {
   invokeRaw(requestBytes: Uint8Array | ArrayBuffer | ArrayBufferView): Promise<Uint8Array>;
   invoke(request: {
     methodId?: string | null;
+    externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
     inputs?: HarnessInputFrame[];
   }): Promise<{
       statusCode: number;
@@ -341,6 +346,7 @@ export interface BrowserModuleHarness {
   ): Promise<Uint8Array>;
   invoke(request: {
     methodId?: string | null;
+    externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
     inputs?: HarnessInputFrame[];
   }): Promise<{
     statusCode: number;

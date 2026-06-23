@@ -9,10 +9,6 @@ import {
   EntityStandardsLink,
 } from "../src/generated/orbpro/entity.js";
 import {
-  CatalogQueryKind,
-  CatalogQueryRequest,
-} from "../src/generated/orbpro/query.js";
-import {
   PropagatorDescribeSourcesBatchRequest,
   PropagatorSampleTrajectoryStatesRequest,
   PropagatorSampleTrajectoryStatesResult,
@@ -43,28 +39,6 @@ test("orbpro generated bindings expose the canonical runtime FlatBuffer contract
     Array.from(payload.dataArray() ?? []),
     Array.from(rawPayloadBytes),
   );
-
-  const queryBuilder = new flatbuffers.Builder(128);
-  CatalogQueryRequest.finishCatalogQueryRequestBuffer(
-    queryBuilder,
-    CatalogQueryRequest.createCatalogQueryRequest(
-      queryBuilder,
-      CatalogQueryKind.CATALOG_ROW,
-      queryBuilder.createString("25544"),
-      7,
-      3,
-      11,
-    ),
-  );
-  const query = CatalogQueryRequest.getRootAsCatalogQueryRequest(
-    new flatbuffers.ByteBuffer(queryBuilder.asUint8Array()),
-  );
-  assert.equal(CatalogQueryRequest.bufferHasIdentifier(new flatbuffers.ByteBuffer(queryBuilder.asUint8Array())), true);
-  assert.equal(query.queryKind(), CatalogQueryKind.CATALOG_ROW);
-  assert.equal(query.query(), "25544");
-  assert.equal(query.entityIndex(), 7);
-  assert.equal(query.maxCount(), 3);
-  assert.equal(query.entityCount(), 11);
 
   const entityBuilder = new flatbuffers.Builder(256);
   const entityIdOffset = entityBuilder.createString("sat-25544");

@@ -1,8 +1,10 @@
 import {
   computeCanonicalModuleHash,
   createSingleFileBundle,
+  getWasmCustomSections,
   parseSingleFileBundle,
 } from "./wasm.js";
+import { SDS_MANIFEST_SECTION_NAME } from "./constants.js";
 import {
   extractPublicationRecordCollection,
 } from "../transport/records.js";
@@ -83,6 +85,19 @@ function decodeSignaturePayload(entry) {
   }
 }
 
+function normalizeOptionalBytes(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (value instanceof Uint8Array) {
+    return new Uint8Array(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  return new Uint8Array(value);
+}
+
 /**
  * Sign a module artifact's canonical wasm hash with an Ed25519 key and embed
  * the detached signature in the artifact's MBL bundle (sds.signature entry).
@@ -118,7 +133,7 @@ export async function signModuleArtifact(bytes, options = {}) {
     signedHashAlgorithm: "sha256-canonical-module-hash",
   };
 
-  let manifestBytes;
+  let manifestBytes = normalizeOptionalBytes(options.manifestBytes);
   let preservedEntries = [];
   if (protectedArtifact?.mbl) {
     const parsed = await parseSingleFileBundle(bytes);
@@ -133,6 +148,10 @@ export async function signModuleArtifact(bytes, options = {}) {
       return true;
     });
   }
+  manifestBytes ??= getWasmCustomSections(
+    payloadBytes,
+    SDS_MANIFEST_SECTION_NAME,
+  )[0];
 
   const rebuilt = await createSingleFileBundle({
     wasmBytes: bytes,

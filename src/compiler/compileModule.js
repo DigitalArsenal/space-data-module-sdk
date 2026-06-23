@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { existsSync } from "node:fs";
 import {
   mkdtemp,
   mkdir,
@@ -66,6 +67,8 @@ import { getWasmWallet } from "../utils/wasmCrypto.js";
 
 const C_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const execFileAsync = promisify(execFile);
+const DEFAULT_SHARED_MEMORY_INITIAL_BYTES = 64 * 1024 * 1024;
+const DEFAULT_SHARED_MEMORY_MAXIMUM_BYTES = 2 * 1024 * 1024 * 1024;
 const EMSCRIPTEN_MEMORY_GROWTH_NOTIFY_SHIM = `
 extern "C" __attribute__((weak)) void emscripten_notify_memory_growth(int) {}
 `;
@@ -104,7 +107,29 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
   if (options.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS) {
     threadArgs.push("-pthread");
   }
-  if (options.allowUndefinedImports === true) {
+  if (options.sharedMemory === true) {
+    const initialMemoryBytes = Math.trunc(
+      options.initialMemoryBytes ?? DEFAULT_SHARED_MEMORY_INITIAL_BYTES,
+    );
+    const maximumMemoryBytes = Math.trunc(
+      options.maximumMemoryBytes ?? DEFAULT_SHARED_MEMORY_MAXIMUM_BYTES,
+    );
+    extraArgs.push(
+      "-s",
+      "IMPORTED_MEMORY=1",
+      "-s",
+      "SHARED_MEMORY=1",
+      "-s",
+      `INITIAL_MEMORY=${initialMemoryBytes}`,
+      "-s",
+      `MAXIMUM_MEMORY=${maximumMemoryBytes}`,
+      "-matomics",
+      "-mbulk-memory",
+    );
+  } else if (options.importedMemory === true) {
+    extraArgs.push("-s", "IMPORTED_MEMORY=1");
+  }
+  if (options.allowUndefinedImports === true || options.sharedMemory === true) {
     extraArgs.push("-s", "ERROR_ON_UNDEFINED_SYMBOLS=0", "-Wl,--allow-undefined");
   }
   if (options.threadModel !== ModuleThreadModel.EMSCRIPTEN_PTHREADS) {
@@ -128,6 +153,9 @@ function buildSourceCompilerArgs(options = {}) {
   const args = ["-O3", "-DNDEBUG"];
   if (options.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS) {
     args.push("-pthread");
+  }
+  if (options.sharedMemory === true) {
+    args.push("-matomics", "-mbulk-memory");
   }
   return args;
 }
@@ -167,8 +195,13 @@ function resolveThreadModel({ manifest, threadModel } = {}) {
   return ModuleThreadModel.SINGLE_THREAD;
 }
 
-function requiresSystemEmscripten(threadModel) {
-  return threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS;
+function requiresSystemEmscripten(options = {}) {
+  const threadModel =
+    typeof options === "string" ? options : options.threadModel;
+  return (
+    threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS ||
+    options.sharedMemory === true
+  );
 }
 
 function guestLinkSymbolPrefix(pluginId) {
@@ -591,6 +624,23 @@ async function ensureSystemCompilerAvailable(command) {
   }
 }
 
+function resolveEmscriptenCommand(command, options = {}) {
+  const root = options.emscriptenRoot ?? process.env.SDN_LOCAL_EMSDK_DIR ?? process.env.EMSDK;
+  if (!root) {
+    return command;
+  }
+  const candidates = [
+    path.join(root, "upstream", "emscripten", command),
+    path.join(root, command),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return candidates[0];
+}
+
 async function runSystemCompiler(command, args, options = {}) {
   try {
     await execFileAsync(command, args, {
@@ -639,8 +689,13 @@ async function compileWithSystemEmscripten(options = {}) {
   const wasmOutputPath = path.join(tempDir, "module.wasm");
 
   try {
-    await ensureSystemCompilerAvailable(sourceCompilerCommand);
-    await ensureSystemCompilerAvailable("em++");
+    const sourceCompilerPath = resolveEmscriptenCommand(
+      sourceCompilerCommand,
+      compileOptions,
+    );
+    const emxxPath = resolveEmscriptenCommand("em++", compileOptions);
+    await ensureSystemCompilerAvailable(sourceCompilerPath);
+    await ensureSystemCompilerAvailable(emxxPath);
     const { runtimeHeaders, schemaHeaders } = await getInvokeCppSupportFiles();
     const args = buildCompilerArgs(exportedSymbols, compileOptions);
     await writeFilesToDirectory(runtimeIncludeDir, runtimeHeaders);
@@ -659,7 +714,7 @@ async function compileWithSystemEmscripten(options = {}) {
       "-o",
       sourceObjectPath,
     ];
-    await runSystemCompiler(sourceCompilerCommand, sourceCompileArgs);
+    await runSystemCompiler(sourceCompilerPath, sourceCompileArgs);
 
     const sourceObjectBytes = new Uint8Array(await readFile(sourceObjectPath));
     const guestLink = deriveGuestLinkRenameArgs({
@@ -680,32 +735,28 @@ async function compileWithSystemEmscripten(options = {}) {
       "-o",
       linkObjectPath,
     ];
-    await runSystemCompiler(sourceCompilerCommand, linkCompileArgs);
-    await runSystemCompiler("em++", [
+    await runSystemCompiler(sourceCompilerPath, linkCompileArgs);
+    await runSystemCompiler(emxxPath, [
       "-c",
       manifestSourcePath,
       "-std=c++17",
       `-I${tempDir}`,
       `-I${runtimeIncludeDir}`,
-      ...(compileOptions.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS
-        ? ["-pthread"]
-        : []),
+      ...buildSourceCompilerArgs(compileOptions),
       "-o",
       manifestObjectPath,
     ]);
-    await runSystemCompiler("em++", [
+    await runSystemCompiler(emxxPath, [
       "-c",
       invokeSourcePath,
       "-std=c++17",
       `-I${tempDir}`,
       `-I${runtimeIncludeDir}`,
-      ...(compileOptions.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS
-        ? ["-pthread"]
-        : []),
+      ...buildSourceCompilerArgs(compileOptions),
       "-o",
       invokeObjectPath,
     ]);
-    await runSystemCompiler("em++", [
+    await runSystemCompiler(emxxPath, [
       sourceObjectPath,
       manifestObjectPath,
       invokeObjectPath,
@@ -795,7 +846,7 @@ export async function compileModuleFromSource(options = {}) {
     noEntry: includeCommandMain !== true,
     threadModel,
   };
-  const compileFunction = requiresSystemEmscripten(threadModel)
+  const compileFunction = requiresSystemEmscripten(compileOptions)
     ? compileWithSystemEmscripten
     : compileWithEmception;
   const result = await compileFunction({
@@ -826,10 +877,14 @@ export async function compileModuleFromSource(options = {}) {
     wasmPath: resolvedOutputPath,
   });
 
-  return {
-    compiler: requiresSystemEmscripten(threadModel)
+  const compilerName = requiresSystemEmscripten(compileOptions)
+    ? threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS
       ? "em++ (system emscripten pthreads)"
-      : "em++ (emception)",
+      : "em++ (system emscripten shared memory)"
+    : "em++ (emception)";
+
+  return {
+    compiler: compilerName,
     language: compiler.language,
     threadModel,
     outputPath: resolvedOutputPath,

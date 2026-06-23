@@ -36,8 +36,8 @@ import {
 test("licensing challenge requests encode and decode through SDS LCH", () => {
   const bytes = encodeLicensingChallengeRequest({
     reqId: "req-123",
-    moduleId: "com.space-data-network.fastest-path",
-    moduleVersion: "0.5.22",
+    moduleId: "sensor-coverage-analysis",
+    moduleVersion: "0.1.0",
     requesterPeerId: "requester-peer-id",
     requesterXpub: "xpub-requester",
     requesterSigningPublicKey: new Uint8Array(32).fill(6),
@@ -57,8 +57,8 @@ test("licensing challenge requests encode and decode through SDS LCH", () => {
   assert.equal(decoded.messageType, "request");
   assert.equal(decoded.role, "requester");
   assert.equal(decoded.reqId, "req-123");
-  assert.equal(decoded.moduleId, "com.space-data-network.fastest-path");
-  assert.equal(decoded.moduleVersion, "0.5.22");
+  assert.equal(decoded.moduleId, "sensor-coverage-analysis");
+  assert.equal(decoded.moduleVersion, "0.1.0");
   assert.equal(decoded.requesterPeerId, "requester-peer-id");
   assert.equal(decoded.requesterXpub, "xpub-requester");
   assert.equal(decoded.requestedDomain, "app.example.com");
@@ -72,8 +72,8 @@ test("licensing challenge requests encode and decode through SDS LCH", () => {
 test("licensing challenge responses decode challenge nonce and provider details", () => {
   const bytes = encodeChallengeResponseFixture({
     reqId: "req-123",
-    moduleId: "com.space-data-network.fastest-path",
-    moduleVersion: "0.5.22",
+    moduleId: "sensor-coverage-analysis",
+    moduleVersion: "0.1.0",
     providerPeerId: "provider-peer-id",
     challengeNonce: new Uint8Array([1, 2, 3, 4]),
     expiresAtMs: 1_700_000_900_000n,
@@ -84,8 +84,8 @@ test("licensing challenge responses decode challenge nonce and provider details"
   assert.equal(decoded.messageType, "response");
   assert.equal(decoded.role, "provider");
   assert.equal(decoded.reqId, "req-123");
-  assert.equal(decoded.moduleId, "com.space-data-network.fastest-path");
-  assert.equal(decoded.moduleVersion, "0.5.22");
+  assert.equal(decoded.moduleId, "sensor-coverage-analysis");
+  assert.equal(decoded.moduleVersion, "0.1.0");
   assert.equal(decoded.providerPeerId, "provider-peer-id");
   assert.equal(decoded.expiresAtMs, 1_700_000_900_000);
   assert.deepEqual(decoded.challengeNonce, new Uint8Array([1, 2, 3, 4]));
@@ -94,8 +94,8 @@ test("licensing challenge responses decode challenge nonce and provider details"
 test("licensing proofs encode and decode through SDS LPF", () => {
   const bytes = encodeLicensingProof({
     reqId: "req-123",
-    moduleId: "com.space-data-network.fastest-path",
-    moduleVersion: "0.5.22",
+    moduleId: "sensor-coverage-analysis",
+    moduleVersion: "0.1.0",
     requesterPeerId: "requester-peer-id",
     requesterXpub: "xpub-requester",
     requesterDomain: "app.example.com",
@@ -115,8 +115,8 @@ test("licensing proofs encode and decode through SDS LPF", () => {
   assert.equal(message.MESSAGE_TYPE(), licensingProofMessageType.ProofRequest);
   assert.equal(decoded.messageType, "proof-request");
   assert.equal(decoded.reqId, "req-123");
-  assert.equal(decoded.moduleId, "com.space-data-network.fastest-path");
-  assert.equal(decoded.moduleVersion, "0.5.22");
+  assert.equal(decoded.moduleId, "sensor-coverage-analysis");
+  assert.equal(decoded.moduleVersion, "0.1.0");
   assert.equal(decoded.requesterPeerId, "requester-peer-id");
   assert.equal(decoded.requesterXpub, "xpub-requester");
   assert.equal(decoded.requestedDomain, "app.example.com");
@@ -133,8 +133,8 @@ test("licensing proofs encode and decode through SDS LPF", () => {
 test("granted licensing grants decode, validate, and expose PLG plus wrapped key payloads", () => {
   const bytes = encodeGrantedGrantFixture({
     reqId: "req-123",
-    moduleId: "com.space-data-network.fastest-path",
-    moduleVersion: "0.5.22",
+    moduleId: "sensor-coverage-analysis",
+    moduleVersion: "0.1.0",
     requesterPeerId: "requester-peer-id",
     requesterXpub: "xpub-requester",
     requestedDomain: "app.example.com",
@@ -148,8 +148,8 @@ test("granted licensing grants decode, validate, and expose PLG plus wrapped key
   const decoded = decodeLicensingGrant(bytes);
   const validated = validateLicensingGrant(decoded, {
     reqId: "req-123",
-    moduleId: "com.space-data-network.fastest-path",
-    moduleVersion: "0.5.22",
+    moduleId: "sensor-coverage-analysis",
+    moduleVersion: "0.1.0",
     expectedDomain: "app.example.com",
     requestedTimeoutMs: 300_000,
     grantVerifierPublicKeyLength: 32,
@@ -167,19 +167,19 @@ test("granted licensing grants decode, validate, and expose PLG plus wrapped key
   assert.equal(validated.requiredScope, "orbpro.default");
   assert.equal(validated.grantStatus, "active");
   assert.equal(descriptor.cid, "bafyencryptedmodule");
-  assert.equal(descriptor.moduleId, "com.space-data-network.fastest-path");
-  assert.equal(descriptor.moduleVersion, "0.5.22");
-  assert.equal(descriptor.keyId, "com.space-data-network.fastest-path:0.5.22");
+  assert.equal(descriptor.moduleId, "sensor-coverage-analysis");
+  assert.equal(descriptor.moduleVersion, "0.1.0");
+  assert.equal(descriptor.keyId, "sensor-coverage-analysis:0.1.0");
   assert.deepEqual(descriptor.contentHash, new Uint8Array(32).fill(7));
   assert.deepEqual(descriptor.allowedDomains, ["app.example.com"]);
   assert.equal(descriptor.encrypted, true);
   assert.equal(wrappedContentKey.wrappingAlgorithm, "x25519-hkdf-sha256-aes-256-ctr-rec");
-  assert.equal(wrappedContentKey.contentKeyId, "com.space-data-network.fastest-path:0.5.22");
+  assert.equal(wrappedContentKey.contentKeyId, "sensor-coverage-analysis:0.1.0");
   assert.equal(wrappedContentKey.recipientKeyId, "7265717565737465722d656e6372797074696f6e2d6b6579");
   assert.equal(wrappedContentKey.keyMaterialRootType, "$KMF");
   assert.deepEqual(wrappedContentKey.providerEphemeralPublicKey, new Uint8Array(32).fill(9));
   assert.deepEqual(wrappedContentKey.nonce, new Uint8Array(12).fill(4));
-  assert.equal(kmf.KEY_ID(), "com.space-data-network.fastest-path:0.5.22");
+  assert.equal(kmf.KEY_ID(), "sensor-coverage-analysis:0.1.0");
   assert.deepEqual(kmf.keyBytesArray(), new Uint8Array([4, 5, 6]));
 });
 
@@ -187,8 +187,8 @@ test("grant validation defaults enforce domain and verifier-key invariants", () 
   const mismatchedDomain = decodeLicensingGrant(
     encodeGrantedGrantFixture({
       reqId: "req-mismatch",
-      moduleId: "com.space-data-network.fastest-path",
-      moduleVersion: "0.5.22",
+      moduleId: "sensor-coverage-analysis",
+      moduleVersion: "0.1.0",
       requesterPeerId: "requester-peer-id",
       requesterXpub: "xpub-requester",
       requestedDomain: "app.example.com",
@@ -210,8 +210,8 @@ test("grant validation defaults enforce domain and verifier-key invariants", () 
   const shortVerifierKey = decodeLicensingGrant(
     encodeGrantedGrantFixture({
       reqId: "req-short-key",
-      moduleId: "com.space-data-network.fastest-path",
-      moduleVersion: "0.5.22",
+      moduleId: "sensor-coverage-analysis",
+      moduleVersion: "0.1.0",
       requesterPeerId: "requester-peer-id",
       requesterXpub: "xpub-requester",
       requestedDomain: "app.example.com",
@@ -235,7 +235,7 @@ test("grant validation defaults enforce domain and verifier-key invariants", () 
 test("denied licensing grants decode and validate as protocol errors", () => {
   const bytes = encodeDeniedGrantFixture({
     reqId: "req-denied",
-    moduleId: "com.space-data-network.fastest-path",
+    moduleId: "sensor-coverage-analysis",
     grantStatus: "policy_denied",
     denialReason: "domain rejected",
   });
@@ -244,7 +244,7 @@ test("denied licensing grants decode and validate as protocol errors", () => {
 
   assert.equal(decoded.messageType, "denied");
   assert.equal(decoded.reqId, "req-denied");
-  assert.equal(decoded.moduleId, "com.space-data-network.fastest-path");
+  assert.equal(decoded.moduleId, "sensor-coverage-analysis");
   assert.equal(decoded.grantStatus, "policy_denied");
   assert.equal(decoded.denialReason, "domain rejected");
   assert.throws(
@@ -358,8 +358,8 @@ function encodeDeniedGrantFixture(options) {
 }
 
 function createModuleDescriptorOffset(builder, contentHash) {
-  const moduleId = "com.space-data-network.fastest-path";
-  const moduleVersion = "0.5.22";
+  const moduleId = "sensor-coverage-analysis";
+  const moduleVersion = "0.1.0";
   const pluginIdOffset = builder.createString(moduleId);
   const nameOffset = builder.createString(moduleId);
   const versionOffset = builder.createString(moduleVersion);

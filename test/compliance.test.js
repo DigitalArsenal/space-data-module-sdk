@@ -799,29 +799,24 @@ test("unresolvable schema produces warning via standards validation", async () =
   assert.ok(report.warnings.length > 0);
 });
 
-test("OrbPro local analysis and propagator type refs resolve via standards validation", async () => {
+test("module-local type refs produce standards validation warnings", async () => {
   const m = createValidManifest();
   m.schemasUsed = [
-    { schemaName: "orbpro.analysis.AccessWindowRequest", fileIdentifier: "AWRQ" },
-    { schemaName: "orbpro.analysis.AccessWindowResult", fileIdentifier: "AWRS" },
-    { schemaName: "orbpro.analysis.CoverageGridConfig", fileIdentifier: "CVGC" },
-    { schemaName: "orbpro.analysis.CoverageGridInfo", fileIdentifier: "CVGI" },
-    { schemaName: "orbpro.analysis.CoverageFootprintBatch", fileIdentifier: "CVFB" },
-    { schemaName: "orbpro.analysis.CoverageStatisticsResult", fileIdentifier: "CVST" },
-    { schemaName: "orbpro.analysis.CoverageIntervalsResult", fileIdentifier: "CVIR" },
-    { schemaName: "orbpro.analysis.CoverageFomResult", fileIdentifier: "CVFR" },
-    { schemaName: "orbpro.analysis.CoverageHeatmapResult", fileIdentifier: "CVHR" },
-    { schemaName: "orbpro.analysis.CoverageUnionResult", fileIdentifier: "CVUR" },
-    { schemaName: "orbpro.analysis.SwathFootprintRequest", fileIdentifier: "SFPQ" },
-    { schemaName: "orbpro.analysis.SwathFootprintResult", fileIdentifier: "SFPR" },
-    { schemaName: "orbpro.analysis.SwathGroundTrackRequest", fileIdentifier: "SGRQ" },
-    { schemaName: "orbpro.analysis.SwathGroundTrackResult", fileIdentifier: "SGRS" },
-    { schemaName: "orbpro.analysis.SwathGenerationRequest", fileIdentifier: "SWAQ" },
-    { schemaName: "orbpro.analysis.SwathGenerationResult", fileIdentifier: "SWAS" },
-    { schemaName: "orbpro.analysis.SwathContainmentRequest", fileIdentifier: "SPIQ" },
-    { schemaName: "orbpro.analysis.SwathContainmentResult", fileIdentifier: "SPIR" },
-    { schemaName: "orbpro.analysis.SwathAccessRequest", fileIdentifier: "SAPQ" },
-    { schemaName: "orbpro.analysis.SwathAccessResult", fileIdentifier: "SAPR" },
+    { schemaName: "LocalOnlyMetric.fbs", fileIdentifier: "LOM1" },
+    { schemaName: "LocalOnlyResult.fbs", fileIdentifier: "LOR1" },
+  ];
+  const report = await validateManifestWithStandards(m);
+  assert.equal(report.ok, true);
+  assert.equal(
+    report.warnings.every((warning) => warning.code === "unresolved-standards-type"),
+    true,
+  );
+  assert.equal(report.warnings.length, m.schemasUsed.length);
+});
+
+test("current OrbPro propagator type refs still resolve via standards validation", async () => {
+  const m = createValidManifest();
+  m.schemasUsed = [
     { schemaName: "orbpro.propagator.PropagatorBatchRequest", fileIdentifier: "PROP" },
     { schemaName: "orbpro.plugins.PropagatorState", fileIdentifier: "PRST" },
   ];

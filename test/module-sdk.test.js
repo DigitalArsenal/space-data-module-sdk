@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { WASI } from "node:wasi";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -25,6 +26,7 @@ import {
   validateArtifactWithStandards,
   validateManifestWithStandards,
 } from "../src/index.js";
+import { createBrowserModuleHarness } from "../src/testing/browserModuleHarness.js";
 
 function createTestManifest() {
   return {
@@ -81,6 +83,41 @@ function createTestManifest() {
       },
     ],
   };
+}
+
+function resolveSharedMemoryEmscriptenRoot() {
+  const candidates = [
+    process.env.SDN_SHARED_MEMORY_EMSDK_DIR,
+    process.env.SDN_LOCAL_EMSDK_DIR,
+    path.resolve(
+      "..",
+      "..",
+      "main-packages",
+      "space-data-network-modules",
+      "analysis",
+      "conjunction-assessment",
+      "deps",
+      "emsdk",
+    ),
+    path.resolve(
+      "..",
+      "..",
+      "main-packages",
+      "OrbPro",
+      "packages",
+      "wasm-engine",
+      "deps",
+      "emsdk",
+    ),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (
+      existsSync(path.join(candidate, "upstream", "emscripten", "em++"))
+    ) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 function createAlignedType(overrides = {}) {
@@ -693,6 +730,53 @@ test("explicit threadModel overrides runtime-target inference", async () => {
   assert.equal(result.report.ok, true);
 });
 
+test("source compilation can emit an imported shared-memory browser artifact", async (t) => {
+  if (typeof SharedArrayBuffer !== "function") {
+    t.skip("SharedArrayBuffer is not available in this runtime.");
+    return;
+  }
+  const emscriptenRoot = resolveSharedMemoryEmscriptenRoot();
+  if (!emscriptenRoot) {
+    t.skip("Repo-local Emscripten shared-memory toolchain is not available.");
+    return;
+  }
+
+  const manifest = {
+    ...createTestManifest(),
+    runtimeTargets: ["browser"],
+    invokeSurfaces: ["direct"],
+  };
+  const result = await compileModuleFromSource({
+    manifest,
+    sourceCode: "int propagate(void) { return 55; }\n",
+    language: "c",
+    importedMemory: true,
+    sharedMemory: true,
+    emscriptenRoot,
+  });
+  const imports = WebAssembly.Module.imports(
+    new WebAssembly.Module(result.wasmBytes),
+  );
+  assert.deepEqual(
+    imports.filter((entry) => entry.kind === "memory"),
+    [{ module: "env", name: "memory", kind: "memory" }],
+  );
+
+  const harness = await createBrowserModuleHarness({
+    wasmSource: result.wasmBytes,
+    surface: "direct",
+    sharedMemory: true,
+    initialMemoryBytes: 64 * 1024 * 1024,
+    maximumMemoryBytes: 2 * 1024 * 1024 * 1024,
+  });
+  t.after(() => {
+    harness.destroy();
+  });
+
+  assert.equal(harness.memory.buffer instanceof SharedArrayBuffer, true);
+  assert.equal(typeof harness.instance.exports.plugin_invoke_stream, "function");
+});
+
 test("artifacts can be signed and encrypted for transport", async () => {
   const manifest = createTestManifest();
   const result = await compileModuleFromSource({
@@ -744,7 +828,7 @@ test("publication protection honors fixed PNM metadata for reproducible records"
   );
 });
 
-test("shared module and legacy OrbPro type refs resolve without warnings", async () => {
+test("shared module and current OrbPro type refs resolve without warnings", async () => {
   const manifest = {
     pluginId: "com.digitalarsenal.examples.type-registry",
     name: "Type Registry Coverage",
@@ -770,20 +854,11 @@ test("shared module and legacy OrbPro type refs resolve without warnings", async
                 ],
               },
               {
-                setId: "legacy-graph",
+                setId: "propagator",
                 allowedTypes: [
                   {
-                    schemaName: "orbpro.analysis.GraphDefinition",
-                    fileIdentifier: "FGDF",
-                  },
-                ],
-              },
-              {
-                setId: "catalog-query",
-                allowedTypes: [
-                  {
-                    schemaName: "orbpro.query.CatalogQueryRequest",
-                    fileIdentifier: "CQRQ",
+                    schemaName: "orbpro.propagator.PropagatorBatchRequest",
+                    fileIdentifier: "PROP",
                   },
                 ],
               },
@@ -836,7 +911,72 @@ test("shared module and legacy OrbPro type refs resolve without warnings", async
   assert.deepEqual(report.warnings, []);
 });
 
-test("aligned OrbPro-style stream type refs resolve without standards warnings", async () => {
+test("module-local stream type refs produce standards warnings", async () => {
+  const manifest = {
+    pluginId: "com.digitalarsenal.examples.local-type-registry",
+    name: "Local Type Registry Coverage",
+    version: "0.1.0",
+    pluginFamily: "analysis",
+    capabilities: [],
+    externalInterfaces: [],
+    methods: [
+      {
+        methodId: "analyze",
+        displayName: "Analyze",
+        inputPorts: [
+          {
+            portId: "coverage",
+            acceptedTypeSets: [
+              {
+                setId: "local-metric",
+                allowedTypes: [
+                  {
+                    schemaName: "LocalCoverageMetric.fbs",
+                    fileIdentifier: "LCM1",
+                  },
+                ],
+              },
+              {
+                setId: "local-product",
+                allowedTypes: [
+                  {
+                    schemaName: "LocalCoverageProduct.fbs",
+                    fileIdentifier: "LCP1",
+                  },
+                ],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        outputPorts: [],
+        maxBatch: 1,
+        drainPolicy: "single-shot",
+      },
+    ],
+    schemasUsed: [
+      {
+        schemaName: "LocalAccessRequest.fbs",
+        fileIdentifier: "LAR1",
+      },
+      {
+        schemaName: "LocalAccessResult.fbs",
+        fileIdentifier: "LAS1",
+      },
+    ],
+  };
+  const report = await validateManifestWithStandards(manifest);
+  assert.equal(report.ok, true);
+  assert.equal(report.warnings.length, 4);
+  assert.equal(
+    report.warnings.every((warning) => warning.code === "unresolved-standards-type"),
+    true,
+  );
+});
+
+test("aligned current OrbPro-style stream type refs resolve without standards warnings", async () => {
   const manifest = {
     pluginId: "com.digitalarsenal.examples.aligned-sgp4-contract",
     name: "Aligned SGP4 Contract",
@@ -879,9 +1019,9 @@ test("aligned OrbPro-style stream type refs resolve without standards warnings",
     ],
     schemasUsed: [
       createAlignedType({
-        schemaName: "CatalogQueryRequest.fbs",
-        fileIdentifier: "CQRQ",
-        rootTypeName: "CatalogQueryRequest",
+        schemaName: "PropagatorBatchRequest.fbs",
+        fileIdentifier: "PROP",
+        rootTypeName: "PropagatorBatchRequest",
         byteLength: 128,
         requiredAlignment: 8,
       }),
@@ -1210,4 +1350,54 @@ test("standards catalogs can load from an explicit standards root", async () => 
     ),
     false,
   );
+});
+
+test("standards validation fails closed for stale SCV generated bindings", async () => {
+  const standardsRoot = await mkdtemp(path.join(os.tmpdir(), "sdn-stale-scv-"));
+  await mkdir(path.join(standardsRoot, "dist"));
+  await writeFile(
+    path.join(standardsRoot, "dist", "manifest.json"),
+    JSON.stringify({
+      STANDARDS: {
+        SCV: {
+          IDL: [
+            "// Hash: stale",
+            "// Version: 1.101.3",
+            "// -----------------------------------END_HEADER",
+            "enum scvEnvelopeKind : ubyte { REQUEST, RESULT }",
+            "enum scvSensorShapeKind : ubyte { CONIC, RECTANGULAR, CUSTOM_POLYGON, SAR_ANNULAR_SECTOR }",
+            "table SCVResult { MESSAGE:string; }",
+            "table SCV { RESULT:SCVResult; }",
+            "root_type SCV;",
+            'file_identifier "$SCV";',
+            "",
+          ].join("\n"),
+          files: ["schema/SCV/main.fbs"],
+        },
+      },
+    }),
+  );
+
+  const manifest = createTestManifest();
+  manifest.schemasUsed = [{ schemaName: "SCV.fbs", fileIdentifier: "$SCV" }];
+
+  const report = await validateManifestWithStandards(manifest, {
+    standardsRoot,
+  });
+
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some((error) => error.code === "stale-scv-contract"),
+    "stale SCV contracts must be compliance errors",
+  );
+});
+
+test("default standards dependency exposes the current SCV coverage result contract", async () => {
+  const catalog = await loadStandardsCatalog();
+  const scv = catalog.find((entry) => entry.schemaCode === "SCV");
+  assert.ok(scv, "SCV must be present in the installed SDS catalog");
+  assert.match(scv.version, /^1\.101\.[6-9]\d*$/);
+  assert.match(scv.idl, /\bSENSOR_LOCAL\b/);
+  assert.match(scv.idl, /\btable SCVAggregateStatistics\b/);
+  assert.match(scv.idl, /\bAGGREGATE_STATISTICS:SCVAggregateStatistics\b/);
 });
