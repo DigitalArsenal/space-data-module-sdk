@@ -38,6 +38,8 @@ import {
   createPublicationNotice,
   decryptMarketplaceContentKeyWrap,
   decodeLicensingGrant,
+  encodeUnsignedFieldStreamMessageForProviderSignature,
+  encodeUnsignedFieldStreamPolicyForProviderSignature,
   encodeUnsignedLicensingGrantForProviderSignature,
   encodePublicationRecordCollection,
   extractGrantModuleDescriptor,
@@ -45,6 +47,8 @@ import {
   extractWrappedContentKey,
   generateX25519Keypair,
   protectMarketplaceContent,
+  verifyFieldStreamMessageProviderSignature,
+  verifyFieldStreamPolicyProviderSignature,
   validateLicensingGrant,
   verifyLicensingGrantProviderSignature,
 } from "../src/index.js";
@@ -554,6 +558,84 @@ test("marketplace field stream messages carry explicit public encrypted redacted
   assert.equal(message.providerSignatureLength(), 64);
 });
 
+test("marketplace field stream policies require provider signatures over unsigned FSP bytes", async () => {
+  const unsignedPolicy = roundTripFieldStreamPolicy(buildMarketplaceFieldStreamPolicy(new Uint8Array(64)));
+  const unsignedPolicyBytes = encodeUnsignedFieldStreamPolicyForProviderSignature(unsignedPolicy);
+  const signature = mockProviderSignature(unsignedPolicyBytes);
+  const signedPolicy = roundTripFieldStreamPolicy(buildMarketplaceFieldStreamPolicy(signature));
+  const providerPublicKey = new Uint8Array(32).fill(0x25);
+
+  const verified = await verifyFieldStreamPolicyProviderSignature(signedPolicy, {
+    providerPublicKey,
+    verify: async (publicKey, payload, candidateSignature) =>
+      Buffer.from(publicKey).equals(Buffer.from(providerPublicKey)) &&
+      Buffer.from(payload).equals(Buffer.from(unsignedPolicyBytes)) &&
+      Buffer.from(candidateSignature).equals(Buffer.from(signature)),
+  });
+  assert.equal(verified, signedPolicy);
+
+  const tamperedPolicy = roundTripFieldStreamPolicy(
+    buildMarketplaceFieldStreamPolicy(signature, { policyVersion: 4 }),
+  );
+  await assert.rejects(
+    () =>
+      verifyFieldStreamPolicyProviderSignature(tamperedPolicy, {
+        providerPublicKey,
+        verify: async (_publicKey, payload, candidateSignature) =>
+          Buffer.from(payload).equals(Buffer.from(unsignedPolicyBytes)) &&
+          Buffer.from(candidateSignature).equals(Buffer.from(signature)),
+      }),
+    /field stream policy provider signature verification failed/,
+  );
+  await assert.rejects(
+    () =>
+      verifyFieldStreamPolicyProviderSignature(unsignedPolicy, {
+        providerPublicKey,
+        verify: async () => true,
+      }),
+    /provider signature must not be all zeroes/,
+  );
+});
+
+test("marketplace field stream messages require provider signatures over unsigned FSM bytes", async () => {
+  const unsignedMessage = roundTripFieldStreamMessage(buildMarketplaceFieldStreamMessage(new Uint8Array(64)));
+  const unsignedMessageBytes = encodeUnsignedFieldStreamMessageForProviderSignature(unsignedMessage);
+  const signature = mockProviderSignature(unsignedMessageBytes);
+  const signedMessage = roundTripFieldStreamMessage(buildMarketplaceFieldStreamMessage(signature));
+  const providerPublicKey = new Uint8Array(32).fill(0x26);
+
+  const verified = await verifyFieldStreamMessageProviderSignature(signedMessage, {
+    providerPublicKey,
+    verify: async (publicKey, payload, candidateSignature) =>
+      Buffer.from(publicKey).equals(Buffer.from(providerPublicKey)) &&
+      Buffer.from(payload).equals(Buffer.from(unsignedMessageBytes)) &&
+      Buffer.from(candidateSignature).equals(Buffer.from(signature)),
+  });
+  assert.equal(verified, signedMessage);
+
+  const tamperedMessage = roundTripFieldStreamMessage(
+    buildMarketplaceFieldStreamMessage(signature, { encryptedPositionCiphertext: new Uint8Array([0xde, 0xad, 0xbe, 0x00]) }),
+  );
+  await assert.rejects(
+    () =>
+      verifyFieldStreamMessageProviderSignature(tamperedMessage, {
+        providerPublicKey,
+        verify: async (_publicKey, payload, candidateSignature) =>
+          Buffer.from(payload).equals(Buffer.from(unsignedMessageBytes)) &&
+          Buffer.from(candidateSignature).equals(Buffer.from(signature)),
+      }),
+    /field stream message provider signature verification failed/,
+  );
+  await assert.rejects(
+    () =>
+      verifyFieldStreamMessageProviderSignature(unsignedMessage, {
+        providerPublicKey,
+        verify: async () => true,
+      }),
+    /provider signature must not be all zeroes/,
+  );
+});
+
 test("marketplace content protection encrypts once and wraps one generated content key per recipient", async () => {
   const alphaKeyPair = await generateX25519Keypair();
   const betaKeyPair = await generateX25519Keypair();
@@ -641,6 +723,107 @@ function roundTripFieldStreamMessage(message) {
   const bytes = builder.asUint8Array();
   assert.equal(FSM.bufferHasIdentifier(new flatbuffers.ByteBuffer(bytes)), true);
   return FSM.getRootAsFSM(new flatbuffers.ByteBuffer(bytes));
+}
+
+function buildMarketplaceFieldStreamPolicy(providerSignature, options = {}) {
+  return new FSPT(
+    "policy-mpe-alpha",
+    options.policyVersion ?? 3,
+    "provider-peer",
+    "listing-maneuver-ephemeris",
+    "maneuver-ephemeris-live",
+    "MPE",
+    new Uint8Array(32).fill(0x61),
+    [
+      new FieldStreamAudienceT(
+        fieldStreamAudienceCategory.Customer,
+        "customer-alpha-peer",
+        "bafy-alpha-epm",
+        "x25519:alpha:2026-06-25",
+      ),
+    ],
+    [
+      new FieldStreamRuleT(
+        "object_id",
+        [1],
+        fieldStreamDecisionCategory.AllowPublic,
+        ["releasable"],
+        [],
+        null,
+      ),
+      new FieldStreamRuleT(
+        "position",
+        [3],
+        fieldStreamDecisionCategory.AllowEncrypted,
+        ["restricted", "orbital-state"],
+        ["customer=alpha", "enclave=secret"],
+        "field-key:alpha:position:epoch-7",
+      ),
+    ],
+    [
+      fieldStreamOperationCategory.Subscribe,
+      fieldStreamOperationCategory.Decrypt,
+    ],
+    "stream:listing-maneuver-ephemeris:maneuver-ephemeris-live",
+    "epoch-7",
+    1_800_000_000_000n,
+    1_800_086_400_000n,
+    fieldStreamRevocationCategory.Active,
+    0n,
+    null,
+    providerSignature,
+  );
+}
+
+function buildMarketplaceFieldStreamMessage(providerSignature, options = {}) {
+  return new FSMT(
+    "fsm-mpe-alpha-000001",
+    "provider-peer",
+    "listing-maneuver-ephemeris",
+    "maneuver-ephemeris-live",
+    "MPE",
+    new Uint8Array(32).fill(0x61),
+    "policy-mpe-alpha",
+    3,
+    "epoch-7",
+    1n,
+    1_800_000_100_000n,
+    1_800_000_160_000n,
+    "customer-alpha-peer",
+    [
+      new FieldStreamValueT(
+        "object_id",
+        [1],
+        fieldStreamValueStateCategory.Public,
+        fieldStreamValueEncodingCategory.TextUtf8,
+        textEncoder.encode("SAT-042"),
+        [],
+        [],
+        [],
+        null,
+        [],
+        ["releasable"],
+        "allow-public",
+      ),
+      new FieldStreamValueT(
+        "position",
+        [3],
+        fieldStreamValueStateCategory.Encrypted,
+        fieldStreamValueEncodingCategory.FlatBuffer,
+        [],
+        options.encryptedPositionCiphertext ?? new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
+        new Uint8Array(12).fill(0x21),
+        new Uint8Array(16).fill(0x22),
+        "field-key:alpha:position:epoch-7",
+        new Uint8Array(32).fill(0x23),
+        ["restricted", "customer-alpha"],
+        "allow-encrypted",
+      ),
+    ],
+    new Uint8Array(32).fill(0x31),
+    new Uint8Array(32).fill(0x30),
+    providerSignature,
+  );
 }
 
 function encodeGrantResponse(options) {
