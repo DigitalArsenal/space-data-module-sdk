@@ -14,6 +14,23 @@ import {
 } from "spacedatastandards.org/lib/js/LGR/main.js";
 import { KMF, keyMaterialAlgorithm, keyMaterialEncoding, keyMaterialRole } from "spacedatastandards.org/lib/js/KMF/main.js";
 import { pluginCategory } from "spacedatastandards.org/lib/js/PLG/main.js";
+import {
+  FSP,
+  FSPT,
+  FieldStreamAudienceT,
+  FieldStreamRuleT,
+  fieldStreamAudienceCategory,
+  fieldStreamDecisionCategory,
+  fieldStreamOperationCategory,
+  fieldStreamRevocationCategory,
+} from "spacedatastandards.org/lib/js/FSP/main.js";
+import {
+  FSM,
+  FSMT,
+  FieldStreamValueT,
+  fieldStreamValueEncodingCategory,
+  fieldStreamValueStateCategory,
+} from "spacedatastandards.org/lib/js/FSM/main.js";
 
 import {
   appendPublicationRecordCollection,
@@ -255,6 +272,288 @@ test("marketplace DPM query metadata binds replay query, result hash, CIDs, encr
   assert.equal(decoded.SIGNATURE_TYPE(), "Ed25519");
 });
 
+test("marketplace field stream policies bind customer-specific field grants", () => {
+  const alphaPolicy = roundTripFieldStreamPolicy(
+    new FSPT(
+      "policy-mpe-alpha",
+      3,
+      "provider-peer",
+      "listing-maneuver-ephemeris",
+      "maneuver-ephemeris-live",
+      "MPE",
+      new Uint8Array(32).fill(0x61),
+      [
+        new FieldStreamAudienceT(
+          fieldStreamAudienceCategory.Customer,
+          "customer-alpha-peer",
+          "bafy-alpha-epm",
+          "x25519:alpha:2026-06-25",
+        ),
+      ],
+      [
+        new FieldStreamRuleT(
+          "object_id",
+          [1],
+          fieldStreamDecisionCategory.AllowPublic,
+          ["releasable"],
+          [],
+          null,
+        ),
+        new FieldStreamRuleT(
+          "position",
+          [3],
+          fieldStreamDecisionCategory.AllowEncrypted,
+          ["restricted", "orbital-state"],
+          ["customer=alpha", "enclave=secret"],
+          "field-key:alpha:position:epoch-7",
+        ),
+        new FieldStreamRuleT(
+          "maneuver_plan",
+          [7],
+          fieldStreamDecisionCategory.Redact,
+          ["maneuver", "competition-sensitive"],
+          ["customer=alpha", "need-to-know=maneuver"],
+          null,
+        ),
+      ],
+      [
+        fieldStreamOperationCategory.Subscribe,
+        fieldStreamOperationCategory.Decrypt,
+        fieldStreamOperationCategory.InvokeModule,
+      ],
+      "stream:listing-maneuver-ephemeris:maneuver-ephemeris-live",
+      "epoch-7",
+      1_800_000_000_000n,
+      1_800_086_400_000n,
+      fieldStreamRevocationCategory.Active,
+      0n,
+      null,
+      new Uint8Array(64).fill(0xa1),
+    ),
+  );
+  const betaPolicy = roundTripFieldStreamPolicy(
+    new FSPT(
+      "policy-mpe-beta",
+      3,
+      "provider-peer",
+      "listing-maneuver-ephemeris",
+      "maneuver-ephemeris-live",
+      "MPE",
+      new Uint8Array(32).fill(0x61),
+      [
+        new FieldStreamAudienceT(
+          fieldStreamAudienceCategory.Customer,
+          "customer-beta-peer",
+          "bafy-beta-epm",
+          "x25519:beta:2026-06-25",
+        ),
+      ],
+      [
+        new FieldStreamRuleT(
+          "object_id",
+          [1],
+          fieldStreamDecisionCategory.AllowPublic,
+          ["releasable"],
+          [],
+          null,
+        ),
+        new FieldStreamRuleT(
+          "position",
+          [3],
+          fieldStreamDecisionCategory.Redact,
+          ["restricted", "orbital-state"],
+          ["customer=beta", "need-to-know=position"],
+          null,
+        ),
+        new FieldStreamRuleT(
+          "maneuver_plan",
+          [7],
+          fieldStreamDecisionCategory.AllowEncrypted,
+          ["maneuver", "competition-sensitive"],
+          ["customer=beta", "enclave=secret"],
+          "field-key:beta:maneuver:epoch-11",
+        ),
+      ],
+      [
+        fieldStreamOperationCategory.Subscribe,
+        fieldStreamOperationCategory.Decrypt,
+      ],
+      "stream:listing-maneuver-ephemeris:maneuver-ephemeris-live",
+      "epoch-11",
+      1_800_000_000_000n,
+      1_800_086_400_000n,
+      fieldStreamRevocationCategory.Active,
+      0n,
+      null,
+      new Uint8Array(64).fill(0xb2),
+    ),
+  );
+
+  assert.equal(alphaPolicy.LISTING_ID(), betaPolicy.LISTING_ID());
+  assert.equal(alphaPolicy.STREAM_ID(), betaPolicy.STREAM_ID());
+  assert.equal(alphaPolicy.SCHEMA_CODE(), "MPE");
+  assert.equal(alphaPolicy.POLICY_ID(), "policy-mpe-alpha");
+  assert.equal(betaPolicy.POLICY_ID(), "policy-mpe-beta");
+  assert.equal(alphaPolicy.AUDIENCES(0).SUBJECT_ID(), "customer-alpha-peer");
+  assert.equal(betaPolicy.AUDIENCES(0).SUBJECT_ID(), "customer-beta-peer");
+  assert.equal(alphaPolicy.AUDIENCES(0).SUBJECT_KEY_ID(), "x25519:alpha:2026-06-25");
+  assert.equal(betaPolicy.AUDIENCES(0).SUBJECT_KEY_ID(), "x25519:beta:2026-06-25");
+  assert.equal(alphaPolicy.rulesLength(), 3);
+  assert.equal(betaPolicy.rulesLength(), 3);
+
+  const alphaPositionRule = alphaPolicy.RULES(1);
+  const alphaManeuverRule = alphaPolicy.RULES(2);
+  const betaPositionRule = betaPolicy.RULES(1);
+  const betaManeuverRule = betaPolicy.RULES(2);
+  assert.equal(alphaPositionRule.FIELD_PATH(), "position");
+  assert.deepEqual(Array.from(alphaPositionRule.fieldIdPathArray()), [3]);
+  assert.equal(alphaPositionRule.DECISION(), fieldStreamDecisionCategory.AllowEncrypted);
+  assert.equal(alphaPositionRule.KEY_ID(), "field-key:alpha:position:epoch-7");
+  assert.deepEqual([alphaPositionRule.TAGS(0), alphaPositionRule.TAGS(1)], ["restricted", "orbital-state"]);
+  assert.deepEqual(
+    [alphaPositionRule.REQUIRED_ATTRIBUTES(0), alphaPositionRule.REQUIRED_ATTRIBUTES(1)],
+    ["customer=alpha", "enclave=secret"],
+  );
+  assert.equal(alphaManeuverRule.DECISION(), fieldStreamDecisionCategory.Redact);
+  assert.equal(betaPositionRule.DECISION(), fieldStreamDecisionCategory.Redact);
+  assert.equal(betaManeuverRule.DECISION(), fieldStreamDecisionCategory.AllowEncrypted);
+  assert.equal(betaManeuverRule.KEY_ID(), "field-key:beta:maneuver:epoch-11");
+  assert.deepEqual(
+    Array.from(alphaPolicy.allowedOperationsArray()),
+    [
+      fieldStreamOperationCategory.Subscribe,
+      fieldStreamOperationCategory.Decrypt,
+      fieldStreamOperationCategory.InvokeModule,
+    ],
+  );
+  assert.deepEqual(
+    Array.from(betaPolicy.allowedOperationsArray()),
+    [fieldStreamOperationCategory.Subscribe, fieldStreamOperationCategory.Decrypt],
+  );
+  assert.equal(alphaPolicy.KEY_EPOCH(), "epoch-7");
+  assert.equal(betaPolicy.KEY_EPOCH(), "epoch-11");
+  assert.equal(alphaPolicy.providerSignatureLength(), 64);
+  assert.equal(betaPolicy.providerSignatureLength(), 64);
+});
+
+test("marketplace field stream messages carry explicit public encrypted redacted and denied fields", () => {
+  const message = roundTripFieldStreamMessage(
+    new FSMT(
+      "fsm-mpe-alpha-000001",
+      "provider-peer",
+      "listing-maneuver-ephemeris",
+      "maneuver-ephemeris-live",
+      "MPE",
+      new Uint8Array(32).fill(0x61),
+      "policy-mpe-alpha",
+      3,
+      "epoch-7",
+      1n,
+      1_800_000_100_000n,
+      1_800_000_160_000n,
+      "customer-alpha-peer",
+      [
+        new FieldStreamValueT(
+          "object_id",
+          [1],
+          fieldStreamValueStateCategory.Public,
+          fieldStreamValueEncodingCategory.TextUtf8,
+          textEncoder.encode("SAT-042"),
+          [],
+          [],
+          [],
+          null,
+          [],
+          ["releasable"],
+          "allow-public",
+        ),
+        new FieldStreamValueT(
+          "position",
+          [3],
+          fieldStreamValueStateCategory.Encrypted,
+          fieldStreamValueEncodingCategory.FlatBuffer,
+          [],
+          new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
+          new Uint8Array(12).fill(0x21),
+          new Uint8Array(16).fill(0x22),
+          "field-key:alpha:position:epoch-7",
+          new Uint8Array(32).fill(0x23),
+          ["restricted", "customer-alpha"],
+          "allow-encrypted",
+        ),
+        new FieldStreamValueT(
+          "maneuver_plan",
+          [7],
+          fieldStreamValueStateCategory.Redacted,
+          fieldStreamValueEncodingCategory.JsonUtf8,
+          [],
+          [],
+          [],
+          [],
+          null,
+          [],
+          ["maneuver", "not-granted"],
+          "redacted:not-granted",
+        ),
+        new FieldStreamValueT(
+          "covariance_detail",
+          [8],
+          fieldStreamValueStateCategory.Unavailable,
+          fieldStreamValueEncodingCategory.JsonUtf8,
+          [],
+          [],
+          [],
+          [],
+          null,
+          [],
+          ["covariance", "deny"],
+          "deny:not-licensed",
+        ),
+      ],
+      new Uint8Array(32).fill(0x31),
+      new Uint8Array(32).fill(0x30),
+      new Uint8Array(64).fill(0xa1),
+    ),
+  );
+
+  assert.equal(message.MESSAGE_ID(), "fsm-mpe-alpha-000001");
+  assert.equal(message.LISTING_ID(), "listing-maneuver-ephemeris");
+  assert.equal(message.STREAM_ID(), "maneuver-ephemeris-live");
+  assert.equal(message.SCHEMA_CODE(), "MPE");
+  assert.equal(message.POLICY_ID(), "policy-mpe-alpha");
+  assert.equal(message.POLICY_VERSION(), 3);
+  assert.equal(message.KEY_EPOCH(), "epoch-7");
+  assert.equal(message.SEQUENCE(), 1n);
+  assert.equal(message.SUBJECT_ID(), "customer-alpha-peer");
+  assert.equal(message.fieldsLength(), 4);
+
+  const objectId = message.FIELDS(0);
+  const position = message.FIELDS(1);
+  const maneuverPlan = message.FIELDS(2);
+  const covarianceDetail = message.FIELDS(3);
+  assert.equal(objectId.FIELD_PATH(), "object_id");
+  assert.equal(objectId.STATE(), fieldStreamValueStateCategory.Public);
+  assert.equal(new TextDecoder().decode(objectId.valueArray()), "SAT-042");
+  assert.equal(position.FIELD_PATH(), "position");
+  assert.equal(position.STATE(), fieldStreamValueStateCategory.Encrypted);
+  assert.equal(position.ENCODING(), fieldStreamValueEncodingCategory.FlatBuffer);
+  assert.deepEqual(Array.from(position.ciphertextArray()), [0xde, 0xad, 0xbe, 0xef]);
+  assert.equal(position.nonceLength(), 12);
+  assert.equal(position.tagLength(), 16);
+  assert.equal(position.KEY_ID(), "field-key:alpha:position:epoch-7");
+  assert.equal(position.aadHashLength(), 32);
+  assert.deepEqual([position.RELEASE_TAGS(0), position.RELEASE_TAGS(1)], ["restricted", "customer-alpha"]);
+  assert.equal(position.DECISION(), "allow-encrypted");
+  assert.equal(maneuverPlan.STATE(), fieldStreamValueStateCategory.Redacted);
+  assert.equal(maneuverPlan.ciphertextLength(), 0);
+  assert.equal(maneuverPlan.DECISION(), "redacted:not-granted");
+  assert.equal(covarianceDetail.STATE(), fieldStreamValueStateCategory.Unavailable);
+  assert.equal(covarianceDetail.DECISION(), "deny:not-licensed");
+  assert.equal(message.payloadHashLength(), 32);
+  assert.equal(message.previousMessageHashLength(), 32);
+  assert.equal(message.providerSignatureLength(), 64);
+});
+
 test("marketplace content protection encrypts once and wraps one generated content key per recipient", async () => {
   const alphaKeyPair = await generateX25519Keypair();
   const betaKeyPair = await generateX25519Keypair();
@@ -325,6 +624,24 @@ test("marketplace content protection encrypts once and wraps one generated conte
   assert.equal(unwrappedKeys[0].length, 32);
   assert.deepEqual(unwrappedKeys[1], unwrappedKeys[0]);
 });
+
+function roundTripFieldStreamPolicy(policy) {
+  const builder = new flatbuffers.Builder(1024);
+  const root = policy.pack(builder);
+  FSP.finishFSPBuffer(builder, root);
+  const bytes = builder.asUint8Array();
+  assert.equal(FSP.bufferHasIdentifier(new flatbuffers.ByteBuffer(bytes)), true);
+  return FSP.getRootAsFSP(new flatbuffers.ByteBuffer(bytes));
+}
+
+function roundTripFieldStreamMessage(message) {
+  const builder = new flatbuffers.Builder(1024);
+  const root = message.pack(builder);
+  FSM.finishFSMBuffer(builder, root);
+  const bytes = builder.asUint8Array();
+  assert.equal(FSM.bufferHasIdentifier(new flatbuffers.ByteBuffer(bytes)), true);
+  return FSM.getRootAsFSM(new flatbuffers.ByteBuffer(bytes));
+}
 
 function encodeGrantResponse(options) {
   const builder = new flatbuffers.Builder(1024);
