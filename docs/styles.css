@@ -11,7 +11,7 @@
   --blue: #58a6ff;
   --green: #42d392;
   --amber: #f2cc60;
-  --sdn-stack-nav-height: 32px;
+  --sdn-stack-footer-height: 40px;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -35,10 +35,46 @@ a {
   text-decoration: none;
 }
 
+.site-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 max(16px, calc((100vw - 1180px) / 2));
+  border-bottom: 1px solid var(--line);
+  background: rgba(5, 7, 10, 0.88);
+  backdrop-filter: blur(18px);
+}
+
+.site-brand {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.stack-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 14px;
+  border: 1px solid rgba(88, 166, 255, 0.42);
+  border-radius: 8px;
+  background: rgba(88, 166, 255, 0.16);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 main {
   width: min(1180px, calc(100vw - 32px));
   margin: 0 auto;
-  padding: calc(var(--sdn-stack-nav-height) + 64px) 0 72px;
+  padding: 88px 0 calc(var(--sdn-stack-footer-height, 40px) + 72px);
 }
 
 .hero {
@@ -46,7 +82,7 @@ main {
   grid-template-columns: minmax(0, 0.92fr) minmax(320px, 1.08fr);
   gap: 32px;
   align-items: center;
-  min-height: calc(100vh - var(--sdn-stack-nav-height) - 80px);
+  min-height: calc(100vh - 128px);
 }
 
 .hero-copy {
@@ -157,13 +193,18 @@ h1 {
   line-height: 1.55;
 }
 
-.docs-list {
+.docs-list,
+.stack-list {
   display: grid;
   grid-template-columns: minmax(220px, 0.34fr) minmax(0, 0.66fr);
   gap: 28px;
   align-items: start;
   border-top: 1px solid var(--line);
   padding-top: 36px;
+}
+
+.stack-list {
+  margin-top: 72px;
 }
 
 .section-head h2 {
@@ -189,6 +230,11 @@ h1 {
   border-color: rgba(88, 166, 255, 0.52);
 }
 
+.link-list a.active {
+  border-color: rgba(88, 166, 255, 0.52);
+  background: rgba(88, 166, 255, 0.14);
+}
+
 .link-list span {
   color: var(--text);
   font-weight: 760;
@@ -203,11 +249,12 @@ h1 {
 @media (max-width: 860px) {
   main {
     width: min(100vw - 24px, 1180px);
-    padding-top: calc(var(--sdn-stack-nav-height) + 40px);
+    padding-top: 72px;
   }
 
   .hero,
-  .docs-list {
+  .docs-list,
+  .stack-list {
     grid-template-columns: 1fr;
   }
 

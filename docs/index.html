@@ -10,6 +10,10 @@
   </head>
   <body>
     <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="./">Space Data Module SDK</a>
+      <a class="stack-button" href="#stack">Stack</a>
+    </header>
 
     <main>
       <section class="hero" aria-labelledby="page-title">
@@ -76,6 +80,35 @@
           <a href="./protocol-installation.md">
             <span>Protocol Installation</span>
             <small>Protocol identity, deployment routing, and installation metadata.</small>
+          </a>
+        </div>
+      </section>
+
+      <section id="stack" class="stack-list" aria-labelledby="stack-title">
+        <div class="section-head">
+          <p class="eyebrow">SDN Stack</p>
+          <h2 id="stack-title">Connected Sites</h2>
+        </div>
+        <div class="link-list">
+          <a href="https://spacedatastandards.org/">
+            <span>Standards</span>
+            <small>Canonical schemas, record contracts, and generated bindings.</small>
+          </a>
+          <a href="https://digitalarsenal.github.io/flatbuffers/">
+            <span>FlatBuffers</span>
+            <small>Binary encoding, schema tooling, and runtime documentation.</small>
+          </a>
+          <a href="https://digitalarsenal.github.io/flatsql/">
+            <span>FlatSQL</span>
+            <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+          </a>
+          <a href="https://spacedatanetwork.org/">
+            <span>SDN</span>
+            <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+          </a>
+          <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+            <span>Module SDK</span>
+            <small>WASM module packaging, validation, and host compatibility tooling.</small>
           </a>
         </div>
       </section>
