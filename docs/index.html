@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Space Data Module SDK documentation for building, validating, signing, and deploying WebAssembly modules on the Space Data Network." />
+    <title>Space Data Module SDK</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script defer src="https://spacedatastandards.org/sdn-stack-nav.js"></script>
+  </head>
+  <body>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+
+    <main>
+      <section class="hero" aria-labelledby="page-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Space Data Network</p>
+          <h1 id="page-title">Space Data Module SDK</h1>
+          <p class="lede">
+            Build portable WebAssembly modules with embedded FlatBuffer manifests,
+            standards-aware validation, browser and WasmEdge harnesses, and signed
+            delivery records for SDN hosts.
+          </p>
+          <div class="actions" aria-label="Primary links">
+            <a class="button primary" href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+            <a class="button" href="./module-publication-standard.md">Publication Standard</a>
+            <a class="button" href="./testing-harness.md">Testing Harness</a>
+          </div>
+        </div>
+        <figure class="architecture">
+          <img src="./architecture.svg" alt="Module architecture overview" />
+        </figure>
+      </section>
+
+      <section class="quick-grid" aria-label="SDK capabilities">
+        <article>
+          <h2>Author</h2>
+          <p>Start from the examples and declare module methods, ports, runtime targets, and standards references in one manifest.</p>
+        </article>
+        <article>
+          <h2>Validate</h2>
+          <p>Check manifests and wasm artifacts against the SDK contract, exported ABI symbols, and canonical SDS type names.</p>
+        </article>
+        <article>
+          <h2>Package</h2>
+          <p>Append REC and MBL bundle metadata, attach publication records, and keep module artifacts single-file deployable.</p>
+        </article>
+        <article>
+          <h2>Run</h2>
+          <p>Exercise the same module through browser, Node, process, and WasmEdge harnesses before publishing to SDN hosts.</p>
+        </article>
+      </section>
+
+      <section class="docs-list" aria-labelledby="docs-title">
+        <div class="section-head">
+          <p class="eyebrow">Reference</p>
+          <h2 id="docs-title">Core Documents</h2>
+        </div>
+        <div class="link-list">
+          <a href="./module-publication-standard.md">
+            <span>Module Publication Standard</span>
+            <small>Manifest, REC, MBL, PNM, and ENC publication contract.</small>
+          </a>
+          <a href="./flatsql-streaming-standard.md">
+            <span>FlatSQL Streaming Standard</span>
+            <small>Binary FlatBuffer stream transport and runtime-host storage.</small>
+          </a>
+          <a href="./browser-wasmedge-isomorphic.md">
+            <span>Browser and WasmEdge Isomorphic Runtime</span>
+            <small>One module artifact across browser and server-side execution.</small>
+          </a>
+          <a href="./testing-harness.md">
+            <span>Testing Harness</span>
+            <small>Process, browser, WasmEdge, and module stream test entrypoints.</small>
+          </a>
+          <a href="./protocol-installation.md">
+            <span>Protocol Installation</span>
+            <small>Protocol identity, deployment routing, and installation metadata.</small>
+          </a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
