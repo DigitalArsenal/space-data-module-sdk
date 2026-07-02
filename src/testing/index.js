@@ -11,6 +11,7 @@ export {
   createBrowserModuleHarness,
   detectArtifactProfile,
 } from "./browserModuleHarness.js";
+export { createWorkerModuleHarness } from "./workerModuleHarness.js";
 export {
   buildWasmEdgeSpawnEnv,
   createPluginInvokeProcessClient,

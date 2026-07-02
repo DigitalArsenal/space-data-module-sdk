@@ -5,3 +5,4 @@ export * from "./browserEdgeShims.js";
 export * from "./wasiShim.js";
 export * from "./isomorphicLoader.js";
 export * from "./abi.js";
+export * from "./sabHostcallChannel.js";

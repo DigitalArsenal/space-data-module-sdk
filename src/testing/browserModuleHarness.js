@@ -293,7 +293,13 @@ async function instantiateBrowserModule(options = {}) {
   let bridge = null;
   let memory = providedMemory;
   if (needsHostBridge) {
-    const dispatch = createHostSyncDispatcher(options.host);
+    // hostcallDispatch overrides the default sync dispatcher — used by the
+    // worker harness to route guest hostcalls through the SAB channel so
+    // async host capabilities (http/ipfs/storage/pubsub) become reachable.
+    const dispatch =
+      typeof options.hostcallDispatch === "function"
+        ? options.hostcallDispatch
+        : createHostSyncDispatcher(options.host);
     bridge = createHostcallBridge({
       dispatch,
       getMemory: () => memory ?? instance?.exports?.memory,
@@ -379,15 +385,22 @@ export async function createBrowserModuleHarness(options = {}) {
   const needsHostBridge = moduleImports.some(
     (entry) => entry.module === DEFAULT_HOSTCALL_IMPORT_MODULE,
   );
+  const hasHostcallDispatch = typeof options.hostcallDispatch === "function";
   const hostOptions =
-    !options.host && needsHostBridge && !options.hostOptions?.wasmWallet
+    !options.host &&
+    needsHostBridge &&
+    !hasHostcallDispatch &&
+    !options.hostOptions?.wasmWallet
       ? {
           ...options.hostOptions,
           wasmWallet: await getWasmWallet(),
         }
       : options.hostOptions;
-  const host = options.host ?? createBrowserHost(hostOptions);
-  const dispatchHost = createAsyncHostDispatcher(host);
+  // With an external hostcallDispatch (worker harness), the host lives on the
+  // controlling thread — skip constructing a default local host.
+  const host =
+    options.host ?? (hasHostcallDispatch ? null : createBrowserHost(hostOptions));
+  const dispatchHost = host ? createAsyncHostDispatcher(host) : null;
 
   const profile = detectArtifactProfile(wasmModule);
   const moduleExports = WebAssembly.Module.exports(wasmModule);
@@ -411,6 +424,7 @@ export async function createBrowserModuleHarness(options = {}) {
   const activeContext = await instantiateBrowserModule({
     wasmModule,
     host,
+    hostcallDispatch: options.hostcallDispatch,
     args: options.args,
     env: options.env,
     performance: options.performance ?? host?.performance,
@@ -665,6 +679,7 @@ export async function createBrowserModuleHarness(options = {}) {
     const commandContext = await instantiateBrowserModule({
       wasmModule,
       host,
+      hostcallDispatch: options.hostcallDispatch,
       args: options.args,
       env: options.env,
       stdinBytes,
@@ -734,6 +749,11 @@ export async function createBrowserModuleHarness(options = {}) {
   }
 
   async function callHost(operation, params = {}) {
+    if (!dispatchHost) {
+      throw new Error(
+        "callHost is unavailable: this harness routes hostcalls through an external hostcallDispatch (no local host).",
+      );
+    }
     return dispatchHost(operation, params);
   }
 
