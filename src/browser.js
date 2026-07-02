@@ -13,6 +13,7 @@ export * from "./host/browserEdgeShims.js";
 export * from "./host/wasiShim.js";
 export * from "./host/abi.js";
 export * from "./host/sabHostcallChannel.js";
+export * from "./host/timerDriver.js";
 export * from "./host/isomorphicLoader.js";
 export { createBrowserModuleHarness, detectArtifactProfile } from "./testing/browserModuleHarness.js";
 export { createWorkerModuleHarness } from "./testing/workerModuleHarness.js";
