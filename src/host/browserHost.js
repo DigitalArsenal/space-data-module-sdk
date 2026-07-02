@@ -37,6 +37,9 @@ export const BrowserHostSupportedCapabilities = Object.freeze([
   "crypto_key_agreement",
   "crypto_kdf",
   "wallet_sign",
+  "pubsub",
+  "storage_query",
+  "storage_write",
   "logging",
 ]);
 
@@ -74,6 +77,13 @@ export const BrowserHostSupportedOperations = Object.freeze([
   "protocol_dial.dial",
   "protocol.request",
   "keyslot.get",
+  "storage.write",
+  "storage.query",
+  "storage.delete",
+  "pubsub.publish",
+  "pubsub.subscribe",
+  "pubsub.unsubscribe",
+  "pubsub.list_topics",
   "context.get",
   "context.set",
   "context.delete",
@@ -154,6 +164,13 @@ function resolveCapabilityAdapters(options = {}) {
       adapters.protocolDial ??
       adapters.protocol_dial ??
       null,
+    storage:
+      options.storage ??
+      adapters.storage ??
+      adapters.storage_write ??
+      adapters.storage_query ??
+      null,
+    pubsub: options.pubsub ?? adapters.pubsub ?? null,
   };
 }
 
@@ -218,6 +235,8 @@ export class BrowserHost {
     const walletSignAdapter = capabilityAdapters.walletSign;
     const protocolHandleAdapter = edgeShims.protocolHandle;
     const protocolDialAdapter = edgeShims.protocolDial;
+    const storageAdapter = capabilityAdapters.storage;
+    const pubsubAdapter = capabilityAdapters.pubsub;
 
     this._grantedCapabilities = granted;
     this._contextStore = options.contextStore ?? new Map();
@@ -448,6 +467,45 @@ export class BrowserHost {
       get: async (params = {}) => {
         this.#assertCapability("wallet_sign", "keyslot.get");
         return invokeAdapterMethod(walletSignAdapter, "get", params, "wallet_sign");
+      },
+    });
+
+    // Storage + pubsub mirror the Go node's module capability contract
+    // (sdn-server internal/modulert/caps): storage.write {schema, data:base64}
+    // -> {cid}; storage.query {schema, day, entity_id, norad_cat_id, limit};
+    // storage.delete {schema, cid}; pubsub.publish {topic, data:utf8};
+    // pubsub.subscribe/unsubscribe {topic}; pubsub.list_topics {} -> {topics}.
+    this.storage = Object.freeze({
+      write: async (params = {}) => {
+        this.#assertCapability("storage_write", "storage.write");
+        return invokeAdapterMethod(storageAdapter, "write", params, "storage");
+      },
+      query: async (params = {}) => {
+        this.#assertCapability("storage_query", "storage.query");
+        return invokeAdapterMethod(storageAdapter, "query", params, "storage");
+      },
+      delete: async (params = {}) => {
+        this.#assertCapability("storage_write", "storage.delete");
+        return invokeAdapterMethod(storageAdapter, "delete", params, "storage");
+      },
+    });
+
+    this.pubsub = Object.freeze({
+      publish: async (params = {}) => {
+        this.#assertCapability("pubsub", "pubsub.publish");
+        return invokeAdapterMethod(pubsubAdapter, "publish", params, "pubsub");
+      },
+      subscribe: async (params = {}) => {
+        this.#assertCapability("pubsub", "pubsub.subscribe");
+        return invokeAdapterMethod(pubsubAdapter, "subscribe", params, "pubsub");
+      },
+      unsubscribe: async (params = {}) => {
+        this.#assertCapability("pubsub", "pubsub.unsubscribe");
+        return invokeAdapterMethod(pubsubAdapter, "unsubscribe", params, "pubsub");
+      },
+      listTopics: async (params = {}) => {
+        this.#assertCapability("pubsub", "pubsub.list_topics");
+        return invokeAdapterMethod(pubsubAdapter, "list_topics", params, "pubsub");
       },
     });
 
@@ -834,6 +892,20 @@ export class BrowserHost {
         return this.protocolDial.request(params);
       case "keyslot.get":
         return this.keyslot.get(params);
+      case "storage.write":
+        return this.storage.write(params);
+      case "storage.query":
+        return this.storage.query(params);
+      case "storage.delete":
+        return this.storage.delete(params);
+      case "pubsub.publish":
+        return this.pubsub.publish(params);
+      case "pubsub.subscribe":
+        return this.pubsub.subscribe(params);
+      case "pubsub.unsubscribe":
+        return this.pubsub.unsubscribe(params);
+      case "pubsub.list_topics":
+        return this.pubsub.listTopics(params);
       case "context.get":
         return this.context.get(params.scope, params.key);
       case "context.set":
