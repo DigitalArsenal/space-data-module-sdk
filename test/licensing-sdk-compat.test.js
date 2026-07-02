@@ -97,7 +97,7 @@ test("SDK grant decoding reads the same SDS payload shape sdn-js currently consu
   assert.equal(descriptor.cid, "bafyencryptedmodule");
   assert.equal(descriptor.moduleId, "com.space-data-network.fastest-path");
   assert.equal(descriptor.moduleVersion, "0.5.22");
-  assert.deepEqual(descriptor.allowedDomains, ["app.example.com"]);
+  assert.deepEqual(descriptor.allowedXpubs, ["xpub6FixtureAllowList"]);
   assert.equal(wrappedContentKey.header.rootType, "$KMF");
   assert.equal(wrappedContentKey.header.context, "license-grant:com.space-data-network.fastest-path:0.5.22");
   assert.equal(kmf.KEY_ID(), "com.space-data-network.fastest-path:0.5.22");
@@ -251,9 +251,9 @@ function createModuleDescriptorOffset(builder, contentHash) {
   const wasmCidOffset = builder.createString("bafyencryptedmodule");
   const requiredScopeOffset = builder.createString("orbpro.default");
   const keyIdOffset = builder.createString(`${moduleId}:${moduleVersion}`);
-  const allowedDomainsOffset = PLG.createAllowedDomainsVector(
+  const allowedXpubsOffset = PLG.createAllowedXpubsVector(
     builder,
-    [builder.createString("app.example.com")],
+    [builder.createString("xpub6FixtureAllowList")],
   );
 
   PLG.startPLG(builder);
@@ -269,7 +269,7 @@ function createModuleDescriptorOffset(builder, contentHash) {
   PLG.addEncrypted(builder, true);
   PLG.addRequiredScope(builder, requiredScopeOffset);
   PLG.addKeyId(builder, keyIdOffset);
-  PLG.addAllowedDomains(builder, allowedDomainsOffset);
+  PLG.addAllowedXpubs(builder, allowedXpubsOffset);
   PLG.addMaxGrantTimeoutMs(builder, 300_000n);
   return PLG.endPLG(builder);
 }

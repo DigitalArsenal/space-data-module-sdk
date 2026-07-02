@@ -329,9 +329,11 @@ export function legacyManifestToPlg(input = {}) {
     encrypted: input.encrypted === true,
     requiredScope: input.requiredScope ?? input.required_scope,
     keyId: input.keyId ?? input.key_id,
-    allowedDomains: Array.isArray(input.allowedDomains)
-      ? input.allowedDomains
-      : [],
+    allowedXpubs: Array.isArray(input.allowedXpubs)
+      ? input.allowedXpubs
+      : Array.isArray(input.allowed_xpubs)
+        ? input.allowed_xpubs
+        : [],
     maxGrantTimeoutMs: input.maxGrantTimeoutMs ?? input.max_grant_timeout_ms,
     minPermissions,
     createdAt: input.createdAt ?? input.created_at,

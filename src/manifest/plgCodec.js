@@ -1176,9 +1176,9 @@ export function encodePlgManifest(manifest = {}) {
       ? builder.createString(keyId)
       : 0;
 
-  const allowedDomainsOffset = addStringVector(
+  const allowedXpubsOffset = addStringVector(
     builder,
-    pick(manifest, "allowedDomains", "allowed_domains", "ALLOWED_DOMAINS"),
+    pick(manifest, "allowedXpubs", "allowed_xpubs", "ALLOWED_XPUBS"),
   );
 
   const maxGrantTimeoutMs = toBigInt(
@@ -1411,8 +1411,8 @@ export function encodePlgManifest(manifest = {}) {
   PLG.addEncrypted(builder, encrypted);
   if (requiredScopeOffset) PLG.addRequiredScope(builder, requiredScopeOffset);
   if (keyIdOffset) PLG.addKeyId(builder, keyIdOffset);
-  if (allowedDomainsOffset)
-    PLG.addAllowedDomains(builder, allowedDomainsOffset);
+  if (allowedXpubsOffset)
+    PLG.addAllowedXpubs(builder, allowedXpubsOffset);
   if (maxGrantTimeoutMs !== 0n)
     PLG.addMaxGrantTimeoutMs(builder, maxGrantTimeoutMs);
   if (minPermissionsOffset)
@@ -1611,10 +1611,10 @@ export function decodePlgManifest(data) {
     encrypted: !!root.ENCRYPTED(),
     requiredScope: root.REQUIRED_SCOPE() || undefined,
     keyId: root.KEY_ID() || undefined,
-    allowedDomains: readStringVector(
+    allowedXpubs: readStringVector(
       root,
-      "allowedDomainsLength",
-      "ALLOWED_DOMAINS",
+      "allowedXpubsLength",
+      "ALLOWED_XPUBS",
     ),
     maxGrantTimeoutMs: root.MAX_GRANT_TIMEOUT_MS(),
     minPermissions: readStringVector(

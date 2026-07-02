@@ -612,10 +612,10 @@ function encodeDecodedModuleDescriptor(builder, descriptor) {
   const wasmCidOffset = createOptionalString(builder, descriptor.cid);
   const requiredScopeOffset = createOptionalString(builder, descriptor.requiredScope);
   const keyIdOffset = createOptionalString(builder, descriptor.keyId);
-  const allowedDomainsOffset = createOptionalStringVector(
+  const allowedXpubsOffset = createOptionalStringVector(
     builder,
-    PLG.createAllowedDomainsVector,
-    descriptor.allowedDomains ?? [],
+    PLG.createAllowedXpubsVector,
+    descriptor.allowedXpubs ?? [],
   );
 
   PLG.startPLG(builder);
@@ -628,7 +628,7 @@ function encodeDecodedModuleDescriptor(builder, descriptor) {
   PLG.addEncrypted(builder, Boolean(descriptor.encrypted));
   if (requiredScopeOffset !== 0) PLG.addRequiredScope(builder, requiredScopeOffset);
   if (keyIdOffset !== 0) PLG.addKeyId(builder, keyIdOffset);
-  if (allowedDomainsOffset !== 0) PLG.addAllowedDomains(builder, allowedDomainsOffset);
+  if (allowedXpubsOffset !== 0) PLG.addAllowedXpubs(builder, allowedXpubsOffset);
   PLG.addMaxGrantTimeoutMs(builder, BigInt(descriptor.maxGrantTimeoutMs ?? 0));
   return PLG.endPLG(builder);
 }
@@ -727,7 +727,7 @@ function decodeGrantModuleDescriptor(moduleDescriptor) {
     moduleVersion: trimOptional(moduleDescriptor.VERSION()),
     requiredScope: trimOptional(moduleDescriptor.REQUIRED_SCOPE()),
     keyId: trimOptional(moduleDescriptor.KEY_ID()),
-    allowedDomains: readAllowedDomains(moduleDescriptor),
+    allowedXpubs: readAllowedXpubs(moduleDescriptor),
     maxGrantTimeoutMs: numberFromUint64(
       moduleDescriptor.MAX_GRANT_TIMEOUT_MS(),
       "moduleDescriptor.MAX_GRANT_TIMEOUT_MS",
@@ -1117,15 +1117,15 @@ function bytesToHex(bytes) {
   );
 }
 
-function readAllowedDomains(descriptor) {
-  const allowedDomains = [];
-  for (let index = 0; index < descriptor.allowedDomainsLength(); index += 1) {
-    const domain = descriptor.ALLOWED_DOMAINS(index);
-    if (domain) {
-      allowedDomains.push(domain);
+function readAllowedXpubs(descriptor) {
+  const allowedXpubs = [];
+  for (let index = 0; index < descriptor.allowedXpubsLength(); index += 1) {
+    const xpub = descriptor.ALLOWED_XPUBS(index);
+    if (xpub) {
+      allowedXpubs.push(xpub);
     }
   }
-  return allowedDomains;
+  return allowedXpubs;
 }
 
 export {

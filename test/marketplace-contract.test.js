@@ -879,9 +879,9 @@ function createModuleDescriptorOffset(builder, options) {
   const wasmCidOffset = builder.createString(options.encryptedCid);
   const requiredScopeOffset = builder.createString("orbpro.default");
   const keyIdOffset = builder.createString(options.contentKeyId);
-  const allowedDomainsOffset = PLG.createAllowedDomainsVector(
+  const allowedXpubsOffset = PLG.createAllowedXpubsVector(
     builder,
-    [builder.createString("app.example.com")],
+    [builder.createString("xpub6FixtureAllowList")],
   );
 
   PLG.startPLG(builder);
@@ -897,7 +897,7 @@ function createModuleDescriptorOffset(builder, options) {
   PLG.addEncrypted(builder, true);
   PLG.addRequiredScope(builder, requiredScopeOffset);
   PLG.addKeyId(builder, keyIdOffset);
-  PLG.addAllowedDomains(builder, allowedDomainsOffset);
+  PLG.addAllowedXpubs(builder, allowedXpubsOffset);
   PLG.addMaxGrantTimeoutMs(builder, 300_000n);
   return PLG.endPLG(builder);
 }

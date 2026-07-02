@@ -2017,7 +2017,7 @@ export interface LicensingGrantModuleDescriptor {
   moduleVersion?: string;
   requiredScope?: string;
   keyId?: string;
-  allowedDomains: string[];
+  allowedXpubs: string[];
   maxGrantTimeoutMs: number;
   encrypted: boolean;
 }
