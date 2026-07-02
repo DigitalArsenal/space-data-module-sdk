@@ -1957,6 +1957,88 @@ export function createModuleTimerDriver(options: {
   onRun?: (run: ModuleTimerRunRecord) => void;
 }): ModuleTimerDriver;
 
+// --- JS flow-runtime host (WS3.2) ---
+export interface FlowFrameData {
+  portId: string;
+  bytes: Uint8Array;
+  streamId: number;
+  sequence: number;
+  endOfStream: boolean;
+}
+export interface FlowRuntimeHost {
+  instance: WebAssembly.Instance;
+  memory: WebAssembly.Memory;
+  nodeCount: number;
+  edgeCount: number;
+  triggerCount: number;
+  dependencyCount: number;
+  resetState(): void;
+  readCString(ptr: number, maxLength?: number): string;
+  getNodeDispatchDescriptor(index: number): Record<string, unknown> & {
+    nodeId: string;
+    dependencyId: string;
+    pluginId: string;
+    methodId: string;
+    dispatchModel: string;
+  };
+  getDependencyDescriptor(index: number): Record<string, unknown> & {
+    dependencyId: string;
+    pluginId: string;
+    version: string;
+  };
+  getNodeState(index: number): {
+    invocationCount: bigint;
+    consumedFrames: bigint;
+    queuedFrames: number;
+    backlogRemaining: number;
+    lastStatus: number;
+    ready: boolean;
+    yielded: boolean;
+  };
+  getIngressState(index: number): {
+    totalReceived: bigint;
+    totalDropped: bigint;
+    queuedFrames: number;
+  };
+  enqueueTrigger(triggerIndex: number): void;
+  enqueueTriggerFrame(
+    triggerIndex: number,
+    frame?: {
+      portId?: string;
+      bytes?: Uint8Array | ArrayBuffer;
+      streamId?: number;
+      sequence?: number;
+      endOfStream?: boolean;
+    },
+  ): void;
+  drain(
+    handlers?: Record<
+      string,
+      (invocation: {
+        nodeIndex: number;
+        pluginId: string;
+        methodId: string;
+        dependencyId: string;
+        nodeId: string;
+        frames: FlowFrameData[];
+      }) =>
+        | Promise<{ statusCode?: number; outputs?: Array<Record<string, unknown>> } | void>
+        | { statusCode?: number; outputs?: Array<Record<string, unknown>> }
+        | void
+    >,
+    options?: { maxIterations?: number; frameBudget?: number },
+  ): Promise<{ iterations: number; nodesInvoked: number; handlersSkipped: number }>;
+}
+export const FLOW_INVALID_INDEX: number;
+export function createFlowRuntimeHost(options: {
+  wasmSource?: Uint8Array | ArrayBuffer;
+  wasmBytes?: Uint8Array | ArrayBuffer;
+  wasmModule?: WebAssembly.Module;
+  args?: string[];
+  env?: Record<string, string>;
+  logOutput?: boolean;
+}): Promise<FlowRuntimeHost>;
+
 export interface ModuleFlatBufferStreamPumpStats {
   bytesReceived: number;
   chunksReceived: number;
