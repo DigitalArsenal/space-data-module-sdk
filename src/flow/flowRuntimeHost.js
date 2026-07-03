@@ -33,6 +33,33 @@ function exportFn(exports, name) {
   return typeof fn === "function" ? fn : null;
 }
 
+// Publication-protected artifacts (docs/module-publication-standard.md) append
+// an SDS $REC record collection: payload || REC bytes || uint32le(REC length)
+// || "$REC". Loaders strip the trailer before wasm compilation (loader
+// expectation 6); signature/bundle-metadata verification stays a separate
+// concern (bundle/signing.js verifyModuleArtifact).
+const REC_TRAILER_FOOTER_LENGTH = 8;
+const REC_TRAILER_MAGIC = [0x24, 0x52, 0x45, 0x43]; // "$REC"
+
+export function stripPublicationTrailer(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length < REC_TRAILER_FOOTER_LENGTH) {
+    return bytes;
+  }
+  const footer = bytes.length - REC_TRAILER_FOOTER_LENGTH;
+  for (let i = 0; i < 4; i += 1) {
+    if (bytes[footer + 4 + i] !== REC_TRAILER_MAGIC[i]) return bytes;
+  }
+  const recLength =
+    (bytes[footer] |
+      (bytes[footer + 1] << 8) |
+      (bytes[footer + 2] << 16) |
+      (bytes[footer + 3] << 24)) >>>
+    0;
+  const payloadLength = footer - recLength;
+  if (recLength === 0 || payloadLength < 0) return bytes;
+  return bytes.subarray(0, payloadLength);
+}
+
 export async function createFlowRuntimeHost(options = {}) {
   let wasmModule = options.wasmModule ?? null;
   if (!wasmModule) {
@@ -40,7 +67,9 @@ export async function createFlowRuntimeHost(options = {}) {
     if (!source) {
       throw new TypeError("createFlowRuntimeHost requires wasmSource bytes or a wasmModule.");
     }
-    const bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
+    const bytes = stripPublicationTrailer(
+      source instanceof Uint8Array ? source : new Uint8Array(source),
+    );
     wasmModule = await WebAssembly.compile(bytes.slice().buffer);
   }
 
