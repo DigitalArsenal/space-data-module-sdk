@@ -191,6 +191,11 @@ export function decodeHttpRequest(bytes) {
  * @param {number} [response.status]
  * @param {object|Map|Array} [response.headers]
  * @param {string|Uint8Array|ArrayBuffer} [response.body]
+ * @param {number|bigint} [response.bodyRefToken] Opaque host body-ref token
+ *   (out-of-band body substitution — see the schema doc). Only meaningful
+ *   together with bodyRefSize > 0 and an absent body.
+ * @param {number|bigint} [response.bodyRefSize] Byte length of the
+ *   referenced body.
  * @returns {Uint8Array} Finished FlatBuffer with file identifier "$HTR".
  */
 export function encodeHttpResponse(response = {}) {
@@ -207,6 +212,8 @@ export function encodeHttpResponse(response = {}) {
     status,
     headersVector,
     bodyVector,
+    BigInt(response.bodyRefToken ?? 0),
+    BigInt(response.bodyRefSize ?? 0),
   );
   HttpResponse.finishHttpResponseBuffer(builder, root);
   return builder.asUint8Array();
@@ -215,9 +222,14 @@ export function encodeHttpResponse(response = {}) {
 /**
  * Decode an HttpResponse envelope ($HTR) back into a plain object.
  *
+ * bodyRefToken/bodyRefSize surface the optional out-of-band body reference
+ * (both 0 when the response carries an inline body or none). Hosts resolve
+ * a non-zero reference against their own body-ref registry (the buffer they
+ * registered when a capability hostcall answered in "deliver":"ref" mode).
+ *
  * @param {Uint8Array} bytes
  * @returns {{status: number, headers: Array<{name: string, value: string}>,
- *   body: Uint8Array}}
+ *   body: Uint8Array, bodyRefToken: bigint, bodyRefSize: number}}
  */
 export function decodeHttpResponse(bytes) {
   const buffer = new flatbuffers.ByteBuffer(bytes);
@@ -231,6 +243,81 @@ export function decodeHttpResponse(bytes) {
     status: response.status(),
     headers: decodeHeaders(response),
     body: response.bodyArray() ?? new Uint8Array(0),
+    bodyRefToken: response.bodyRefToken(),
+    bodyRefSize: Number(response.bodyRefSize()),
+  };
+}
+
+/**
+ * Word-folded FNV-1a 64 over a byte buffer — THE content-hash algorithm of
+ * body-reference descriptors ({"$sdnbodyref":1,...,"fnv1a64":"<16 hex>"}) and
+ * of the flow modules' stream entity tags (W/"fnv1a64-<16 hex>"). Folds
+ * 8-byte little-endian words, then the tail bytes individually; both hosts
+ * (Go: sdn-server, JS: this function) and the in-wasm hashers
+ * (foundation/decision-gate) MUST produce identical values over identical
+ * bytes so reference-mode etags equal hashed-stream etags.
+ *
+ * @param {Uint8Array} bytes
+ * @returns {string} 16-char lower-case hex digest.
+ */
+export function fnv1a64Hex(bytes) {
+  const prime = 1099511628211n;
+  const mask = 0xffffffffffffffffn;
+  // NOTE: this offset basis (1469598103934665603) is the value the deployed
+  // foundation/decision-gate hasher has always used (it drops the trailing
+  // "7" of the textbook FNV-1a 64 basis 14695981039346656037). The tag is an
+  // opaque validator, so the exact constant does not matter — MATCHING the
+  // in-wasm hasher bit-for-bit does.
+  let hash = 1469598103934665603n;
+  const words = bytes.length - (bytes.length % 8);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let i = 0;
+  for (; i < words; i += 8) {
+    hash ^= view.getBigUint64(i, true);
+    hash = (hash * prime) & mask;
+  }
+  for (; i < bytes.length; i += 1) {
+    hash ^= BigInt(bytes[i]);
+    hash = (hash * prime) & mask;
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+/**
+ * Host-side body-reference registry for "deliver":"ref" capability results
+ * and $HTR BODY_REF resolution — the JS counterpart of the Go hostcall
+ * bridge's registry (sdn-server internal/modulert). One registry per module
+ * instance / hostcall bridge; tokens are monotonic and single-exchange:
+ * `take` removes the entry, `reset` clears everything at the end of an
+ * exchange.
+ *
+ * @returns {{put(bytes: Uint8Array): number,
+ *   take(token: number|bigint): Uint8Array|null,
+ *   reset(): void, size(): number}}
+ */
+export function createBodyRefRegistry() {
+  const entries = new Map();
+  let next = 1;
+  return {
+    put(bytes) {
+      const token = next;
+      next += 1;
+      entries.set(token, bytes);
+      return token;
+    },
+    take(token) {
+      const key = Number(token);
+      const bytes = entries.get(key);
+      if (bytes === undefined) return null;
+      entries.delete(key);
+      return bytes;
+    },
+    reset() {
+      entries.clear();
+    },
+    size() {
+      return entries.size;
+    },
   };
 }
 

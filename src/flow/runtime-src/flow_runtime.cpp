@@ -522,6 +522,44 @@ FLOW_EXPORT uint32_t space_data_module_runtime_get_ingress_states(void) {
 #endif
 }
 
+FLOW_EXPORT int32_t space_data_module_runtime_dispatch_current_invocation_direct(
+    int32_t frame_budget);
+
+// In-wasm scheduler loop (loop C.5c): run every ready LINKED-DIRECT node to
+// completion inside one host call — ready-node selection, invocation
+// begin/dispatch/complete, and frame routing all stay in this module's
+// linear memory instead of costing 3-4 host<->wasm round-trips per node.
+// Returns the number of linked dispatches performed and stops (without
+// consuming it) at the first ready node that is NOT linked (host-model,
+// e.g. the egress sink) so the host loop handles it — node order is
+// identical to the host-driven loop (first ready by index). Hosts probe for
+// this export and fall back to per-node driving when absent (older
+// artifacts).
+FLOW_EXPORT int32_t space_data_module_runtime_drain_linked(int32_t max_iterations) {
+  if (g_current_node != kInvalidIndex) return -1;  // invocation open
+  if (max_iterations == 0) return 0;               // presence probe
+  int32_t budget = max_iterations > 0 ? max_iterations : 1024;
+  int32_t dispatched = 0;
+  for (int32_t i = 0; i < budget; i++) {
+    uint32_t node = kInvalidIndex;
+    for (uint32_t n = 0; n < FLOW_NODE_COUNT; n++) {
+      if (flow_node_is_ready(n)) {
+        node = n;
+        break;
+      }
+    }
+    if (node == kInvalidIndex || !flow_node_is_linked(node)) break;
+    if (space_data_module_runtime_begin_node_invocation(static_cast<int32_t>(node), 64) < 0) {
+      space_data_module_runtime_complete_node_invocation(static_cast<int32_t>(node));
+      break;
+    }
+    space_data_module_runtime_dispatch_current_invocation_direct(64);
+    space_data_module_runtime_complete_node_invocation(static_cast<int32_t>(node));
+    dispatched++;
+  }
+  return dispatched;
+}
+
 // Linked-direct dispatch: run the current node's linked guest-link entry over
 // the current invocation frames — all inside this module's linear memory.
 FLOW_EXPORT int32_t space_data_module_runtime_dispatch_current_invocation_direct(

@@ -118,6 +118,41 @@ test("encodeHttpResponse carries binary stream bodies verbatim", () => {
   assert.deepEqual(decoded.body, stream);
 });
 
+test("encodeHttpResponse round-trips the out-of-band body reference fields", () => {
+  const decoded = decodeHttpResponse(
+    encodeHttpResponse({
+      status: 200,
+      headers: { "content-type": "application/vnd.sdn.flatbuffers.stream" },
+      bodyRefToken: 7,
+      bodyRefSize: 9_000_000,
+    }),
+  );
+  assert.equal(decoded.status, 200);
+  assert.deepEqual(decoded.body, new Uint8Array(0), "referenced bodies carry no inline bytes");
+  assert.equal(Number(decoded.bodyRefToken), 7);
+  assert.equal(decoded.bodyRefSize, 9_000_000);
+
+  // Envelopes without a reference decode to zeros (backwards compatible with
+  // pre-C.5c $HTR frames, which simply lack the fields).
+  const plain = decodeHttpResponse(encodeHttpResponse({ status: 200, body: new Uint8Array([1]) }));
+  assert.equal(Number(plain.bodyRefToken), 0);
+  assert.equal(plain.bodyRefSize, 0);
+});
+
+test("createBodyRefRegistry: put/take/reset semantics", async () => {
+  const { createBodyRefRegistry } = await import("../src/http/index.js");
+  const registry = createBodyRefRegistry();
+  const bytes = Uint8Array.from([9, 8, 7]);
+  const token = registry.put(bytes);
+  assert.ok(token > 0);
+  assert.equal(registry.size(), 1);
+  assert.equal(registry.take(token), bytes, "take returns the registered buffer");
+  assert.equal(registry.take(token), null, "tokens are single-use");
+  registry.put(Uint8Array.from([1]));
+  registry.reset();
+  assert.equal(registry.size(), 0, "reset clears the exchange scope");
+});
+
 test("decoders reject envelopes with the wrong file identifier", () => {
   const request = encodeHttpRequest({ path: "/x" });
   const response = encodeHttpResponse({ status: 200 });

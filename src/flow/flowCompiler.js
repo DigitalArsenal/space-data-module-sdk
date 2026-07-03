@@ -80,6 +80,7 @@ const RUNTIME_ABI_EXPORTS = [
   "get_node_states",
   "get_ingress_states",
   "dispatch_current_invocation_direct",
+  "drain_linked",
 ].map((name) => `space_data_module_runtime_${name}`);
 
 const FLOW_ARTIFACT_EXPORTS = [

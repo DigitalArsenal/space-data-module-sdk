@@ -69,8 +69,34 @@ bodyArray():Uint8Array|null {
   return offset ? new Uint8Array(this.bb!.bytes().buffer, this.bb!.bytes().byteOffset + this.bb!.__vector(this.bb_pos + offset), this.bb!.__vector_len(this.bb_pos + offset)) : null;
 }
 
+/**
+ * OPTIONAL out-of-band body reference (near-zero-copy egress, loop C.5c).
+ * When BODY_REF_SIZE > 0 (and BODY is absent), the body bytes do NOT
+ * travel through the flow's linear memory: the module passes through the
+ * opaque token it received from a capability hostcall that answered in
+ * reference mode (e.g. storage.flatsql_*_stream with "deliver":"ref"),
+ * and the host substitutes the exact byte buffer it registered under
+ * that token. Still the dumb-pipe contract: the module DECIDED the body
+ * (it made the query and forwarded the result reference); the host only
+ * resolves its own token — a descriptor read, never a decision. Tokens
+ * are scoped to the module instance's hostcall bridge and to the current
+ * exchange.
+ */
+bodyRefToken():bigint {
+  const offset = this.bb!.__offset(this.bb_pos, 10);
+  return offset ? this.bb!.readUint64(this.bb_pos + offset) : BigInt('0');
+}
+
+/**
+ * Byte length of the referenced body (0 = no reference present).
+ */
+bodyRefSize():bigint {
+  const offset = this.bb!.__offset(this.bb_pos, 12);
+  return offset ? this.bb!.readUint64(this.bb_pos + offset) : BigInt('0');
+}
+
 static startHttpResponse(builder:flatbuffers.Builder) {
-  builder.startObject(3);
+  builder.startObject(5);
 }
 
 static addStatus(builder:flatbuffers.Builder, status:number) {
@@ -109,6 +135,14 @@ static startBodyVector(builder:flatbuffers.Builder, numElems:number) {
   builder.startVector(1, numElems, 1);
 }
 
+static addBodyRefToken(builder:flatbuffers.Builder, bodyRefToken:bigint) {
+  builder.addFieldInt64(3, bodyRefToken, BigInt('0'));
+}
+
+static addBodyRefSize(builder:flatbuffers.Builder, bodyRefSize:bigint) {
+  builder.addFieldInt64(4, bodyRefSize, BigInt('0'));
+}
+
 static endHttpResponse(builder:flatbuffers.Builder):flatbuffers.Offset {
   const offset = builder.endObject();
   return offset;
@@ -122,11 +156,13 @@ static finishSizePrefixedHttpResponseBuffer(builder:flatbuffers.Builder, offset:
   builder.finish(offset, '$HTR', true);
 }
 
-static createHttpResponse(builder:flatbuffers.Builder, status:number, headersOffset:flatbuffers.Offset, bodyOffset:flatbuffers.Offset):flatbuffers.Offset {
+static createHttpResponse(builder:flatbuffers.Builder, status:number, headersOffset:flatbuffers.Offset, bodyOffset:flatbuffers.Offset, bodyRefToken:bigint, bodyRefSize:bigint):flatbuffers.Offset {
   HttpResponse.startHttpResponse(builder);
   HttpResponse.addStatus(builder, status);
   HttpResponse.addHeaders(builder, headersOffset);
   HttpResponse.addBody(builder, bodyOffset);
+  HttpResponse.addBodyRefToken(builder, bodyRefToken);
+  HttpResponse.addBodyRefSize(builder, bodyRefSize);
   return HttpResponse.endHttpResponse(builder);
 }
 }

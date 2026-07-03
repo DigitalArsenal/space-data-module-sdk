@@ -26,7 +26,9 @@ struct HttpResponse FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_STATUS = 4,
     VT_HEADERS = 6,
-    VT_BODY = 8
+    VT_BODY = 8,
+    VT_BODY_REF_TOKEN = 10,
+    VT_BODY_REF_SIZE = 12
   };
   /// HTTP status code (200, 304, 400, 404, 502, ...).
   uint16_t STATUS() const {
@@ -41,6 +43,24 @@ struct HttpResponse FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const ::flatbuffers::Vector<uint8_t> *BODY() const {
     return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_BODY);
   }
+  /// OPTIONAL out-of-band body reference (near-zero-copy egress, loop C.5c).
+  /// When BODY_REF_SIZE > 0 (and BODY is absent), the body bytes do NOT
+  /// travel through the flow's linear memory: the module passes through the
+  /// opaque token it received from a capability hostcall that answered in
+  /// reference mode (e.g. storage.flatsql_*_stream with "deliver":"ref"),
+  /// and the host substitutes the exact byte buffer it registered under
+  /// that token. Still the dumb-pipe contract: the module DECIDED the body
+  /// (it made the query and forwarded the result reference); the host only
+  /// resolves its own token — a descriptor read, never a decision. Tokens
+  /// are scoped to the module instance's hostcall bridge and to the current
+  /// exchange.
+  uint64_t BODY_REF_TOKEN() const {
+    return GetField<uint64_t>(VT_BODY_REF_TOKEN, 0);
+  }
+  /// Byte length of the referenced body (0 = no reference present).
+  uint64_t BODY_REF_SIZE() const {
+    return GetField<uint64_t>(VT_BODY_REF_SIZE, 0);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -50,6 +70,8 @@ struct HttpResponse FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyVectorOfTables(HEADERS()) &&
            VerifyOffset(verifier, VT_BODY) &&
            verifier.VerifyVector(BODY()) &&
+           VerifyField<uint64_t>(verifier, VT_BODY_REF_TOKEN, 8) &&
+           VerifyField<uint64_t>(verifier, VT_BODY_REF_SIZE, 8) &&
            verifier.EndTable();
   }
 };
@@ -67,6 +89,12 @@ struct HttpResponseBuilder {
   void add_BODY(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> BODY) {
     fbb_.AddOffset(HttpResponse::VT_BODY, BODY);
   }
+  void add_BODY_REF_TOKEN(uint64_t BODY_REF_TOKEN) {
+    fbb_.AddElement<uint64_t>(HttpResponse::VT_BODY_REF_TOKEN, BODY_REF_TOKEN, 0);
+  }
+  void add_BODY_REF_SIZE(uint64_t BODY_REF_SIZE) {
+    fbb_.AddElement<uint64_t>(HttpResponse::VT_BODY_REF_SIZE, BODY_REF_SIZE, 0);
+  }
   explicit HttpResponseBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -82,8 +110,12 @@ inline ::flatbuffers::Offset<HttpResponse> CreateHttpResponse(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     uint16_t STATUS = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<sdn::http::HttpHeader>>> HEADERS = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> BODY = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> BODY = 0,
+    uint64_t BODY_REF_TOKEN = 0,
+    uint64_t BODY_REF_SIZE = 0) {
   HttpResponseBuilder builder_(_fbb);
+  builder_.add_BODY_REF_SIZE(BODY_REF_SIZE);
+  builder_.add_BODY_REF_TOKEN(BODY_REF_TOKEN);
   builder_.add_BODY(BODY);
   builder_.add_HEADERS(HEADERS);
   builder_.add_STATUS(STATUS);
@@ -94,14 +126,18 @@ inline ::flatbuffers::Offset<HttpResponse> CreateHttpResponseDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     uint16_t STATUS = 0,
     std::vector<::flatbuffers::Offset<sdn::http::HttpHeader>> *HEADERS = nullptr,
-    const std::vector<uint8_t> *BODY = nullptr) {
+    const std::vector<uint8_t> *BODY = nullptr,
+    uint64_t BODY_REF_TOKEN = 0,
+    uint64_t BODY_REF_SIZE = 0) {
   auto HEADERS__ = HEADERS ? _fbb.CreateVectorOfSortedTables<sdn::http::HttpHeader>(HEADERS) : 0;
   auto BODY__ = BODY ? _fbb.CreateVector<uint8_t>(*BODY) : 0;
   return sdn::http::CreateHttpResponse(
       _fbb,
       STATUS,
       HEADERS__,
-      BODY__);
+      BODY__,
+      BODY_REF_TOKEN,
+      BODY_REF_SIZE);
 }
 
 inline const sdn::http::HttpResponse *GetHttpResponse(const void *buf) {

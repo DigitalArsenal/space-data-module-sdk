@@ -16,6 +16,20 @@ table HttpResponse {
   HEADERS:[HttpHeader];
   /// Raw response body bytes (empty for 304).
   BODY:[ubyte];
+  /// OPTIONAL out-of-band body reference (near-zero-copy egress, loop C.5c).
+  /// When BODY_REF_SIZE > 0 (and BODY is absent), the body bytes do NOT
+  /// travel through the flow's linear memory: the module passes through the
+  /// opaque token it received from a capability hostcall that answered in
+  /// reference mode (e.g. storage.flatsql_*_stream with "deliver":"ref"),
+  /// and the host substitutes the exact byte buffer it registered under
+  /// that token. Still the dumb-pipe contract: the module DECIDED the body
+  /// (it made the query and forwarded the result reference); the host only
+  /// resolves its own token — a descriptor read, never a decision. Tokens
+  /// are scoped to the module instance's hostcall bridge and to the current
+  /// exchange.
+  BODY_REF_TOKEN:ulong;
+  /// Byte length of the referenced body (0 = no reference present).
+  BODY_REF_SIZE:ulong;
 }
 
 root_type HttpResponse;

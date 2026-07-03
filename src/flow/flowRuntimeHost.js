@@ -271,8 +271,20 @@ export async function createFlowRuntimeHost(options = {}) {
     async drain(handlers = {}, options = {}) {
       const maxIterations = options.maxIterations ?? 1000;
       const result = { iterations: 0, nodesInvoked: 0, handlersSkipped: 0 };
+      // In-wasm scheduler loop (loop C.5c): artifacts exporting
+      // space_data_module_runtime_drain_linked run all ready linked-direct
+      // nodes inside ONE call; the host loop then only services host-model
+      // nodes. Older artifacts fall back to per-node driving below.
+      const drainLinked = exportFn(exports, "space_data_module_runtime_drain_linked");
 
       for (let i = 0; i < maxIterations; i++) {
+        if (drainLinked) {
+          const dispatched = drainLinked(maxIterations) | 0;
+          if (dispatched > 0) {
+            result.nodesInvoked += dispatched;
+            result.iterations += dispatched;
+          }
+        }
         const nodeIndex = call("get_ready_node_index") >>> 0;
         if (nodeIndex === FLOW_INVALID_INDEX) break;
         result.iterations++;
@@ -303,6 +315,29 @@ export async function createFlowRuntimeHost(options = {}) {
           dispatchModel = dd.dispatchModel;
         }
 
+        const handler =
+          handlers[`${pluginId}:${methodId}`] ??
+          handlers[dependencyId] ??
+          handlers[nodeId] ??
+          handlers[methodId] ??
+          null;
+
+        if (!handler) {
+          // No host handler: linked-direct nodes run entirely inside the
+          // artifact — do NOT copy their (possibly large) input frames out of
+          // linear memory just to discard them (loop C.5c copy elimination;
+          // mirrors the Go host's drain).
+          result.handlersSkipped++;
+          if (dispatchModel === "linked-direct") {
+            call("dispatch_current_invocation_direct", options.frameBudget ?? 64);
+            call("complete_node_invocation", nodeIndex);
+            result.nodesInvoked++;
+            continue;
+          }
+          call("complete_node_invocation", nodeIndex);
+          continue;
+        }
+
         const frames = [];
         for (let f = 0; f < inv.frameCount; f++) {
           const fd = readFrameDescriptor(inv.framesPtr + f * FRAME_DESCRIPTOR_SIZE);
@@ -314,25 +349,6 @@ export async function createFlowRuntimeHost(options = {}) {
             sequence: fd.sequence,
             endOfStream: fd.endOfStream,
           });
-        }
-
-        const handler =
-          handlers[`${pluginId}:${methodId}`] ??
-          handlers[dependencyId] ??
-          handlers[nodeId] ??
-          handlers[methodId] ??
-          null;
-
-        if (!handler) {
-          result.handlersSkipped++;
-          if (dispatchModel === "linked-direct") {
-            call("dispatch_current_invocation_direct", options.frameBudget ?? 64);
-            call("complete_node_invocation", nodeIndex);
-            result.nodesInvoked++;
-            continue;
-          }
-          call("complete_node_invocation", nodeIndex);
-          continue;
         }
 
         let handlerResult;
