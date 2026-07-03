@@ -125,6 +125,12 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
   }
   const args = [
     "-O3",
+    // Bulk-memory ops: memcpy/memset in module code lower to native
+    // memory.copy/memory.fill instead of byte loops — WITHOUT this, large
+    // aligned-stream frames crawl (~10 MB/s) under interpreted hosts
+    // (loop C.5 wirespeed gate). Baseline wasm feature, supported by every
+    // target host (WasmEdge + all browsers).
+    "-mbulk-memory",
     ...threadArgs,
     "-s",
     "STANDALONE_WASM=1",
@@ -138,7 +144,9 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
 }
 
 function buildSourceCompilerArgs(options = {}) {
-  const args = ["-O3", "-DNDEBUG"];
+  // -mbulk-memory: see buildCompilerArgs — memcpy/memset become native
+  // memory.copy/memory.fill (loop C.5).
+  const args = ["-O3", "-mbulk-memory", "-DNDEBUG"];
   if (usesPthreadCompileFlags(options)) {
     args.push("-pthread");
   }

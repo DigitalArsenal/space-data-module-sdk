@@ -1219,10 +1219,13 @@ async function linkFlowArtifactWithEmception({ runtimeSource, invokeHeader, gene
         objectPaths.push(objectPath);
       });
 
+      // -mbulk-memory: frame moves in the flow runtime (edge queues, arena
+      // copies) lower to native memory.copy/memory.fill instead of byte
+      // loops — decisive for interpreted hosts (loop C.5 wirespeed gate).
       const compileCommands = [
-        `em++ -c ${workDir}/flow_runtime.cpp -I${workDir} -std=c++17 -O3 -DNDEBUG -o ${workDir}/flow_runtime.o`,
-        `em++ -c ${workDir}/flow-manifest-exports.cpp -std=c++17 -O3 -o ${workDir}/flow-manifest-exports.o`,
-        `em++ -c ${workDir}/flow-program-exports.cpp -std=c++17 -O3 -o ${workDir}/flow-program-exports.o`,
+        `em++ -c ${workDir}/flow_runtime.cpp -I${workDir} -std=c++17 -O3 -mbulk-memory -DNDEBUG -o ${workDir}/flow_runtime.o`,
+        `em++ -c ${workDir}/flow-manifest-exports.cpp -std=c++17 -O3 -mbulk-memory -o ${workDir}/flow-manifest-exports.o`,
+        `em++ -c ${workDir}/flow-program-exports.cpp -std=c++17 -O3 -mbulk-memory -o ${workDir}/flow-program-exports.o`,
       ];
       const exportArgs = FLOW_ARTIFACT_EXPORTS.map((symbol) => `-Wl,--export=${symbol}`).join(" ");
       const linkCommand =
