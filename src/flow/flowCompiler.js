@@ -380,6 +380,88 @@ function collectComponentDependencies({ nodePluginIds, dependencies, issues, cap
 }
 
 /**
+ * findFlowCycles returns every elementary cycle reachable in the node graph
+ * as { nodeIds, edges } (iterative DFS with back-edge extraction; each cycle
+ * reported once). Self-loops are cycles of length one.
+ */
+export function findFlowCycles(nodes, edges) {
+  const WHITE = 0;
+  const GRAY = 1;
+  const BLACK = 2;
+  const color = new Map();
+  const out = new Map();
+  for (const node of nodes) {
+    if (!node?.nodeId) continue;
+    color.set(node.nodeId, WHITE);
+    out.set(node.nodeId, []);
+  }
+  for (const edge of edges) {
+    if (out.has(edge?.fromNodeId) && color.has(edge?.toNodeId)) {
+      out.get(edge.fromNodeId).push(edge);
+    }
+  }
+
+  const cycles = [];
+  const seen = new Set();
+  const stack = [];
+
+  const visit = (start) => {
+    const frames = [{ nodeId: start, edgeIdx: 0 }];
+    color.set(start, GRAY);
+    stack.push(start);
+    while (frames.length > 0) {
+      const frame = frames[frames.length - 1];
+      const nodeEdges = out.get(frame.nodeId) ?? [];
+      if (frame.edgeIdx >= nodeEdges.length) {
+        color.set(frame.nodeId, BLACK);
+        stack.pop();
+        frames.pop();
+        continue;
+      }
+      const edge = nodeEdges[frame.edgeIdx];
+      frame.edgeIdx += 1;
+      const next = edge.toNodeId;
+      const state = color.get(next);
+      if (state === GRAY) {
+        // Back edge: extract the cycle from the stack.
+        const at = stack.indexOf(next);
+        const nodeIds = stack.slice(at);
+        const key = [...nodeIds].sort().join(" ");
+        if (!seen.has(key)) {
+          seen.add(key);
+          const cycleEdges = [];
+          for (let i = 0; i < nodeIds.length; i += 1) {
+            const from = nodeIds[i];
+            const to = nodeIds[(i + 1) % nodeIds.length];
+            const found = (out.get(from) ?? []).find((candidate) => candidate.toNodeId === to);
+            if (found) cycleEdges.push(found);
+          }
+          cycles.push({ nodeIds, edges: cycleEdges });
+        }
+      } else if (state === WHITE) {
+        color.set(next, GRAY);
+        stack.push(next);
+        frames.push({ nodeId: next, edgeIdx: 0 });
+      }
+    }
+  };
+
+  for (const nodeId of color.keys()) {
+    if (color.get(nodeId) === WHITE) visit(nodeId);
+  }
+  return cycles;
+}
+
+// edgeIsBounded: a cycle edge is safe only with a finite queue bound and a
+// policy that cannot grow the queue without limit.
+function edgeIsBounded(edge) {
+  const policy = String(edge?.backpressurePolicy ?? "queue").toLowerCase();
+  const depth = Number(edge?.queueDepth ?? 1);
+  const boundedPolicy = policy === "queue" || policy === "drop-oldest" || policy === "drop-newest";
+  return boundedPolicy && Number.isFinite(depth) && depth > 0 && depth <= 65536;
+}
+
+/**
  * Validate a flow document against its dependency manifests. Returns
  * { ok, issues, capabilities, nodes } where `capabilities` is the computed
  * capability union of all linked nodes and `nodes` carries the resolved
@@ -509,6 +591,52 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
       );
     }
   });
+
+  // Unending-loop detection: cycles in the node graph make the drain loop
+  // spin forever on a single ingress frame. Cycles are a hard error unless
+  // the flow explicitly opts in with `allowCycles: true` AND every edge on
+  // every cycle is bounded (finite queueDepth with a queue/drop policy) —
+  // sanctioned feedback must be unable to grow without bound. Applies to
+  // `flow check`, `flow compile`, and any flow UI built on this validator.
+  const cycles = findFlowCycles(nodes, edges);
+  if (cycles.length > 0) {
+    const allowCycles = flow?.allowCycles === true;
+    for (const cycle of cycles) {
+      const path = [...cycle.nodeIds, cycle.nodeIds[0]].join(" -> ");
+      if (!allowCycles) {
+        pushIssue(
+          issues,
+          "error",
+          "flow-cycle",
+          `Flow graph contains a cycle: ${path}. Cycles hang the scheduler; break the loop, ` +
+            `or set flow.allowCycles = true AND give every edge in the cycle a bounded ` +
+            `backpressure policy (finite queueDepth).`,
+          "flow.edges",
+        );
+        continue;
+      }
+      const unbounded = cycle.edges.filter((edge) => !edgeIsBounded(edge));
+      if (unbounded.length > 0) {
+        const labels = unbounded.map((edge) => `${edge.fromNodeId} -> ${edge.toNodeId}`).join(", ");
+        pushIssue(
+          issues,
+          "error",
+          "unbounded-cycle",
+          `Flow cycle ${path} is allowed by flow.allowCycles but has unbounded edges (${labels}); ` +
+            `every cycle edge needs backpressurePolicy queue|drop-oldest|drop-newest with a finite queueDepth.`,
+          "flow.edges",
+        );
+      } else {
+        pushIssue(
+          issues,
+          "warning",
+          "sanctioned-cycle",
+          `Flow contains a sanctioned feedback cycle (${path}); all cycle edges are bounded.`,
+          "flow.edges",
+        );
+      }
+    }
+  }
 
   const triggerIds = new Set(triggers.map((trigger) => trigger?.triggerId).filter(Boolean));
   if (triggers.length === 0) {

@@ -398,3 +398,64 @@ extern "C" int echo(void) {
   const decoded = decodeFlowProgram(new Uint8Array(host.memory.buffer, ptr, size).slice());
   assert.equal(decoded.programId, "test.echo-flow");
 });
+
+test("flow check fails on a graph cycle by default", () => {
+  const flow = makeFlow();
+  // consumer feeds back into producer: producer -> consumer -> producer.
+  flow.edges.push({ fromNodeId: "consumer", fromPortId: "done", toNodeId: "producer", toPortId: "request" });
+  const check = checkFlowProgram({
+    flow,
+    dependencies: dependencyMap(producerDependency, consumerDependency),
+  });
+  assert.equal(check.ok, false);
+  const cycleIssue = check.errors.find((issue) => issue.code === "flow-cycle");
+  assert.ok(cycleIssue, "expected flow-cycle error");
+  assert.match(cycleIssue.message, /producer -> consumer -> producer/);
+});
+
+test("flow check fails on a self-loop", () => {
+  const flow = makeFlow();
+  flow.edges.push({ fromNodeId: "consumer", fromPortId: "done", toNodeId: "consumer", toPortId: "stream" });
+  const check = checkFlowProgram({
+    flow,
+    dependencies: dependencyMap(producerDependency, consumerDependency),
+  });
+  assert.equal(check.ok, false);
+  assert.ok(check.errors.some((issue) => issue.code === "flow-cycle"));
+});
+
+test("allowCycles admits bounded feedback with a warning, rejects unbounded", () => {
+  const flow = makeFlow({ allowCycles: true });
+  // Bounded feedback edge: finite queue.
+  flow.edges.push({
+    fromNodeId: "consumer",
+    fromPortId: "done",
+    toNodeId: "producer",
+    toPortId: "request",
+    backpressurePolicy: "drop-oldest",
+    queueDepth: 8,
+  });
+  const bounded = checkFlowProgram({
+    flow,
+    dependencies: dependencyMap(producerDependency, consumerDependency),
+  });
+  assert.ok(!bounded.errors.some((issue) => issue.code === "flow-cycle" || issue.code === "unbounded-cycle"),
+    "bounded sanctioned cycle must not error");
+  assert.ok(bounded.issues.some((issue) => issue.code === "sanctioned-cycle"), "expected sanctioned-cycle warning");
+
+  // Same cycle but unbounded (block policy): rejected even with allowCycles.
+  const unboundedFlow = makeFlow({ allowCycles: true });
+  unboundedFlow.edges.push({
+    fromNodeId: "consumer",
+    fromPortId: "done",
+    toNodeId: "producer",
+    toPortId: "request",
+    backpressurePolicy: "block",
+  });
+  const unbounded = checkFlowProgram({
+    flow: unboundedFlow,
+    dependencies: dependencyMap(producerDependency, consumerDependency),
+  });
+  assert.equal(unbounded.ok, false);
+  assert.ok(unbounded.errors.some((issue) => issue.code === "unbounded-cycle"));
+});
