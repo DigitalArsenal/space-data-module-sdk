@@ -1,0 +1,22 @@
+// Canonical HTTP response envelope for WASM-served HTTP (host-owned ABI).
+//
+// Counterpart of schemas/HttpRequestAbi.fbs (which declares the shared
+// HttpHeader table). The host streams STATUS/HEADERS/BODY back to the client
+// verbatim; it must not add, drop, or rewrite any of them.
+
+include "HttpRequestAbi.fbs";
+
+namespace sdn.http;
+
+table HttpResponse {
+  /// HTTP status code (200, 304, 400, 404, 502, ...).
+  STATUS:ushort;
+  /// Response headers, sorted by NAME. All content-type / caching / count
+  /// headers are decided inside the module.
+  HEADERS:[HttpHeader];
+  /// Raw response body bytes (empty for 304).
+  BODY:[ubyte];
+}
+
+root_type HttpResponse;
+file_identifier "$HTR";
