@@ -14,3 +14,6 @@ export {
   encodeStreamInvokeResponse,
 } from "./flowCodec.js";
 export { createDependencyStreamBridge } from "./dependencyStreamBridge.js";
+// The flow compiler (flow check/compile) is node-only (emception + fs) and
+// ships on the dedicated "./flow/compiler" subpath to keep this barrel
+// browser-safe.
