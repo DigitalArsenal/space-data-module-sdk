@@ -15,6 +15,12 @@
  */
 
 import { createBrowserWasiShim } from "../host/wasiShim.js";
+import {
+  ENGINE_REF_ENTRY_SIZE,
+  instantiateFlatsqlLinkShim,
+  isEngineBodyRefToken,
+  readEngineRefEntry,
+} from "./flatsqlLinkShim.js";
 
 export const FLOW_INVALID_INDEX = 0xffffffff;
 
@@ -79,6 +85,22 @@ export async function createFlowRuntimeHost(options = {}) {
     logOutput: options.logOutput === true,
   });
   const imports = { ...wasi.imports, ...(options.extraImports ?? {}) };
+  // Direct engine linkage (loop C.7): a LINKED flow artifact imports the live
+  // FlatSQL engine's function exports (module "flatsql") and the tiny
+  // memory-crossing shim (module "flatsql_link", instantiated here against
+  // the SAME engine memory) — the browser-native form of the server's
+  // VM.RegisterModule instance sharing.
+  const engineLink = options.engineLink ?? null;
+  if (engineLink) {
+    if (!engineLink.exports || !(engineLink.exports.memory instanceof WebAssembly.Memory)) {
+      throw new TypeError(
+        "createFlowRuntimeHost engineLink requires the live engine's exports (with memory).",
+      );
+    }
+    const shimInstance = await instantiateFlatsqlLinkShim(engineLink.exports);
+    imports.flatsql = engineLink.exports;
+    imports.flatsql_link = shimInstance.exports;
+  }
   if (options.legacyHostImportCompat === true) {
     // Legacy compiled-flow artifacts import a `sdn_flow_host` module; stub its
     // dispatch entry (0 = caller wins) so they instantiate under plain
@@ -97,6 +119,17 @@ export async function createFlowRuntimeHost(options = {}) {
   }
   wasi.setMemory(memory);
   exportFn(exports, "_initialize")?.();
+
+  if (engineLink) {
+    const linkInit = exportFn(exports, "sdn_flatsql_link_init");
+    if (!linkInit) {
+      throw new Error(
+        "engineLink was provided but the flow artifact exports no sdn_flatsql_link_init " +
+          "(compile the flow with engineLinkage: \"flatsql\").",
+      );
+    }
+    linkInit(engineLink.dbHandle | 0);
+  }
 
   const malloc = exportFn(exports, "malloc");
   if (!malloc) {
@@ -262,6 +295,32 @@ export async function createFlowRuntimeHost(options = {}) {
         totalDropped: v.getBigUint64(ptr + 8, true),
         queuedFrames: v.getUint32(ptr + 16, true),
       };
+    },
+
+    /**
+     * Engine body-reference resolution (loop C.7 direct linkage): tokens with
+     * the "SDNE" magic reference an artifact materialized in ENGINE memory by
+     * a direct in-wasm query. The entry lives in the flow's exported ref
+     * table; the bytes are copied straight out of the engine's linear memory
+     * (the JS counterpart of the Go harvest under the store engine lock —
+     * single-threaded JS needs no lock). Returns null for unknown tokens.
+     */
+    resolveEngineBodyRef(token) {
+      if (!engineLink || !isEngineBodyRefToken(token)) return null;
+      const tablePtr = exportFn(exports, "sdn_flatsql_link_ref_table")?.() >>> 0;
+      const slots = exportFn(exports, "sdn_flatsql_link_ref_slots")?.() >>> 0;
+      if (!tablePtr || !slots) return null;
+      const v = view();
+      for (let i = 0; i < slots; i++) {
+        const entry = readEngineRefEntry(v, tablePtr + i * ENGINE_REF_ENTRY_SIZE);
+        if (!entry.used || entry.token !== BigInt(token)) continue;
+        const engineHeap = new Uint8Array(engineLink.exports.memory.buffer);
+        return {
+          ...entry,
+          bytes: engineHeap.slice(entry.enginePtr, entry.enginePtr + entry.size),
+        };
+      }
+      return null;
     },
 
     enqueueTrigger(triggerIndex) {

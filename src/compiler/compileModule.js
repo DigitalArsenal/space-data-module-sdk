@@ -150,6 +150,14 @@ function buildSourceCompilerArgs(options = {}) {
   if (usesPthreadCompileFlags(options)) {
     args.push("-pthread");
   }
+  // Caller-supplied preprocessor defines (e.g. SDN_FLATSQL_LINKED=1 for the
+  // engine-linked guest-link object variant, loop C.7). NAME or NAME=VALUE.
+  for (const define of Array.isArray(options.defines) ? options.defines : []) {
+    const text = String(define ?? "").trim();
+    if (/^[A-Za-z_][A-Za-z0-9_]*(=[^\s]*)?$/.test(text)) {
+      args.push(`-D${text}`);
+    }
+  }
   return args;
 }
 

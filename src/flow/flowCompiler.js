@@ -45,6 +45,7 @@ import { SDS_MANIFEST_SECTION_NAME } from "../bundle/constants.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { bytesToHex } from "../utils/encoding.js";
 import { encodeFlowProgram } from "./flowCodec.js";
+import { FLATSQL_LINK_SHIM_WASM } from "./flatsqlLinkShim.js";
 import { normalizeManifestForSdnFlow } from "./normalize.js";
 import {
   BackpressurePolicy,
@@ -93,8 +94,34 @@ const FLOW_ARTIFACT_EXPORTS = [
   "flow_get_manifest_flatbuffer_size",
 ];
 
+// Additional exports of LINKED-mode artifacts (flow.engineLinkage ==
+// "flatsql"): the host wires the store's live engine db handle in and reads
+// the engine body-reference table out (loop C.7 direct linkage).
+const FLOW_LINKED_EXPORTS = [
+  "sdn_flatsql_link_init",
+  "sdn_flatsql_link_ref_table",
+  "sdn_flatsql_link_ref_slots",
+];
+
+// Capability stamped onto linked-mode flow manifests. Hosts treat it as the
+// first-party gate: linking grants FULL store-memory access, so a host must
+// refuse to mount a linked artifact unless it can (and is willing to) share
+// its live engine instance. Untrusted modules never get this capability —
+// they stay on the storage.flatsql_* hostcall bridge permanently.
+export const ENGINE_LINK_CAPABILITY = "storage_engine_link";
+
+export function flowEngineLinkage(flow) {
+  const linkage = String(flow?.engineLinkage ?? "").trim().toLowerCase();
+  if (linkage === "" || linkage === "none" || linkage === "bridge") return null;
+  if (linkage === "flatsql") return "flatsql";
+  throw new Error(
+    `Unsupported flow.engineLinkage "${flow.engineLinkage}" (expected "flatsql" or omitted for bridge mode).`,
+  );
+}
+
 const GUEST_LINK_OBJECT_FILENAME = "module-link.o";
 const GUEST_LINK_METADATA_FILENAME = "metadata.json";
+const GUEST_LINK_LINKED_DIRNAME = "guest-link-linked";
 const SKIPPED_SCAN_DIRECTORIES = new Set([
   "node_modules",
   ".git",
@@ -149,18 +176,25 @@ async function loadDependencyFromDirectory(dir) {
     wasmPath: path.join(dir, "dist", "isomorphic", "module.wasm"),
     guestLink: null,
   };
-  const guestLinkDir = path.join(dir, "dist", "guest-link");
-  try {
+  const readGuestLink = async (dirname) => {
+    const guestLinkDir = path.join(dir, "dist", dirname);
     const [objectBytes, metadata] = await Promise.all([
       readFile(path.join(guestLinkDir, GUEST_LINK_OBJECT_FILENAME)),
       readFile(path.join(guestLinkDir, GUEST_LINK_METADATA_FILENAME), "utf8").then(JSON.parse),
     ]);
-    entry.guestLink = {
-      objectBytes: new Uint8Array(objectBytes),
-      metadata,
-    };
+    return { objectBytes: new Uint8Array(objectBytes), metadata };
+  };
+  try {
+    entry.guestLink = await readGuestLink("guest-link");
   } catch {
     entry.guestLink = null;
+  }
+  // Optional engine-linked object variant (compiled -DSDN_FLATSQL_LINKED):
+  // used instead of guestLink when the flow compiles in linked mode.
+  try {
+    entry.guestLinkLinked = await readGuestLink(GUEST_LINK_LINKED_DIRNAME);
+  } catch {
+    entry.guestLinkLinked = null;
   }
   return entry;
 }
@@ -701,6 +735,19 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
       if (id) capabilities.add(id);
     }
   }
+
+  // Engine linkage mode (loop C.7): linked flows stamp the engine-link
+  // capability so hosts can gate mounting (first-party only) and know to
+  // register the live engine instance + link shim at instantiation.
+  let engineLinkage = null;
+  try {
+    engineLinkage = flowEngineLinkage(flow);
+  } catch (error) {
+    pushIssue(issues, "error", "invalid-engine-linkage", error.message, "flow.engineLinkage");
+  }
+  if (engineLinkage) {
+    capabilities.add(ENGINE_LINK_CAPABILITY);
+  }
   const componentDependencies = collectComponentDependencies({
     nodePluginIds: [
       ...new Set(resolvedNodes.filter((entry) => entry.dependency).map((entry) => entry.node.pluginId)),
@@ -717,6 +764,7 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
     errors,
     warnings: issues.filter((issue) => issue.severity === "warning"),
     capabilities: [...capabilities].sort(),
+    engineLinkage,
     componentDependencies,
     nodes: resolvedNodes.map((entry) => ({
       nodeId: entry.node.nodeId,
@@ -1017,21 +1065,30 @@ export function generateFlowTables({ flow, check, dependencies }) {
   const triggerIndex = new Map(triggers.map((trigger, index) => [trigger.triggerId, index]));
   const dispatchByNodeId = new Map(check.nodes.map((node) => [node.nodeId, node.dispatchModel]));
 
-  // Linked dependencies (deduped by pluginId, in first-use order).
+  // Linked dependencies (deduped by pluginId, in first-use order). In
+  // engine-linked mode a dependency's `guest-link-linked` object variant
+  // (compiled -DSDN_FLATSQL_LINKED, calling the runtime template's direct
+  // engine helpers instead of storage.flatsql_* hostcalls) is preferred when
+  // the package ships one; pure compute nodes fall back to their standard
+  // object (both variants share the deterministic symbol prefix).
+  const engineLinked = Boolean(check.engineLinkage);
   const linkedDependencies = [];
   const dependencyIndexByPluginId = new Map();
   for (const node of nodes) {
     if (dispatchByNodeId.get(node.nodeId) !== "linked-direct") continue;
     if (dependencyIndexByPluginId.has(node.pluginId)) continue;
     const dependency = dependencies.get(node.pluginId);
-    if (!dependency?.guestLink) {
+    const chosenGuestLink = engineLinked
+      ? (dependency?.guestLinkLinked ?? dependency?.guestLink ?? null)
+      : (dependency?.guestLink ?? null);
+    if (!chosenGuestLink) {
       throw new Error(
         `Plugin "${node.pluginId}" has no guest-link object (dist/guest-link/${GUEST_LINK_OBJECT_FILENAME}); ` +
           "rebuild the module with a build that persists compileModuleFromSource's guestLink output.",
       );
     }
     dependencyIndexByPluginId.set(node.pluginId, linkedDependencies.length);
-    linkedDependencies.push(dependency);
+    linkedDependencies.push({ ...dependency, guestLink: chosenGuestLink });
   }
 
   const nodeEntries = nodes.map((node) => {
@@ -1039,7 +1096,7 @@ export function generateFlowTables({ flow, check, dependencies }) {
     if (dispatchModel !== "linked-direct") {
       return { node, dispatchModel, entrySymbol: null, dependency: null };
     }
-    const dependency = dependencies.get(node.pluginId);
+    const dependency = linkedDependencies[dependencyIndexByPluginId.get(node.pluginId)];
     const entrySymbol = dependency.guestLink.metadata?.methodSymbols?.[node.methodId];
     if (!entrySymbol) {
       throw new Error(
@@ -1202,7 +1259,7 @@ export function generateFlowTables({ flow, check, dependencies }) {
 // Compilation — flow compile (emception monolithic link)
 // ---------------------------------------------------------------------------
 
-async function linkFlowArtifactWithEmception({ runtimeSource, invokeHeader, generatedInc, manifestSource, programSource, dependencyObjects }) {
+async function linkFlowArtifactWithEmception({ runtimeSource, invokeHeader, generatedInc, manifestSource, programSource, dependencyObjects, engineLinked = false }) {
   return runWithEmceptionLock(async (emception) => {
     const workDir = "/working/space-data-module-flow-compile";
     const write = (name, content) => emception.writeFile(`${workDir}/${name}`, content);
@@ -1223,12 +1280,19 @@ async function linkFlowArtifactWithEmception({ runtimeSource, invokeHeader, gene
       // -mbulk-memory: frame moves in the flow runtime (edge queues, arena
       // copies) lower to native memory.copy/memory.fill instead of byte
       // loops — decisive for interpreted hosts (loop C.5 wirespeed gate).
+      // -DSDN_FLATSQL_LINKED compiles the direct engine-linkage block into
+      // the runtime template (loop C.7): engine-facing calls become wasm
+      // imports from modules "flatsql"/"flatsql_link" instead of hostcalls.
+      const linkedDefine = engineLinked ? " -DSDN_FLATSQL_LINKED=1" : "";
       const compileCommands = [
-        `em++ -c ${workDir}/flow_runtime.cpp -I${workDir} -std=c++17 -O3 -mbulk-memory -DNDEBUG -o ${workDir}/flow_runtime.o`,
+        `em++ -c ${workDir}/flow_runtime.cpp -I${workDir} -std=c++17 -O3 -mbulk-memory -DNDEBUG${linkedDefine} -o ${workDir}/flow_runtime.o`,
         `em++ -c ${workDir}/flow-manifest-exports.cpp -std=c++17 -O3 -mbulk-memory -o ${workDir}/flow-manifest-exports.o`,
         `em++ -c ${workDir}/flow-program-exports.cpp -std=c++17 -O3 -mbulk-memory -o ${workDir}/flow-program-exports.o`,
       ];
-      const exportArgs = FLOW_ARTIFACT_EXPORTS.map((symbol) => `-Wl,--export=${symbol}`).join(" ");
+      const exportSymbols = engineLinked
+        ? [...FLOW_ARTIFACT_EXPORTS, ...FLOW_LINKED_EXPORTS]
+        : FLOW_ARTIFACT_EXPORTS;
+      const exportArgs = exportSymbols.map((symbol) => `-Wl,--export=${symbol}`).join(" ");
       const linkCommand =
         `em++ ${workDir}/flow_runtime.o ${workDir}/flow-manifest-exports.o ${workDir}/flow-program-exports.o ` +
         `${objectPaths.join(" ")} -O3 -s STANDALONE_WASM=1 -s ALLOW_MEMORY_GROWTH=1 ` +
@@ -1296,6 +1360,7 @@ export async function compileFlowProgram({ flow, dependencies, outDir, flowSourc
     manifestSource,
     programSource,
     dependencyObjects: linkedDependencies.map((dependency) => dependency.guestLink.objectBytes),
+    engineLinked: Boolean(check.engineLinkage),
   });
   wasmBytes = appendWasmCustomSection(
     wasmBytes,
@@ -1342,6 +1407,10 @@ export async function compileFlowProgram({ flow, dependencies, outDir, flowSourc
     edges: (flow.edges ?? []).length,
     triggers: (flow.triggers ?? []).length,
     capabilities: check.capabilities,
+    // "flatsql-direct": engine-facing query calls are direct wasm imports
+    // from the live store engine instance (modules "flatsql"/"flatsql_link");
+    // "bridge": queries travel the storage.flatsql_* capability hostcalls.
+    engineLinkage: check.engineLinkage ? "flatsql-direct" : "bridge",
     dispatch: check.nodes,
     dependencies: dependencyRecords,
   };
@@ -1367,6 +1436,14 @@ export async function compileFlowProgram({ flow, dependencies, outDir, flowSourc
     outputs.manifestPath = manifestPath;
     outputs.artifactPath = artifactPath;
     outputs.flowJsonPath = flowJsonPath;
+    if (check.engineLinkage) {
+      // Ship the deterministic flatsql_link shim next to the artifact so any
+      // host can instantiate the memory-crossing component without depending
+      // on the SDK at runtime (sdn-server embeds the identical bytes).
+      const shimPath = path.join(outDir, "flatsql-link-shim.wasm");
+      await writeFile(shimPath, FLATSQL_LINK_SHIM_WASM);
+      outputs.linkShimPath = shimPath;
+    }
   }
 
   const report = await validateArtifactWithStandards({

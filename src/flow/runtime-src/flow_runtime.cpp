@@ -40,6 +40,10 @@
 
 #define FLOW_EXPORT extern "C" __attribute__((visibility("default")))
 
+#ifdef SDN_FLATSQL_LINKED
+static void sdn_flatsql_link_reset_refs(void);
+#endif
+
 // Guest-link objects compiled from Emscripten C++ may import the memory
 // growth notification; provide the same weak no-op the module compiler uses.
 extern "C" __attribute__((weak)) void emscripten_notify_memory_growth(int) {}
@@ -360,6 +364,9 @@ FLOW_EXPORT void space_data_module_runtime_reset_state(void) {
     memset(&g_ingress_states[t], 0, sizeof(FlowIngressRuntimeStateC));
   }
   g_current_node = kInvalidIndex;
+#ifdef SDN_FLATSQL_LINKED
+  sdn_flatsql_link_reset_refs();
+#endif
 }
 
 FLOW_EXPORT uint32_t space_data_module_runtime_get_ready_node_index(void) {
@@ -606,3 +613,255 @@ FLOW_EXPORT int32_t space_data_module_runtime_dispatch_current_invocation_direct
   g_shim_inputs.clear();
   return static_cast<int32_t>(routed);
 }
+
+#ifdef SDN_FLATSQL_LINKED
+// ============================================================================
+// Direct FlatSQL engine linkage (loop C.7 — the B-iv end state).
+//
+// Compiled ONLY into linked-mode flows (`flow.engineLinkage == "flatsql"`).
+// The artifact imports the live store engine's FUNCTION exports from module
+// "flatsql" (scalars cross instances fine) and crosses the memory boundary
+// through the tiny flatsql_link shim (src/flow/flatsqlLinkShim.js), whose
+// memory IS the engine memory. Query submission therefore never touches the
+// hostcall bridge: SQL text + TLV params are poked into engine-malloc'd
+// space, flatsql_query_raw_flatbuffer_stream runs as a direct in-wasm call,
+// and the materialized aligned stream stays in ENGINE memory.
+//
+// Result delivery keeps the loop C.5c body-reference contract: the guest
+// registers the engine artifact in the exported engine-ref table below and
+// forwards a {"$sdnbodyref":1,...} descriptor whose token carries the "SDNE"
+// magic. The host resolves the token AFTER the linked drain, while it still
+// holds the store engine lock (mirror hit = zero copies warm; miss = one
+// engine->host copy verified against the descriptor's fnv1a64).
+//
+// Concurrency contract (docs/flatsql-component-linkage.md section 4.1 item
+// 4): the engine is SQLITE_THREADSAFE=0 — the HOST must hold the store
+// engine lock for the whole linked drain that reaches these calls.
+// ============================================================================
+
+#define FSL_IMPORT(mod, name) \
+  extern "C" __attribute__((import_module(mod), import_name(name)))
+
+FSL_IMPORT("flatsql", "malloc") uint32_t fsl_engine_malloc(uint32_t size);
+FSL_IMPORT("flatsql", "free") void fsl_engine_free(uint32_t ptr);
+FSL_IMPORT("flatsql", "flatsql_query_raw_flatbuffer_stream")
+int32_t fsl_engine_query_raw(int32_t handle, uint32_t sql_ptr, uint32_t param_ptr,
+                             uint32_t param_len, int32_t param_count);
+FSL_IMPORT("flatsql", "flatsql_response_artifact_data") uint32_t fsl_engine_artifact_data(void);
+FSL_IMPORT("flatsql", "flatsql_response_artifact_size") int32_t fsl_engine_artifact_size(void);
+FSL_IMPORT("flatsql", "flatsql_response_artifact_row_count") double fsl_engine_artifact_rows(void);
+FSL_IMPORT("flatsql", "flatsql_response_artifact_column_count") double fsl_engine_artifact_cols(void);
+FSL_IMPORT("flatsql", "flatsql_response_artifact_cache_hit") int32_t fsl_engine_artifact_cache_hit(void);
+FSL_IMPORT("flatsql", "flatsql_query_cache_generation") double fsl_engine_generation(int32_t handle);
+FSL_IMPORT("flatsql", "flatsql_get_error") uint32_t fsl_engine_get_error(void);
+FSL_IMPORT("flatsql_link", "peek8") uint32_t fsl_link_peek8(uint32_t addr);
+FSL_IMPORT("flatsql_link", "peek64") uint64_t fsl_link_peek64(uint32_t addr);
+FSL_IMPORT("flatsql_link", "poke8") void fsl_link_poke8(uint32_t addr, uint32_t value);
+FSL_IMPORT("flatsql_link", "fnv1a64") uint64_t fsl_link_fnv1a64(uint32_t addr, uint32_t len);
+FSL_IMPORT("flatsql_link", "count_frames") int32_t fsl_link_count_frames(uint32_t addr, uint32_t len);
+
+// ABI struct shared with guest-link objects compiled -DSDN_FLATSQL_LINKED
+// (e.g. data-source/retrieval). Field order/sizes are load-bearing.
+struct SdnFlatsqlLinkedResult {
+  uint64_t generation;
+  uint64_t fnv1a64;
+  uint64_t token;  // engine body-ref token (0 unless want_ref)
+  uint32_t engine_ptr;
+  uint32_t size;
+  int32_t rows;
+  int32_t cols;
+  int32_t cache_hit;
+  int32_t frames;
+};
+static_assert(sizeof(SdnFlatsqlLinkedResult) == 48, "SdnFlatsqlLinkedResult must be 48 bytes");
+
+// Engine body-reference table read by the host after each linked drain.
+// Layout mirrors flatsqlLinkShim.js readEngineRefEntry (40 bytes LE).
+struct SdnEngineRefEntry {
+  uint64_t token;
+  uint64_t generation;
+  uint64_t fnv1a64;
+  uint32_t engine_ptr;
+  uint32_t size;
+  uint32_t frames;
+  uint32_t used;
+};
+static_assert(sizeof(SdnEngineRefEntry) == 40, "SdnEngineRefEntry must be 40 bytes");
+
+static constexpr uint32_t kSdnEngineRefSlots = 8;
+static constexpr uint64_t kSdnEngineRefTokenMagic = 0x53444E45ull << 32;  // "SDNE"
+
+static SdnEngineRefEntry g_engine_refs[kSdnEngineRefSlots];
+static uint64_t g_engine_ref_counter = 0;
+static int32_t g_fsl_db_handle = 0;
+static char g_fsl_error[512];
+
+static void sdn_flatsql_link_reset_refs(void) {
+  memset(g_engine_refs, 0, sizeof(g_engine_refs));
+}
+
+// Host wiring exports: the host sets the store db handle after instantiation
+// and reads the ref table (in this module's memory) after linked drains.
+FLOW_EXPORT void sdn_flatsql_link_init(int32_t db_handle) { g_fsl_db_handle = db_handle; }
+FLOW_EXPORT uint32_t sdn_flatsql_link_ref_table(void) {
+  return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g_engine_refs[0]));
+}
+FLOW_EXPORT uint32_t sdn_flatsql_link_ref_slots(void) { return kSdnEngineRefSlots; }
+
+extern "C" uint32_t sdn_flatsql_linked_available(void) { return g_fsl_db_handle != 0 ? 1u : 0u; }
+extern "C" const char *sdn_flatsql_linked_error(void) { return g_fsl_error; }
+
+static void fsl_set_error_from_engine(const char *fallback) {
+  uint32_t ptr = fsl_engine_get_error();
+  uint32_t i = 0;
+  if (ptr != 0) {
+    for (; i < sizeof(g_fsl_error) - 1; i++) {
+      uint32_t b = fsl_link_peek8(ptr + i);
+      if (b == 0) break;
+      g_fsl_error[i] = static_cast<char>(b);
+    }
+  }
+  if (i == 0 && fallback != nullptr) {
+    strncpy(g_fsl_error, fallback, sizeof(g_fsl_error) - 1);
+    i = static_cast<uint32_t>(strlen(g_fsl_error));
+  }
+  g_fsl_error[i] = '\0';
+}
+
+static void fsl_copy_to_engine(uint32_t dst, const uint8_t *src, uint32_t len) {
+  for (uint32_t i = 0; i < len; i++) fsl_link_poke8(dst + i, src[i]);
+}
+
+// Copy engine memory into this module's memory (byte path: json branch,
+// error strings). 8-byte strides through the shim keep the call count low.
+extern "C" int32_t sdn_flatsql_linked_read(uint8_t *dst, uint32_t engine_ptr, uint32_t len) {
+  uint32_t i = 0;
+  for (; i + 8 <= len; i += 8) {
+    uint64_t w = fsl_link_peek64(engine_ptr + i);
+    memcpy(dst + i, &w, 8);
+  }
+  for (; i < len; i++) dst[i] = static_cast<uint8_t>(fsl_link_peek8(engine_ptr + i));
+  return 0;
+}
+
+// Local FNV-1a 64 over FLOW memory (identity keys for the etag cache below —
+// never crosses the wire, does not need the word-folded shape).
+static uint64_t fsl_local_fnv(const uint8_t *data, uint32_t len) {
+  uint64_t hash = 1469598103934665603ull;
+  for (uint32_t i = 0; i < len; i++) {
+    hash ^= data[i];
+    hash *= 1099511628211ull;
+  }
+  return hash;
+}
+
+// Etag/frame-count cache: hashing the (possibly multi-MB) engine artifact
+// happens ONCE per (query identity, engine generation); warm requests reuse
+// the cached fnv1a64/frames with zero rehashing (the same staleness authority
+// the host mirror uses — the engine's own generation counter).
+struct FslEtagCacheEntry {
+  uint64_t key_sql;
+  uint64_t key_params;
+  uint64_t generation;
+  uint64_t fnv;
+  int32_t frames;
+  uint32_t valid;
+};
+static constexpr uint32_t kFslEtagCacheSlots = 8;
+static FslEtagCacheEntry g_fsl_etag_cache[kFslEtagCacheSlots];
+static uint32_t g_fsl_etag_next = 0;
+
+// Submit a raw-stream query DIRECTLY to the linked engine instance.
+// Returns 0 on success; negative on failure (message via
+// sdn_flatsql_linked_error). want_ref != 0 additionally computes the
+// fnv1a64/frame metadata and registers an engine body-ref token.
+extern "C" int32_t sdn_flatsql_linked_query_raw_stream(
+    const char *sql, uint32_t sql_len, const uint8_t *params_tlv, uint32_t tlv_len,
+    uint32_t param_count, int32_t want_ref, SdnFlatsqlLinkedResult *out) {
+  g_fsl_error[0] = '\0';
+  if (out == nullptr) return -1;
+  memset(out, 0, sizeof(*out));
+  if (g_fsl_db_handle == 0) {
+    strncpy(g_fsl_error, "flatsql linkage not initialized (sdn_flatsql_link_init not called)",
+            sizeof(g_fsl_error) - 1);
+    return -2;
+  }
+
+  uint32_t sql_ptr = fsl_engine_malloc(sql_len + 1);
+  if (sql_ptr == 0) {
+    strncpy(g_fsl_error, "engine malloc failed for sql", sizeof(g_fsl_error) - 1);
+    return -3;
+  }
+  fsl_copy_to_engine(sql_ptr, reinterpret_cast<const uint8_t *>(sql), sql_len);
+  fsl_link_poke8(sql_ptr + sql_len, 0);
+
+  uint32_t tlv_ptr = 0;
+  if (tlv_len > 0) {
+    tlv_ptr = fsl_engine_malloc(tlv_len);
+    if (tlv_ptr == 0) {
+      fsl_engine_free(sql_ptr);
+      strncpy(g_fsl_error, "engine malloc failed for params", sizeof(g_fsl_error) - 1);
+      return -3;
+    }
+    fsl_copy_to_engine(tlv_ptr, params_tlv, tlv_len);
+  }
+
+  const int32_t ok = fsl_engine_query_raw(g_fsl_db_handle, sql_ptr, tlv_ptr, tlv_len,
+                                          static_cast<int32_t>(param_count));
+  fsl_engine_free(sql_ptr);
+  if (tlv_ptr != 0) fsl_engine_free(tlv_ptr);
+  if (ok == 0) {
+    fsl_set_error_from_engine("flatsql_query_raw_flatbuffer_stream failed");
+    return -4;
+  }
+
+  out->engine_ptr = fsl_engine_artifact_data();
+  out->size = static_cast<uint32_t>(fsl_engine_artifact_size());
+  out->rows = static_cast<int32_t>(fsl_engine_artifact_rows());
+  out->cols = static_cast<int32_t>(fsl_engine_artifact_cols());
+  out->cache_hit = fsl_engine_artifact_cache_hit();
+  out->generation = static_cast<uint64_t>(fsl_engine_generation(g_fsl_db_handle));
+
+  if (want_ref != 0) {
+    const uint64_t key_sql = fsl_local_fnv(reinterpret_cast<const uint8_t *>(sql), sql_len);
+    const uint64_t key_params = tlv_len > 0 ? fsl_local_fnv(params_tlv, tlv_len) : 0;
+    FslEtagCacheEntry *hit = nullptr;
+    for (uint32_t i = 0; i < kFslEtagCacheSlots; i++) {
+      FslEtagCacheEntry &entry = g_fsl_etag_cache[i];
+      if (entry.valid && entry.key_sql == key_sql && entry.key_params == key_params &&
+          entry.generation == out->generation) {
+        hit = &entry;
+        break;
+      }
+    }
+    if (hit != nullptr) {
+      out->fnv1a64 = hit->fnv;
+      out->frames = hit->frames;
+    } else {
+      out->fnv1a64 = fsl_link_fnv1a64(out->engine_ptr, out->size);
+      out->frames = fsl_link_count_frames(out->engine_ptr, out->size);
+      FslEtagCacheEntry &slot = g_fsl_etag_cache[g_fsl_etag_next % kFslEtagCacheSlots];
+      g_fsl_etag_next++;
+      slot.key_sql = key_sql;
+      slot.key_params = key_params;
+      slot.generation = out->generation;
+      slot.fnv = out->fnv1a64;
+      slot.frames = out->frames;
+      slot.valid = 1;
+    }
+
+    g_engine_ref_counter++;
+    const uint64_t token = kSdnEngineRefTokenMagic | (g_engine_ref_counter & 0xFFFFFFFFull);
+    SdnEngineRefEntry &ref = g_engine_refs[g_engine_ref_counter % kSdnEngineRefSlots];
+    ref.token = token;
+    ref.generation = out->generation;
+    ref.fnv1a64 = out->fnv1a64;
+    ref.engine_ptr = out->engine_ptr;
+    ref.size = out->size;
+    ref.frames = static_cast<uint32_t>(out->frames < 0 ? 0 : out->frames);
+    ref.used = 1;
+    out->token = token;
+  }
+  return 0;
+}
+#endif  // SDN_FLATSQL_LINKED
