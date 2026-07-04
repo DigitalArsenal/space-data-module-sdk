@@ -20,6 +20,7 @@ export const RecommendedCapabilityIds = Object.freeze([
   "storage_adapter",
   "storage_query",
   "storage_write",
+  "storage_ingest",
   "context_read",
   "context_write",
   "process_exec",
