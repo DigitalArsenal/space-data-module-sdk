@@ -459,3 +459,130 @@ test("allowCycles admits bounded feedback with a warning, rejects unbounded", ()
   assert.equal(unbounded.ok, false);
   assert.ok(unbounded.errors.some((issue) => issue.code === "unbounded-cycle"));
 });
+
+// ---------------------------------------------------------------------------
+// Flow-manifest `api` block validation (gateway loop G.2).
+// ---------------------------------------------------------------------------
+
+function makeAPIRoute(overrides = {}) {
+  return {
+    path: "peers/{peerId}",
+    method: "GET",
+    operationId: "getPeer",
+    summary: "One peer",
+    anonymous: true,
+    params: [
+      { name: "peerId", in: "path", required: true, schema: { type: "string" } },
+      { name: "format", in: "query", schema: { type: "string" } },
+    ],
+    responses: {
+      200: {
+        description: "ok",
+        recordStream: true,
+        content: {
+          "application/vnd.sdn.flatbuffers.stream": { description: "fb" },
+          "application/json": { schema: { type: "array" }, description: "bare array" },
+        },
+      },
+      404: { description: "unknown peer" },
+    },
+    ...overrides,
+  };
+}
+
+function checkWithAPI(api) {
+  return checkFlowProgram({
+    flow: makeFlow({ api }),
+    dependencies: dependencyMap(producerDependency, consumerDependency),
+  });
+}
+
+test("flow check passes a well-formed api block", () => {
+  const check = checkWithAPI({ basePath: "/api/v1/peers", tag: "discovery", routes: [makeAPIRoute()] });
+  assert.equal(check.ok, true, JSON.stringify(check.issues));
+  assert.ok(!check.issues.some((issue) => issue.code.startsWith("api-")), JSON.stringify(check.issues));
+});
+
+test("flow check tolerates an absent api block", () => {
+  const check = checkWithAPI(undefined);
+  assert.equal(check.ok, true, JSON.stringify(check.issues));
+});
+
+test("api block must be an object with non-empty routes", () => {
+  assert.ok(checkWithAPI([]).errors.some((issue) => issue.code === "api-invalid"));
+  assert.ok(checkWithAPI({}).errors.some((issue) => issue.code === "api-missing-routes"));
+  assert.ok(checkWithAPI({ routes: [] }).errors.some((issue) => issue.code === "api-missing-routes"));
+});
+
+test("api basePath must start with a slash", () => {
+  const check = checkWithAPI({ basePath: "api/v1/peers", routes: [makeAPIRoute()] });
+  assert.ok(check.errors.some((issue) => issue.code === "api-invalid-base-path"));
+});
+
+test("api route path templates are validated", () => {
+  const malformed = checkWithAPI({ routes: [makeAPIRoute({ path: "peers/{peer id}" })] });
+  assert.ok(malformed.errors.some((issue) => issue.code === "api-invalid-route-path"));
+  const strayBrace = checkWithAPI({ routes: [makeAPIRoute({ path: "peers/{peerId" })] });
+  assert.ok(strayBrace.errors.some((issue) => issue.code === "api-invalid-route-path"));
+});
+
+test("api route method must be a known HTTP method", () => {
+  const check = checkWithAPI({ routes: [makeAPIRoute({ method: "FETCH" })] });
+  assert.ok(check.errors.some((issue) => issue.code === "api-invalid-route-method"));
+});
+
+test("api duplicate method+path routes are rejected", () => {
+  const check = checkWithAPI({ routes: [makeAPIRoute(), makeAPIRoute()] });
+  assert.ok(check.errors.some((issue) => issue.code === "api-duplicate-route"));
+});
+
+test("api params must be parameter objects with valid name/in", () => {
+  const badIn = checkWithAPI({ routes: [makeAPIRoute({ params: [{ name: "x", in: "body" }] })] });
+  assert.ok(badIn.errors.some((issue) => issue.code === "api-invalid-params"));
+  const badName = checkWithAPI({ routes: [makeAPIRoute({ params: [{ in: "query" }] })] });
+  assert.ok(badName.errors.some((issue) => issue.code === "api-invalid-params"));
+});
+
+test("api path template without a declared path param warns", () => {
+  const check = checkWithAPI({
+    routes: [makeAPIRoute({ params: [{ name: "format", in: "query" }] })],
+  });
+  assert.equal(check.ok, true, JSON.stringify(check.errors));
+  assert.ok(check.warnings.some((issue) => issue.code === "api-undeclared-path-param"));
+});
+
+test("api responses shape is validated", () => {
+  const badStatus = checkWithAPI({
+    routes: [makeAPIRoute({ responses: { ok: { description: "x" } } })],
+  });
+  assert.ok(badStatus.errors.some((issue) => issue.code === "api-invalid-responses"));
+  const badMedia = checkWithAPI({
+    routes: [makeAPIRoute({ responses: { 200: { content: { json: {} } } } })],
+  });
+  assert.ok(badMedia.errors.some((issue) => issue.code === "api-invalid-responses"));
+  const badRecordStream = checkWithAPI({
+    routes: [makeAPIRoute({ responses: { 200: { recordStream: "yes" } } })],
+  });
+  assert.ok(badRecordStream.errors.some((issue) => issue.code === "api-invalid-responses"));
+});
+
+test("the real data-retrieval api block shape passes validation", () => {
+  // Mirror of the shipped flows/data-retrieval.flow.json api block (subset):
+  // regression-guards the validator against the first real carrier.
+  const check = checkWithAPI({
+    basePath: "/api/v1/data",
+    tag: "data",
+    routes: [
+      makeAPIRoute({ path: "omm/bulk", operationId: "getOmmBulk", deprecated: true, params: [{ name: "format", in: "query" }] }),
+      makeAPIRoute({
+        path: "query",
+        method: "POST",
+        operationId: "postDataQuery",
+        anonymous: false,
+        params: [{ name: "format", in: "query" }],
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } },
+      }),
+    ],
+  });
+  assert.equal(check.ok, true, JSON.stringify(check.issues));
+});

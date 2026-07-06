@@ -16,6 +16,7 @@ export const RecommendedCapabilityIds = Object.freeze([
   "pubsub",
   "protocol_handle",
   "protocol_dial",
+  "p2p_read",
   "database",
   "storage_adapter",
   "storage_query",

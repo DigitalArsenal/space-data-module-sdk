@@ -496,6 +496,218 @@ function edgeIsBounded(edge) {
   return boundedPolicy && Number.isFinite(depth) && depth > 0 && depth <= 65536;
 }
 
+// ---------------------------------------------------------------------------
+// Flow-manifest `api` block validation (gateway loop G.1 extension, validated
+// since G.2). The block is declarative OpenAPI metadata copied VERBATIM into
+// the compiled bundle and parsed at mount time by the host's OpenAPI
+// generator, so shape errors would otherwise surface only as a wrong or
+// missing spec entry on a live node. Rules mirror the host-side reader
+// (sdn-server internal/flowrt/apidoc.go + internal/api/docs.go).
+// ---------------------------------------------------------------------------
+
+const FLOW_API_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
+const FLOW_API_PARAM_LOCATIONS = new Set(["query", "path", "header", "cookie"]);
+const FLOW_API_TEMPLATE_SEGMENT = /^\{[A-Za-z_][A-Za-z0-9_]*\}$/;
+
+function flowAPIPathTemplateParams(path) {
+  const params = [];
+  for (const segment of String(path ?? "").split("/")) {
+    if (FLOW_API_TEMPLATE_SEGMENT.test(segment)) params.push(segment.slice(1, -1));
+  }
+  return params;
+}
+
+function flowAPIPathSegmentValid(segment) {
+  if (segment.includes("{") || segment.includes("}")) {
+    return FLOW_API_TEMPLATE_SEGMENT.test(segment);
+  }
+  return true;
+}
+
+export function validateFlowAPIDeclaration(flow, issues) {
+  const api = flow?.api;
+  if (api === undefined || api === null) return;
+  if (typeof api !== "object" || Array.isArray(api)) {
+    pushIssue(issues, "error", "api-invalid", "flow.api must be an object when present.", "flow.api");
+    return;
+  }
+  if (api.basePath !== undefined) {
+    if (typeof api.basePath !== "string" || !api.basePath.startsWith("/")) {
+      pushIssue(
+        issues,
+        "error",
+        "api-invalid-base-path",
+        'flow.api.basePath must be a string starting with "/" (documentation hint; the node config mount path wins).',
+        "flow.api.basePath",
+      );
+    }
+  }
+  for (const key of ["tag", "tagDescription"]) {
+    if (api[key] !== undefined && typeof api[key] !== "string") {
+      pushIssue(issues, "error", "api-invalid-tag", `flow.api.${key} must be a string when present.`, `flow.api.${key}`);
+    }
+  }
+  const routes = api.routes;
+  if (!Array.isArray(routes) || routes.length === 0) {
+    pushIssue(
+      issues,
+      "error",
+      "api-missing-routes",
+      "flow.api.routes must be a non-empty array of route declarations.",
+      "flow.api.routes",
+    );
+    return;
+  }
+  const seenRoutes = new Set();
+  routes.forEach((route, index) => {
+    const location = `flow.api.routes[${index}]`;
+    if (typeof route !== "object" || route === null || Array.isArray(route)) {
+      pushIssue(issues, "error", "api-invalid-route", "Route declaration must be an object.", location);
+      return;
+    }
+    if (typeof route.path !== "string") {
+      pushIssue(issues, "error", "api-invalid-route-path", 'Route "path" must be a string (may be "" for the mount root).', location);
+    } else {
+      if (/\s/.test(route.path)) {
+        pushIssue(issues, "error", "api-invalid-route-path", `Route path "${route.path}" must not contain whitespace.`, location);
+      }
+      for (const segment of route.path.split("/")) {
+        if (!flowAPIPathSegmentValid(segment)) {
+          pushIssue(
+            issues,
+            "error",
+            "api-invalid-route-path",
+            `Route path "${route.path}" has a malformed template segment "${segment}" (expected "{paramName}").`,
+            location,
+          );
+        }
+      }
+    }
+    let method = "GET";
+    if (route.method !== undefined) {
+      if (typeof route.method !== "string" || !FLOW_API_METHODS.has(route.method.trim().toUpperCase())) {
+        pushIssue(
+          issues,
+          "error",
+          "api-invalid-route-method",
+          `Route method "${route.method}" is not a valid HTTP method (${[...FLOW_API_METHODS].join(", ")}).`,
+          location,
+        );
+      } else {
+        method = route.method.trim().toUpperCase();
+      }
+    }
+    if (typeof route.path === "string") {
+      const key = `${method} ${route.path}`;
+      if (seenRoutes.has(key)) {
+        pushIssue(issues, "error", "api-duplicate-route", `Route "${key}" is declared more than once.`, location);
+      }
+      seenRoutes.add(key);
+    }
+    for (const key of ["operationId", "summary", "description"]) {
+      if (route[key] !== undefined && typeof route[key] !== "string") {
+        pushIssue(issues, "error", "api-invalid-route-field", `Route "${key}" must be a string when present.`, location);
+      }
+    }
+    for (const key of ["anonymous", "deprecated"]) {
+      if (route[key] !== undefined && typeof route[key] !== "boolean") {
+        pushIssue(issues, "error", "api-invalid-route-field", `Route "${key}" must be a boolean when present.`, location);
+      }
+    }
+    const declaredPathParams = new Set();
+    if (route.params !== undefined) {
+      if (!Array.isArray(route.params)) {
+        pushIssue(issues, "error", "api-invalid-params", 'Route "params" must be an array of OpenAPI parameter objects.', location);
+      } else {
+        route.params.forEach((param, paramIndex) => {
+          const paramLocation = `${location}.params[${paramIndex}]`;
+          if (typeof param !== "object" || param === null || Array.isArray(param)) {
+            pushIssue(issues, "error", "api-invalid-params", "Parameter must be an OpenAPI parameter object.", paramLocation);
+            return;
+          }
+          if (typeof param.name !== "string" || param.name.length === 0) {
+            pushIssue(issues, "error", "api-invalid-params", 'Parameter "name" must be a non-empty string.', paramLocation);
+          }
+          if (typeof param.in !== "string" || !FLOW_API_PARAM_LOCATIONS.has(param.in)) {
+            pushIssue(
+              issues,
+              "error",
+              "api-invalid-params",
+              `Parameter "in" must be one of ${[...FLOW_API_PARAM_LOCATIONS].join(", ")}.`,
+              paramLocation,
+            );
+          } else if (param.in === "path" && typeof param.name === "string") {
+            declaredPathParams.add(param.name);
+          }
+        });
+      }
+    }
+    for (const templateParam of flowAPIPathTemplateParams(route.path)) {
+      if (!declaredPathParams.has(templateParam)) {
+        pushIssue(
+          issues,
+          "warning",
+          "api-undeclared-path-param",
+          `Route path template "{${templateParam}}" has no matching {"name":"${templateParam}","in":"path"} entry in params; ` +
+            "the generated spec will carry an undocumented path parameter.",
+          location,
+        );
+      }
+    }
+    if (route.requestBody !== undefined && (typeof route.requestBody !== "object" || route.requestBody === null || Array.isArray(route.requestBody))) {
+      pushIssue(issues, "error", "api-invalid-request-body", 'Route "requestBody" must be an OpenAPI requestBody object.', location);
+    }
+    if (route.responses !== undefined) {
+      if (typeof route.responses !== "object" || route.responses === null || Array.isArray(route.responses)) {
+        pushIssue(issues, "error", "api-invalid-responses", 'Route "responses" must be an object keyed by status code.', location);
+      } else {
+        for (const [status, response] of Object.entries(route.responses)) {
+          const responseLocation = `${location}.responses["${status}"]`;
+          if (status !== "default" && !/^[1-5][0-9]{2}$/.test(status)) {
+            pushIssue(
+              issues,
+              "error",
+              "api-invalid-responses",
+              `Response key "${status}" must be a 3-digit HTTP status code or "default".`,
+              responseLocation,
+            );
+          }
+          if (typeof response !== "object" || response === null || Array.isArray(response)) {
+            pushIssue(issues, "error", "api-invalid-responses", "Response value must be an object.", responseLocation);
+            continue;
+          }
+          if (response.recordStream !== undefined && typeof response.recordStream !== "boolean") {
+            pushIssue(issues, "error", "api-invalid-responses", '"recordStream" must be a boolean when present.', responseLocation);
+          }
+          if (response.content !== undefined) {
+            if (typeof response.content !== "object" || response.content === null || Array.isArray(response.content)) {
+              pushIssue(issues, "error", "api-invalid-responses", '"content" must be an object keyed by media type.', responseLocation);
+            } else {
+              for (const [mediaType, mediaValue] of Object.entries(response.content)) {
+                if (!mediaType.includes("/")) {
+                  pushIssue(
+                    issues,
+                    "error",
+                    "api-invalid-responses",
+                    `Content key "${mediaType}" is not a media type (expected e.g. "application/json").`,
+                    responseLocation,
+                  );
+                }
+                if (typeof mediaValue !== "object" || mediaValue === null || Array.isArray(mediaValue)) {
+                  pushIssue(issues, "error", "api-invalid-responses", `Content["${mediaType}"] must be an object.`, responseLocation);
+                }
+              }
+            }
+          }
+          if (response.headers !== undefined && (typeof response.headers !== "object" || response.headers === null || Array.isArray(response.headers))) {
+            pushIssue(issues, "error", "api-invalid-responses", '"headers" must be an object of OpenAPI header objects.', responseLocation);
+          }
+        }
+      }
+    }
+  });
+}
+
 /**
  * Validate a flow document against its dependency manifests. Returns
  * { ok, issues, capabilities, nodes } where `capabilities` is the computed
@@ -723,6 +935,11 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
       );
     }
   }
+
+  // Gateway `api` block (when present): shape-validate the declarative HTTP
+  // surface so a bad block fails `flow check`/`flow compile` instead of
+  // silently corrupting the host-generated OpenAPI spec.
+  validateFlowAPIDeclaration(flow, issues);
 
   // Capability union — the flow's permission set is the union of its nodes'
   // declared capabilities plus the capabilities of every transitively
