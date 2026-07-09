@@ -14,7 +14,12 @@ import {
 } from "../transport/pki.js";
 import { RuntimeTarget } from "../runtime/constants.js";
 import { sha256Bytes } from "../utils/crypto.js";
-import { toUint8Array } from "../utils/encoding.js";
+import {
+  base64ToBytes,
+  bytesToBase64,
+  hexToBytes,
+  toUint8Array,
+} from "../utils/encoding.js";
 import {
   aesGcmDecrypt,
   aesGcmEncrypt,
@@ -101,7 +106,8 @@ export const NodeHostSupportedOperations = Object.freeze([
   "protocol_handle.unregister",
   "protocol_dial.dial",
   "protocol.request",
-  "keyslot.get",
+  "keyslot.sign",
+  "keyslot.unwrap",
   "exec.execFile",
   "context.get",
   "context.set",
@@ -314,6 +320,52 @@ async function invokeAdapterMethod(adapter, methodName, params, label) {
   }
   throw new Error(
     `${label} adapter does not implement "${methodName}" or invoke().`,
+  );
+}
+
+// keyslotUnwrapHKDFInfo domain-separates the HKDF step of keyslot.unwrap from
+// every other HKDF use in this host (e.g. crypto.hkdf). Must match the Go
+// reference implementation's keyslotUnwrapHKDFInfo constant
+// (sdn-server/internal/modulert/caps/keyslot.go) exactly, or wrapped
+// payloads produced against one host will fail to unwrap on the other.
+const KEYSLOT_UNWRAP_HKDF_INFO = "sdn-server/keyslot.unwrap/v1";
+
+// normalizeKeySlotMaterial accepts the raw key-slot secret returned by a
+// host-supplied walletSign adapter's internal "get" resolver and coerces it
+// to a Uint8Array. This resolver is never exposed to the guest directly
+// (there is no "keyslot.get" hostcall) — it only feeds the host-side
+// keyslot.sign / keyslot.unwrap crypto oracle implemented below, mirroring
+// Go's resolveKeySlot() in keyslot.go. Callers MUST NOT return the result of
+// this function, or any encoding of it, to the guest.
+function normalizeKeySlotMaterial(raw) {
+  if (raw instanceof Uint8Array) {
+    return raw;
+  }
+  if (raw instanceof ArrayBuffer) {
+    return new Uint8Array(raw);
+  }
+  if (ArrayBuffer.isView(raw)) {
+    return toUint8Array(raw);
+  }
+  if (typeof raw === "string") {
+    return base64ToBytes(raw);
+  }
+  if (raw && typeof raw === "object") {
+    if (raw.base64 !== undefined) {
+      return base64ToBytes(raw.base64);
+    }
+    if (raw.hex !== undefined) {
+      return hexToBytes(raw.hex);
+    }
+    if (raw.value !== undefined) {
+      return normalizeKeySlotMaterial(raw.value);
+    }
+    if (raw.bytes !== undefined) {
+      return normalizeKeySlotMaterial(raw.bytes);
+    }
+  }
+  throw new Error(
+    "wallet_sign adapter returned an unrecognized key-slot material shape.",
   );
 }
 
@@ -2051,10 +2103,21 @@ export class NodeHost {
         ),
     });
 
+    // keyslot is a host-side crypto oracle (parity with the Go node's
+    // internal/modulert/caps/keyslot.go): it never returns a slot's private
+    // key material to the guest. Guests get the *outputs* of private-key
+    // operations (a signature, or the plaintext that was wrapped to a
+    // slot's public key) — never the key itself. There is no "keyslot.get"
+    // raw-export operation; unknown keyslot operations fail closed via the
+    // default branch of invoke()'s switch below.
     this.keyslot = Object.freeze({
-      get: async (params = {}) =>
-        this.#withCapability("wallet_sign", "keyslot.get", async () =>
-          invokeAdapterMethod(this._walletSignAdapter, "get", params, "wallet_sign"),
+      sign: async (params = {}) =>
+        this.#withCapability("wallet_sign", "keyslot.sign", async () =>
+          this.#keyslotSign(params),
+        ),
+      unwrap: async (params = {}) =>
+        this.#withCapability("wallet_sign", "keyslot.unwrap", async () =>
+          this.#keyslotUnwrap(params),
         ),
     });
   }
@@ -2208,8 +2271,10 @@ export class NodeHost {
         return this.protocolDial.dial(params);
       case "protocol.request":
         return this.protocolDial.request(params);
-      case "keyslot.get":
-        return this.keyslot.get(params);
+      case "keyslot.sign":
+        return this.keyslot.sign(params);
+      case "keyslot.unwrap":
+        return this.keyslot.unwrap(params);
       case "exec.execFile":
         return this.exec.execFile(params);
       case "context.get":
@@ -2472,6 +2537,119 @@ export class NodeHost {
   #withCapability(capability, operation, callback) {
     this.assertCapability(capability, operation);
     return callback();
+  }
+
+  // resolveKeySlotMaterial looks up a slot's private key material via the
+  // host-supplied walletSign adapter. The returned Uint8Array MUST NOT be
+  // mutated (it may alias the adapter's live key store) and MUST NOT be
+  // returned, or any encoding of it, to the guest. Only derived outputs
+  // (signatures, decrypted plaintext of a wrapped payload) may cross the
+  // host/guest boundary. Mirrors resolveKeySlot() in keyslot.go.
+  async #resolveKeySlotMaterial(slotId) {
+    const normalizedSlotId = assertNonEmptyString(slotId, "slotId");
+    const record = await invokeAdapterMethod(
+      this._walletSignAdapter,
+      "get",
+      { slotId: normalizedSlotId },
+      "wallet_sign",
+    );
+    const material = normalizeKeySlotMaterial(record);
+    if (material.length === 0) {
+      throw new Error(`keyslot "${normalizedSlotId}" not found`);
+    }
+    return material;
+  }
+
+  // keyslot.sign performs a host-side signature over a guest-supplied
+  // payload using the named slot's private key. Request:
+  //   {slotId, payload: base64, algorithm?: "ed25519" | "secp256k1"}
+  // algorithm defaults to "ed25519". Response:
+  //   {signature: base64, algorithm}
+  // The slot's key material never appears in the response. Mirrors
+  // handleKeyslotSign() in keyslot.go.
+  async #keyslotSign(params = {}) {
+    const slotId = assertNonEmptyString(params.slotId, "slotId");
+    const keyMaterial = await this.#resolveKeySlotMaterial(slotId);
+    const payload =
+      params.payload === undefined || params.payload === null
+        ? new Uint8Array()
+        : base64ToBytes(String(params.payload));
+    const algorithm = String(params.algorithm ?? "").trim() || "ed25519";
+
+    if (algorithm === "ed25519") {
+      if (keyMaterial.length !== 32) {
+        throw new Error(`keyslot "${slotId}" is not a 32-byte ed25519 seed`);
+      }
+      const signature = await ed25519Sign(payload, keyMaterial);
+      return { signature: bytesToBase64(signature), algorithm: "ed25519" };
+    }
+
+    if (algorithm === "secp256k1") {
+      if (keyMaterial.length !== 32) {
+        throw new Error(
+          `keyslot "${slotId}" is not a 32-byte secp256k1 private key`,
+        );
+      }
+      const digest = await sha256Bytes(payload);
+      const rawSignature = await secp256k1SignDigest(digest, keyMaterial);
+      return {
+        signature: bytesToBase64(rawSignatureToDer(rawSignature)),
+        algorithm: "secp256k1",
+      };
+    }
+
+    throw new Error(`unsupported keyslot.sign algorithm: ${algorithm}`);
+  }
+
+  // keyslot.unwrap decrypts a payload that was sealed to a slot's X25519
+  // public key, returning only the decrypted plaintext (e.g. a licensing
+  // content key) — never the slot's private key. Wrap scheme is
+  // ephemeral-sender ECIES: X25519(slotPrivateKey, ephemeralPublicKey) ->
+  // HKDF-SHA256 -> AES-256-GCM. Request:
+  //   {slotId, ephemeralPublicKey: base64, nonce: base64, ciphertext: base64}
+  // Response: {plaintext: base64}. Mirrors handleKeyslotUnwrap() in
+  // keyslot.go, including the wire format where `ciphertext` is
+  // (ciphertext || 16-byte GCM tag), per Go's crypto/cipher.GCM convention.
+  async #keyslotUnwrap(params = {}) {
+    const slotId = assertNonEmptyString(params.slotId, "slotId");
+    const keyMaterial = await this.#resolveKeySlotMaterial(slotId);
+    if (keyMaterial.length !== 32) {
+      throw new Error(
+        `keyslot "${slotId}" is not a 32-byte x25519 private key`,
+      );
+    }
+
+    const ephemeralPublicKey = base64ToBytes(
+      String(params.ephemeralPublicKey ?? ""),
+    );
+    const nonce = base64ToBytes(String(params.nonce ?? ""));
+    const wireCiphertext = base64ToBytes(String(params.ciphertext ?? ""));
+    if (ephemeralPublicKey.length === 0 || wireCiphertext.length === 0) {
+      throw new Error(
+        "keyslot.unwrap requires ephemeralPublicKey and ciphertext",
+      );
+    }
+    if (wireCiphertext.length < 16) {
+      throw new Error(
+        "keyslot.unwrap ciphertext is too short to contain a GCM tag",
+      );
+    }
+    const tagStart = wireCiphertext.length - 16;
+    const ciphertext = wireCiphertext.subarray(0, tagStart);
+    const tag = wireCiphertext.subarray(tagStart);
+
+    const sharedSecret = await x25519SharedSecret(
+      keyMaterial,
+      ephemeralPublicKey,
+    );
+    const aesKey = await hkdfBytes(
+      sharedSecret,
+      new Uint8Array(),
+      textEncoder.encode(KEYSLOT_UNWRAP_HKDF_INFO),
+      32,
+    );
+    const plaintext = await aesGcmDecrypt(aesKey, ciphertext, tag, nonce);
+    return { plaintext: bytesToBase64(plaintext) };
   }
 }
 
