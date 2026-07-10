@@ -1,0 +1,41 @@
+// Canonical HTTP request envelope for WASM-served HTTP (host-owned ABI).
+//
+// TRUE isomorphism contract: ALL HTTP semantics (routing, query parsing,
+// content negotiation, caching decisions) live inside the wasm module. The
+// host — Go daemon or browser harness — is a dumb pipe that delivers exactly
+// one HttpRequest frame to the module's HTTP method and streams back the
+// HttpResponse frame (schemas/HttpResponseAbi.fbs) verbatim.
+//
+// Two-root convention: FlatBuffers allows one root_type/file_identifier per
+// schema file, so the request and response roots live in sibling files
+// (mirroring schemas/orbpro/CatalogQueryRequest.fbs + CatalogQueryResult.fbs).
+// The shared HttpHeader table is declared here and included by the response
+// schema.
+
+namespace sdn.http;
+
+table HttpHeader {
+  /// Lower-cased header name. NAME is a FlatBuffers key so header vectors
+  /// are sorted and binary-searchable; encoders must sort by NAME.
+  NAME:string (key);
+  VALUE:string;
+}
+
+table HttpRequest {
+  /// HTTP method verb, upper-case (GET, POST, ...).
+  METHOD:string;
+  /// URL path only (no query string), e.g. "/api/v1/omm/bulk".
+  PATH:string;
+  /// Raw query string without the leading "?", still URL-encoded. The module
+  /// owns all parsing.
+  QUERY:string;
+  /// Request headers, sorted by NAME.
+  HEADERS:[HttpHeader];
+  /// Raw request body bytes (may be absent).
+  BODY:[ubyte];
+  /// Remote address ("ip:port") as observed by the host pipe.
+  REMOTE:string;
+}
+
+root_type HttpRequest;
+file_identifier "$HTQ";

@@ -293,3 +293,49 @@ invoke buffer.
 useful as an adapter example, but it is not the canonical durable identity
 model. It exposes a module-owned mutable logical database. The canonical model
 for cross-host durability is host-owned rows plus host-owned runtime regions.
+
+## Body-Reference Delivery (`"deliver":"ref"`)
+
+Loop C.5c adds an OPTIONAL near-zero-copy egress mode for capability
+hostcalls whose result is an aligned stream that the module passes through
+VERBATIM to an HTTP response body (the retrieval flow's flatbuffer branch).
+The election is always the GUEST's; hosts never invent it.
+
+1. The module adds `"deliver":"ref"` to the hostcall payload
+   (`storage.flatsql_query_stream` / `storage.flatsql_epoch_stream`).
+2. A ref-capable host keeps the materialized bytes in ITS memory, registers
+   them on the calling instance's hostcall-bridge body-ref registry, and
+   answers with NO binary segment:
+
+   ```json
+   {"ok":true,"result":{"rows":N,"columns":M,
+     "ref":{"token":T,"size":S,"frames":F,"fnv1a64":"<16 hex>"}}}
+   ```
+
+   - `token` — opaque, single-use, scoped to this module instance's bridge
+     and the current exchange.
+   - `size` — byte length of the referenced stream.
+   - `frames` — size-prefixed frame count, skipping zero-length prefixes
+     (the `x-sdn-record-count` rule); omitted when the framing is malformed.
+   - `fnv1a64` — word-folded FNV-1a 64 content hash (`fnv1a64Hex` in
+     `space-data-module-sdk/http` is the reference implementation; it is
+     bit-identical to foundation/decision-gate's in-wasm hasher, so
+     reference-mode entity tags equal hashed-stream entity tags).
+
+   A host that does not understand `deliver` simply returns the byte
+   segment as always; modules MUST fall back to verbatim byte passthrough.
+3. The module forwards the reference in-band as a small JSON descriptor
+   frame `{"$sdnbodyref":1,"token":T,"size":S,"frames":F,"fnv1a64":"…"}`
+   (an aligned stream can never collide: it starts with a `u32le` size
+   prefix, not `{`).
+4. `foundation/http-respond` recognizes the descriptor on its body port and
+   emits `$HTR` with `BODY_REF_TOKEN`/`BODY_REF_SIZE` set and NO inline
+   body (schema `HttpResponseAbi.fbs`).
+5. The host egress substitutes the byte buffer registered under the token
+   (Go: `flowrt.htrPipe` + `modulert.HostBridge.TakeBodyRef`; JS:
+   `createBodyRefRegistry` from `space-data-module-sdk/http`). Tokens are
+   single-use; hosts drop unconsumed references at end-of-exchange (304 and
+   error paths never consume theirs).
+
+The stream bytes therefore never enter the flow's linear memory: the only
+byte movement left on a warm request is the host's socket write.

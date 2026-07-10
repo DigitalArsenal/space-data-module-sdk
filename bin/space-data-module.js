@@ -20,6 +20,12 @@ import {
   signModuleArtifact,
   verifyModuleArtifact,
 } from "../src/bundle/signing.js";
+import {
+  checkFlowProgram,
+  compileFlowProgram,
+  loadFlowDocument,
+  resolveFlowDependencies,
+} from "../src/flow/flowCompiler.js";
 
 async function main(argv) {
   const [command, ...rest] = argv;
@@ -28,6 +34,8 @@ async function main(argv) {
       return runCheck(rest);
     case "compile":
       return runCompile(rest);
+    case "flow":
+      return runFlow(rest);
     case "protect":
       return runProtect(rest);
     case "sign":
@@ -92,6 +100,9 @@ function parseArgs(argv) {
       case "--mnemonic":
         options.mnemonic = requireValue(argv, ++index, value);
         break;
+      case "--deps":
+        options.depsPath = requireValue(argv, ++index, value);
+        break;
       case "--key":
         options.keyPath = path.resolve(requireValue(argv, ++index, value));
         break;
@@ -122,6 +133,8 @@ function printUsage() {
   space-data-module check --repo-root .
   space-data-module check --manifest ./manifest.json --wasm ./dist/module.wasm
   space-data-module compile --manifest ./manifest.json --source ./src/module.c --out ./dist/module.wasm
+  space-data-module flow check ./flows/my.flow.json --deps ./modules-root
+  space-data-module flow compile ./flows/my.flow.json --deps ./modules-root [--out ./flows/my/dist]
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --recipient-public-key <hex> --out ./dist/module.wasm.enc
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --single-file-bundle --out ./dist/module.bundle.wasm
@@ -141,6 +154,98 @@ function printReport(report) {
   if (report.issues.length === 0) {
     console.log("  No issues found.");
   }
+}
+
+// space-data-module flow check|compile <flow.json> [--deps <path>] [--out <dir>]
+async function runFlow(argv) {
+  const [subcommand, ...rest] = argv;
+  if (subcommand !== "check" && subcommand !== "compile") {
+    printUsage();
+    return 1;
+  }
+  const positionals = rest.filter((value) => !value.startsWith("--"));
+  const flags = [];
+  for (let index = 0; index < rest.length; index += 1) {
+    const value = rest[index];
+    if (!value.startsWith("--")) continue;
+    flags.push(value);
+    if (value !== "--json" && rest[index + 1] !== undefined) {
+      flags.push(rest[++index]);
+    }
+  }
+  const flowPath = positionals[0] ? path.resolve(positionals[0]) : null;
+  if (!flowPath) {
+    throw new Error(`flow ${subcommand} requires a <flow.json> path.`);
+  }
+  const options = parseArgs(flags);
+
+  const flow = await loadFlowDocument(flowPath);
+  const dependencies = await resolveFlowDependencies({
+    depsPath: options.depsPath ?? path.dirname(flowPath),
+  });
+
+  if (subcommand === "check") {
+    const check = checkFlowProgram({ flow, dependencies });
+    if (options.json) {
+      console.log(JSON.stringify(check, null, 2));
+    } else {
+      console.log(`${check.ok ? "PASS" : "FAIL"} ${flowPath}`);
+      for (const issue of check.issues) {
+        console.log(`  ${issue.severity.toUpperCase()} ${issue.code}: ${issue.message}`);
+      }
+      console.log(`  capabilities: [${check.capabilities.join(", ")}]`);
+      for (const node of check.nodes) {
+        console.log(`  node ${node.nodeId}: ${node.pluginId}:${node.methodId} (${node.dispatchModel})`);
+      }
+      for (const component of check.componentDependencies) {
+        console.log(
+          `  component ${component.pluginId}${component.minVersion ? `@${component.minVersion}` : ""}` +
+            `${component.resolved ? "" : " (unresolved)"}`,
+        );
+      }
+    }
+    return check.ok ? 0 : 1;
+  }
+
+  const outDir =
+    options.outputPath ??
+    path.join(
+      path.dirname(flowPath),
+      path.basename(flowPath).replace(/\.flow\.json$/, "").replace(/\.json$/, ""),
+      "dist",
+    );
+  const result = await compileFlowProgram({
+    flow,
+    dependencies,
+    outDir,
+    flowSourcePath: flowPath,
+  });
+  if (options.json) {
+    console.log(
+      JSON.stringify(
+        {
+          outDir,
+          outputs: result.outputs,
+          capabilities: result.check.capabilities,
+          artifact: result.artifact,
+          report: result.report,
+        },
+        null,
+        2,
+      ),
+    );
+  } else {
+    console.log(`Wrote ${result.outputs.moduleWasmPath}`);
+    console.log(`  capabilities: [${result.check.capabilities.join(", ")}]`);
+    for (const node of result.check.nodes) {
+      console.log(`  node ${node.nodeId}: ${node.pluginId}:${node.methodId} (${node.dispatchModel})`);
+    }
+    for (const issue of result.check.warnings) {
+      console.log(`  WARNING ${issue.code}: ${issue.message}`);
+    }
+    printReport(result.report);
+  }
+  return result.report.ok ? 0 : 1;
 }
 
 async function runCheck(argv) {

@@ -42,6 +42,8 @@
     "./host/browser": "./src/host/browserHost.js",
     "./host/timer-driver": "./src/host/timerDriver.js",
     "./flow": "./src/flow/index.js",
+    "./flow/compiler": "./src/flow/flowCompiler.js",
+    "./http": "./src/http/index.js",
     "./host/browser-edge-shims": "./src/host/browserEdgeShims.js",
     "./host/wasi-shim": "./src/host/wasiShim.js",
     "./host/isomorphic": "./src/host/isomorphicLoader.js",

@@ -14,3 +14,17 @@ export {
   encodeStreamInvokeResponse,
 } from "./flowCodec.js";
 export { createDependencyStreamBridge } from "./dependencyStreamBridge.js";
+export {
+  FLATSQL_LINK_SHIM_WASM,
+  FLATSQL_ENGINE_IMPORT_MODULE,
+  FLATSQL_LINK_IMPORT_MODULE,
+  ENGINE_BODY_REF_TOKEN_MAGIC,
+  ENGINE_REF_ENTRY_SIZE,
+  buildFlatsqlLinkShimWasm,
+  instantiateFlatsqlLinkShim,
+  isEngineBodyRefToken,
+  readEngineRefEntry,
+} from "./flatsqlLinkShim.js";
+// The flow compiler (flow check/compile) is node-only (emception + fs) and
+// ships on the dedicated "./flow/compiler" subpath to keep this barrel
+// browser-safe.

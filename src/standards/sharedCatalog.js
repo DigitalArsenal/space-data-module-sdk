@@ -5,6 +5,21 @@ const sharedModuleCatalogEntries = [
     fileIdentifier: "TICK",
     source: "shared-module-runtime",
   },
+  // Canonical WASM-served HTTP envelope ABI (module-sdk schemas/HttpRequestAbi.fbs
+  // + HttpResponseAbi.fbs). The manifest refs carry the "$"-prefixed 4-char
+  // identifiers ("$HTQ"/"$HTR"); catalog identifiers are stored normalized.
+  {
+    schemaCode: "HTTPREQUESTABI",
+    schemaName: "HttpRequestAbi.fbs",
+    fileIdentifier: "HTQ",
+    source: "module-sdk-host-abi",
+  },
+  {
+    schemaCode: "HTTPRESPONSEABI",
+    schemaName: "HttpResponseAbi.fbs",
+    fileIdentifier: "HTR",
+    source: "module-sdk-host-abi",
+  },
   {
     schemaCode: "HTTPREQUEST",
     schemaName: "HttpRequest.fbs",

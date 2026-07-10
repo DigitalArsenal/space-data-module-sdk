@@ -15,6 +15,12 @@
  */
 
 import { createBrowserWasiShim } from "../host/wasiShim.js";
+import {
+  ENGINE_REF_ENTRY_SIZE,
+  instantiateFlatsqlLinkShim,
+  isEngineBodyRefToken,
+  readEngineRefEntry,
+} from "./flatsqlLinkShim.js";
 
 export const FLOW_INVALID_INDEX = 0xffffffff;
 
@@ -33,6 +39,33 @@ function exportFn(exports, name) {
   return typeof fn === "function" ? fn : null;
 }
 
+// Publication-protected artifacts (docs/module-publication-standard.md) append
+// an SDS $REC record collection: payload || REC bytes || uint32le(REC length)
+// || "$REC". Loaders strip the trailer before wasm compilation (loader
+// expectation 6); signature/bundle-metadata verification stays a separate
+// concern (bundle/signing.js verifyModuleArtifact).
+const REC_TRAILER_FOOTER_LENGTH = 8;
+const REC_TRAILER_MAGIC = [0x24, 0x52, 0x45, 0x43]; // "$REC"
+
+export function stripPublicationTrailer(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length < REC_TRAILER_FOOTER_LENGTH) {
+    return bytes;
+  }
+  const footer = bytes.length - REC_TRAILER_FOOTER_LENGTH;
+  for (let i = 0; i < 4; i += 1) {
+    if (bytes[footer + 4 + i] !== REC_TRAILER_MAGIC[i]) return bytes;
+  }
+  const recLength =
+    (bytes[footer] |
+      (bytes[footer + 1] << 8) |
+      (bytes[footer + 2] << 16) |
+      (bytes[footer + 3] << 24)) >>>
+    0;
+  const payloadLength = footer - recLength;
+  if (recLength === 0 || payloadLength < 0) return bytes;
+  return bytes.subarray(0, payloadLength);
+}
+
 export async function createFlowRuntimeHost(options = {}) {
   let wasmModule = options.wasmModule ?? null;
   if (!wasmModule) {
@@ -40,7 +73,9 @@ export async function createFlowRuntimeHost(options = {}) {
     if (!source) {
       throw new TypeError("createFlowRuntimeHost requires wasmSource bytes or a wasmModule.");
     }
-    const bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
+    const bytes = stripPublicationTrailer(
+      source instanceof Uint8Array ? source : new Uint8Array(source),
+    );
     wasmModule = await WebAssembly.compile(bytes.slice().buffer);
   }
 
@@ -50,6 +85,22 @@ export async function createFlowRuntimeHost(options = {}) {
     logOutput: options.logOutput === true,
   });
   const imports = { ...wasi.imports, ...(options.extraImports ?? {}) };
+  // Direct engine linkage (loop C.7): a LINKED flow artifact imports the live
+  // FlatSQL engine's function exports (module "flatsql") and the tiny
+  // memory-crossing shim (module "flatsql_link", instantiated here against
+  // the SAME engine memory) — the browser-native form of the server's
+  // VM.RegisterModule instance sharing.
+  const engineLink = options.engineLink ?? null;
+  if (engineLink) {
+    if (!engineLink.exports || !(engineLink.exports.memory instanceof WebAssembly.Memory)) {
+      throw new TypeError(
+        "createFlowRuntimeHost engineLink requires the live engine's exports (with memory).",
+      );
+    }
+    const shimInstance = await instantiateFlatsqlLinkShim(engineLink.exports);
+    imports.flatsql = engineLink.exports;
+    imports.flatsql_link = shimInstance.exports;
+  }
   if (options.legacyHostImportCompat === true) {
     // Legacy compiled-flow artifacts import a `sdn_flow_host` module; stub its
     // dispatch entry (0 = caller wins) so they instantiate under plain
@@ -68,6 +119,17 @@ export async function createFlowRuntimeHost(options = {}) {
   }
   wasi.setMemory(memory);
   exportFn(exports, "_initialize")?.();
+
+  if (engineLink) {
+    const linkInit = exportFn(exports, "sdn_flatsql_link_init");
+    if (!linkInit) {
+      throw new Error(
+        "engineLink was provided but the flow artifact exports no sdn_flatsql_link_init " +
+          "(compile the flow with engineLinkage: \"flatsql\").",
+      );
+    }
+    linkInit(engineLink.dbHandle | 0);
+  }
 
   const malloc = exportFn(exports, "malloc");
   if (!malloc) {
@@ -235,6 +297,32 @@ export async function createFlowRuntimeHost(options = {}) {
       };
     },
 
+    /**
+     * Engine body-reference resolution (loop C.7 direct linkage): tokens with
+     * the "SDNE" magic reference an artifact materialized in ENGINE memory by
+     * a direct in-wasm query. The entry lives in the flow's exported ref
+     * table; the bytes are copied straight out of the engine's linear memory
+     * (the JS counterpart of the Go harvest under the store engine lock —
+     * single-threaded JS needs no lock). Returns null for unknown tokens.
+     */
+    resolveEngineBodyRef(token) {
+      if (!engineLink || !isEngineBodyRefToken(token)) return null;
+      const tablePtr = exportFn(exports, "sdn_flatsql_link_ref_table")?.() >>> 0;
+      const slots = exportFn(exports, "sdn_flatsql_link_ref_slots")?.() >>> 0;
+      if (!tablePtr || !slots) return null;
+      const v = view();
+      for (let i = 0; i < slots; i++) {
+        const entry = readEngineRefEntry(v, tablePtr + i * ENGINE_REF_ENTRY_SIZE);
+        if (!entry.used || entry.token !== BigInt(token)) continue;
+        const engineHeap = new Uint8Array(engineLink.exports.memory.buffer);
+        return {
+          ...entry,
+          bytes: engineHeap.slice(entry.enginePtr, entry.enginePtr + entry.size),
+        };
+      }
+      return null;
+    },
+
     enqueueTrigger(triggerIndex) {
       call("enqueue_trigger_frames", triggerIndex);
     },
@@ -271,8 +359,20 @@ export async function createFlowRuntimeHost(options = {}) {
     async drain(handlers = {}, options = {}) {
       const maxIterations = options.maxIterations ?? 1000;
       const result = { iterations: 0, nodesInvoked: 0, handlersSkipped: 0 };
+      // In-wasm scheduler loop (loop C.5c): artifacts exporting
+      // space_data_module_runtime_drain_linked run all ready linked-direct
+      // nodes inside ONE call; the host loop then only services host-model
+      // nodes. Older artifacts fall back to per-node driving below.
+      const drainLinked = exportFn(exports, "space_data_module_runtime_drain_linked");
 
       for (let i = 0; i < maxIterations; i++) {
+        if (drainLinked) {
+          const dispatched = drainLinked(maxIterations) | 0;
+          if (dispatched > 0) {
+            result.nodesInvoked += dispatched;
+            result.iterations += dispatched;
+          }
+        }
         const nodeIndex = call("get_ready_node_index") >>> 0;
         if (nodeIndex === FLOW_INVALID_INDEX) break;
         result.iterations++;
@@ -303,6 +403,29 @@ export async function createFlowRuntimeHost(options = {}) {
           dispatchModel = dd.dispatchModel;
         }
 
+        const handler =
+          handlers[`${pluginId}:${methodId}`] ??
+          handlers[dependencyId] ??
+          handlers[nodeId] ??
+          handlers[methodId] ??
+          null;
+
+        if (!handler) {
+          // No host handler: linked-direct nodes run entirely inside the
+          // artifact — do NOT copy their (possibly large) input frames out of
+          // linear memory just to discard them (loop C.5c copy elimination;
+          // mirrors the Go host's drain).
+          result.handlersSkipped++;
+          if (dispatchModel === "linked-direct") {
+            call("dispatch_current_invocation_direct", options.frameBudget ?? 64);
+            call("complete_node_invocation", nodeIndex);
+            result.nodesInvoked++;
+            continue;
+          }
+          call("complete_node_invocation", nodeIndex);
+          continue;
+        }
+
         const frames = [];
         for (let f = 0; f < inv.frameCount; f++) {
           const fd = readFrameDescriptor(inv.framesPtr + f * FRAME_DESCRIPTOR_SIZE);
@@ -314,25 +437,6 @@ export async function createFlowRuntimeHost(options = {}) {
             sequence: fd.sequence,
             endOfStream: fd.endOfStream,
           });
-        }
-
-        const handler =
-          handlers[`${pluginId}:${methodId}`] ??
-          handlers[dependencyId] ??
-          handlers[nodeId] ??
-          handlers[methodId] ??
-          null;
-
-        if (!handler) {
-          result.handlersSkipped++;
-          if (dispatchModel === "linked-direct") {
-            call("dispatch_current_invocation_direct", options.frameBudget ?? 64);
-            call("complete_node_invocation", nodeIndex);
-            result.nodesInvoked++;
-            continue;
-          }
-          call("complete_node_invocation", nodeIndex);
-          continue;
         }
 
         let handlerResult;
