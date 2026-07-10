@@ -121,26 +121,21 @@ function encodeCanonicalChallengeRequest(options) {
   );
   const requesterDomainOffset = builder.createString(options.requesterDomain);
   const providerPeerIdOffset = builder.createString(options.providerPeerId);
-  const root = LCH.createLCH(
-    builder,
-    licensingChallengeMessageType.Request,
-    licensingChallengeRole.Requester,
-    reqIdOffset,
-    moduleIdOffset,
-    moduleVersionOffset,
-    requesterPeerIdOffset,
-    requesterXpubOffset,
-    requesterSigningPubkeyOffset,
-    requesterEphemeralPubkeyOffset,
-    requesterDomainOffset,
-    BigInt(options.requestedTimeoutMs),
-    BigInt(options.requestedAtMs),
-    0,
-    0n,
-    providerPeerIdOffset,
-    0,
-    0,
-  );
+  LCH.startLCH(builder);
+  LCH.addMessageType(builder, licensingChallengeMessageType.Request);
+  LCH.addRole(builder, licensingChallengeRole.Requester);
+  LCH.addRequestId(builder, reqIdOffset);
+  LCH.addModuleId(builder, moduleIdOffset);
+  LCH.addModuleVersion(builder, moduleVersionOffset);
+  LCH.addRequesterPeerId(builder, requesterPeerIdOffset);
+  LCH.addRequesterXpub(builder, requesterXpubOffset);
+  LCH.addRequesterSigningPubkey(builder, requesterSigningPubkeyOffset);
+  LCH.addRequesterEphemeralPubkey(builder, requesterEphemeralPubkeyOffset);
+  LCH.addRequestedDomain(builder, requesterDomainOffset);
+  LCH.addRequestedTimeoutMs(builder, BigInt(options.requestedTimeoutMs));
+  LCH.addRequestedAt(builder, BigInt(options.requestedAtMs));
+  LCH.addProviderPeerId(builder, providerPeerIdOffset);
+  const root = LCH.endLCH(builder);
   LCH.finishLCHBuffer(builder, root);
   return builder.asUint8Array();
 }
