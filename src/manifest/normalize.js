@@ -63,6 +63,7 @@ const capabilityKindByName = Object.freeze({
   storage_adapter: CapabilityKind.STORAGE_ADAPTER,
   storage_query: CapabilityKind.STORAGE_QUERY,
   storage_write: CapabilityKind.STORAGE_WRITE,
+  storage_ingest: CapabilityKind.STORAGE_INGEST,
   wallet_sign: CapabilityKind.WALLET_SIGN,
   ipfs: CapabilityKind.IPFS,
   crypto_hash: CapabilityKind.CRYPTO_HASH,

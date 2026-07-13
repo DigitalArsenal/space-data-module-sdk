@@ -41,5 +41,6 @@ export var CapabilityKind;
     CapabilityKind[CapabilityKind["CRYPTO_KEY_AGREEMENT"] = 33] = "CRYPTO_KEY_AGREEMENT";
     CapabilityKind[CapabilityKind["CRYPTO_KDF"] = 34] = "CRYPTO_KDF";
     CapabilityKind[CapabilityKind["SCHEDULE_CRON"] = 35] = "SCHEDULE_CRON";
+    CapabilityKind[CapabilityKind["STORAGE_INGEST"] = 36] = "STORAGE_INGEST";
 })(CapabilityKind || (CapabilityKind = {}));
 //# sourceMappingURL=capability-kind.js.map

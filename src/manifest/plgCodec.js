@@ -274,6 +274,7 @@ const hostCapabilityByName = Object.freeze({
   crypto_key_agreement: hostCapabilityKind.CRYPTO_KEY_AGREEMENT,
   crypto_kdf: hostCapabilityKind.CRYPTO_KDF,
   schedule_cron: hostCapabilityKind.SCHEDULE_CRON,
+  storage_ingest: hostCapabilityKind.STORAGE_INGEST,
 });
 
 function resolveHostCapability(value) {

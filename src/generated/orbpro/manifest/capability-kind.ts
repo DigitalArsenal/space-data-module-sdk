@@ -42,4 +42,5 @@ export enum CapabilityKind {
   CRYPTO_KEY_AGREEMENT = 33,
   CRYPTO_KDF = 34,
   SCHEDULE_CRON = 35,
+  STORAGE_INGEST = 36,
 }

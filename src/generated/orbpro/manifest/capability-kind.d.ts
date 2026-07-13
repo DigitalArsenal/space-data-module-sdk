@@ -37,6 +37,7 @@ export declare enum CapabilityKind {
     CRYPTO_DECRYPT = 32,
     CRYPTO_KEY_AGREEMENT = 33,
     CRYPTO_KDF = 34,
-    SCHEDULE_CRON = 35
+    SCHEDULE_CRON = 35,
+    STORAGE_INGEST = 36
 }
 //# sourceMappingURL=capability-kind.d.ts.map
