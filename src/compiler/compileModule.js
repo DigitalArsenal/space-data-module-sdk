@@ -232,13 +232,24 @@ function requiresSystemEmscripten(threadModel, options = {}) {
   );
 }
 
-function guestLinkSymbolPrefix(pluginId) {
+// Guest-link symbols are namespaced by the FULL lowercase-hex encoding of the
+// pluginId's UTF-8 bytes. Hex encoding is injective, so distinct pluginIds always
+// map to distinct prefixes. Do NOT truncate: a prior `.slice(0, 24)` (12 bytes)
+// collided real plugin ids that share a 12-byte stem — e.g. `com.orbpro.iss-source`
+// and `com.orbpro.intelsat-source` both truncated to hex("com.orbpro.i")
+// (`636f6d2e6f726270726f2e69`), which would silently merge/clash their symbols at
+// `wasm-ld -r` compose time. Wasm symbol names have no meaningful length limit, so
+// the full hex is safe. The emitted prefix (and the per-method `methodSymbols`) is
+// recorded in the guest-link metadata; that metadata is the AUTHORITATIVE source
+// consumers read at compose time (see src/flow/flowCompiler.js) — consumers must
+// never re-derive the prefix from pluginId, which keeps already-committed artifacts
+// (including any that carry a legacy truncated prefix) compatible.
+export function guestLinkSymbolPrefix(pluginId) {
   const normalized = String(pluginId ?? "module");
-  const ascii = Array.from(new TextEncoder().encode(normalized))
+  const hex = Array.from(new TextEncoder().encode(normalized))
     .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")
-    .slice(0, 24);
-  return `sdm_guest_${ascii}_`;
+    .join("");
+  return `sdm_guest_${hex}_`;
 }
 
 function parseStrongDefinedIdentifiers(nmOutput = "") {

@@ -117,6 +117,36 @@ pulls in that machinery on demand. A module declared `emscripten-pthreads` that
 never spawns a thread will therefore fail this guardrail; such a module should
 use the `single-thread` model instead.
 
+## Guest-link symbol namespacing (collision-proof, metadata-authoritative)
+
+For monolithic flow composition, each module also emits a **guest-link** wasm
+object whose exported method symbols are namespaced by a per-plugin prefix so
+that independently-built modules can be linked together with `wasm-ld -r` without
+symbol clashes. `guestLinkSymbolPrefix(pluginId)` in
+`src/compiler/compileModule.js` produces that prefix as:
+
+```
+sdm_guest_<full-lowercase-hex-of-pluginId-UTF8-bytes>_
+```
+
+The prefix uses the **full** hex encoding of the pluginId — it is **not**
+truncated. Hex encoding is injective, so distinct pluginIds always map to
+distinct prefixes. (A prior `.slice(0, 24)` truncation to 12 bytes collided real
+plugin ids that share a 12-byte stem — e.g. `com.orbpro.iss-source` and
+`com.orbpro.intelsat-source` both collapsed to `hex("com.orbpro.i")`
+`636f6d2e6f726270726f2e69`, which would silently merge/clash their symbols at
+compose time.) Wasm symbol names have no meaningful length limit, so the full hex
+is always safe.
+
+The emitted `symbolPrefix` and the per-method `methodSymbols` map are recorded in
+the guest-link **metadata** (`sds.guest-link`). **That metadata is the sole
+authoritative source consumers read at compose time** — `generateFlowTables` in
+`src/flow/flowCompiler.js` declares and calls
+`dependency.guestLink.metadata.methodSymbols[methodId]` and never re-derives the
+prefix from the pluginId. This keeps already-committed artifacts compatible: an
+object that shipped with a legacy (e.g. truncated) prefix still composes, because
+its own metadata carries the exact symbol names its object bytes define.
+
 ## 3. Compile-Time vs. Runtime: an honest boundary
 
 Passing this guardrail proves the **artifact** is a valid wasi-threads
@@ -140,6 +170,12 @@ runtime — must be reported as such.
   artifact rejected** (has shared memory + atomics but no wasi-threads contract);
   a shared-flag-stripped artifact rejected; and a false-positive guard proving
   the atomics decoder ignores `0xFE` immediates.
+- `test/guest-link-symbol-prefix.test.js` — the guest-link prefix is the full
+  injective hex of the pluginId; two previously-colliding ids now get distinct
+  prefixes; fresh prefixes match the committed modules-branch artifacts
+  byte-for-byte; and the compose path treats the guest-link metadata's
+  `symbolPrefix` / `methodSymbols` as authoritative (never re-derived), keeping a
+  legacy truncated-prefix artifact compatible.
 
 ## See also
 
