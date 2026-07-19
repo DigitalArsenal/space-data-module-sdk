@@ -39,6 +39,7 @@ const currentScvResultFields = Object.freeze(
     "RASTER_PRODUCTS",
     "MESSAGE",
     "AGGREGATE_STATISTICS",
+    "TARGET_RESULTS",
   ]),
 );
 
