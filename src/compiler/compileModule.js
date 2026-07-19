@@ -125,7 +125,13 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
     // assertPthreadArtifact() in compileModuleFromSource.
     const pthreadArgs = ["-O3"];
     if (options.noEntry === true) {
-      pthreadArgs.push("-Wl,--no-entry");
+      // No command surface → emit a wasi REACTOR: exports `_initialize` (which
+      // runs global constructors + WASI init) and NO `_start`. This makes the
+      // artifact directly invocable exactly like the single-thread build. Plain
+      // `-Wl,--no-entry` is wrong for wasi-clang: it still links crt1-command,
+      // whose `_start` traps (unreachable) at the missing user `main`, leaving
+      // the module uninitialized and un-invocable for the direct surface.
+      pthreadArgs.push("-mexec-model=reactor");
     }
     pthreadArgs.push(...PTHREAD_FINAL_LINK_FLAGS);
     if (options.allowUndefinedImports === true) {

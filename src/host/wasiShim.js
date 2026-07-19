@@ -223,6 +223,15 @@ export function createBrowserWasiShim(options = {}) {
     throw new WasiExitError(code);
   }
 
+  // wasm32-wasip1-threads (isomorphic-pthreads) modules import sched_yield —
+  // pthread spin/backoff loops call it. A cooperative no-op (yield to the
+  // engine) is the correct browser/Node semantics: real preemption is the
+  // host's job. Present on every shim so a threaded artifact instantiates
+  // (a missing import would fail instantiation for the whole module).
+  function sched_yield() {
+    return ERRNO_SUCCESS;
+  }
+
   // --- Output helpers ---
 
   function flushOutput() {
@@ -271,6 +280,7 @@ export function createBrowserWasiShim(options = {}) {
         args_get,
         random_get,
         proc_exit,
+        sched_yield,
       },
     },
     setMemory,

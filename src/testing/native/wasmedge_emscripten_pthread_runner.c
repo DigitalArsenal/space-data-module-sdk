@@ -1493,6 +1493,31 @@ static bool invoke_optional_module_init(
     WasmEdge_ExecutorContext *executor,
     WasmEdge_ModuleInstanceContext *module,
     bool service_mode) {
+  // Reactor artifacts (the isomorphic-pthreads wasi-threads default, built with
+  // -mexec-model=reactor) export `_initialize` and NO `_start`. `_initialize`
+  // runs the global constructors AND the WASI reactor init; it is the canonical,
+  // complete init entry. It MUST be invoked or global ctors never execute under
+  // WasmEdge (static registration / std::once / SDS + FlatSQL statics silently
+  // stay uninitialized). This applies in BOTH the service_mode (resident plugin)
+  // and one-shot paths. Command modules (which export `_start`) keep their
+  // EXISTING behavior exactly: the `_initialize` branch is only taken when there
+  // is no `_start`.
+  WasmEdge_FunctionInstanceContext *start = find_function(module, "_start");
+  if (start == NULL) {
+    WasmEdge_FunctionInstanceContext *initialize =
+        find_function(module, "_initialize");
+    if (initialize != NULL) {
+      return invoke_function(
+          executor,
+          initialize,
+          NULL,
+          0,
+          NULL,
+          0,
+          "_initialize");
+    }
+  }
+
   if (service_mode) {
     WasmEdge_FunctionInstanceContext *ctors =
         find_function(module, "__wasm_call_ctors");
@@ -1509,7 +1534,6 @@ static bool invoke_optional_module_init(
     return true;
   }
 
-  WasmEdge_FunctionInstanceContext *start = find_function(module, "_start");
   if (start != NULL) {
     return invoke_function(executor, start, NULL, 0, NULL, 0, "_start");
   }

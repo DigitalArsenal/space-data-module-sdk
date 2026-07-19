@@ -13,6 +13,10 @@
  */
 
 import { createBrowserWasiShim, WasiExitError } from "../host/wasiShim.js";
+import {
+  createWasiThreadSpawn,
+  isWasiThreadsModule,
+} from "../host/wasiThreadHost.js";
 import { createBrowserHost } from "../host/browserHost.js";
 import { getWasmWallet } from "../utils/wasmCrypto.js";
 import {
@@ -272,9 +276,16 @@ async function instantiateBrowserModule(options = {}) {
   const needsHostBridge = moduleImports.some(
     (entry) => entry.module === DEFAULT_HOSTCALL_IMPORT_MODULE,
   );
+  // Isomorphic-pthreads (wasm32-wasip1-threads) artifacts import
+  // `wasi.thread-spawn` over a SHARED imported memory. Such a module can only be
+  // instantiated with shared memory, so force it here regardless of the caller's
+  // sharedMemory flag; single-thread artifacts are unaffected.
+  const isThreaded = isWasiThreadsModule(options.wasmModule);
   const memoryImports = moduleImports.filter((entry) => entry.kind === "memory");
   if (!providedMemory && memoryImports.length > 0) {
-    providedMemory = createImportedMemory(options);
+    providedMemory = createImportedMemory(
+      isThreaded ? { ...options, sharedMemory: true } : options,
+    );
   }
   for (const entry of memoryImports) {
     if (!providedMemory) {
@@ -288,6 +299,26 @@ async function instantiateBrowserModule(options = {}) {
     };
   }
   addStandaloneSharedMemoryEnvStubs(importObject, moduleImports);
+
+  // Isomorphic-pthreads host: satisfy `wasi.thread-spawn` by running each guest
+  // pthread on a real OS thread (Node worker_threads / browser Worker) over the
+  // shared imported memory. Only wired for modules that import it.
+  let threadHost = null;
+  if (isThreaded) {
+    if (!providedMemory) {
+      throw new Error(
+        "wasi-threads module imports wasi.thread-spawn but no shared imported memory is available.",
+      );
+    }
+    threadHost = await createWasiThreadSpawn({
+      wasmModule: options.wasmModule,
+      memory: providedMemory,
+    });
+    importObject.wasi = {
+      ...(importObject.wasi ?? {}),
+      "thread-spawn": threadHost.threadSpawn,
+    };
+  }
 
   let instance = null;
   let bridge = null;
@@ -322,6 +353,20 @@ async function instantiateBrowserModule(options = {}) {
   }
   if (instance.exports._initialize) {
     instance.exports._initialize();
+  } else if (isThreaded && typeof instance.exports._start === "function") {
+    // wasi-threads artifacts link the wasi command crt (exports `_start`), not a
+    // reactor (`_initialize`). Run `_start` ONCE to execute global constructors
+    // + WASI init before any direct invoke. The module declares no command
+    // surface, so its main is an empty stub — `_start` runs ctors and proc_exit's
+    // out; swallow that exit. Direct-invoke exports remain callable afterward
+    // (the linear memory + globals persist).
+    try {
+      instance.exports._start();
+    } catch (error) {
+      if (!(error instanceof WasiExitError)) {
+        throw error;
+      }
+    }
   }
 
   return {
@@ -329,6 +374,7 @@ async function instantiateBrowserModule(options = {}) {
     bridge,
     wasi,
     memory,
+    threadHost,
   };
 }
 
@@ -435,7 +481,7 @@ export async function createBrowserModuleHarness(options = {}) {
     initialMemoryBytes: options.initialMemoryBytes,
     maximumMemoryBytes: options.maximumMemoryBytes,
   });
-  const { instance, bridge, wasi, memory } = activeContext;
+  const { instance, bridge, wasi, memory, threadHost } = activeContext;
   const allowRawInvoke = options.allowRawInvoke !== false;
 
   // --- Invoke helpers ---
@@ -775,6 +821,9 @@ export async function createBrowserModuleHarness(options = {}) {
 
   function destroy() {
     wasi.flushOutput();
+    if (threadHost) {
+      void threadHost.terminateAll();
+    }
   }
 
   return {
@@ -789,6 +838,10 @@ export async function createBrowserModuleHarness(options = {}) {
     bridge,
     wasi,
     memory,
+    // Present only for isomorphic-pthreads (wasi-threads) artifacts: exposes the
+    // spawn host so callers can observe real thread activity
+    // (spawnCount/distinctOsThreadCount).
+    threadHost,
     callHost,
     invokeDirect,
     invoke,
