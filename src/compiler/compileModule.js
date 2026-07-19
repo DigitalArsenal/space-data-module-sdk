@@ -27,6 +27,11 @@ import {
   getInvokeCppSchemaHeaders,
 } from "./flatcSupport.js";
 import { runWithEmceptionLock } from "./emceptionNode.js";
+import {
+  assertPthreadArtifact,
+  assertPthreadFlagsPresent,
+  PTHREAD_FINAL_LINK_FLAGS,
+} from "./pthreadArtifactGuard.js";
 import { encodePluginManifest, toEmbeddedPluginManifest } from "../manifest/index.js";
 import {
   DefaultInvokeExports,
@@ -106,40 +111,47 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
   const linkerExports = exportedSymbols.map(
     (symbol) => "-Wl,--export=" + symbol,
   );
-  const extraArgs = [];
-  const threadArgs = [];
-  if (usesPthreadCompileFlags(options)) {
-    threadArgs.push("-pthread");
+  const isPthreads = options.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS;
+  const args = ["-O3"];
+  if (options.noEntry === true) {
+    args.push("--no-entry");
   }
-  if (options.importedMemory === true) {
-    extraArgs.push("-s", "IMPORTED_MEMORY=1");
-  }
-  if (options.sharedMemory === true) {
-    extraArgs.push("-s", "SHARED_MEMORY=1");
-  }
-  if (options.allowUndefinedImports === true) {
-    extraArgs.push("-s", "ERROR_ON_UNDEFINED_SYMBOLS=0", "-Wl,--allow-undefined");
-  }
-  if (options.threadModel !== ModuleThreadModel.EMSCRIPTEN_PTHREADS) {
-    extraArgs.push("-s", "ALLOW_MEMORY_GROWTH=1");
-  }
-  const args = [
-    "-O3",
+  if (isPthreads) {
+    // Non-bypassable enforced pthreads final-link flag set (source of truth:
+    // PTHREAD_FINAL_LINK_FLAGS). This carries -pthread -matomics -mbulk-memory
+    // -s STANDALONE_WASM=1 -s IMPORTED_MEMORY=1 -s ALLOW_MEMORY_GROWTH=1 so the
+    // artifact is a growable shared-memory/atomics wasm that threads in both the
+    // browser and WasmEdge. The emitted wasm is then validated by
+    // assertPthreadArtifact() in compileModuleFromSource.
+    args.push(...PTHREAD_FINAL_LINK_FLAGS);
+    if (options.allowUndefinedImports === true) {
+      args.push("-s", "ERROR_ON_UNDEFINED_SYMBOLS=0", "-Wl,--allow-undefined");
+    }
+  } else {
     // Bulk-memory ops: memcpy/memset in module code lower to native
     // memory.copy/memory.fill instead of byte loops — WITHOUT this, large
     // aligned-stream frames crawl (~10 MB/s) under interpreted hosts
     // (loop C.5 wirespeed gate). Baseline wasm feature, supported by every
     // target host (WasmEdge + all browsers).
-    "-mbulk-memory",
-    ...threadArgs,
-    "-s",
-    "STANDALONE_WASM=1",
-    ...extraArgs,
-    ...linkerExports,
-  ];
-  if (options.noEntry === true) {
-    args.splice(1, 0, "--no-entry");
+    args.push("-mbulk-memory");
+    if (usesPthreadCompileFlags(options)) {
+      args.push("-pthread");
+    }
+    args.push("-s", "STANDALONE_WASM=1");
+    if (options.importedMemory === true) {
+      args.push("-s", "IMPORTED_MEMORY=1");
+    }
+    if (options.sharedMemory === true) {
+      args.push("-s", "SHARED_MEMORY=1");
+    }
+    if (options.allowUndefinedImports === true) {
+      args.push("-s", "ERROR_ON_UNDEFINED_SYMBOLS=0", "-Wl,--allow-undefined");
+    }
+    args.push("-s", "ALLOW_MEMORY_GROWTH=1");
   }
+  args.push(...linkerExports);
+  // Defensive invariant: the pthreads model must never lose a mandated flag.
+  assertPthreadFlagsPresent(args, { threadModel: options.threadModel });
   return args;
 }
 
@@ -849,6 +861,17 @@ export async function compileModuleFromSource(options = {}) {
   await writeFile(resolvedOutputPath, wasmBytes);
   tempDir = result.tempDir;
 
+  // Enforce the isomorphic-pthreads guardrail on the EMITTED artifact: a build
+  // that claims the pthreads thread model but did not emit a shared-memory /
+  // atomics wasm must FAIL the compile here rather than ship. See
+  // docs/isomorphic-pthreads.md.
+  let threadFeatures = null;
+  if (threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS) {
+    threadFeatures = assertPthreadArtifact(wasmBytes, {
+      source: resolvedOutputPath,
+    });
+  }
+
   // Validate the compiled artifact
   const report = await validateArtifactWithStandards({
     manifest,
@@ -866,6 +889,7 @@ export async function compileModuleFromSource(options = {}) {
     wasmBytes,
     guestLink: result.guestLink,
     manifestWarnings: warnings,
+    threadFeatures,
     report,
   };
 }

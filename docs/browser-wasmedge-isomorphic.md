@@ -29,6 +29,18 @@ The practical effect is:
 Use the pure `["wasmedge"]` target when you want maximum WasmEdge-native guest
 capability and do not need browser loading from the same binary.
 
+### Pthreads variant (shared-memory, isomorphic threading)
+
+When a module needs real guest threads (the `emscripten-pthreads` thread model,
+default for `["wasmedge"]`), the SDK **enforces** the shared-memory/atomics link
+flags and **validates the emitted `.wasm`** — a build that claims pthreads but
+does not emit a shared-memory/atomics wasm is rejected at compile time. That
+guardrail (the enforced flag set, the artifact validator, and the compile-time
+vs. runtime-thread-support boundary) is documented in
+[`docs/isomorphic-pthreads.md`](./isomorphic-pthreads.md). This present document
+covers the portable `single-thread` loading profile; read the pthreads doc
+before shipping a threaded WasmEdge artifact.
+
 ## Canonical Module Repo Layout
 
 Module repos should publish the shared compiled artifact under a stable runtime

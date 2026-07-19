@@ -7,6 +7,13 @@ export {
 } from "./compileModule.js";
 
 export {
+  analyzeWasmThreadFeatures,
+  assertPthreadArtifact,
+  assertPthreadFlagsPresent,
+  PTHREAD_FINAL_LINK_FLAGS,
+} from "./pthreadArtifactGuard.js";
+
+export {
   getFlatbuffersCppRuntimeHeaders,
   getInvokeCppSchemaHeaders,
 } from "./flatcSupport.js";
