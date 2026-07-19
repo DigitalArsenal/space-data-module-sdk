@@ -13,6 +13,8 @@ export {
   PTHREAD_FINAL_LINK_FLAGS,
 } from "./pthreadArtifactGuard.js";
 
+export { resolveWasiThreadsToolchain } from "./wasiThreadsToolchain.js";
+
 export {
   getFlatbuffersCppRuntimeHeaders,
   getInvokeCppSchemaHeaders,

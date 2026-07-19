@@ -22,11 +22,21 @@ import {
   PluginFamily,
   PluginManifestT,
   protectModuleArtifact,
+  resolveWasiThreadsToolchain,
   toEmbeddedPluginManifest,
   validateArtifactWithStandards,
   validateManifestWithStandards,
 } from "../src/index.js";
 import { createBrowserModuleHarness } from "../src/testing/browserModuleHarness.js";
+
+function wasiThreadsAvailable() {
+  try {
+    resolveWasiThreadsToolchain();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function createTestManifest() {
   return {
@@ -652,15 +662,26 @@ test("source compilation uses production optimization flags for module objects",
   assert.match(source, /sourcePath,[\s\S]*\.\.\.guestLink\.renameArgs,[\s\S]*\.\.\.buildSourceCompilerArgs\(compileOptions\)/);
 });
 
-test("wasmedge-targeted compile resolves to the pthread thread model", async () => {
+test("wasmedge-targeted compile resolves to the pthread thread model", async (t) => {
+  if (!wasiThreadsAvailable()) {
+    t.skip("wasi-threads toolchain (wasm32-wasip1-threads) is not available.");
+    return;
+  }
   const manifest = {
     ...createTestManifest(),
     runtimeTargets: ["wasmedge"],
   };
   const result = await compileModuleFromSource({
     manifest,
-    sourceCode: "int propagate(void) { return 13; }\n",
-    language: "c",
+    sourceCode:
+      '#include <atomic>\n#include <thread>\n' +
+      'extern "C" int propagate(void) {\n' +
+      '  std::atomic<int> a{0};\n' +
+      '  std::thread t([&]{ a.fetch_add(13, std::memory_order_seq_cst); });\n' +
+      '  t.join();\n' +
+      '  return a.load();\n' +
+      '}\n',
+    language: "c++",
   });
 
   assert.equal(result.threadModel, ModuleThreadModel.EMSCRIPTEN_PTHREADS);
@@ -668,11 +689,15 @@ test("wasmedge-targeted compile resolves to the pthread thread model", async () 
     result.guestLink?.threadModel,
     ModuleThreadModel.EMSCRIPTEN_PTHREADS,
   );
-  assert.match(result.compiler, /system emscripten pthreads/i);
+  assert.match(result.compiler, /wasi-threads/i);
   assert.equal(result.report.ok, true);
 });
 
-test("wasmedge-targeted pthread command builds retain emscripten host imports", async () => {
+test("wasmedge-targeted pthread builds emit the wasi-threads contract, not emscripten worker hooks", async (t) => {
+  if (!wasiThreadsAvailable()) {
+    t.skip("wasi-threads toolchain (wasm32-wasip1-threads) is not available.");
+    return;
+  }
   const manifest = {
     ...createTestManifest(),
     runtimeTargets: ["wasmedge"],
@@ -680,35 +705,39 @@ test("wasmedge-targeted pthread command builds retain emscripten host imports", 
   };
   const result = await compileModuleFromSource({
     manifest,
-    sourceCode: "int propagate(void) { return 34; }\n",
-    language: "c",
+    sourceCode:
+      '#include <atomic>\n#include <thread>\n' +
+      'extern "C" int propagate(void) {\n' +
+      '  std::atomic<int> a{0};\n' +
+      '  std::thread t([&]{ a.fetch_add(34, std::memory_order_seq_cst); });\n' +
+      '  t.join();\n' +
+      '  return a.load();\n' +
+      '}\n',
+    language: "c++",
   });
 
   const imports = WebAssembly.Module.imports(
     new WebAssembly.Module(result.wasmBytes),
   );
-  const modules = Array.from(
-    new Set(imports.map((entry) => entry.module)),
-  ).sort();
 
   assert.equal(result.threadModel, ModuleThreadModel.EMSCRIPTEN_PTHREADS);
-  assert.deepEqual(modules, ["env", "wasi_snapshot_preview1"]);
+  // The isomorphic wasi-threads contract: imports wasi.thread-spawn + shared
+  // env.memory, exports wasi_thread_start, and imports NONE of Emscripten's
+  // browser-only worker/mailbox hooks.
+  assert.equal(result.threadFeatures.isIsomorphicPthreads, true);
+  assert.equal(result.threadFeatures.hasWasiThreadSpawnImport, true);
+  assert.equal(result.threadFeatures.hasWasiThreadStartExport, true);
+  assert.deepEqual(result.threadFeatures.emscriptenThreadHooks, []);
   assert.ok(
-    imports.some(
-      (entry) =>
-        entry.module === "env" &&
-        entry.name === "emscripten_check_blocking_allowed",
-    ),
+    imports.some((entry) => entry.module === "env" && entry.name === "memory"),
   );
   assert.ok(
     imports.some(
-      (entry) => entry.module === "env" && entry.name === "__indirect_function_table",
-    ) === false,
+      (entry) => entry.module === "wasi" && entry.name === "thread-spawn",
+    ),
   );
   assert.ok(
-    imports.some(
-      (entry) => entry.module === "env" && entry.name === "memory",
-    ),
+    imports.every((entry) => entry.name !== "__pthread_create_js"),
   );
 });
 

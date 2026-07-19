@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 
 import {
   compileModuleFromSource,
@@ -11,7 +15,26 @@ import {
   assertPthreadFlagsPresent,
   PTHREAD_FINAL_LINK_FLAGS,
 } from "../src/compiler/pthreadArtifactGuard.js";
+import { resolveWasiThreadsToolchain } from "../src/compiler/wasiThreadsToolchain.js";
 import { parseWasmModuleSections, decodeUnsignedLeb128 } from "../src/bundle/wasm.js";
+
+function wasiThreadsAvailable() {
+  try {
+    resolveWasiThreadsToolchain();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function emscriptenAvailable() {
+  try {
+    execFileSync("em++", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function createTestManifest(overrides = {}) {
   return {
@@ -63,8 +86,7 @@ function createTestManifest(overrides = {}) {
 }
 
 // A real pthreads module that spawns std::thread workers over a std::atomic
-// accumulator — the proven conjunction-assessment shape. VERIFIED to compile
-// through the SDK pthreads path and emit a shared-memory/atomics wasm.
+// accumulator — the proven conjunction-assessment shape.
 const THREADED_CPP_SOURCE = `#include <atomic>
 #include <thread>
 #include <vector>
@@ -80,9 +102,8 @@ extern "C" int propagate(void) {
 `;
 
 // A single-thread C module that deliberately embeds 0xFE-valued i32 constants
-// and memory load/store instructions (whose offsets can contain 0xFE bytes) so
-// the atomics decoder is exercised against false positives. `volatile` blocks
-// constant folding so the 0xFE bytes survive -O3.
+// and memory load/store instructions so the atomics decoder is exercised
+// against false positives. `volatile` blocks constant folding under -O3.
 const FALSE_POSITIVE_C_SOURCE = `#include <stdint.h>
 static volatile uint32_t g_table[256];
 int propagate(void) {
@@ -108,16 +129,43 @@ function compilePthreadModule() {
 }
 
 /**
- * Return the absolute byte offset of the (first) imported memory's limits flags
- * byte, so a test can deterministically flip the shared bit. Returns -1 if no
- * imported memory is present.
+ * Compile a browser-only Emscripten `-pthread` standalone artifact directly with
+ * em++. It has shared memory + atomics but imports env.__pthread_create_js and
+ * the _emscripten_* worker/mailbox hooks (no wasi thread-spawn) — the exact
+ * artifact the guardrail must REJECT.
  */
+function compileEmscriptenBrowserPthread() {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "empthread-"));
+  const src = path.join(dir, "m.cpp");
+  const out = path.join(dir, "m.wasm");
+  // em++ treats `.c` as C++ (mangling), so use extern "C" for a clean export.
+  writeFileSync(src, 'extern "C" int propagate(void){return 7;}\n');
+  execFileSync(
+    "em++",
+    [
+      "-O3",
+      "--no-entry",
+      "-pthread",
+      "-s",
+      "STANDALONE_WASM=1",
+      "-s",
+      "IMPORTED_MEMORY=1",
+      "-Wl,--export=propagate",
+      src,
+      "-o",
+      out,
+    ],
+    { stdio: "ignore" },
+  );
+  return new Uint8Array(readFileSync(out));
+}
+
+/** Absolute byte offset of the first imported memory's limits flags byte. */
 function findImportedMemoryFlagsOffset(wasmBytes) {
   const parsed = parseWasmModuleSections(wasmBytes);
   const section = parsed.sections.find((s) => s.id === 2);
   if (!section) return -1;
   const bytes = parsed.bytes;
-  const dec = new TextDecoder();
   let cursor = section.payloadStart;
   const count = decodeUnsignedLeb128(bytes, cursor);
   cursor = count.nextOffset;
@@ -135,7 +183,7 @@ function findImportedMemoryFlagsOffset(wasmBytes) {
       cursor = decodeUnsignedLeb128(bytes, cursor).nextOffset;
       if (flags & 0x01) cursor = decodeUnsignedLeb128(bytes, cursor).nextOffset;
     } else if (kind === 0x02) {
-      return cursor; // the flags byte
+      return cursor;
     } else if (kind === 0x03) {
       cursor += 2;
     } else {
@@ -155,63 +203,73 @@ function codeSectionContainsByte(wasmBytes, byteValue) {
   return false;
 }
 
-test("flag assembler carries the mandated pthreads flags and never -mthreads", () => {
-  assert.ok(PTHREAD_FINAL_LINK_FLAGS.includes("-pthread"));
-  assert.ok(PTHREAD_FINAL_LINK_FLAGS.includes("-matomics"));
-  assert.ok(PTHREAD_FINAL_LINK_FLAGS.includes("-mbulk-memory"));
-  for (const setting of ["STANDALONE_WASM=1", "IMPORTED_MEMORY=1", "ALLOW_MEMORY_GROWTH=1"]) {
-    const present = PTHREAD_FINAL_LINK_FLAGS.some(
-      (value, index) => value === "-s" && PTHREAD_FINAL_LINK_FLAGS[index + 1] === setting,
-    );
-    assert.ok(present, `expected -s ${setting} in PTHREAD_FINAL_LINK_FLAGS`);
+test("flag assembler carries the mandated wasi-threads link flags, no emscripten -s / -mthreads", () => {
+  for (const flag of [
+    "-pthread",
+    "-matomics",
+    "-mbulk-memory",
+    "-Wl,--import-memory",
+    "-Wl,--shared-memory",
+  ]) {
+    assert.ok(PTHREAD_FINAL_LINK_FLAGS.includes(flag), `expected ${flag}`);
   }
-  // -mthreads is invalid for wasm32-unknown-emscripten and must never be added.
+  assert.ok(
+    PTHREAD_FINAL_LINK_FLAGS.some((f) => f.startsWith("-Wl,--max-memory=")),
+    "expected a -Wl,--max-memory= flag",
+  );
+  // Must NOT carry Emscripten -s settings (those produce the browser-only build)
+  // and must never add -mthreads (invalid for the wasm target).
   assert.ok(!PTHREAD_FINAL_LINK_FLAGS.includes("-mthreads"));
+  assert.ok(!PTHREAD_FINAL_LINK_FLAGS.includes("-s"));
 
-  // The invariant guard passes on the full set and throws if a flag is dropped.
   assert.doesNotThrow(() =>
     assertPthreadFlagsPresent([...PTHREAD_FINAL_LINK_FLAGS], {
       threadModel: ModuleThreadModel.EMSCRIPTEN_PTHREADS,
     }),
   );
   const stripped = PTHREAD_FINAL_LINK_FLAGS.filter(
-    (value, index) =>
-      !(value === "-s" && PTHREAD_FINAL_LINK_FLAGS[index + 1] === "ALLOW_MEMORY_GROWTH=1") &&
-      value !== "ALLOW_MEMORY_GROWTH=1",
+    (value) => value !== "-Wl,--shared-memory",
   );
   assert.throws(
     () =>
       assertPthreadFlagsPresent(stripped, {
         threadModel: ModuleThreadModel.EMSCRIPTEN_PTHREADS,
       }),
-    /ALLOW_MEMORY_GROWTH/,
+    /shared-memory/,
   );
-  // Non-pthreads models are not constrained by the assertion.
   assert.doesNotThrow(() =>
     assertPthreadFlagsPresent([], { threadModel: ModuleThreadModel.SINGLE_THREAD }),
   );
 });
 
-test("pthreads compile emits a validated shared-memory / atomics wasm", async () => {
+test("pthreads compile emits a validated wasi-threads shared-memory/atomics wasm", async (t) => {
+  if (!wasiThreadsAvailable()) {
+    t.skip("wasi-threads toolchain (wasm32-wasip1-threads) is not available.");
+    return;
+  }
   const result = await compilePthreadModule();
   assert.equal(result.threadModel, ModuleThreadModel.EMSCRIPTEN_PTHREADS);
+  assert.match(result.compiler, /wasi-threads/);
 
-  // The compile itself ran the guardrail and attached the analysis.
   assert.ok(result.threadFeatures);
-  assert.equal(result.threadFeatures.hasSharedMemory, true);
-  assert.equal(result.threadFeatures.usesAtomics, true);
+  assert.equal(result.threadFeatures.isIsomorphicPthreads, true);
 
   const analysis = analyzeWasmThreadFeatures(result.wasmBytes);
+  // shared memory
   assert.equal(analysis.hasSharedMemory, true);
   assert.equal(analysis.sharedMemory.source, "import");
   assert.equal(analysis.sharedMemory.shared, true);
-  assert.equal(analysis.usesAtomics, true);
-  assert.ok(analysis.atomicInstructionCount > 0);
-  // ALLOW_MEMORY_GROWTH took effect: the shared memory is growable (max > min).
   assert.ok(analysis.sharedMemory.max > analysis.sharedMemory.min);
   assert.equal(analysis.isGrowableSharedMemory, true);
+  // atomics
+  assert.equal(analysis.usesAtomics, true);
+  assert.ok(analysis.atomicInstructionCount > 0);
+  // the wasi-threads host contract
+  assert.equal(analysis.hasWasiThreadSpawnImport, true);
+  assert.equal(analysis.hasWasiThreadStartExport, true);
+  // NOT an Emscripten Web-Worker build
+  assert.deepEqual(analysis.emscriptenThreadHooks, []);
 
-  // The explicit assertion accepts a genuine pthreads artifact.
   assert.doesNotThrow(() => assertPthreadArtifact(result.wasmBytes));
 });
 
@@ -226,24 +284,53 @@ test("single-thread artifact is rejected by the pthreads validator", async () =>
 
   const analysis = analyzeWasmThreadFeatures(result.wasmBytes);
   assert.equal(analysis.hasSharedMemory, false);
+  assert.equal(analysis.isIsomorphicPthreads, false);
 
   assert.throws(
     () => assertPthreadArtifact(result.wasmBytes, { source: "single-thread.wasm" }),
-    /shared memory/i,
+    /shared memory|wasi/i,
   );
 });
 
-test("a shared-flag-stripped pthreads artifact is rejected", async () => {
+test("an Emscripten browser-only -pthread artifact is rejected (has shared memory + atomics but no wasi-threads contract)", async (t) => {
+  if (!emscriptenAvailable()) {
+    t.skip("Emscripten (em++) is not available to build the browser-only fixture.");
+    return;
+  }
+  const wasmBytes = compileEmscriptenBrowserPthread();
+  const analysis = analyzeWasmThreadFeatures(wasmBytes);
+
+  // It DOES have shared memory + atomics — the necessary-but-insufficient case.
+  assert.equal(analysis.hasSharedMemory, true);
+  assert.equal(analysis.usesAtomics, true);
+  // But it is the browser-only Web Worker build, not a wasi-threads artifact.
+  assert.ok(analysis.emscriptenThreadHooks.length > 0);
+  assert.equal(analysis.hasWasiThreadSpawnImport, false);
+  assert.equal(analysis.hasWasiThreadStartExport, false);
+  assert.equal(analysis.isIsomorphicPthreads, false);
+
+  assert.throws(
+    () => assertPthreadArtifact(wasmBytes, { source: "emscripten-browser.wasm" }),
+    /Emscripten|wasi|thread-spawn|wasi_thread_start/i,
+  );
+});
+
+test("a shared-flag-stripped pthreads artifact is rejected", async (t) => {
+  if (!wasiThreadsAvailable()) {
+    t.skip("wasi-threads toolchain (wasm32-wasip1-threads) is not available.");
+    return;
+  }
   const result = await compilePthreadModule();
   const offset = findImportedMemoryFlagsOffset(result.wasmBytes);
   assert.ok(offset >= 0, "expected an imported memory in the pthreads artifact");
-  assert.equal(result.wasmBytes[offset] & 0x02, 0x02, "expected the shared bit set before tampering");
+  assert.equal(result.wasmBytes[offset] & 0x02, 0x02, "expected shared bit set before tampering");
 
   const tampered = result.wasmBytes.slice();
   tampered[offset] = tampered[offset] & ~0x02; // clear the shared bit (0x03 -> 0x01)
 
   const analysis = analyzeWasmThreadFeatures(tampered);
   assert.equal(analysis.hasSharedMemory, false);
+  assert.equal(analysis.isIsomorphicPthreads, false);
   assert.throws(
     () => assertPthreadArtifact(tampered, { source: "stripped.wasm" }),
     /shared memory/i,
@@ -257,9 +344,6 @@ test("atomics decoder does not false-positive on 0xFE immediates", async () => {
     language: "c",
     threadModel: ModuleThreadModel.SINGLE_THREAD,
   });
-  // Prove the scenario is real: the single-thread code section actually contains
-  // 0xFE bytes (from i32.const / memarg immediates), which a naive byte scan
-  // would miscount as atomics.
   assert.equal(
     codeSectionContainsByte(result.wasmBytes, 0xfe),
     true,

@@ -32,6 +32,7 @@ import {
   assertPthreadFlagsPresent,
   PTHREAD_FINAL_LINK_FLAGS,
 } from "./pthreadArtifactGuard.js";
+import { resolveWasiThreadsToolchain } from "./wasiThreadsToolchain.js";
 import { encodePluginManifest, toEmbeddedPluginManifest } from "../manifest/index.js";
 import {
   DefaultInvokeExports,
@@ -112,54 +113,70 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
     (symbol) => "-Wl,--export=" + symbol,
   );
   const isPthreads = options.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS;
+  if (isPthreads) {
+    // Non-bypassable enforced pthreads final-LINK flag set (source of truth:
+    // PTHREAD_FINAL_LINK_FLAGS). These are wasi-threads (wasm-ld) flags, NOT
+    // Emscripten -s settings: they import a shared memory and select the
+    // atomics/bulk-memory features so the artifact is a wasi-threads wasm
+    // (imports wasi.thread-spawn, exports wasi_thread_start) that threads in
+    // both the browser (via a SharedArrayBuffer/Worker shim) and WasmEdge. The
+    // toolchain args (--target/--sysroot/-resource-dir) are prepended by
+    // compileWithWasiThreads. The emitted wasm is validated by
+    // assertPthreadArtifact() in compileModuleFromSource.
+    const pthreadArgs = ["-O3"];
+    if (options.noEntry === true) {
+      pthreadArgs.push("-Wl,--no-entry");
+    }
+    pthreadArgs.push(...PTHREAD_FINAL_LINK_FLAGS);
+    if (options.allowUndefinedImports === true) {
+      pthreadArgs.push("-Wl,--allow-undefined");
+    }
+    pthreadArgs.push(...linkerExports);
+    // Defensive invariant: the pthreads model must never lose a mandated flag.
+    assertPthreadFlagsPresent(pthreadArgs, { threadModel: options.threadModel });
+    return pthreadArgs;
+  }
+  // Single-thread / Emscripten-shared-memory-browser path (emception or system
+  // emscripten). Uses Emscripten -s settings.
   const args = ["-O3"];
   if (options.noEntry === true) {
     args.push("--no-entry");
   }
-  if (isPthreads) {
-    // Non-bypassable enforced pthreads final-link flag set (source of truth:
-    // PTHREAD_FINAL_LINK_FLAGS). This carries -pthread -matomics -mbulk-memory
-    // -s STANDALONE_WASM=1 -s IMPORTED_MEMORY=1 -s ALLOW_MEMORY_GROWTH=1 so the
-    // artifact is a growable shared-memory/atomics wasm that threads in both the
-    // browser and WasmEdge. The emitted wasm is then validated by
-    // assertPthreadArtifact() in compileModuleFromSource.
-    args.push(...PTHREAD_FINAL_LINK_FLAGS);
-    if (options.allowUndefinedImports === true) {
-      args.push("-s", "ERROR_ON_UNDEFINED_SYMBOLS=0", "-Wl,--allow-undefined");
-    }
-  } else {
-    // Bulk-memory ops: memcpy/memset in module code lower to native
-    // memory.copy/memory.fill instead of byte loops — WITHOUT this, large
-    // aligned-stream frames crawl (~10 MB/s) under interpreted hosts
-    // (loop C.5 wirespeed gate). Baseline wasm feature, supported by every
-    // target host (WasmEdge + all browsers).
-    args.push("-mbulk-memory");
-    if (usesPthreadCompileFlags(options)) {
-      args.push("-pthread");
-    }
-    args.push("-s", "STANDALONE_WASM=1");
-    if (options.importedMemory === true) {
-      args.push("-s", "IMPORTED_MEMORY=1");
-    }
-    if (options.sharedMemory === true) {
-      args.push("-s", "SHARED_MEMORY=1");
-    }
-    if (options.allowUndefinedImports === true) {
-      args.push("-s", "ERROR_ON_UNDEFINED_SYMBOLS=0", "-Wl,--allow-undefined");
-    }
-    args.push("-s", "ALLOW_MEMORY_GROWTH=1");
+  // Bulk-memory ops: memcpy/memset in module code lower to native
+  // memory.copy/memory.fill instead of byte loops — WITHOUT this, large
+  // aligned-stream frames crawl (~10 MB/s) under interpreted hosts
+  // (loop C.5 wirespeed gate). Baseline wasm feature, supported by every
+  // target host (WasmEdge + all browsers).
+  args.push("-mbulk-memory");
+  if (usesPthreadCompileFlags(options)) {
+    args.push("-pthread");
   }
+  args.push("-s", "STANDALONE_WASM=1");
+  if (options.importedMemory === true) {
+    args.push("-s", "IMPORTED_MEMORY=1");
+  }
+  if (options.sharedMemory === true) {
+    args.push("-s", "SHARED_MEMORY=1");
+  }
+  if (options.allowUndefinedImports === true) {
+    args.push("-s", "ERROR_ON_UNDEFINED_SYMBOLS=0", "-Wl,--allow-undefined");
+  }
+  args.push("-s", "ALLOW_MEMORY_GROWTH=1");
   args.push(...linkerExports);
-  // Defensive invariant: the pthreads model must never lose a mandated flag.
-  assertPthreadFlagsPresent(args, { threadModel: options.threadModel });
   return args;
 }
 
 function buildSourceCompilerArgs(options = {}) {
+  const isPthreads = options.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS;
   // -mbulk-memory: see buildCompilerArgs — memcpy/memset become native
   // memory.copy/memory.fill (loop C.5).
   const args = ["-O3", "-mbulk-memory", "-DNDEBUG"];
-  if (usesPthreadCompileFlags(options)) {
+  if (isPthreads) {
+    // wasi-threads object compile: enable atomics and disable C++ exceptions
+    // (the wasi-threads libc++ is built without exception support, so throwing
+    // code otherwise fails to link on __cxa_throw / __cxa_allocate_exception).
+    args.push("-matomics", "-fno-exceptions", "-pthread");
+  } else if (usesPthreadCompileFlags(options)) {
     args.push("-pthread");
   }
   // Caller-supplied preprocessor defines (e.g. SDN_FLATSQL_LINKED=1 for the
@@ -776,6 +793,159 @@ async function compileWithSystemEmscripten(options = {}) {
   }
 }
 
+async function runWasiCompiler(command, args, options = {}) {
+  try {
+    await execFileAsync(command, args, {
+      cwd: options.cwd,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new Error(
+        `Compilation failed: wasi-threads driver "${command}" was not found on PATH.`,
+      );
+    }
+    const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
+    const stdout = typeof error?.stdout === "string" ? error.stdout.trim() : "";
+    const detail = stderr || stdout || error?.message || "unknown error";
+    throw new Error(`Compilation failed with ${command} (wasi-threads): ${detail}`);
+  }
+}
+
+// Builds the isomorphic-pthreads artifact with the wasi-threads toolchain
+// (clang --target=wasm32-wasip1-threads). Emits a wasi-threads wasm (imports
+// wasi.thread-spawn, exports wasi_thread_start over an imported shared memory)
+// that threads under WasmEdge and, via a SharedArrayBuffer/Worker shim, the
+// browser — NOT an Emscripten Web-Worker build. See wasiThreadsToolchain.js and
+// docs/isomorphic-pthreads.md.
+async function compileWithWasiThreads(options = {}) {
+  const {
+    manifest,
+    language,
+    sourceExtension,
+    sourceCode,
+    manifestSource,
+    invokeHeaderSource,
+    invokeSource,
+    exportedSymbols,
+    outputPath,
+    compileOptions,
+  } = options;
+  const toolchain = resolveWasiThreadsToolchain();
+  const isCpp = String(language ?? "").toLowerCase().startsWith("c++");
+  const sourceDriver = isCpp ? toolchain.clangxx : toolchain.clang;
+  const cppDriver = toolchain.clangxx;
+
+  const tempDir = await mkdtemp(
+    path.join(os.tmpdir(), "space-data-module-sdk-compile-"),
+  );
+  const resolvedOutputPath = path.resolve(
+    outputPath ?? path.join(tempDir, "module.wasm"),
+  );
+  const runtimeIncludeDir = path.join(tempDir, "flatbuffers-runtime");
+  const sourcePath = path.join(tempDir, `module.${sourceExtension}`);
+  const manifestSourcePath = path.join(tempDir, "plugin-manifest-exports.cpp");
+  const invokeHeaderPath = path.join(tempDir, "space_data_module_invoke.h");
+  const invokeSourcePath = path.join(tempDir, "plugin-invoke-bridge.cpp");
+  const sourceObjectPath = path.join(tempDir, "module.o");
+  const linkObjectPath = path.join(tempDir, "module-link.o");
+  const manifestObjectPath = path.join(tempDir, "plugin-manifest-exports.o");
+  const invokeObjectPath = path.join(tempDir, "plugin-invoke-bridge.o");
+  const wasmOutputPath = path.join(tempDir, "module.wasm");
+
+  try {
+    const { runtimeHeaders, schemaHeaders } = await getInvokeCppSupportFiles();
+    const linkArgs = buildCompilerArgs(exportedSymbols, compileOptions);
+    await writeFilesToDirectory(runtimeIncludeDir, runtimeHeaders);
+    await writeFilesToDirectory(tempDir, schemaHeaders);
+    await writeFile(sourcePath, sourceCode);
+    await writeFile(manifestSourcePath, manifestSource);
+    await writeFile(invokeHeaderPath, invokeHeaderSource);
+    await writeFile(invokeSourcePath, invokeSource);
+
+    const includeArgs = [`-I${tempDir}`, `-I${runtimeIncludeDir}`];
+    const sourceCompilerArgs = buildSourceCompilerArgs(compileOptions);
+
+    await runWasiCompiler(sourceDriver, [
+      ...toolchain.toolchainArgs,
+      "-c",
+      sourcePath,
+      ...includeArgs,
+      ...(isCpp ? ["-std=c++17"] : []),
+      ...sourceCompilerArgs,
+      "-o",
+      sourceObjectPath,
+    ]);
+
+    const sourceObjectBytes = new Uint8Array(await readFile(sourceObjectPath));
+    const guestLink = deriveGuestLinkRenameArgs({
+      objectBytes: sourceObjectBytes,
+      pluginId: manifest?.pluginId,
+      methodIds: Array.isArray(manifest?.methods)
+        ? manifest.methods.map((method) => String(method?.methodId ?? ""))
+        : [],
+    });
+
+    await runWasiCompiler(sourceDriver, [
+      ...toolchain.toolchainArgs,
+      "-c",
+      sourcePath,
+      ...includeArgs,
+      ...(isCpp ? ["-std=c++17"] : []),
+      ...guestLink.renameArgs,
+      ...sourceCompilerArgs,
+      "-o",
+      linkObjectPath,
+    ]);
+
+    for (const [srcPath, objPath] of [
+      [manifestSourcePath, manifestObjectPath],
+      [invokeSourcePath, invokeObjectPath],
+    ]) {
+      await runWasiCompiler(cppDriver, [
+        ...toolchain.toolchainArgs,
+        "-c",
+        srcPath,
+        "-std=c++17",
+        ...includeArgs,
+        ...sourceCompilerArgs,
+        "-o",
+        objPath,
+      ]);
+    }
+
+    await runWasiCompiler(cppDriver, [
+      ...toolchain.toolchainArgs,
+      sourceObjectPath,
+      manifestObjectPath,
+      invokeObjectPath,
+      ...linkArgs,
+      "-o",
+      wasmOutputPath,
+    ]);
+
+    const wasmBytes = new Uint8Array(await readFile(wasmOutputPath));
+    const linkObjectBytes = new Uint8Array(await readFile(linkObjectPath));
+    await writeFile(resolvedOutputPath, wasmBytes);
+    return {
+      wasmBytes,
+      outputPath: resolvedOutputPath,
+      tempDir,
+      guestLink: {
+        format: "wasm-object",
+        language,
+        symbolPrefix: guestLink.prefix,
+        methodSymbols: guestLink.methodSymbols,
+        threadModel: compileOptions.threadModel,
+        objectBytes: linkObjectBytes,
+      },
+    };
+  } catch (error) {
+    await rm(tempDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 export async function compileModuleFromSource(options = {}) {
   const manifest = options.manifest ?? {};
   const sourceCode = String(options.sourceCode ?? "");
@@ -835,10 +1005,15 @@ export async function compileModuleFromSource(options = {}) {
     noEntry: includeCommandMain !== true,
     threadModel,
   };
-  const useSystemEmscripten = requiresSystemEmscripten(threadModel, compileOptions);
-  const compileFunction = useSystemEmscripten
-    ? compileWithSystemEmscripten
-    : compileWithEmception;
+  const useWasiThreads =
+    threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS;
+  const useSystemEmscripten =
+    !useWasiThreads && requiresSystemEmscripten(threadModel, compileOptions);
+  const compileFunction = useWasiThreads
+    ? compileWithWasiThreads
+    : useSystemEmscripten
+      ? compileWithSystemEmscripten
+      : compileWithEmception;
   const result = await compileFunction({
     manifest,
     language: compiler.language,
@@ -879,9 +1054,11 @@ export async function compileModuleFromSource(options = {}) {
   });
 
   return {
-    compiler: useSystemEmscripten
-      ? "em++ (system emscripten pthreads)"
-      : "em++ (emception)",
+    compiler: useWasiThreads
+      ? "wasm32-wasi-clang++ (wasi-threads)"
+      : useSystemEmscripten
+        ? "em++ (system emscripten pthreads)"
+        : "em++ (emception)",
     language: compiler.language,
     threadModel,
     outputPath: resolvedOutputPath,

@@ -13,45 +13,49 @@ import {
 
 // Mirrors ModuleThreadModel.EMSCRIPTEN_PTHREADS in compileModule.js. Kept as a
 // local literal to avoid an import cycle (compileModule imports this module).
+// NOTE: the enum value string is historical; this model now compiles to a
+// wasi-threads artifact (NOT an Emscripten Web-Worker build). See
+// docs/isomorphic-pthreads.md and wasiThreadsToolchain.js.
 const EMSCRIPTEN_PTHREADS = "emscripten-pthreads";
 
-// The non-bypassable final-link flag set for the emscripten-pthreads model.
+// The non-bypassable final-LINK flag set for the isomorphic-pthreads model.
 //
-// `-mthreads` from an earlier spec is intentionally OMITTED: it is invalid for
-// the wasm32-unknown-emscripten target and breaks the compile
-//   clang: error: unsupported option '-mthreads' for target 'wasm32-unknown-emscripten'
-// `-mthreads` is a MinGW/Windows driver flag, not a WebAssembly target feature.
-// Emscripten's `-pthread` already selects the threads model (it defines
-// __EMSCRIPTEN_SHARED_MEMORY__=1 and enables the atomics/bulk-memory/shared
-// features); `-matomics -mbulk-memory` make those features explicit. The thread
-// guarantee is delivered by these flags AND validated at the artifact level by
-// assertPthreadArtifact() below.
+// These are the wasm-ld / clang flags that produce a wasi-threads artifact:
+//   -pthread                  select the threads runtime (wasi-threads libc/libc++)
+//   -matomics -mbulk-memory   enable the atomics + bulk-memory target features
+//   -Wl,--import-memory       import the (shared) memory from the host (env.memory)
+//   -Wl,--shared-memory       make that memory shared (SharedArrayBuffer / atomics)
+//   -Wl,--max-memory=2GiB     required maximum for a shared, growable memory
+//
+// These deliberately do NOT use Emscripten `-s` settings. Emscripten `-pthread`
+// (even with -s STANDALONE_WASM=1) emits the browser-only Web Worker model
+// (env.__pthread_create_js + _emscripten_* mailbox/postMessage imports, no wasi
+// thread-spawn) which CANNOT thread under WasmEdge. `-mthreads` is likewise not
+// used (a MinGW driver flag, not a wasm target feature). The thread guarantee is
+// delivered by these flags AND validated on the emitted artifact by
+// assertPthreadArtifact() below (shared memory + atomics + wasi.thread-spawn
+// import + wasi_thread_start export, and NO Emscripten thread hooks).
 export const PTHREAD_FINAL_LINK_FLAGS = Object.freeze([
   "-pthread",
   "-matomics",
   "-mbulk-memory",
-  "-s",
-  "STANDALONE_WASM=1",
-  "-s",
-  "IMPORTED_MEMORY=1",
-  "-s",
-  "ALLOW_MEMORY_GROWTH=1",
+  "-Wl,--import-memory",
+  "-Wl,--shared-memory",
+  "-Wl,--max-memory=2147483648",
 ]);
 
-// The `-s KEY=VALUE` settings that must be present as adjacent (`-s`, value)
-// pairs in the assembled final-link args for the pthreads model.
-const PTHREAD_REQUIRED_SETTINGS = Object.freeze([
-  "STANDALONE_WASM=1",
-  "IMPORTED_MEMORY=1",
-  "ALLOW_MEMORY_GROWTH=1",
-]);
-
-// The bare (non `-s`) flags that must be present for the pthreads model.
+// The bare flags that must be present in the assembled final-link args for the
+// pthreads model.
 const PTHREAD_REQUIRED_BARE_FLAGS = Object.freeze([
   "-pthread",
   "-matomics",
   "-mbulk-memory",
+  "-Wl,--import-memory",
+  "-Wl,--shared-memory",
 ]);
+
+// A `-Wl,--max-memory=<n>` flag (any value) must also be present.
+const PTHREAD_MAX_MEMORY_PREFIX = "-Wl,--max-memory=";
 
 /**
  * Defensive invariant: after the final-link args are assembled, confirm that the
@@ -73,13 +77,8 @@ export function assertPthreadFlagsPresent(args, context = {}) {
       missing.push(flag);
     }
   }
-  for (const setting of PTHREAD_REQUIRED_SETTINGS) {
-    const present = argList.some(
-      (value, index) => value === "-s" && argList[index + 1] === setting,
-    );
-    if (!present) {
-      missing.push(`-s ${setting}`);
-    }
+  if (!argList.some((value) => value.startsWith(PTHREAD_MAX_MEMORY_PREFIX))) {
+    missing.push(`${PTHREAD_MAX_MEMORY_PREFIX}<bytes>`);
   }
   if (missing.length > 0) {
     throw new Error(
@@ -464,6 +463,91 @@ function collectDeclaredMemories(parsed) {
   return memories;
 }
 
+const IMPORT_KIND_NAMES = ["function", "table", "memory", "global"];
+
+function collectAllImports(parsed) {
+  const section = parsed.sections.find((s) => s.id === 2);
+  if (!section) {
+    return [];
+  }
+  const bytes = parsed.bytes;
+  const imports = [];
+  let cursor = section.payloadStart;
+  const countInfo = decodeUnsignedLeb128(bytes, cursor);
+  cursor = countInfo.nextOffset;
+  for (let i = 0; i < countInfo.value; i += 1) {
+    const modLen = decodeUnsignedLeb128(bytes, cursor);
+    cursor = modLen.nextOffset;
+    const moduleName = textDecoder.decode(bytes.subarray(cursor, cursor + modLen.value));
+    cursor += modLen.value;
+    const nameLen = decodeUnsignedLeb128(bytes, cursor);
+    cursor = nameLen.nextOffset;
+    const importName = textDecoder.decode(bytes.subarray(cursor, cursor + nameLen.value));
+    cursor += nameLen.value;
+    const kind = bytes[cursor++];
+    imports.push({ module: moduleName, name: importName, kind: IMPORT_KIND_NAMES[kind] ?? kind });
+    if (kind === 0x00) {
+      cursor = decodeUnsignedLeb128(bytes, cursor).nextOffset; // typeidx
+    } else if (kind === 0x01) {
+      cursor += 1; // reftype
+      const limits = readLimits(bytes, cursor, section.payloadEnd);
+      cursor = limits.nextOffset;
+    } else if (kind === 0x02) {
+      const limits = readLimits(bytes, cursor, section.payloadEnd);
+      cursor = limits.nextOffset;
+    } else if (kind === 0x03) {
+      cursor += 2; // valtype + mutability
+    } else {
+      break;
+    }
+  }
+  return imports;
+}
+
+function collectExportNames(parsed) {
+  const section = parsed.sections.find((s) => s.id === 7);
+  if (!section) {
+    return [];
+  }
+  const bytes = parsed.bytes;
+  const names = [];
+  let cursor = section.payloadStart;
+  const countInfo = decodeUnsignedLeb128(bytes, cursor);
+  cursor = countInfo.nextOffset;
+  for (let i = 0; i < countInfo.value; i += 1) {
+    const nameLen = decodeUnsignedLeb128(bytes, cursor);
+    cursor = nameLen.nextOffset;
+    names.push(textDecoder.decode(bytes.subarray(cursor, cursor + nameLen.value)));
+    cursor += nameLen.value;
+    cursor += 1; // export kind
+    cursor = decodeUnsignedLeb128(bytes, cursor).nextOffset; // index
+  }
+  return names;
+}
+
+// The WasmEdge/wasi thread-spawn host contract: the guest imports a
+// `thread-spawn` function and exports `wasi_thread_start`.
+function isWasiThreadSpawnImport(entry) {
+  return (
+    (entry.module === "wasi" || entry.module === "wasi_snapshot_preview1") &&
+    entry.name === "thread-spawn"
+  );
+}
+
+// Emscripten's browser-only Web Worker thread hooks. Their presence means the
+// artifact threads via JS postMessage workers and CANNOT spawn threads under
+// WasmEdge — it must be rejected as an isomorphic-pthreads artifact.
+function isEmscriptenThreadHook(entry) {
+  if (entry.module !== "env") {
+    return false;
+  }
+  return (
+    entry.name === "__pthread_create_js" ||
+    /pthread_create/.test(entry.name) ||
+    /^_?emscripten_.*(thread|mailbox|main_thread|postmessage)/i.test(entry.name)
+  );
+}
+
 function readDeclaredFeatures(wasmBytes) {
   let customSections;
   try {
@@ -499,7 +583,8 @@ function readDeclaredFeatures(wasmBytes) {
 }
 
 /**
- * Parse a compiled wasm artifact and report its threading features.
+ * Parse a compiled wasm artifact and report its threading features, including
+ * the isomorphic wasi-threads host contract.
  *
  * @param {Uint8Array|ArrayBuffer|ArrayBufferView} wasmBytes
  * @returns {{
@@ -510,6 +595,10 @@ function readDeclaredFeatures(wasmBytes) {
  *   atomicInstructionCount: number,
  *   declaredFeatures: string[]|null,
  *   isGrowableSharedMemory: boolean,
+ *   hasWasiThreadSpawnImport: boolean,
+ *   hasWasiThreadStartExport: boolean,
+ *   emscriptenThreadHooks: string[],
+ *   isIsomorphicPthreads: boolean,
  * }}
  */
 export function analyzeWasmThreadFeatures(wasmBytes) {
@@ -524,21 +613,48 @@ export function analyzeWasmThreadFeatures(wasmBytes) {
   const usesAtomics =
     atomicInstructionCount > 0 ||
     (Array.isArray(declaredFeatures) && declaredFeatures.includes("atomics"));
+  const imports = collectAllImports(parsed);
+  const exportNames = collectExportNames(parsed);
+  const hasWasiThreadSpawnImport = imports.some(isWasiThreadSpawnImport);
+  const hasWasiThreadStartExport = exportNames.includes("wasi_thread_start");
+  const emscriptenThreadHooks = imports
+    .filter(isEmscriptenThreadHook)
+    .map((entry) => `${entry.module}.${entry.name}`);
+  const hasSharedMemory = sharedMemory !== null;
   return {
-    hasSharedMemory: sharedMemory !== null,
+    hasSharedMemory,
     sharedMemory,
     memories,
     usesAtomics,
     atomicInstructionCount,
     declaredFeatures,
-    isGrowableSharedMemory: sharedMemory !== null && sharedMemory.growable === true,
+    isGrowableSharedMemory: hasSharedMemory && sharedMemory.growable === true,
+    hasWasiThreadSpawnImport,
+    hasWasiThreadStartExport,
+    emscriptenThreadHooks,
+    isIsomorphicPthreads:
+      hasSharedMemory &&
+      usesAtomics &&
+      hasWasiThreadSpawnImport &&
+      hasWasiThreadStartExport &&
+      emscriptenThreadHooks.length === 0,
   };
 }
 
 /**
- * Reject a compiled wasm artifact that claims the pthreads thread model but does
- * not actually declare a shared memory and use atomics. Returns the analysis on
- * success; throws with a clear, actionable message otherwise.
+ * Reject a compiled wasm artifact that claims the isomorphic-pthreads thread
+ * model but is not a real wasi-threads artifact. To pass, the emitted wasm MUST:
+ *   - declare/import a shared memory (shared limits flag), and
+ *   - use atomics (atomic instructions in the code section), and
+ *   - import the wasi `thread-spawn` host function, and
+ *   - export `wasi_thread_start`, and
+ *   - NOT import Emscripten's browser-only Web Worker thread hooks
+ *     (env.__pthread_create_js / env._emscripten_* mailbox/postMessage), which
+ *     cannot spawn threads under WasmEdge.
+ *
+ * Shared memory + atomics alone are necessary but NOT sufficient — an Emscripten
+ * `-pthread` browser build has both yet threads only via JS workers. Returns the
+ * analysis on success; throws a clear, actionable error otherwise.
  *
  * @param {Uint8Array|ArrayBuffer|ArrayBufferView} wasmBytes
  * @param {{ source?: string }} [options]
@@ -557,8 +673,8 @@ export function assertPthreadArtifact(wasmBytes, options = {}) {
   const failures = [];
   if (!analysis.hasSharedMemory) {
     failures.push(
-      "it declares no shared memory (a module that claims pthreads must import " +
-        "or declare a memory with the shared limits flag)",
+      "it declares no shared memory (a threaded module must import or declare a " +
+        "memory with the shared limits flag)",
     );
   }
   if (!analysis.usesAtomics) {
@@ -566,12 +682,31 @@ export function assertPthreadArtifact(wasmBytes, options = {}) {
       "it uses no atomics (no atomic/threads instructions were found in the code section)",
     );
   }
+  if (!analysis.hasWasiThreadSpawnImport) {
+    failures.push(
+      "it does not import the wasi `thread-spawn` host function (WasmEdge cannot " +
+        "spawn guest threads without the wasi-threads contract)",
+    );
+  }
+  if (!analysis.hasWasiThreadStartExport) {
+    failures.push(
+      "it does not export `wasi_thread_start` (the wasi-threads entry a host " +
+        "invokes to run a spawned thread)",
+    );
+  }
+  if (analysis.emscriptenThreadHooks.length > 0) {
+    failures.push(
+      "it imports Emscripten's browser-only Web Worker thread hooks " +
+        `(${analysis.emscriptenThreadHooks.join(", ")}) — this is a JS-worker ` +
+        "build that cannot thread under WasmEdge, not an isomorphic artifact",
+    );
+  }
   if (failures.length > 0) {
     throw new Error(
-      `pthreads artifact validation REJECTED ${source}: the build claims the ` +
-        "emscripten-pthreads thread model but the emitted wasm is not a " +
-        `shared-memory/atomics artifact — ${failures.join("; ")}. This build ` +
-        "must not ship.",
+      `isomorphic-pthreads artifact validation REJECTED ${source}: the build ` +
+        "claims the pthreads thread model but the emitted wasm is not a valid " +
+        `wasi-threads shared-memory/atomics artifact — ${failures.join("; ")}. ` +
+        "This build must not ship.",
     );
   }
   return analysis;

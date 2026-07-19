@@ -32,11 +32,13 @@ capability and do not need browser loading from the same binary.
 ### Pthreads variant (shared-memory, isomorphic threading)
 
 When a module needs real guest threads (the `emscripten-pthreads` thread model,
-default for `["wasmedge"]`), the SDK **enforces** the shared-memory/atomics link
-flags and **validates the emitted `.wasm`** — a build that claims pthreads but
-does not emit a shared-memory/atomics wasm is rejected at compile time. That
-guardrail (the enforced flag set, the artifact validator, and the compile-time
-vs. runtime-thread-support boundary) is documented in
+default for `["wasmedge"]`), the SDK compiles it through the **wasi-threads**
+toolchain (`clang --target=wasm32-wasip1-threads -pthread`), **not** Emscripten
+`-pthread` (which emits a browser-only Web-Worker build that cannot thread under
+WasmEdge). It **enforces** the wasi-threads link flags and **validates the
+emitted `.wasm`** — the artifact must import `wasi.thread-spawn`, export
+`wasi_thread_start`, be a shared-memory/atomics wasm, and carry no Emscripten
+worker hooks, or the compile is rejected. That guardrail is documented in
 [`docs/isomorphic-pthreads.md`](./isomorphic-pthreads.md). This present document
 covers the portable `single-thread` loading profile; read the pthreads doc
 before shipping a threaded WasmEdge artifact.

@@ -8,26 +8,35 @@ Use this skill when touching module compilation for `runtimeTargets: ["wasmedge"
 - Prefer explicit `threadModel` handling over hidden toolchain heuristics.
 - Default `wasmedge` targets to `emscripten-pthreads` unless the caller
   explicitly overrides the thread model.
-- Route pthread builds through a real system Emscripten toolchain.
+- **Route pthread builds through the wasi-threads toolchain, NOT Emscripten.**
+  Emscripten `-pthread` (even with `-s STANDALONE_WASM=1`) emits a browser-only
+  Web-Worker build (`env.__pthread_create_js` + `env._emscripten_*`
+  mailbox/postMessage imports, no wasi thread-spawn) that CANNOT thread under
+  WasmEdge. The pthreads model compiles with
+  `clang --target=wasm32-wasip1-threads -pthread` (see
+  `src/compiler/wasiThreadsToolchain.js`).
 - **Final pthreads artifacts are enforced AND validated.** The pthreads final
-  link is non-bypassable: it always carries
-  `-pthread -matomics -mbulk-memory -s STANDALONE_WASM=1 -s IMPORTED_MEMORY=1 -s ALLOW_MEMORY_GROWTH=1`
-  (assembled once in `src/compiler/pthreadArtifactGuard.js` /
-  `buildCompilerArgs`). Do NOT add `-mthreads` — it is invalid for the
-  `wasm32-unknown-emscripten` target and breaks the compile; `-pthread` already
-  selects the threads model.
+  link is non-bypassable: it always carries the wasi-threads flags
+  `-pthread -matomics -mbulk-memory -Wl,--import-memory -Wl,--shared-memory -Wl,--max-memory=…`
+  (assembled once as `PTHREAD_FINAL_LINK_FLAGS` in
+  `src/compiler/pthreadArtifactGuard.js` / `buildCompilerArgs`). NO Emscripten
+  `-s` settings; NEVER `-mthreads` (invalid for the wasm target). Objects are
+  compiled `-fno-exceptions` (the wasi-threads libc++ is built without
+  exceptions).
 - **Validate the emitted wasm, not just the flags.** After emit, the SDK parses
-  the `.wasm` and asserts it declares a shared memory (limits shared flag
-  `0x02`, imported or declared) AND uses atomics (real code-section instruction
-  decode — never a `0xFE` byte scan; `target_features` is stripped at `-O3`). A
-  module that claims pthreads but emits a non-shared-memory wasm MUST fail the
-  compile, not ship. Use `assertPthreadArtifact` / `analyzeWasmThreadFeatures`.
+  the `.wasm` and REJECTS the compile unless it: declares a shared memory (limits
+  shared flag `0x02`) AND uses atomics (real code-section instruction decode —
+  never a `0xFE` byte scan) AND imports `wasi.thread-spawn` AND exports
+  `wasi_thread_start` AND imports NONE of Emscripten's browser worker hooks.
+  Shared memory + atomics ALONE are necessary-but-insufficient (a browser-only
+  Emscripten build has both). Use `assertPthreadArtifact` /
+  `analyzeWasmThreadFeatures`.
 - **Do not claim WasmEdge thread support until a real runtime invocation spawns
-  threads and runs.** Compile-time shared-memory/atomics validation is necessary
-  but not sufficient. A validated artifact that only compiles — and does not
-  actually spawn and run guest threads under the target WasmEdge build — is NOT
-  proof of thread support. Runtime thread-spawn verification is owned by the
-  deploy/benchmark node, not this SDK.
+  threads and runs.** Compile-time validation (wasi-threads contract + shared
+  memory + atomics) is necessary but not sufficient. A validated artifact that
+  only compiles — and does not actually spawn and run guest threads under the
+  target WasmEdge build — is NOT proof of thread support. Runtime thread-spawn
+  verification is owned by the deploy/benchmark node, not this SDK.
 - Do not substitute Cesium `TaskProcessor`, ad hoc JS worker pools, or host-side
   worker orchestration for guest pthread support.
 
