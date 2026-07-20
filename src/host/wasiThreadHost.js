@@ -128,10 +128,81 @@ function browserBlobUrl() {
   return cachedBrowserBlobUrl;
 }
 
-// How long to wait for every pooled worker to confirm readiness before giving
-// up and disabling browser threading entirely. Warm-pool startup is a handful
-// of postMessage round-trips + one instantiation each, so this is generous.
-const BROWSER_POOL_PROBE_TIMEOUT_MS = 10000;
+// How long to wait for a pooled worker to confirm readiness before giving up and
+// disabling browser threading entirely. Warm-pool startup is a handful of
+// postMessage round-trips + one instantiation each; on a genuinely cross-origin
+// isolated context that completes in well under a second. This deadline is kept
+// SHORT on purpose: when arming is contended or a worker never confirms, the
+// guest must commit to its proven sequential path FAST (threadSpawn -> -1) rather
+// than leave the caller's compute watchdog to absorb a multi-second stall. Arming
+// also short-circuits the instant ANY worker reports not-ready (see armBrowserPool),
+// so the honest bound on a failed arming decision is one worker's first turn, not
+// this whole window.
+const BROWSER_POOL_PROBE_TIMEOUT_MS = 1500;
+
+// Arm the browser warm pool: probe every created worker and resolve a single
+// all-or-nothing decision. Resolves true ONLY when every worker confirms
+// {t:"ready", ok:true}; resolves false the instant ANY worker reports not-ready,
+// errors, or misses the probe deadline — a committed, fast sequential fallback,
+// never a wait for the slowest loser. The per-worker onmessage handler installed
+// here is PERSISTENT: after arming it keeps dispatching {t:"exit"} (idle return)
+// and {t:"error"} (guest fault surfacing) for the life of the pool.
+function armBrowserPool(created, { wasmModule, memory, timeoutMs, onExit }) {
+  return new Promise((resolve) => {
+    let remaining = created.length;
+    let settled = false;
+    const timers = [];
+    const finish = (ok) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      for (const timer of timers) {
+        clearTimeout(timer);
+      }
+      resolve(ok);
+    };
+    for (const worker of created) {
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      timers.push(timer);
+      worker.onmessage = (event) => {
+        const message = event.data || {};
+        if (message.t === "ready") {
+          clearTimeout(timer);
+          if (message.ok === true) {
+            remaining -= 1;
+            if (remaining === 0) {
+              finish(true);
+            }
+          } else {
+            // One worker that cannot instantiate the module over the shared
+            // memory disables the whole pool — decide NOW, do not wait out the
+            // rest of the probes.
+            finish(false);
+          }
+        } else if (message.t === "exit") {
+          onExit(worker, message.tid);
+        } else if (message.t === "error") {
+          // eslint-disable-next-line no-console
+          console.error(
+            "[wasi-thread] pooled worker guest error:",
+            message.error,
+          );
+        }
+      };
+      worker.onerror = (error) => {
+        clearTimeout(timer);
+        // eslint-disable-next-line no-console
+        console.error(
+          "[wasi-thread] pooled worker error:",
+          error?.message ?? error,
+        );
+        finish(false);
+      };
+      worker.postMessage({ t: "probe", wasmModule, memory });
+    }
+  });
+}
 
 function isSharedMemoryBacked(memory) {
   return (
@@ -281,52 +352,13 @@ export async function createWasiThreadSpawn({
     for (let i = 0; i < poolSize; i += 1) {
       created.push(new Worker(browserBlobUrl()));
     }
-    // Persistent per-worker handler dispatches ready/exit/error; readiness is
-    // awaited via a per-worker promise resolved on the first {t:"ready"}.
-    const readyPromises = created.map(
-      (worker) =>
-        new Promise((resolve) => {
-          let settled = false;
-          const settle = (ok) => {
-            if (!settled) {
-              settled = true;
-              resolve(ok);
-            }
-          };
-          const timer = setTimeout(
-            () => settle(false),
-            BROWSER_POOL_PROBE_TIMEOUT_MS,
-          );
-          worker.onmessage = (event) => {
-            const message = event.data || {};
-            if (message.t === "ready") {
-              clearTimeout(timer);
-              settle(message.ok === true);
-            } else if (message.t === "exit") {
-              returnWorkerToIdle(worker, message.tid);
-            } else if (message.t === "error") {
-              // eslint-disable-next-line no-console
-              console.error(
-                "[wasi-thread] pooled worker guest error:",
-                message.error,
-              );
-            }
-          };
-          worker.onerror = (error) => {
-            clearTimeout(timer);
-            // eslint-disable-next-line no-console
-            console.error(
-              "[wasi-thread] pooled worker error:",
-              error?.message ?? error,
-            );
-            settle(false);
-          };
-          worker.postMessage({ t: "probe", wasmModule, memory });
-        }),
-    );
-
-    const results = await Promise.all(readyPromises);
-    if (results.length > 0 && results.every((ok) => ok === true)) {
+    const armed = await armBrowserPool(created, {
+      wasmModule,
+      memory,
+      timeoutMs: BROWSER_POOL_PROBE_TIMEOUT_MS,
+      onExit: returnWorkerToIdle,
+    });
+    if (armed) {
       poolDisabled = false;
       for (const worker of created) {
         poolWorkers.push(worker);
@@ -335,7 +367,9 @@ export async function createWasiThreadSpawn({
     } else {
       // Any failure disables browser threading entirely: threadSpawn returns -1,
       // the guest's pthread_create returns EAGAIN, and the module runs its whole
-      // grid inline (correct, deterministic, non-hanging).
+      // grid inline (correct, deterministic, non-hanging). Every created worker
+      // is torn down — including ones that DID confirm ready — so no orphaned
+      // nested worker lingers to contend with the sequential retry's pool.
       for (const worker of created) {
         try {
           worker.terminate();
