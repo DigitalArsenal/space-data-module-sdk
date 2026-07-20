@@ -171,15 +171,74 @@ test("a probe timeout disables the pool (no worker ever confirms ready)", async 
   mock.timers.enable({ apis: ["setTimeout"] });
   try {
     const pending = host({ requestedThreads: 2 });
-    // Let the ready worker's microtask reply drain, then trip the probe timeout.
+    // Let the ready worker's microtask reply drain, then trip the SHORT probe
+    // deadline (1500 ms). The committed-sequential fallback must not wait longer.
     await Promise.resolve();
-    mock.timers.tick(10000);
+    mock.timers.tick(1500);
     const h = await pending;
     assert.equal(h.threadSpawn(1), -1);
     assert.equal(MockWorker.terminatedCount, 2);
   } finally {
     mock.timers.reset();
   }
+});
+
+test("the probe deadline commits to the fallback well before a compute watchdog (<= 2 s)", async () => {
+  // Regression guard for the arming-race decision: the whole point of the warm
+  // pool is that a NON-armable context falls back to the guest's sequential path
+  // PROMPTLY. If the probe deadline creeps back toward the old 10 s value, a
+  // failed arming would again let the demo's compute watchdog (seconds) absorb
+  // the stall instead of committing to -1 immediately.
+  installBrowserEnv({
+    hardwareConcurrency: 8,
+    behaviors: ["timeout", "timeout"],
+    autoExit: false,
+  });
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const pending = host({ requestedThreads: 2 });
+    await Promise.resolve();
+    // Advancing only 2 s must be enough to reach the disabled decision.
+    mock.timers.tick(2000);
+    const h = await pending;
+    assert.equal(h.threadSpawn(1), -1, "pool disabled within 2 s");
+    assert.equal(MockWorker.terminatedCount, 2);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("arming short-circuits to disabled on the FIRST not-ready — no wait for the losers", async () => {
+  // The decision must resolve the instant a worker reports {ok:false}; it must
+  // NOT block on the remaining workers (here two that never reply). With NO fake
+  // timers installed, only the microtask {ok:false} from worker 0 can settle the
+  // arming — proving the short-circuit does not depend on any probe timeout.
+  installBrowserEnv({
+    hardwareConcurrency: 8,
+    behaviors: ["fail", "timeout", "timeout"],
+    autoExit: false,
+  });
+  const h = await host({ requestedThreads: 3 });
+  assert.equal(h.threadSpawn(1), -1, "spawn declined immediately on first fail");
+  assert.equal(h.spawnCount(), 0);
+  assert.equal(
+    MockWorker.terminatedCount,
+    3,
+    "all three workers torn down even though two never confirmed",
+  );
+});
+
+test("a single onerror short-circuits arming with two silent siblings", async () => {
+  // Same short-circuit contract via the onerror path: worker 0 errors, the other
+  // two never reply, and the pool disables without any timer advance.
+  installBrowserEnv({
+    hardwareConcurrency: 8,
+    behaviors: ["error", "timeout", "timeout"],
+    autoExit: false,
+  });
+  const h = await host({ requestedThreads: 3 });
+  assert.equal(h.threadSpawn(1), -1);
+  assert.equal(MockWorker.terminatedCount, 3);
 });
 
 test("worker exit returns it to the idle pool for reuse", async () => {
