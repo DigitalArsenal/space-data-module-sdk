@@ -110,34 +110,11 @@ function createAbiMethod(methodId) {
   return {
     methodId,
     displayName: methodId,
-    inputPorts: [
-      {
-        portId: "request",
-        acceptedTypeSets: [
-          {
-            setId: "any-input",
-            allowedTypes: [{ acceptsAnyFlatbuffer: true }],
-          },
-        ],
-        minStreams: 1,
-        maxStreams: 1,
-        required: true,
-      },
-    ],
-    outputPorts: [
-      {
-        portId: "response",
-        acceptedTypeSets: [
-          {
-            setId: "any-output",
-            allowedTypes: [{ acceptsAnyFlatbuffer: true }],
-          },
-        ],
-        minStreams: 0,
-        maxStreams: 1,
-        required: false,
-      },
-    ],
+    // These exports exercise the scalar hostcall ABI directly; they neither
+    // consume nor produce PIV frames, so fabricated wildcard frame ports
+    // would violate the canonical dual-representation contract.
+    inputPorts: [],
+    outputPorts: [],
     maxBatch: 1,
     drainPolicy: "single-shot",
   };

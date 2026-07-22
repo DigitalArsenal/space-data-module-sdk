@@ -1,3 +1,10 @@
+import type { ModuleDeploymentPlan } from "./deployment/index.js";
+import type {
+  HarnessInputFrame,
+  ModuleHarness,
+  RuntimeHostTestModuleDefinition,
+} from "./testing/index.js";
+
 // --- Manifest ---
 
 export type PayloadWireFormat = "flatbuffer" | "aligned-binary";
@@ -12,6 +19,7 @@ export type ProtocolRoleName = "handle" | "dial" | "both";
 export interface PayloadTypeRef {
   schemaName?: string;
   fileIdentifier?: string;
+  schemaVersion?: string;
   schemaHash?: string | number[] | Uint8Array;
   acceptsAnyFlatbuffer?: boolean;
   wireFormat?: PayloadWireFormat;
@@ -38,6 +46,16 @@ export function payloadTypeRefsMatch(
   actualTypeRef?: PayloadTypeRef | null,
 ): boolean;
 
+export function payloadSchemaIdentitiesEqual(
+  leftTypeRef?: PayloadTypeRef | null,
+  rightTypeRef?: PayloadTypeRef | null,
+): boolean;
+
+export function alignedPayloadLayoutsCompatible(
+  leftTypeRef?: PayloadTypeRef | null,
+  rightTypeRef?: PayloadTypeRef | null,
+): boolean;
+
 export function selectPreferredPayloadTypeRef(
   port?: { acceptedTypeSets?: Array<{ allowedTypes?: PayloadTypeRef[] }> } | null,
   options?: { preferredWireFormat?: PayloadWireFormat | string | null },
@@ -48,6 +66,7 @@ export type AllowedType = PayloadTypeRef;
 export interface AcceptedTypeSet {
   setId: string;
   allowedTypes: PayloadTypeRef[];
+  allowedWireFormats?: PayloadWireFormat[];
 }
 
 export interface PortManifest {
@@ -114,6 +133,39 @@ export interface BuildArtifact {
   entrySymbol?: string | null;
 }
 
+export interface PluginFlowNode {
+  nodeId: string;
+  pluginId: string;
+  methodId?: string | null;
+  kind?: string | null;
+  dispatchModel?: string | null;
+  config?: Uint8Array | number[];
+  uiX?: number;
+  uiY?: number;
+}
+
+export interface PluginFlowEdge {
+  edgeId?: string | null;
+  fromNodeId: string;
+  fromPortId: string;
+  toNodeId: string;
+  toPortId: string;
+}
+
+export interface PluginFlowTrigger {
+  triggerId: string;
+  kind?: string | null;
+  source?: string | null;
+  defaultIntervalMs?: number | bigint;
+  httpPath?: string | null;
+}
+
+export interface PluginFlowTriggerBinding {
+  triggerId: string;
+  targetNodeId: string;
+  targetPortId: string;
+}
+
 export interface PluginManifest {
   pluginId: string;
   name: string;
@@ -128,6 +180,10 @@ export interface PluginManifest {
   protocols?: ProtocolSpec[];
   schemasUsed?: PayloadTypeRef[];
   buildArtifacts?: BuildArtifact[];
+  flowNodes?: PluginFlowNode[];
+  flowEdges?: PluginFlowEdge[];
+  flowTriggers?: PluginFlowTrigger[];
+  flowTriggerBindings?: PluginFlowTriggerBinding[];
   abiVersion?: number;
 }
 
@@ -149,6 +205,30 @@ export function writeEmbeddedManifestArtifacts(options: {
 
 // --- Invoke ---
 
+export interface InvokeArenaTransferToken {}
+
+export interface InvokeArenaLease {
+  readonly arena: Uint8Array;
+  readonly generation: number;
+  readonly closed: boolean;
+  advance(
+    nextArena?: Uint8Array | ArrayBuffer | ArrayBufferView,
+  ): number;
+  close(): void;
+  createTransferToken(
+    frame: InvokeFrame,
+    options?: {
+      ownership?: number | string;
+      mutability?: number | string;
+    },
+  ): InvokeArenaTransferToken;
+}
+
+export function createInvokeArenaLease(
+  arena: Uint8Array | ArrayBuffer | ArrayBufferView,
+  options?: { generation?: number },
+): InvokeArenaLease;
+
 export interface InvokeFrame {
   portId?: string | null;
   typeRef?: PayloadTypeRef | null;
@@ -156,6 +236,8 @@ export interface InvokeFrame {
   offset?: number;
   size?: number;
   ownership?: number | string;
+  arenaLease?: InvokeArenaLease;
+  arenaGeneration?: number;
   generation?: number;
   mutability?: number | string;
   frameId?: bigint | number | string;
@@ -193,15 +275,18 @@ export interface PluginInvokeResponseEnvelope {
 export interface DecodedPluginInvokeRequestEnvelope
   extends PluginInvokeRequestEnvelope {
   envelope: "PIV";
+  arenaLease: InvokeArenaLease;
 }
 
 export interface DecodedPluginInvokeResponseEnvelope
   extends PluginInvokeResponseEnvelope {
   envelope: "PIV";
+  arenaLease: InvokeArenaLease;
 }
 
 export interface DecodePluginInvokeEnvelopeOptions {
   externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
+  arenaLease?: InvokeArenaLease;
 }
 
 export function encodePluginInvokeRequest(
@@ -240,7 +325,10 @@ export function assertAlignedInvokeBuffer(
  */
 export function forwardOutputFrameAsInput(
   outputFrame: InvokeFrame,
-  overrides?: Partial<InvokeFrame>,
+  overrides?: Partial<InvokeFrame> & {
+    copyCanonical?: boolean;
+    arenaTransfer?: InvokeArenaTransferToken;
+  },
 ): InvokeFrame;
 export function normalizeInvokeSurfaceName(
   value: InvokeSurface | number | string | null | undefined,
@@ -896,6 +984,7 @@ export interface GuestLinkArtifact {
   symbolPrefix: string;
   methodSymbols: Record<string, string>;
   threadModel: ModuleThreadModelName;
+  capabilities: string[];
   objectBytes: Uint8Array;
 }
 
@@ -946,6 +1035,9 @@ export function compileModuleFromSource(options: {
   maximumMemoryBytes?: number;
   emscriptenRoot?: string;
   allowUndefinedImports?: boolean;
+  guestLinkCapabilities?: string[];
+  catalog?: StandardsEntry[];
+  standardsRoot?: string;
 }): Promise<CompilationResult>;
 
 export function cleanupCompilation(
@@ -1068,6 +1160,9 @@ export interface StandardsEntry {
   hash: string | null;
   version: string | null;
   files: string[];
+  rootTypeName?: string | null;
+  idl?: string;
+  source?: string;
 }
 
 export function loadStandardsCatalog(options?: {
@@ -1957,87 +2052,310 @@ export function createModuleTimerDriver(options: {
   onRun?: (run: ModuleTimerRunRecord) => void;
 }): ModuleTimerDriver;
 
-// --- JS flow-runtime host (WS3.2) ---
+// --- JS flow-runtime host (WS3.2 / Phase 3 routing ABI) ---
+export type FlowFrameOwnership =
+  | "host-owned"
+  | "plugin-owned"
+  | "transferred"
+  | "unknown";
+export type FlowFrameMutability =
+  | "immutable"
+  | "single-writer-mutable"
+  | "append-only"
+  | "unknown";
+
 export interface FlowFrameData {
   portId: string;
   bytes: Uint8Array;
+  typeRef: PayloadTypeRef | null;
+  wireFormat: PayloadWireFormat;
+  alignment: number;
+  ownership: FlowFrameOwnership;
+  mutability: FlowFrameMutability;
+  frameId: bigint;
+  arenaGeneration: number;
   streamId: number;
   sequence: number;
   endOfStream: boolean;
 }
+
+export interface FlowTriggerFrameOptions {
+  portId?: string;
+  bytes?: Uint8Array | ArrayBuffer;
+  typeRef?: PayloadTypeRef | null;
+  wireFormat?: PayloadWireFormat | 0 | 1;
+  alignment?: number;
+  ownership?:
+    | Exclude<FlowFrameOwnership, "unknown">
+    | "producer-owned"
+    | "borrowed"
+    | "shared"
+    | 0
+    | 1
+    | 2;
+  mutability?:
+    | Exclude<FlowFrameMutability, "unknown">
+    | "mutable"
+    | 0
+    | 1
+    | 2;
+  frameId?: bigint | number | string;
+  traceToken?: bigint | number | string;
+  streamId?: number;
+  sequence?: number;
+  endOfStream?: boolean;
+}
+
+export interface FlowOutputFrame extends FlowTriggerFrameOptions {
+  bytes?: Uint8Array | ArrayBuffer;
+}
+
+export interface FlowNodeDispatchDescriptor {
+  nodeIdPtr: number;
+  nodeIndex: number;
+  dependencyIdPtr: number;
+  dependencyIndex: number;
+  pluginIdPtr: number;
+  methodIdPtr: number;
+  dispatchModelPtr: number;
+  entrypointPtr: number;
+  manifestBytesSymbolPtr: number;
+  manifestSizeSymbolPtr: number;
+  initSymbolPtr: number;
+  destroySymbolPtr: number;
+  mallocSymbolPtr: number;
+  freeSymbolPtr: number;
+  streamInvokeSymbolPtr: number;
+  nodeId: string;
+  dependencyId: string;
+  pluginId: string;
+  methodId: string;
+  dispatchModel: string;
+}
+
+export interface FlowDependencyDescriptor {
+  dependencyIdPtr: number;
+  pluginIdPtr: number;
+  versionPtr: number;
+  sha256Ptr: number;
+  signaturePtr: number;
+  signerPublicKeyPtr: number;
+  entrypointPtr: number;
+  manifestBytesSymbolPtr: number;
+  manifestSizeSymbolPtr: number;
+  initSymbolPtr: number;
+  destroySymbolPtr: number;
+  mallocSymbolPtr: number;
+  freeSymbolPtr: number;
+  streamInvokeSymbolPtr: number;
+  wasmBytesPtr: number;
+  wasmSize: number;
+  manifestBytesPtr: number;
+  manifestSize: number;
+  dependencyId: string;
+  pluginId: string;
+  version: string;
+  sha256: string | null;
+  signature: string | null;
+  signerPublicKey: string | null;
+}
+
+export interface FlowEdgeDescriptor {
+  fromNode: number;
+  fromPortPtr: number;
+  toNode: number;
+  toPortPtr: number;
+  schemaNamePtr: number;
+  fileIdentifierPtr: number;
+  schemaVersionPtr: number;
+  schemaHashPtr: number;
+  schemaHashSize: number;
+  rootTypeNamePtr: number;
+  canonicalFallbackAvailable: number;
+  alignedEligible: number;
+  alignedLayoutFields: number;
+  alignedByteLength: number;
+  alignedFixedStringLength: number;
+  alignedRequiredAlignment: number;
+  fromPort: string;
+  toPort: string;
+  schemaName: string;
+  fileIdentifier: string;
+  schemaVersion: string | null;
+  schemaHash: Uint8Array;
+  rootTypeName: string;
+}
+
+export interface FlowRoutingState {
+  alignedSharedRoutes: bigint;
+  alignedCopiedRoutes: bigint;
+  canonicalRoutes: bigint;
+  rejectedFrames: bigint;
+}
+
+export interface FlowNodeState {
+  invocationCount: bigint;
+  consumedFrames: bigint;
+  queuedFrames: number;
+  backlogRemaining: number;
+  lastStatus: number;
+  ready: boolean;
+  yielded: boolean;
+}
+
+export interface FlowIngressState {
+  totalReceived: bigint;
+  totalDropped: bigint;
+  queuedFrames: number;
+}
+
+export interface FlowEngineBodyReference {
+  token: bigint;
+  generation: bigint;
+  fnv1a64: bigint;
+  enginePtr: number;
+  size: number;
+  frames: number;
+  used: number;
+  bytes: Uint8Array;
+}
+
+export interface FlowHandlerInvocation {
+  nodeIndex: number;
+  pluginId: string;
+  methodId: string;
+  dependencyId: string;
+  nodeId: string;
+  frames: FlowFrameData[];
+}
+
+export interface FlowHandlerResult {
+  statusCode?: number;
+  backlogRemaining?: number;
+  yielded?: boolean;
+  outputs?: FlowOutputFrame[];
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  error?: unknown;
+}
+
+export type FlowHandler = (
+  invocation: FlowHandlerInvocation,
+) => Promise<FlowHandlerResult | void> | FlowHandlerResult | void;
+export type FlowHandlerMap = Record<string, FlowHandler>;
+
+export interface FlowDrainOptions {
+  maxIterations?: number;
+  frameBudget?: number;
+}
+
+export interface FlowDrainResult {
+  iterations: number;
+  nodesInvoked: number;
+  handlersSkipped: number;
+}
+
 export interface FlowRuntimeHost {
   instance: WebAssembly.Instance;
   memory: WebAssembly.Memory;
   nodeCount: number;
+  /** Number of real route edges in the compiled graph. */
   edgeCount: number;
+  /** Number of all type descriptor rows, including trigger-only identities. */
+  typeDescriptorCount: number;
   triggerCount: number;
   dependencyCount: number;
   resetState(): void;
   readCString(ptr: number, maxLength?: number): string;
-  getNodeDispatchDescriptor(index: number): Record<string, unknown> & {
-    nodeId: string;
-    dependencyId: string;
-    pluginId: string;
-    methodId: string;
-    dispatchModel: string;
-  };
-  getDependencyDescriptor(index: number): Record<string, unknown> & {
-    dependencyId: string;
-    pluginId: string;
-    version: string;
-  };
-  getNodeState(index: number): {
-    invocationCount: bigint;
-    consumedFrames: bigint;
-    queuedFrames: number;
-    backlogRemaining: number;
-    lastStatus: number;
-    ready: boolean;
-    yielded: boolean;
-  };
-  getIngressState(index: number): {
-    totalReceived: bigint;
-    totalDropped: bigint;
-    queuedFrames: number;
-  };
+  getNodeDispatchDescriptor(index: number): FlowNodeDispatchDescriptor;
+  getDependencyDescriptor(index: number): FlowDependencyDescriptor;
+  getEdgeDescriptor(index: number): FlowEdgeDescriptor;
+  getTypeDescriptor(index: number): FlowEdgeDescriptor | null;
+  getRoutingState(): FlowRoutingState;
+  getNodeState(index: number): FlowNodeState;
+  getIngressState(index: number): FlowIngressState;
+  resolveEngineBodyRef(
+    token: bigint | number | string,
+  ): FlowEngineBodyReference | null;
   enqueueTrigger(triggerIndex: number): void;
   enqueueTriggerFrame(
     triggerIndex: number,
-    frame?: {
-      portId?: string;
-      bytes?: Uint8Array | ArrayBuffer;
-      streamId?: number;
-      sequence?: number;
-      endOfStream?: boolean;
-    },
-  ): void;
+    frame?: FlowTriggerFrameOptions,
+  ): number;
   drain(
-    handlers?: Record<
-      string,
-      (invocation: {
-        nodeIndex: number;
-        pluginId: string;
-        methodId: string;
-        dependencyId: string;
-        nodeId: string;
-        frames: FlowFrameData[];
-      }) =>
-        | Promise<{ statusCode?: number; outputs?: Array<Record<string, unknown>> } | void>
-        | { statusCode?: number; outputs?: Array<Record<string, unknown>> }
-        | void
-    >,
-    options?: { maxIterations?: number; frameBudget?: number },
-  ): Promise<{ iterations: number; nodesInvoked: number; handlersSkipped: number }>;
+    handlers?: FlowHandlerMap,
+    options?: FlowDrainOptions,
+  ): Promise<FlowDrainResult>;
 }
-export const FLOW_INVALID_INDEX: number;
-export function createFlowRuntimeHost(options: {
+
+export interface FlowRuntimeHostOptions {
   wasmSource?: Uint8Array | ArrayBuffer;
   wasmBytes?: Uint8Array | ArrayBuffer;
   wasmModule?: WebAssembly.Module;
   args?: string[];
   env?: Record<string, string>;
   logOutput?: boolean;
-}): Promise<FlowRuntimeHost>;
+  extraImports?: WebAssembly.Imports;
+  legacyHostImportCompat?: boolean;
+  engineLink?: {
+    exports: WebAssembly.Exports & { memory: WebAssembly.Memory };
+  } | null;
+}
+
+export const FLOW_INVALID_INDEX: number;
+export function createFlowRuntimeHost(
+  options: FlowRuntimeHostOptions,
+): Promise<FlowRuntimeHost>;
+
+export interface ModuleSignatureVerificationPolicy {
+  trustedPublicKeys?: string[] | string;
+  requireSignature?: boolean;
+}
+
+export interface IsomorphicFlowChildOptions {
+  pluginId: string;
+  wasmSource: Uint8Array | ArrayBuffer | ArrayBufferView;
+  manifest?: PluginManifest | Record<string, unknown>;
+  surface?: "direct" | "command";
+  verifySignature?: false | ModuleSignatureVerificationPolicy;
+  host?: BrowserHost | RuntimeHost | Record<string, unknown>;
+  hostcallDispatch?: (operation: string, params: unknown) => unknown;
+  imports?: WebAssembly.Imports;
+}
+
+export interface IsomorphicFlowChildRecord {
+  nodeId: string;
+  pluginId: string;
+  sha256: string;
+  descriptor: FlowDependencyDescriptor;
+  config: Uint8Array;
+  configInputPortId: string | null;
+  harness: BrowserModuleHarness;
+}
+
+export interface IsomorphicFlowDrainOptions extends FlowDrainOptions {
+  handlers?: FlowHandlerMap;
+}
+
+export interface IsomorphicFlowRuntimeHost
+  extends Omit<FlowRuntimeHost, "drain"> {
+  parent: FlowRuntimeHost;
+  children: Map<string, IsomorphicFlowChildRecord>;
+  drain(options?: IsomorphicFlowDrainOptions): Promise<FlowDrainResult>;
+  destroy(): void;
+}
+
+export interface IsomorphicFlowRuntimeHostOptions
+  extends FlowRuntimeHostOptions {
+  /** Exact signed artifact bytes are required; precompiled modules are rejected. */
+  wasmModule?: never;
+  verifySignature?: false | ModuleSignatureVerificationPolicy;
+  children?: IsomorphicFlowChildOptions[];
+}
+
+export function createIsomorphicFlowRuntimeHost(
+  options: IsomorphicFlowRuntimeHostOptions,
+): Promise<IsomorphicFlowRuntimeHost>;
 
 export interface ModuleFlatBufferStreamPumpStats {
   bytesReceived: number;

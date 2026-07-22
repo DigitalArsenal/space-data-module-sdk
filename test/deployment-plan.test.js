@@ -15,6 +15,22 @@ import {
 } from "../src/deployment/index.js";
 import { extractPublicationRecordCollection } from "../src/transport/records.js";
 
+function dualTypeSet(setId, schemaName, fileIdentifier, rootTypeName) {
+  const identity = { schemaName, fileIdentifier, rootTypeName };
+  return {
+    setId,
+    allowedTypes: [
+      { ...identity, wireFormat: "flatbuffer" },
+      {
+        ...identity,
+        wireFormat: "aligned-binary",
+        byteLength: 64,
+        requiredAlignment: 8,
+      },
+    ],
+  };
+}
+
 function createManifest() {
   return {
     pluginId: "com.digitalarsenal.examples.protocol-deployment",
@@ -56,15 +72,7 @@ function createManifest() {
           {
             portId: "request",
             acceptedTypeSets: [
-              {
-                setId: "omm",
-                allowedTypes: [
-                  {
-                    schemaName: "OMM.fbs",
-                    fileIdentifier: "$OMM",
-                  },
-                ],
-              },
+              dualTypeSet("omm", "OMM.fbs", "$OMM", "OMM"),
             ],
             minStreams: 1,
             maxStreams: 1,
@@ -75,15 +83,7 @@ function createManifest() {
           {
             portId: "state",
             acceptedTypeSets: [
-              {
-                setId: "cat",
-                allowedTypes: [
-                  {
-                    schemaName: "CAT.fbs",
-                    fileIdentifier: "$CAT",
-                  },
-                ],
-              },
+              dualTypeSet("cat", "CAT.fbs", "$CAT", "CAT"),
             ],
             minStreams: 0,
             maxStreams: 1,

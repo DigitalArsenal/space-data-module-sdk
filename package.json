@@ -32,6 +32,7 @@
     "./compiler": "./src/compiler/index.js",
     "./compiler/emception": "./src/compiler/emception.js",
     "./bundle": "./src/bundle/index.js",
+    "./app": "./src/app/index.js",
     "./deployment": "./src/deployment/index.js",
     "./invoke": "./src/invoke/index.js",
     "./runtime": "./src/runtime/index.js",
@@ -41,7 +42,10 @@
     },
     "./host/browser": "./src/host/browserHost.js",
     "./host/timer-driver": "./src/host/timerDriver.js",
-    "./flow": "./src/flow/index.js",
+    "./flow": {
+      "types": "./src/flow/index.d.ts",
+      "default": "./src/flow/index.js"
+    },
     "./flow/compiler": "./src/flow/flowCompiler.js",
     "./http": "./src/http/index.js",
     "./host/browser-edge-shims": "./src/host/browserEdgeShims.js",
@@ -85,7 +89,7 @@
     "flatsql": "^0.4.2",
     "hd-wallet-wasm": "^2.0.6",
     "sdn-emception": "1.0.0",
-    "spacedatastandards.org": "https://github.com/DigitalArsenal/spacedatastandards.org/archive/b3945bf8cdc527fe8e3ca1468d52da96a649c1a1.tar.gz"
+    "spacedatastandards.org": "https://github.com/DigitalArsenal/spacedatastandards.org/archive/96d61cc782f12b0c2a64665ee4c363f04073bcee.tar.gz"
   },
   "devDependencies": {
     "esbuild": "^0.28.0",

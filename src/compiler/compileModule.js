@@ -81,6 +81,23 @@ export const ModuleThreadModel = Object.freeze({
   EMSCRIPTEN_PTHREADS: "emscripten-pthreads",
 });
 
+function resolveGuestLinkCapabilities(manifest, explicitCapabilities) {
+  const source = Array.isArray(explicitCapabilities)
+    ? explicitCapabilities
+    : (Array.isArray(manifest?.capabilities) ? manifest.capabilities : []);
+  const capabilities = [];
+  const seen = new Set();
+  for (const capability of source) {
+    const id = String(
+      typeof capability === "string" ? capability : capability?.capability ?? "",
+    ).trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    capabilities.push(id);
+  }
+  return capabilities;
+}
+
 function selectCompiler(language) {
   const normalized = String(language ?? "c").trim().toLowerCase();
   if (normalized === "c++" || normalized === "cpp" || normalized === "cxx") {
@@ -439,6 +456,9 @@ function createGuestLinkBundleEntries(guestLink) {
         methodIds: Object.keys(guestLink.methodSymbols ?? {}),
         language: guestLink.language,
         threadModel: guestLink.threadModel ?? ModuleThreadModel.SINGLE_THREAD,
+        ...(Array.isArray(guestLink.capabilities)
+          ? { capabilities: [...guestLink.capabilities] }
+          : {}),
       },
       description: "Guest-link metadata for monolithic flow linking.",
     },
@@ -639,6 +659,7 @@ async function compileWithEmception(options = {}) {
             methodSymbols: guestLink.methodSymbols,
             threadModel:
               compileOptions.threadModel ?? ModuleThreadModel.SINGLE_THREAD,
+            capabilities: compileOptions.guestLinkCapabilities,
             objectBytes: linkObjectBytes,
           },
         };
@@ -801,6 +822,7 @@ async function compileWithSystemEmscripten(options = {}) {
         symbolPrefix: guestLink.prefix,
         methodSymbols: guestLink.methodSymbols,
         threadModel: compileOptions.threadModel,
+        capabilities: compileOptions.guestLinkCapabilities,
         objectBytes: linkObjectBytes,
       },
     };
@@ -954,6 +976,7 @@ async function compileWithWasiThreads(options = {}) {
         symbolPrefix: guestLink.prefix,
         methodSymbols: guestLink.methodSymbols,
         threadModel: compileOptions.threadModel,
+        capabilities: compileOptions.guestLinkCapabilities,
         objectBytes: linkObjectBytes,
       },
     };
@@ -972,7 +995,14 @@ export async function compileModuleFromSource(options = {}) {
 
   ensureExportableMethodIds(manifest);
 
-  const validation = await validateArtifactWithStandards({ manifest });
+  const standardsOptions = {
+    catalog: options.catalog,
+    standardsRoot: options.standardsRoot,
+  };
+  const validation = await validateArtifactWithStandards({
+    manifest,
+    ...standardsOptions,
+  });
   if (!validation.ok) {
     const error = new Error("Manifest validation failed.");
     error.report = validation;
@@ -982,11 +1012,12 @@ export async function compileModuleFromSource(options = {}) {
   const compiler = selectCompiler(options.language);
   const invokeSurfaces = resolveInvokeSurfaces(manifest);
   const includeCommandMain = invokeSurfaces.includes(InvokeSurface.COMMAND);
-  const { manifest: embeddedManifest, warnings } = toEmbeddedPluginManifest(
-    manifest,
-  );
+  const { warnings } = toEmbeddedPluginManifest(manifest);
   const manifestSource = generateEmbeddedManifestSource({
-    manifest: embeddedManifest,
+    // Embed the canonical raw PLG shape so fields that do not exist in the
+    // legacy PMAN object model (notably schemaVersion) remain byte-identical
+    // to the signed custom-section manifest.
+    manifest,
   });
   const invokeHeaderSource = generateInvokeSupportHeader();
   const invokeSource =
@@ -1021,6 +1052,10 @@ export async function compileModuleFromSource(options = {}) {
     ...options,
     noEntry: includeCommandMain !== true,
     threadModel,
+    guestLinkCapabilities: resolveGuestLinkCapabilities(
+      manifest,
+      options.guestLinkCapabilities,
+    ),
   };
   const useWasiThreads =
     threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS;
@@ -1068,6 +1103,7 @@ export async function compileModuleFromSource(options = {}) {
   const report = await validateArtifactWithStandards({
     manifest,
     wasmPath: resolvedOutputPath,
+    ...standardsOptions,
   });
 
   return {

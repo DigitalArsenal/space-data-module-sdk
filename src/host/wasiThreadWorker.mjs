@@ -10,24 +10,15 @@
 
 import { workerData } from "node:worker_threads";
 
-import { createBrowserWasiShim } from "./wasiShim.js";
+import { createWasiThreadWorkerRuntime } from "./wasiThreadWorkerRuntime.js";
 
-const { wasmModule, memory, tid, startArg } = workerData;
-
-const wasi = createBrowserWasiShim({});
-wasi.setMemory(memory);
-
-const imports = {
-  ...wasi.imports,
-  env: { memory },
-  // A leaf compute thread does not spawn further threads; satisfy the import
-  // with a failing stub so any accidental nested spawn degrades rather than
-  // recursing workers without bound.
-  wasi: { "thread-spawn": () => -1 },
-};
-
-const instance = new WebAssembly.Instance(wasmModule, imports);
-wasi.setMemory(instance.exports.memory ?? memory);
+const { wasmModule, memory, tid, startArg, hostcallChannel } = workerData;
+const runtime = createWasiThreadWorkerRuntime({
+  wasmModule,
+  memory,
+  hostcallChannel,
+});
+const instance = runtime.instantiate();
 
 try {
   instance.exports.wasi_thread_start(tid, startArg);
@@ -36,4 +27,6 @@ try {
   if (!(error && error.name === "WasiExitError")) {
     throw error;
   }
+} finally {
+  runtime.close();
 }

@@ -14,11 +14,25 @@
           "portId": "request",
           "acceptedTypeSets": [
             {
-              "setId": "omm",
+              "setId": "atmosphere-model",
               "allowedTypes": [
                 {
-                  "schemaName": "OMM.fbs",
-                  "fileIdentifier": "$OMM"
+                  "schemaName": "ATM.fbs",
+                  "fileIdentifier": "$ATM",
+                  "schemaVersion": "1.0.2",
+                  "schemaHash": "0fefdca4bbcb7857e93403dd11f29a678d454ab71b14385715c52f6a72dd77ec",
+                  "rootTypeName": "ATM",
+                  "wireFormat": "flatbuffer"
+                },
+                {
+                  "schemaName": "ATM.fbs",
+                  "fileIdentifier": "$ATM",
+                  "schemaVersion": "1.0.2",
+                  "schemaHash": "0fefdca4bbcb7857e93403dd11f29a678d454ab71b14385715c52f6a72dd77ec",
+                  "rootTypeName": "ATM",
+                  "wireFormat": "aligned-binary",
+                  "byteLength": 8,
+                  "requiredAlignment": 4
                 }
               ]
             }
@@ -33,11 +47,25 @@
           "portId": "state",
           "acceptedTypeSets": [
             {
-              "setId": "cat",
+              "setId": "gravity-model",
               "allowedTypes": [
                 {
-                  "schemaName": "CAT.fbs",
-                  "fileIdentifier": "$CAT"
+                  "schemaName": "GRV.fbs",
+                  "fileIdentifier": "$GRV",
+                  "schemaVersion": "0.0.4",
+                  "schemaHash": "2f8585994747b20a6f52a3a5875be763dbfa12de9de6b5979e305296081f1033",
+                  "rootTypeName": "GRV",
+                  "wireFormat": "flatbuffer"
+                },
+                {
+                  "schemaName": "GRV.fbs",
+                  "fileIdentifier": "$GRV",
+                  "schemaVersion": "0.0.4",
+                  "schemaHash": "2f8585994747b20a6f52a3a5875be763dbfa12de9de6b5979e305296081f1033",
+                  "rootTypeName": "GRV",
+                  "wireFormat": "aligned-binary",
+                  "byteLength": 72,
+                  "requiredAlignment": 8
                 }
               ]
             }

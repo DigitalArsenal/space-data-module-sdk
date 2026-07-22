@@ -1,6 +1,7 @@
 export {
   INVOKE_ARENA_ALIGNMENT,
   assertAlignedInvokeBuffer,
+  createInvokeArenaLease,
   decodePluginInvokeRequest,
   decodePluginInvokeResponse,
   encodePluginInvokeRequest,

@@ -5,8 +5,9 @@
  * WASI modules (the same .wasm that runs in WasmEdge) can be instantiated
  * directly in the browser via WebAssembly.instantiate().
  *
- * Covers the 11 imports observed across all SDN plugin standalone builds:
+ * Covers the preview1 imports observed across SDN plugin standalone builds:
  *   clock_time_get, fd_write, fd_read, fd_close, fd_seek, fd_fdstat_get,
+ *   fd_prestat_get, fd_prestat_dir_name,
  *   environ_sizes_get, environ_get, proc_exit, args_get, args_sizes_get,
  *   random_get
  */
@@ -156,6 +157,18 @@ export function createBrowserWasiShim(options = {}) {
     return ERRNO_SUCCESS;
   }
 
+  // This browser shim exposes no ambient preopened directories. Toolchains
+  // commonly probe these two preview1 calls during startup; returning BADF is
+  // the fail-closed WASI result and lets the guest continue without filesystem
+  // authority.
+  function fd_prestat_get(_fd, _bufPtr) {
+    return ERRNO_BADF;
+  }
+
+  function fd_prestat_dir_name(_fd, _pathPtr, _pathLen) {
+    return ERRNO_BADF;
+  }
+
   function environ_sizes_get(countPtr, bufSizePtr) {
     const dv = view();
     dv.setUint32(countPtr, encodedEnvEntries.length, true);
@@ -274,6 +287,8 @@ export function createBrowserWasiShim(options = {}) {
         fd_close,
         fd_seek,
         fd_fdstat_get,
+        fd_prestat_get,
+        fd_prestat_dir_name,
         environ_sizes_get,
         environ_get,
         args_sizes_get,

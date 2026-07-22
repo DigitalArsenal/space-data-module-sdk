@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as flatbuffers from "../src/vendor/flatbuffers/flatbuffers.js";
+import { PIV } from "spacedatastandards.org/lib/js/PIV/PIV.js";
+import { BufferMutability } from "../src/generated/orbpro/stream/buffer-mutability.js";
+import { BufferOwnership } from "../src/generated/orbpro/stream/buffer-ownership.js";
 
 import {
   INVOKE_ARENA_ALIGNMENT,
@@ -12,13 +16,30 @@ import {
 } from "../src/index.js";
 import { createBrowserModuleHarness } from "../src/testing/index.js";
 
+const GRV_IDENTITY = Object.freeze({
+  schemaName: "GRV.fbs",
+  fileIdentifier: "$GRV",
+  rootTypeName: "GRV",
+});
+
 function createPort(portId, required = true) {
   return {
     portId,
     acceptedTypeSets: [
       {
-        setId: `${portId}-any`,
-        allowedTypes: [{ acceptsAnyFlatbuffer: true }],
+        setId: `${portId}-grv`,
+        allowedTypes: [
+          {
+            ...GRV_IDENTITY,
+            wireFormat: "flatbuffer",
+          },
+          {
+            ...GRV_IDENTITY,
+            wireFormat: "aligned-binary",
+            byteLength: 72,
+            requiredAlignment: 8,
+          },
+        ],
       },
     ],
     minStreams: required ? 1 : 0,
@@ -52,6 +73,148 @@ function createManifest(methodId, inputPortIds, outputPortIds) {
 function absoluteFrameOffset(arena, frame) {
   return arena.byteOffset + frame.offset;
 }
+
+function alignedGrvType(overrides = {}) {
+  return {
+    ...GRV_IDENTITY,
+    schemaVersion: "0.0.4",
+    schemaHash:
+      "2f8585994747b20a6f52a3a5875be763dbfa12de9de6b5979e305296081f1033",
+    wireFormat: "aligned-binary",
+    fixedStringLength: 24,
+    byteLength: 72,
+    requiredAlignment: 8,
+    ...overrides,
+  };
+}
+
+function mutateFirstTabUint32(bytes, kind, vtableField, value) {
+  const bb = new flatbuffers.ByteBuffer(bytes);
+  const root = PIV.getRootAsPIV(bb);
+  const tab =
+    kind === "request"
+      ? root.REQUEST()?.INPUTS(0)
+      : root.RESPONSE()?.OUTPUTS(0);
+  assert.ok(tab, `expected first ${kind} TAB`);
+  const fieldOffset = tab.bb.__offset(tab.bb_pos, vtableField);
+  assert.notEqual(fieldOffset, 0, `TAB field ${vtableField} must be present`);
+  tab.bb.writeInt32(tab.bb_pos + fieldOffset, value);
+  return bytes;
+}
+
+test("PIV/TAB round-trip preserves exact schema hash and aligned layout metadata", () => {
+  const frameId = 0xfedcba9876543210n;
+  const bytes = encodePluginInvokeRequest({
+    methodId: "metadata",
+    inputs: [
+      {
+        portId: "gravity",
+        alignment: 8,
+        typeRef: alignedGrvType(),
+        ownership: "producer-owned",
+        mutability: "append-only",
+        frameId,
+        // An explicit opaque frame id must win over legacy stream fields.
+        sequence: 9n,
+        endOfStream: true,
+        payload: new Uint8Array(72),
+      },
+    ],
+  });
+
+  const [frame] = decodePluginInvokeRequest(bytes).inputs;
+  assert.deepEqual(
+    Array.from(frame.typeRef.schemaHash),
+    Array.from(Buffer.from(alignedGrvType().schemaHash, "hex")),
+  );
+  assert.equal(frame.typeRef.schemaVersion, "0.0.4");
+  assert.equal(frame.typeRef.fixedStringLength, 24);
+  assert.equal(frame.typeRef.byteLength, 72);
+  assert.equal(frame.typeRef.requiredAlignment, 8);
+  assert.equal(frame.ownership, BufferOwnership.PRODUCER_OWNED);
+  assert.equal(frame.mutability, BufferMutability.APPEND_ONLY);
+  assert.equal(frame.frameId, frameId);
+});
+
+test("PIV/TAB encoder rejects explicit zero and non-power-of-two descriptor alignment", () => {
+  const makeRequest = (alignment) => ({
+    methodId: "invalid_alignment",
+    inputs: [
+      {
+        portId: "gravity",
+        alignment,
+        typeRef: alignedGrvType(),
+        payload: new Uint8Array(72),
+      },
+    ],
+  });
+
+  assert.throws(
+    () => encodePluginInvokeRequest(makeRequest(0)),
+    /alignment.*positive power of two/i,
+  );
+  assert.throws(
+    () => encodePluginInvokeRequest(makeRequest(3)),
+    /alignment.*positive power of two/i,
+  );
+});
+
+test("PIV/TAB encoder rejects descriptor alignment below the type requirement", () => {
+  assert.throws(
+    () =>
+      encodePluginInvokeRequest({
+        methodId: "weak_alignment",
+        inputs: [
+          {
+            portId: "gravity",
+            alignment: 4,
+            typeRef: alignedGrvType(),
+            payload: new Uint8Array(72),
+          },
+        ],
+      }),
+    /alignment 4.*required alignment 8/i,
+  );
+});
+
+test("PIV/TAB encoder rejects an aligned payload whose size differs from its declared layout", () => {
+  assert.throws(
+    () =>
+      encodePluginInvokeResponse({
+        outputs: [
+          {
+            portId: "gravity",
+            typeRef: alignedGrvType(),
+            payload: new Uint8Array(71),
+          },
+        ],
+      }),
+    /aligned.*size 71.*byteLength 72/i,
+  );
+});
+
+test("PIV/TAB external arena encoder rejects uint32 range overflow before arena slicing", () => {
+  assert.throws(
+    () =>
+      encodePluginInvokeRequest({
+        methodId: "overflow",
+        externalArena: new Uint8Array(16),
+        inputs: [
+          {
+            portId: "gravity",
+            offset: 0xffffffff,
+            size: 2,
+            alignment: 8,
+            typeRef: {
+              ...GRV_IDENTITY,
+              wireFormat: "flatbuffer",
+            },
+          },
+        ],
+      }),
+    /offset \+ size.*uint32/i,
+  );
+});
 
 test("encoded request arenas are absolutely aligned across size permutations", () => {
   for (let trial = 0; trial < 128; trial += 1) {
@@ -171,39 +334,83 @@ test("aligned-binary frame views support direct 64-bit typed array access", () =
 });
 
 test("decoder rejects frames that violate their declared required alignment", () => {
-  // Hand-build a response whose frame metadata lies about alignment: the
-  // frame claims requiredAlignment 16 but sits at an 8-only offset.
-  const bytes = encodePluginInvokeResponse({
+  const bytes = mutateFirstTabUint32(encodePluginInvokeResponse({
     statusCode: 0,
     outputs: [
-      { portId: "pad", payload: new Uint8Array(8) },
       {
         portId: "state",
-        alignment: 8,
-        typeRef: { requiredAlignment: 16, wireFormat: "aligned-binary" },
-        payload: new Uint8Array(16),
+        alignment: 16,
+        typeRef: alignedGrvType({ requiredAlignment: 16 }),
+        payload: new Uint8Array(72),
       },
     ],
-  });
+  }), "response", 8, 8);
 
-  // The encoder packs frames to their declared frame alignment (8 here), so
-  // the 16-byte requiredAlignment contract is violated either directly or
-  // after shifting the buffer base off the 16-byte boundary.
-  let threw = false;
-  try {
-    decodePluginInvokeResponse(bytes);
-  } catch (error) {
-    assert.match(String(error.message), /misaligned/);
-    threw = true;
-  }
-  if (!threw) {
-    const shifted = new Uint8Array(bytes.length + 8);
-    shifted.set(bytes, 8);
-    assert.throws(
-      () => decodePluginInvokeResponse(shifted.subarray(8)),
-      /misaligned|not 8-byte aligned/,
-    );
-  }
+  assert.throws(
+    () => decodePluginInvokeResponse(bytes),
+    /alignment 8.*required alignment 16/i,
+  );
+});
+
+test("decoder rejects zero alignment, aligned size mismatch, overflow, and out-of-arena ranges", () => {
+  const validAligned = () =>
+    encodePluginInvokeResponse({
+      outputs: [
+        {
+          portId: "gravity",
+          alignment: 8,
+          typeRef: alignedGrvType(),
+          payload: new Uint8Array(72),
+        },
+      ],
+    });
+
+  assert.throws(
+    () =>
+      decodePluginInvokeResponse(
+        mutateFirstTabUint32(validAligned(), "response", 8, 0),
+      ),
+    /alignment.*positive power of two/i,
+  );
+  assert.throws(
+    () =>
+      decodePluginInvokeResponse(
+        mutateFirstTabUint32(validAligned(), "response", 6, 71),
+      ),
+    /aligned.*size 71.*byteLength 72/i,
+  );
+
+  const externalArena = new Uint8Array(32);
+  const validExternal = () =>
+    encodePluginInvokeRequest({
+      methodId: "external",
+      externalArena,
+      inputs: [
+        {
+          portId: "gravity",
+          offset: 8,
+          size: 8,
+          alignment: 8,
+          typeRef: { ...GRV_IDENTITY, wireFormat: "flatbuffer" },
+        },
+      ],
+    });
+  assert.throws(
+    () =>
+      decodePluginInvokeRequest(
+        mutateFirstTabUint32(validExternal(), "request", 4, 0xffffffff),
+        { externalArena },
+      ),
+    /offset \+ size.*uint32/i,
+  );
+  assert.throws(
+    () =>
+      decodePluginInvokeRequest(
+        mutateFirstTabUint32(validExternal(), "request", 6, 32),
+        { externalArena },
+      ),
+    /payload range exceeds external arena/i,
+  );
 });
 
 const ALIGNMENT_PROBE_SOURCE = `#include <stdint.h>
@@ -215,10 +422,10 @@ int probe_alignment(void) {
     plugin_set_error("missing-frame", "No input frame was provided.");
     return 3;
   }
-  if (((uintptr_t)frame->payload % 16u) != 0u) {
+  if (((uintptr_t)frame->payload % 8u) != 0u) {
     plugin_set_error(
       "guest-misaligned-input",
-      "Input payload view is not 16-byte aligned inside guest memory."
+      "Input payload view is not 8-byte aligned inside guest memory."
     );
     return 4;
   }
@@ -230,7 +437,7 @@ int probe_alignment(void) {
     frame->root_type_name,
     frame->fixed_string_length,
     frame->byte_length,
-    16,
+    8,
     frame->payload,
     frame->payload_length
   );
@@ -250,7 +457,7 @@ test("compiled module sees aligned input views and returns aligned response aren
       wasmSource: compilation.wasmBytes,
       surface: "direct",
     });
-    const payload = new Uint8Array(64);
+    const payload = new Uint8Array(72);
     for (let index = 0; index < payload.length; index += 1) {
       payload[index] = (index * 5 + 1) & 0xff;
     }
@@ -260,8 +467,9 @@ test("compiled module sees aligned input views and returns aligned response aren
         {
           portId: "state",
           typeRef: {
+            ...GRV_IDENTITY,
             wireFormat: "aligned-binary",
-            requiredAlignment: 16,
+            requiredAlignment: 8,
             byteLength: payload.length,
           },
           payload,
@@ -272,11 +480,11 @@ test("compiled module sees aligned input views and returns aligned response aren
     assert.equal(response.statusCode, 0, response.errorMessage ?? "");
     assert.equal(response.outputs.length, 1);
     const frame = response.outputs[0];
-    assert.equal(frame.typeRef?.requiredAlignment, 16);
+    assert.equal(frame.typeRef?.requiredAlignment, 8);
     assert.equal(
-      (response.payloadArena.byteOffset + frame.offset) % 16,
+      (response.payloadArena.byteOffset + frame.offset) % 8,
       0,
-      "response frame must be absolutely 16-byte aligned",
+      "response frame must be absolutely 8-byte aligned",
     );
     assert.deepEqual(Array.from(frame.payload), Array.from(payload));
     harness.destroy();

@@ -10,7 +10,7 @@
  *        trigger bindings, capability union)
  *     -> flow_generated.inc (descriptor tables + required-port readiness
  *        tables + prefixed guest-link entry dispatch)
- *     -> emception em++ monolithic link of the SDK flow runtime template
+ *     -> a thread-model-matched monolithic link of the SDK flow runtime template
  *        (src/flow/runtime-src/flow_runtime.cpp, the
  *        space_data_module_runtime_* ABI) with each dependency's PREFIXED
  *        guest-link wasm object (dist/guest-link/module-link.o, emitted by
@@ -26,22 +26,48 @@
  * FlowStore install triple (runtime.wasm + flow.json + artifact.json) plus
  * the module layout (isomorphic/module.wasm + plugin-manifest.json).
  *
- * Toolchain is EMCEPTION ONLY (the same runWithEmceptionLock pipeline the
- * module compiler uses) so the identical compile path can later run inside
- * the browser IDE. Never the system emcc.
+ * Single-thread guest sets use Emception (the same runWithEmceptionLock
+ * pipeline the module compiler uses). All-wasi-threads guest sets use the
+ * SDK's canonical wasm32-wasip1-threads toolchain and artifact guard. Mixing
+ * those object models is rejected before linking.
  */
 
+import os from "node:os";
 import path from "node:path";
+import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 
 import { generateEmbeddedManifestSource } from "../embeddedManifest.js";
 import { generateInvokeSupportHeader } from "../compiler/invokeGlue.js";
 import { runWithEmceptionLock } from "../compiler/emceptionNode.js";
-import { validateArtifactWithStandards } from "../compliance/index.js";
-import { encodePluginManifest } from "../manifest/index.js";
+import {
+  assertPthreadArtifact,
+  assertPthreadFlagsPresent,
+  PTHREAD_FINAL_LINK_FLAGS,
+} from "../compiler/pthreadArtifactGuard.js";
+import { resolveWasiThreadsToolchain } from "../compiler/wasiThreadsToolchain.js";
+import {
+  validateArtifactWithStandards,
+  validatePluginManifest,
+} from "../compliance/index.js";
+import {
+  alignedPayloadLayoutsCompatible,
+  encodePluginManifest,
+  getPayloadTypeWireFormat,
+  payloadSchemaIdentitiesEqual,
+} from "../manifest/index.js";
 import { appendWasmCustomSection } from "../bundle/wasm.js";
 import { SDS_MANIFEST_SECTION_NAME } from "../bundle/constants.js";
+import { verifyModuleArtifact } from "../bundle/signing.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { bytesToHex } from "../utils/encoding.js";
 import { encodeFlowProgram } from "./flowCodec.js";
@@ -62,10 +88,21 @@ import { DrainPolicy } from "../generated/orbpro/manifest.js";
 const RUNTIME_TEMPLATE_PATH = fileURLToPath(
   new URL("./runtime-src/flow_runtime.cpp", import.meta.url),
 );
+const execFileAsync = promisify(execFile);
+
+const FLOW_THREAD_MODEL = Object.freeze({
+  SINGLE_THREAD: "single-thread",
+  WASI_THREADS: "wasi-threads",
+});
+const HISTORICAL_PTHREAD_THREAD_MODEL = "emscripten-pthreads";
 
 const RUNTIME_ABI_EXPORTS = [
   "get_node_descriptor_count",
   "get_edge_descriptor_count",
+  "get_edge_descriptors",
+  "get_route_edge_descriptor_count",
+  "get_routing_state",
+  "get_current_invocation_generation",
   "get_trigger_descriptor_count",
   "get_dependency_descriptor_count",
   "reset_state",
@@ -113,9 +150,8 @@ export const ENGINE_LINK_CAPABILITY = "storage_engine_link";
 export function flowEngineLinkage(flow) {
   const linkage = String(flow?.engineLinkage ?? "").trim().toLowerCase();
   if (linkage === "" || linkage === "none" || linkage === "bridge") return null;
-  if (linkage === "flatsql") return "flatsql";
   throw new Error(
-    `Unsupported flow.engineLinkage "${flow.engineLinkage}" (expected "flatsql" or omitted for bridge mode).`,
+    `flow.engineLinkage "${flow.engineLinkage}" is retired: FlatSQL must be an independently signed and instantiated isomorphic WASM node.`,
   );
 }
 
@@ -139,8 +175,125 @@ function cString(value) {
   return JSON.stringify(String(value ?? ""));
 }
 
+function cNullableString(value) {
+  return value === undefined || value === null ? "nullptr" : cString(value);
+}
+
+function schemaHashBytes(value) {
+  if (value === undefined || value === null) return [];
+  if (typeof value === "string") {
+    const hex = value.startsWith("0x") ? value.slice(2) : value;
+    if (hex.length === 0) return [];
+    if (hex.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(hex)) {
+      throw new TypeError("Validated edge contract contains an invalid schemaHash.");
+    }
+    const bytes = [];
+    for (let index = 0; index < hex.length; index += 2) {
+      bytes.push(Number.parseInt(hex.slice(index, index + 2), 16));
+    }
+    return bytes;
+  }
+  if (Array.isArray(value) || value instanceof Uint8Array) {
+    return Array.from(value);
+  }
+  throw new TypeError("Validated edge contract contains an invalid schemaHash.");
+}
+
+function edgeLayoutScalar(value, label) {
+  if (value === undefined || value === null) {
+    return { present: false, value: 0 };
+  }
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric < 0 || numeric > 0xffffffff) {
+    throw new TypeError(`Validated edge contract contains an invalid ${label}.`);
+  }
+  return { present: true, value: numeric };
+}
+
 function pushIssue(issues, severity, code, message, location) {
   issues.push({ severity, code, message, location });
+}
+
+async function verifyIsomorphicNodeArtifacts({
+  flow,
+  check,
+  dependencies,
+  flowSourcePath,
+}) {
+  const nodesById = new Map(
+    (flow?.nodes ?? []).map((node) => [node.nodeId, node]),
+  );
+  const verifiedByPluginId = new Map();
+  for (const checkedNode of check.nodes) {
+    if (checkedNode.dispatchModel !== "isomorphic") continue;
+    const node = nodesById.get(checkedNode.nodeId);
+    const dependency = dependencies.get(checkedNode.pluginId);
+    if (!node || !dependency) {
+      throw new Error(
+        `Cannot verify isomorphic node "${checkedNode.nodeId}" without its resolved dependency.`,
+      );
+    }
+    const prior = verifiedByPluginId.get(checkedNode.pluginId);
+    if (prior) {
+      if (prior.sha256 !== node.artifact.sha256) {
+        throw new Error(
+          `Isomorphic plugin "${checkedNode.pluginId}" is bound to conflicting artifact hashes.`,
+        );
+      }
+      continue;
+    }
+
+    const flowBase = flowSourcePath
+      ? path.dirname(path.resolve(flowSourcePath))
+      : dependency.dir ?? process.cwd();
+    const artifactPath = path.isAbsolute(node.artifact.path)
+      ? node.artifact.path
+      : path.resolve(flowBase, node.artifact.path);
+    const artifactBytes = dependency.artifactBytes
+      ? new Uint8Array(dependency.artifactBytes)
+      : new Uint8Array(await readFile(artifactPath));
+    const exactSha256 = bytesToHex(await sha256Bytes(artifactBytes));
+    if (exactSha256 !== node.artifact.sha256) {
+      throw new Error(
+        `Isomorphic node "${checkedNode.nodeId}" artifact hash mismatch: expected ${node.artifact.sha256}, received ${exactSha256}.`,
+      );
+    }
+
+    const publisherPath = path.isAbsolute(node.artifact.publisher)
+      ? node.artifact.publisher
+      : path.resolve(flowBase, node.artifact.publisher);
+    const publisher = dependency.publisherRecord
+      ? dependency.publisherRecord
+      : JSON.parse(await readFile(publisherPath, "utf8"));
+    if (publisher?.developmentOnly === true) {
+      throw new Error(
+        `Isomorphic node "${checkedNode.nodeId}" is signed only by a development publisher.`,
+      );
+    }
+    if (!/^[0-9a-f]{64}$/.test(publisher?.publicKeyHex ?? "")) {
+      throw new Error(
+        `Isomorphic node "${checkedNode.nodeId}" publisher has no valid Ed25519 public key.`,
+      );
+    }
+    const verification = await verifyModuleArtifact(artifactBytes, {
+      trustedPublicKeys: [publisher.publicKeyHex],
+      requireSignature: true,
+    });
+    if (!verification.verified || verification.signatureScope !== "bundle") {
+      throw new Error(
+        `Isomorphic node "${checkedNode.nodeId}" artifact signature is not a verified whole-bundle signature.`,
+      );
+    }
+    verifiedByPluginId.set(checkedNode.pluginId, {
+      artifactBytes,
+      artifactPath,
+      publisher,
+      publisherPath,
+      sha256: exactSha256,
+      verification,
+    });
+  }
+  return verifiedByPluginId;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,27 +421,93 @@ function portAcceptedTypes(port) {
   return types;
 }
 
-function typesCompatible(fromTypes, toTypes) {
-  if (fromTypes.length === 0 || toTypes.length === 0) {
-    return true; // untyped side — no declared constraint to violate
+function concreteTypesByWireFormat(types, wireFormat) {
+  return types.filter(
+    (typeRef) =>
+      typeRef?.acceptsAnyFlatbuffer !== true &&
+      getPayloadTypeWireFormat(typeRef) === wireFormat,
+  );
+}
+
+function resolveEdgeTypeContract(fromTypes, toTypes) {
+  const fromCanonical = concreteTypesByWireFormat(fromTypes, "flatbuffer");
+  const toCanonical = concreteTypesByWireFormat(toTypes, "flatbuffer");
+  const fromAligned = concreteTypesByWireFormat(fromTypes, "aligned-binary");
+  const toAligned = concreteTypesByWireFormat(toTypes, "aligned-binary");
+
+  // Host-model graph boundaries are not PLG ports. They remain
+  // application-blind byte ingress/egress and therefore support only the
+  // concrete canonical identity declared by the module-facing side.
+  if (fromTypes.length === 0 && toCanonical.length === 1) {
+    const canonical = toCanonical[0];
+    return {
+      schemaName: canonical.schemaName ?? null,
+      fileIdentifier: canonical.fileIdentifier ?? null,
+      schemaVersion: canonical.schemaVersion ?? null,
+      schemaHash: canonical.schemaHash ?? null,
+      rootTypeName: canonical.rootTypeName ?? null,
+      compatibleWireFormats: ["flatbuffer"],
+      canonical: { producer: null, consumer: canonical },
+      aligned: null,
+    };
   }
-  for (const to of toTypes) {
-    if (to.acceptsAnyFlatbuffer === true) return true;
+  if (toTypes.length === 0 && fromCanonical.length === 1) {
+    const canonical = fromCanonical[0];
+    return {
+      schemaName: canonical.schemaName ?? null,
+      fileIdentifier: canonical.fileIdentifier ?? null,
+      schemaVersion: canonical.schemaVersion ?? null,
+      schemaHash: canonical.schemaHash ?? null,
+      rootTypeName: canonical.rootTypeName ?? null,
+      compatibleWireFormats: ["flatbuffer"],
+      canonical: { producer: canonical, consumer: null },
+      aligned: null,
+    };
   }
-  for (const from of fromTypes) {
-    if (from.acceptsAnyFlatbuffer === true) return true;
-  }
-  for (const from of fromTypes) {
-    for (const to of toTypes) {
-      if (
-        (from.fileIdentifier && to.fileIdentifier && from.fileIdentifier === to.fileIdentifier) ||
-        (from.schemaName && to.schemaName && from.schemaName === to.schemaName)
-      ) {
-        return true;
-      }
+
+  for (const producerCanonical of fromCanonical) {
+    const consumerCanonical = toCanonical.find((candidate) =>
+      payloadSchemaIdentitiesEqual(producerCanonical, candidate),
+    );
+    if (!consumerCanonical) continue;
+
+    const producerAligned = fromAligned.find((candidate) =>
+      payloadSchemaIdentitiesEqual(producerCanonical, candidate),
+    );
+    const consumerAligned = toAligned.find((candidate) =>
+      payloadSchemaIdentitiesEqual(consumerCanonical, candidate),
+    );
+    if (!producerAligned || !consumerAligned) {
+      return {
+        errorCode: "edge-missing-representation-pair",
+        errorMessage:
+          "The edge's canonical SDS identity is not paired with an aligned-binary representation on both ports.",
+      };
     }
+    if (!alignedPayloadLayoutsCompatible(producerAligned, consumerAligned)) {
+      return {
+        errorCode: "edge-aligned-layout-mismatch",
+        errorMessage:
+          `Aligned-binary peers for ${producerCanonical.schemaName ?? "the SDS type"} ` +
+          "declare incompatible byteLength, fixedStringLength, or requiredAlignment metadata.",
+      };
+    }
+
+    return {
+      schemaName: producerCanonical.schemaName ?? null,
+      fileIdentifier: producerCanonical.fileIdentifier ?? null,
+      schemaVersion: producerCanonical.schemaVersion ?? null,
+      schemaHash: producerCanonical.schemaHash ?? null,
+      rootTypeName: producerCanonical.rootTypeName ?? null,
+      compatibleWireFormats: ["flatbuffer", "aligned-binary"],
+      canonical: {
+        producer: producerCanonical,
+        consumer: consumerCanonical,
+      },
+      aligned: { producer: producerAligned, consumer: consumerAligned },
+    };
   }
-  return false;
+  return null;
 }
 
 function describeTypes(types) {
@@ -307,9 +526,92 @@ function isHostModelNode(node) {
   return node?.dispatchModel === "host" || kind === "sink" || kind === "source";
 }
 
+function requestedNodeDispatchModel(node) {
+  const requested = String(node?.dispatchModel ?? "").trim().toLowerCase();
+  return requested || null;
+}
+
+function validateIsomorphicArtifactLock(node, issues, location) {
+  const artifact = node?.artifact;
+  const valid =
+    artifact &&
+    typeof artifact === "object" &&
+    !Array.isArray(artifact) &&
+    typeof artifact.path === "string" &&
+    artifact.path.trim().length > 0 &&
+    typeof artifact.publisher === "string" &&
+    artifact.publisher.trim().length > 0 &&
+    typeof artifact.sha256 === "string" &&
+    /^[0-9a-f]{64}$/.test(artifact.sha256);
+  if (valid) return;
+  pushIssue(
+    issues,
+    "error",
+    "missing-isomorphic-artifact-lock",
+    `Isomorphic node "${node?.nodeId ?? "?"}" must bind artifact.path, artifact.publisher, and an exact lowercase SHA-256 digest.`,
+    `${location}.artifact`,
+  );
+}
+
 function capabilityId(capability) {
   if (typeof capability === "string") return capability;
   return capability?.capability ?? null;
+}
+
+function normalizedCapabilityIds(capabilities) {
+  const ids = [];
+  const seen = new Set();
+  for (const capability of Array.isArray(capabilities) ? capabilities : []) {
+    const id = String(capabilityId(capability) ?? "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+function selectedGuestLink(dependency, engineLinked) {
+  if (!dependency) return null;
+  return engineLinked
+    ? (dependency.guestLinkLinked ?? dependency.guestLink ?? null)
+    : (dependency.guestLink ?? null);
+}
+
+function normalizeGuestThreadModel(value) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return FLOW_THREAD_MODEL.SINGLE_THREAD;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === FLOW_THREAD_MODEL.SINGLE_THREAD) {
+    return FLOW_THREAD_MODEL.SINGLE_THREAD;
+  }
+  if (
+    normalized === FLOW_THREAD_MODEL.WASI_THREADS ||
+    normalized === HISTORICAL_PTHREAD_THREAD_MODEL
+  ) {
+    return FLOW_THREAD_MODEL.WASI_THREADS;
+  }
+  return null;
+}
+
+function resolveNodeCapabilitySlice(entry, guestLink) {
+  if (Array.isArray(entry.node?.capabilities)) {
+    return {
+      capabilities: normalizedCapabilityIds(entry.node.capabilities),
+      source: "node",
+    };
+  }
+  const guestCapabilities = guestLink?.metadata?.capabilities ?? guestLink?.capabilities;
+  if (Array.isArray(guestCapabilities)) {
+    return {
+      capabilities: normalizedCapabilityIds(guestCapabilities),
+      source: "guest-link",
+    };
+  }
+  return {
+    capabilities: normalizedCapabilityIds(entry.dependency?.manifest?.capabilities),
+    source: "manifest",
+  };
 }
 
 // A module manifest's own DEPENDENCIES entries (PLG PluginDependency:
@@ -461,7 +763,7 @@ export function findFlowCycles(nodes, edges) {
         // Back edge: extract the cycle from the stack.
         const at = stack.indexOf(next);
         const nodeIds = stack.slice(at);
-        const key = [...nodeIds].sort().join(" ");
+        const key = [...nodeIds].sort().join("\0");
         if (!seen.has(key)) {
           seen.add(key);
           const cycleEdges = [];
@@ -731,6 +1033,7 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
 
   const nodeIndex = new Map();
   const resolvedNodes = [];
+  const validatedDependencyIds = new Set();
   nodes.forEach((node, index) => {
     const location = `flow.nodes[${index}]`;
     if (!node?.nodeId) {
@@ -744,10 +1047,45 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
     nodeIndex.set(node.nodeId, index);
 
     const dependency = dependencies.get(node.pluginId) ?? null;
+    const requestedDispatchModel = requestedNodeDispatchModel(node);
     let method = null;
     let dispatchModel = "host";
     if (dependency) {
-      dispatchModel = "linked-direct";
+      if (
+        requestedDispatchModel &&
+        requestedDispatchModel !== "linked-direct" &&
+        requestedDispatchModel !== "isomorphic"
+      ) {
+        pushIssue(
+          issues,
+          "error",
+          "invalid-dispatch-model",
+          `Resolved node "${node.nodeId}" requests unsupported dispatch model "${node.dispatchModel}".`,
+          `${location}.dispatchModel`,
+        );
+      }
+      dispatchModel =
+        requestedDispatchModel === "isomorphic"
+          ? "isomorphic"
+          : "linked-direct";
+      if (dispatchModel === "isomorphic") {
+        validateIsomorphicArtifactLock(node, issues, location);
+      }
+      if (!validatedDependencyIds.has(node.pluginId)) {
+        validatedDependencyIds.add(node.pluginId);
+        const report = validatePluginManifest(dependency.manifest, {
+          sourceName: `dependency[${JSON.stringify(node.pluginId)}]`,
+        });
+        for (const issue of report.issues) {
+          pushIssue(
+            issues,
+            issue.severity,
+            issue.code,
+            `Plugin "${node.pluginId}": ${issue.message}`,
+            issue.location,
+          );
+        }
+      }
       method = findMethod(dependency.normalized, node.methodId);
       if (!method) {
         pushIssue(
@@ -771,6 +1109,46 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
   });
 
   const resolvedByNodeId = new Map(resolvedNodes.map((entry) => [entry.node.nodeId, entry]));
+  const edgeTypeContracts = Array(edges.length).fill(null);
+
+  for (const entry of resolvedNodes) {
+    if (entry.dispatchModel !== "host" || !isHostModelNode(entry.node)) continue;
+    const incomingEdges = edges.filter(
+      (edge) => edge?.toNodeId === entry.node.nodeId,
+    );
+    const outgoingEdges = edges.filter(
+      (edge) => edge?.fromNodeId === entry.node.nodeId,
+    );
+    const location = `flow.nodes[${entry.index}]`;
+    if (incomingEdges.length > 0 && outgoingEdges.length > 0) {
+      pushIssue(
+        issues,
+        "error",
+        "host-node-schema-bridge",
+        `Unresolved host node "${entry.node.nodeId}" cannot sit between graph nodes or bridge typed schemas; host-model nodes are canonical ingress or egress boundaries only.`,
+        location,
+      );
+    }
+    const kind = String(entry.node?.kind ?? "").toLowerCase();
+    if (kind === "source" && incomingEdges.length > 0) {
+      pushIssue(
+        issues,
+        "error",
+        "host-source-has-input",
+        `Host source boundary "${entry.node.nodeId}" cannot have incoming graph edges.`,
+        location,
+      );
+    }
+    if (kind === "sink" && outgoingEdges.length > 0) {
+      pushIssue(
+        issues,
+        "error",
+        "host-sink-has-output",
+        `Host sink boundary "${entry.node.nodeId}" cannot have outgoing graph edges.`,
+        location,
+      );
+    }
+  }
 
   edges.forEach((edge, index) => {
     const location = `flow.edges[${index}]`;
@@ -816,7 +1194,16 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
       toTypes = portAcceptedTypes(toPort);
     }
 
-    if (!typesCompatible(fromTypes, toTypes)) {
+    const edgeTypeContract = resolveEdgeTypeContract(fromTypes, toTypes);
+    if (edgeTypeContract?.errorCode) {
+      pushIssue(
+        issues,
+        "error",
+        edgeTypeContract.errorCode,
+        `Edge ${edge.fromNodeId}.${edge.fromPortId} -> ${edge.toNodeId}.${edge.toPortId}: ${edgeTypeContract.errorMessage}`,
+        location,
+      );
+    } else if (!edgeTypeContract) {
       pushIssue(
         issues,
         "error",
@@ -825,6 +1212,22 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
           `${describeTypes(fromTypes)} does not satisfy ${describeTypes(toTypes)}.`,
         location,
       );
+      pushIssue(
+        issues,
+        "error",
+        "edge-missing-canonical-fallback",
+        `Edge ${edge.fromNodeId}.${edge.fromPortId} -> ${edge.toNodeId}.${edge.toPortId} has no mutually available canonical SDS FlatBuffer representation.`,
+        location,
+      );
+    } else {
+      edgeTypeContracts[index] = {
+        edgeIndex: index,
+        fromNodeId: edge.fromNodeId,
+        fromPortId: edge.fromPortId,
+        toNodeId: edge.toNodeId,
+        toPortId: edge.toPortId,
+        ...edgeTypeContract,
+      };
     }
 
     if (from.index > to.index) {
@@ -941,18 +1344,6 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
   // silently corrupting the host-generated OpenAPI spec.
   validateFlowAPIDeclaration(flow, issues);
 
-  // Capability union — the flow's permission set is the union of its nodes'
-  // declared capabilities plus the capabilities of every transitively
-  // resolved COMPONENT dependency (modules declared in node manifests'
-  // DEPENDENCIES — linked libraries, not graph boxes).
-  const capabilities = new Set();
-  for (const entry of resolvedNodes) {
-    for (const capability of entry.dependency?.manifest?.capabilities ?? []) {
-      const id = capabilityId(capability);
-      if (id) capabilities.add(id);
-    }
-  }
-
   // Engine linkage mode (loop C.7): linked flows stamp the engine-link
   // capability so hosts can gate mounting (first-party only) and know to
   // register the live engine instance + link shim at instantiation.
@@ -962,6 +1353,70 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
   } catch (error) {
     pushIssue(issues, "error", "invalid-engine-linkage", error.message, "flow.engineLinkage");
   }
+
+  // Capability union — explicit per-node capability slices take precedence,
+  // including an explicit empty array. Otherwise use the selected guest-link
+  // object's metadata, with the root manifest as the conservative fallback.
+  // A slice may narrow a module's declared permissions but may never escalate
+  // beyond them.
+  const capabilities = new Set();
+  const threadModels = new Set();
+  for (const entry of resolvedNodes) {
+    if (!entry.dependency) continue;
+    const guestLink = selectedGuestLink(entry.dependency, Boolean(engineLinkage));
+    const rootCapabilities = new Set(
+      normalizedCapabilityIds(entry.dependency.manifest?.capabilities),
+    );
+    const slice = resolveNodeCapabilitySlice(entry, guestLink);
+    for (const capability of slice.capabilities) {
+      if (!rootCapabilities.has(capability)) {
+        pushIssue(
+          issues,
+          "error",
+          "capability-escalation",
+          `Node "${entry.node.nodeId}" requests capability "${capability}" from its ${slice.source} ` +
+            `slice, but plugin "${entry.node.pluginId}" does not declare it in the root manifest.`,
+          `flow.nodes[${entry.index}].capabilities`,
+        );
+        continue;
+      }
+      capabilities.add(capability);
+    }
+
+    if (entry.dispatchModel === "linked-direct") {
+      const declaredThreadModel =
+        guestLink?.metadata?.threadModel ?? guestLink?.threadModel;
+      const threadModel = normalizeGuestThreadModel(declaredThreadModel);
+      if (!threadModel) {
+        pushIssue(
+          issues,
+          "error",
+          "invalid-guest-thread-model",
+          `Plugin "${entry.node.pluginId}" declares unsupported guest-link thread model ` +
+            `"${declaredThreadModel}".`,
+          `flow.nodes[${entry.index}]`,
+        );
+      } else {
+        threadModels.add(threadModel);
+      }
+    }
+  }
+
+  let threadModel =
+    threadModels.size === 1
+      ? [...threadModels][0]
+      : FLOW_THREAD_MODEL.SINGLE_THREAD;
+  if (threadModels.size > 1) {
+    threadModel = null;
+    pushIssue(
+      issues,
+      "error",
+      "mixed-guest-thread-models",
+      "A flow cannot link single-thread and wasi-threads guest objects into one artifact.",
+      "flow.nodes",
+    );
+  }
+
   if (engineLinkage) {
     capabilities.add(ENGINE_LINK_CAPABILITY);
   }
@@ -982,7 +1437,9 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
     warnings: issues.filter((issue) => issue.severity === "warning"),
     capabilities: [...capabilities].sort(),
     engineLinkage,
+    threadModel,
     componentDependencies,
+    edgeTypeContracts,
     nodes: resolvedNodes.map((entry) => ({
       nodeId: entry.node.nodeId,
       pluginId: entry.node.pluginId,
@@ -1030,12 +1487,44 @@ function rawMethod(dependency, methodId) {
   ) ?? null;
 }
 
+function signedFlowEdgeContract(contract, fromDispatchModel, toDispatchModel) {
+  if (!contract) {
+    throw new Error("Validated flow edge is missing its exact SDS type contract.");
+  }
+  const canonicalType = contract.canonical?.producer ?? contract.canonical?.consumer;
+  if (!canonicalType) {
+    throw new Error("Validated flow edge is missing its canonical SDS fallback type.");
+  }
+  const alignedType = contract.aligned?.producer ?? contract.aligned?.consumer ?? null;
+  const sharedArena =
+    fromDispatchModel === "linked-direct" &&
+    toDispatchModel === "linked-direct";
+  const alignedEligible =
+    sharedArena &&
+    contract.compatibleWireFormats?.includes("aligned-binary") === true &&
+    Boolean(contract.aligned?.producer && contract.aligned?.consumer);
+  return {
+    canonicalType: { ...canonicalType, wireFormat: "flatbuffer" },
+    alignedType: alignedType
+      ? { ...alignedType, wireFormat: "aligned-binary" }
+      : null,
+    canonicalFallbackAvailable: true,
+    alignedEligible,
+    routePolicy: alignedEligible
+      ? "aligned-shared-arena-or-canonical"
+      : "canonical-only",
+  };
+}
+
 export function buildFlowModuleManifest({ flow, check, dependencies }) {
   const nodes = Array.isArray(flow?.nodes) ? flow.nodes : [];
   const edges = Array.isArray(flow?.edges) ? flow.edges : [];
   const triggers = Array.isArray(flow?.triggers) ? flow.triggers : [];
   const triggerBindings = Array.isArray(flow?.triggerBindings) ? flow.triggerBindings : [];
   const nodeById = new Map(nodes.map((node) => [node.nodeId, node]));
+  const checkedNodeById = new Map(
+    check.nodes.map((node) => [node.nodeId, node]),
+  );
 
   const hostModelNodeIds = new Set(
     check.nodes.filter((node) => node.dispatchModel === "host").map((node) => node.nodeId),
@@ -1169,6 +1658,54 @@ export function buildFlowModuleManifest({ flow, check, dependencies }) {
         target: "browser,wasmedge",
       },
     ],
+    flowNodes: nodes.map((node) => {
+      const checkedNode = checkedNodeById.get(node.nodeId);
+      const config =
+        node.config instanceof Uint8Array
+          ? new Uint8Array(node.config)
+          : Array.isArray(node.config)
+            ? [...node.config]
+            : undefined;
+      return {
+        nodeId: node.nodeId,
+        pluginId: node.pluginId,
+        methodId: node.methodId ?? null,
+        kind: node.kind ?? null,
+        dispatchModel:
+          checkedNode?.dispatchModel === "host"
+            ? "host-capability"
+            : checkedNode?.dispatchModel === "isomorphic"
+              ? "isomorphic"
+              : null,
+        ...(config ? { config } : {}),
+        uiX: Number(node.uiX ?? 0),
+        uiY: Number(node.uiY ?? 0),
+      };
+    }),
+    flowEdges: edges.map((edge, index) => ({
+      edgeId: edge.edgeId ?? `edge-${index}`,
+      fromNodeId: edge.fromNodeId,
+      fromPortId: edge.fromPortId,
+      toNodeId: edge.toNodeId,
+      toPortId: edge.toPortId,
+      contract: signedFlowEdgeContract(
+        check.edgeTypeContracts?.[index],
+        checkedNodeById.get(edge.fromNodeId)?.dispatchModel,
+        checkedNodeById.get(edge.toNodeId)?.dispatchModel,
+      ),
+    })),
+    flowTriggers: triggers.map((trigger) => ({
+      triggerId: trigger.triggerId,
+      kind: trigger.kind ?? null,
+      source: trigger.source ?? null,
+      defaultIntervalMs: Number(trigger.defaultIntervalMs ?? 0),
+      httpPath: trigger.httpPath ?? null,
+    })),
+    flowTriggerBindings: triggerBindings.map((binding) => ({
+      triggerId: binding.triggerId,
+      targetNodeId: binding.targetNodeId,
+      targetPortId: binding.targetPortId,
+    })),
     abiVersion: 1,
   };
 }
@@ -1290,30 +1827,58 @@ export function generateFlowTables({ flow, check, dependencies }) {
   // object (both variants share the deterministic symbol prefix).
   const engineLinked = Boolean(check.engineLinkage);
   const linkedDependencies = [];
-  const dependencyIndexByPluginId = new Map();
+  const linkedDependencyIndexByPluginId = new Map();
   for (const node of nodes) {
     if (dispatchByNodeId.get(node.nodeId) !== "linked-direct") continue;
-    if (dependencyIndexByPluginId.has(node.pluginId)) continue;
+    if (linkedDependencyIndexByPluginId.has(node.pluginId)) continue;
     const dependency = dependencies.get(node.pluginId);
-    const chosenGuestLink = engineLinked
-      ? (dependency?.guestLinkLinked ?? dependency?.guestLink ?? null)
-      : (dependency?.guestLink ?? null);
+    const chosenGuestLink = selectedGuestLink(dependency, engineLinked);
     if (!chosenGuestLink) {
       throw new Error(
         `Plugin "${node.pluginId}" has no guest-link object (dist/guest-link/${GUEST_LINK_OBJECT_FILENAME}); ` +
           "rebuild the module with a build that persists compileModuleFromSource's guestLink output.",
       );
     }
-    dependencyIndexByPluginId.set(node.pluginId, linkedDependencies.length);
+    linkedDependencyIndexByPluginId.set(node.pluginId, linkedDependencies.length);
     linkedDependencies.push({ ...dependency, guestLink: chosenGuestLink });
+  }
+
+  // Runtime dependency descriptors cover both monolithically linked guests
+  // and exact hash-bound isomorphic children. Isomorphic children deliberately
+  // carry no guest-link object: both hosts instantiate their signed artifact
+  // bytes separately and service the graph-selected invocation descriptor.
+  const runtimeDependencies = [];
+  const runtimeDependencyIndexByPluginId = new Map();
+  for (const node of nodes) {
+    const dispatchModel = dispatchByNodeId.get(node.nodeId) ?? "host";
+    if (dispatchModel !== "linked-direct" && dispatchModel !== "isomorphic") {
+      continue;
+    }
+    if (runtimeDependencyIndexByPluginId.has(node.pluginId)) continue;
+    const dependency = dependencies.get(node.pluginId);
+    const runtimeDependency =
+      dispatchModel === "linked-direct"
+        ? linkedDependencies[linkedDependencyIndexByPluginId.get(node.pluginId)]
+        : { ...dependency, guestLink: null, artifactLock: { ...node.artifact } };
+    runtimeDependencyIndexByPluginId.set(node.pluginId, runtimeDependencies.length);
+    runtimeDependencies.push(runtimeDependency);
   }
 
   const nodeEntries = nodes.map((node) => {
     const dispatchModel = dispatchByNodeId.get(node.nodeId) ?? "host";
+    if (dispatchModel === "isomorphic") {
+      return {
+        node,
+        dispatchModel,
+        entrySymbol: null,
+        dependency:
+          runtimeDependencies[runtimeDependencyIndexByPluginId.get(node.pluginId)],
+      };
+    }
     if (dispatchModel !== "linked-direct") {
       return { node, dispatchModel, entrySymbol: null, dependency: null };
     }
-    const dependency = linkedDependencies[dependencyIndexByPluginId.get(node.pluginId)];
+    const dependency = linkedDependencies[linkedDependencyIndexByPluginId.get(node.pluginId)];
     const entrySymbol = dependency.guestLink.metadata?.methodSymbols?.[node.methodId];
     if (!entrySymbol) {
       throw new Error(
@@ -1335,12 +1900,121 @@ export function generateFlowTables({ flow, check, dependencies }) {
     }
   }
 
+  const reservedTriggerFromPorts = new Set();
+  for (const dependency of dependencies.values()) {
+    for (const method of dependency?.normalized?.methods ?? []) {
+      for (const outputPort of method?.outputPorts ?? []) {
+        if (outputPort?.portId) reservedTriggerFromPorts.add(outputPort.portId);
+      }
+    }
+  }
+
+  const triggerBindingDescriptors = triggerBindings.map((binding, index) => {
+    const targetNodeIndex = nodeIndex.get(binding.targetNodeId);
+    const targetEntry = nodeEntries[targetNodeIndex];
+    const targetMethod = targetEntry?.dependency
+      ? findMethod(targetEntry.dependency.normalized, targetEntry.node.methodId)
+      : null;
+    const targetPort = (targetMethod?.inputPorts ?? []).find(
+      (port) => port?.portId === binding.targetPortId,
+    );
+    const targetTypes = portAcceptedTypes(targetPort);
+    const canonicalTypes = concreteTypesByWireFormat(targetTypes, "flatbuffer");
+    const alignedTypes = concreteTypesByWireFormat(targetTypes, "aligned-binary");
+    if (canonicalTypes.length !== 1 || alignedTypes.length !== 1) {
+      throw new Error(
+        `Validated trigger binding ${index} (${binding.targetNodeId}.${binding.targetPortId}) ` +
+          "must resolve to exactly one paired canonical and aligned-binary SDS type.",
+      );
+    }
+    const canonical = canonicalTypes[0];
+    const aligned = alignedTypes[0];
+    const byteLength = edgeLayoutScalar(aligned.byteLength, "trigger aligned byteLength");
+    const fixedStringLength = edgeLayoutScalar(
+      aligned.fixedStringLength,
+      "trigger aligned fixedStringLength",
+    );
+    const requiredAlignment = edgeLayoutScalar(
+      aligned.requiredAlignment,
+      "trigger aligned requiredAlignment",
+    );
+    const sentinelBase = `@trigger:${binding.triggerId}:${index}`;
+    let sentinelFromPort = sentinelBase;
+    let collisionIndex = 0;
+    while (reservedTriggerFromPorts.has(sentinelFromPort)) {
+      collisionIndex += 1;
+      sentinelFromPort = `${sentinelBase}:${collisionIndex}`;
+    }
+    reservedTriggerFromPorts.add(sentinelFromPort);
+    return {
+      binding,
+      canonical,
+      sentinelFromPort,
+      alignedLayoutFields:
+        (byteLength.present ? 1 : 0) |
+        (fixedStringLength.present ? 2 : 0) |
+        (requiredAlignment.present ? 4 : 0),
+      byteLength: byteLength.value,
+      fixedStringLength: fixedStringLength.value,
+      requiredAlignment: requiredAlignment.value,
+      schemaHash: schemaHashBytes(canonical.schemaHash),
+    };
+  });
+
+  const edgeDescriptors = edges.map((edge, index) => {
+    const contract = check.edgeTypeContracts?.[index];
+    if (!contract) {
+      throw new Error(
+        `Validated flow is missing the compiled type contract for edge ${index} ` +
+          `(${edge.fromNodeId}.${edge.fromPortId} -> ${edge.toNodeId}.${edge.toPortId}).`,
+      );
+    }
+    const canonicalFallbackAvailable =
+      contract.compatibleWireFormats?.includes("flatbuffer") === true &&
+      Boolean(contract.canonical?.producer || contract.canonical?.consumer);
+    const sharedArenaEligible =
+      dispatchByNodeId.get(edge.fromNodeId) === "linked-direct" &&
+      dispatchByNodeId.get(edge.toNodeId) === "linked-direct";
+    const alignedEligible =
+      sharedArenaEligible &&
+      contract.compatibleWireFormats?.includes("aligned-binary") === true &&
+      Boolean(contract.aligned?.producer && contract.aligned?.consumer);
+    const alignedLayout = alignedEligible ? contract.aligned.producer : null;
+    const byteLength = edgeLayoutScalar(
+      alignedLayout?.byteLength,
+      "aligned byteLength",
+    );
+    const fixedStringLength = edgeLayoutScalar(
+      alignedLayout?.fixedStringLength,
+      "aligned fixedStringLength",
+    );
+    const requiredAlignment = edgeLayoutScalar(
+      alignedLayout?.requiredAlignment,
+      "aligned requiredAlignment",
+    );
+    return {
+      edge,
+      contract,
+      canonicalFallbackAvailable,
+      alignedEligible,
+      alignedLayoutFields:
+        (byteLength.present ? 1 : 0) |
+        (fixedStringLength.present ? 2 : 0) |
+        (requiredAlignment.present ? 4 : 0),
+      byteLength: byteLength.value,
+      fixedStringLength: fixedStringLength.value,
+      requiredAlignment: requiredAlignment.value,
+      schemaHash: schemaHashBytes(contract.schemaHash),
+    };
+  });
+
   const lines = [];
   lines.push("// Generated from the flow document by space-data-module flow compile — do not edit.");
   lines.push(`#define FLOW_NODE_COUNT ${nodes.length}u`);
-  lines.push(`#define FLOW_EDGE_COUNT ${edges.length}u`);
+  lines.push(`#define FLOW_ROUTE_EDGE_COUNT ${edges.length}u`);
+  lines.push(`#define FLOW_EDGE_COUNT ${edges.length + triggerBindingDescriptors.length}u`);
   lines.push(`#define FLOW_TRIGGER_COUNT ${triggers.length}u`);
-  lines.push(`#define FLOW_DEP_COUNT ${linkedDependencies.length}u`);
+  lines.push(`#define FLOW_DEP_COUNT ${runtimeDependencies.length}u`);
   lines.push(`#define FLOW_TRIGGER_BINDING_COUNT ${triggerBindings.length}u`);
   lines.push(`#define FLOW_REQUIRED_PORT_COUNT ${requiredPorts.length}u`);
   lines.push("");
@@ -1369,14 +2043,17 @@ export function generateFlowTables({ flow, check, dependencies }) {
     model: strName(`node${index}_model`, entry.dispatchModel),
     entry: entry.entrySymbol ? strName(`node${index}_entry`, entry.entrySymbol) : null,
   }));
-  const depStrs = linkedDependencies.map((dependency, index) => ({
+  const depStrs = runtimeDependencies.map((dependency, index) => ({
     id: strName(`dep${index}_id`, dependency.pluginId),
     plugin: strName(`dep${index}_plugin`, dependency.pluginId),
     version: strName(`dep${index}_version`, dependency.manifest?.version ?? ""),
-    entry: strName(
-      `dep${index}_entry`,
-      Object.values(dependency.guestLink.metadata?.methodSymbols ?? {})[0] ?? "",
-    ),
+    sha256: strName(`dep${index}_sha256`, dependency.artifactLock?.sha256 ?? ""),
+    entry: dependency.guestLink
+      ? strName(
+          `dep${index}_entry`,
+          Object.values(dependency.guestLink.metadata?.methodSymbols ?? {})[0] ?? "",
+        )
+      : null,
   }));
   const sym = {
     malloc: strName("sym_malloc", "malloc"),
@@ -1384,19 +2061,70 @@ export function generateFlowTables({ flow, check, dependencies }) {
   };
   lines.push(...strConsts, "");
 
-  lines.push(`FlowEdge g_edges[FLOW_EDGE_COUNT${edges.length === 0 ? " + 1" : ""}] = {`);
-  for (const edge of edges) {
+  for (const [index, descriptor] of edgeDescriptors.entries()) {
+    if (descriptor.schemaHash.length === 0) continue;
     lines.push(
-      `  { ${nodeIndex.get(edge.fromNodeId)}u, ${cString(edge.fromPortId)}, ${nodeIndex.get(edge.toNodeId)}u, ${cString(edge.toPortId)} },`,
+      `static const uint8_t kEdge${index}SchemaHash[] = { ${descriptor.schemaHash
+        .map((byte) => `0x${byte.toString(16).padStart(2, "0")}`)
+        .join(", ")} };`,
+    );
+  }
+  for (const [index, descriptor] of triggerBindingDescriptors.entries()) {
+    if (descriptor.schemaHash.length === 0) continue;
+    lines.push(
+      `static const uint8_t kTriggerBinding${index}SchemaHash[] = { ${descriptor.schemaHash
+        .map((byte) => `0x${byte.toString(16).padStart(2, "0")}`)
+        .join(", ")} };`,
+    );
+  }
+  if (
+    edgeDescriptors.some((descriptor) => descriptor.schemaHash.length > 0) ||
+    triggerBindingDescriptors.some((descriptor) => descriptor.schemaHash.length > 0)
+  ) {
+    lines.push("");
+  }
+
+  lines.push(
+    `FlowEdge g_edges[FLOW_EDGE_COUNT${edges.length + triggerBindingDescriptors.length === 0 ? " + 1" : ""}] = {`,
+  );
+  for (const [index, descriptor] of edgeDescriptors.entries()) {
+    const { edge, contract } = descriptor;
+    lines.push(
+      `  { ${nodeIndex.get(edge.fromNodeId)}u, ${cString(edge.fromPortId)}, ` +
+        `${nodeIndex.get(edge.toNodeId)}u, ${cString(edge.toPortId)}, ` +
+        `${cNullableString(contract.schemaName)}, ${cNullableString(contract.fileIdentifier)}, ` +
+        `${cNullableString(contract.schemaVersion)}, ` +
+        `${descriptor.schemaHash.length > 0 ? `kEdge${index}SchemaHash` : "nullptr"}, ` +
+        `${descriptor.schemaHash.length}u, ${cNullableString(contract.rootTypeName)}, ` +
+        `${descriptor.canonicalFallbackAvailable ? 1 : 0}u, ` +
+        `${descriptor.alignedEligible ? 1 : 0}u, ${descriptor.alignedLayoutFields}u, ` +
+        `${descriptor.byteLength}u, ${descriptor.fixedStringLength}u, ` +
+        `${descriptor.requiredAlignment}u },`,
+    );
+  }
+  for (const [index, descriptor] of triggerBindingDescriptors.entries()) {
+    const { binding, canonical } = descriptor;
+    lines.push(
+      `  { ${nodeIndex.get(binding.targetNodeId)}u, ` +
+        `${cString(descriptor.sentinelFromPort)}, ` +
+        `${nodeIndex.get(binding.targetNodeId)}u, ${cString(binding.targetPortId)}, ` +
+        `${cNullableString(canonical.schemaName)}, ${cNullableString(canonical.fileIdentifier)}, ` +
+        `${cNullableString(canonical.schemaVersion)}, ` +
+        `${descriptor.schemaHash.length > 0 ? `kTriggerBinding${index}SchemaHash` : "nullptr"}, ` +
+        `${descriptor.schemaHash.length}u, ${cNullableString(canonical.rootTypeName)}, ` +
+        `1u, 1u, ${descriptor.alignedLayoutFields}u, ${descriptor.byteLength}u, ` +
+        `${descriptor.fixedStringLength}u, ${descriptor.requiredAlignment}u },`,
     );
   }
   lines.push("};");
   lines.push(
     `FlowTriggerBinding g_trigger_bindings[FLOW_TRIGGER_BINDING_COUNT${triggerBindings.length === 0 ? " + 1" : ""}] = {`,
   );
-  for (const binding of triggerBindings) {
+  for (const [index, descriptor] of triggerBindingDescriptors.entries()) {
+    const { binding } = descriptor;
     lines.push(
-      `  { ${triggerIndex.get(binding.triggerId)}u, ${nodeIndex.get(binding.targetNodeId)}u, ${cString(binding.targetPortId)} },`,
+      `  { ${triggerIndex.get(binding.triggerId)}u, ${nodeIndex.get(binding.targetNodeId)}u, ` +
+        `${cString(binding.targetPortId)}, ${edges.length + index}u },`,
     );
   }
   lines.push("};");
@@ -1417,7 +2145,7 @@ export function generateFlowTables({ flow, check, dependencies }) {
   nodeEntries.forEach((entry, index) => {
     const strs = nodeStrs[index];
     const dependencyIdx = entry.dependency
-      ? `${dependencyIndexByPluginId.get(entry.dependency.pluginId)}u`
+      ? `${runtimeDependencyIndexByPluginId.get(entry.dependency.pluginId)}u`
       : "0xFFFFFFFFu";
     lines.push("  {");
     lines.push(`    FlowNodeDispatchDescriptorC &d = g_dispatch_descriptors[${index}];`);
@@ -1434,17 +2162,18 @@ export function generateFlowTables({ flow, check, dependencies }) {
     lines.push(`    d.stream_invoke_symbol_ptr = ${strs.entry ? `reinterpret_cast<uint32_t>(${strs.entry})` : "0"};`);
     lines.push("  }");
   });
-  linkedDependencies.forEach((dependency, index) => {
+  runtimeDependencies.forEach((dependency, index) => {
     const strs = depStrs[index];
     lines.push("  {");
     lines.push(`    SignedArtifactDependencyDescriptorC &dd = g_dependency_descriptors[${index}];`);
     lines.push(`    dd.dependency_id_ptr = reinterpret_cast<uint32_t>(${strs.id});`);
     lines.push(`    dd.plugin_id_ptr = reinterpret_cast<uint32_t>(${strs.plugin});`);
     lines.push(`    dd.version_ptr = reinterpret_cast<uint32_t>(${strs.version});`);
-    lines.push(`    dd.entrypoint_ptr = reinterpret_cast<uint32_t>(${strs.entry});`);
+    lines.push(`    dd.sha256_ptr = reinterpret_cast<uint32_t>(${strs.sha256});`);
+    lines.push(`    dd.entrypoint_ptr = ${strs.entry ? `reinterpret_cast<uint32_t>(${strs.entry})` : "0"};`);
     lines.push(`    dd.malloc_symbol_ptr = reinterpret_cast<uint32_t>(${sym.malloc});`);
     lines.push(`    dd.free_symbol_ptr = reinterpret_cast<uint32_t>(${sym.free});`);
-    lines.push(`    dd.stream_invoke_symbol_ptr = reinterpret_cast<uint32_t>(${strs.entry});`);
+    lines.push(`    dd.stream_invoke_symbol_ptr = ${strs.entry ? `reinterpret_cast<uint32_t>(${strs.entry})` : "0"};`);
     lines.push("  }");
   });
   lines.push("}");
@@ -1469,11 +2198,15 @@ export function generateFlowTables({ flow, check, dependencies }) {
   lines.push("    default: return -1;");
   lines.push("  }");
   lines.push("}");
-  return { source: lines.join("\n") + "\n", linkedDependencies };
+  return {
+    source: lines.join("\n") + "\n",
+    linkedDependencies,
+    runtimeDependencies,
+  };
 }
 
 // ---------------------------------------------------------------------------
-// Compilation — flow compile (emception monolithic link)
+// Compilation — flow compile (thread-model-matched monolithic link)
 // ---------------------------------------------------------------------------
 
 async function linkFlowArtifactWithEmception({ runtimeSource, invokeHeader, generatedInc, manifestSource, programSource, dependencyObjects, engineLinked = false }) {
@@ -1539,11 +2272,129 @@ async function linkFlowArtifactWithEmception({ runtimeSource, invokeHeader, gene
   });
 }
 
+async function runWasiThreadsCompiler(command, args, cwd) {
+  try {
+    await execFileAsync(command, args, {
+      cwd,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+  } catch (error) {
+    const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
+    const stdout = typeof error?.stdout === "string" ? error.stdout.trim() : "";
+    throw new Error(
+      `Flow compilation failed (wasi-threads): ${command} ${args.join(" ")}` +
+        `${stderr || stdout ? `\n${stderr || stdout}` : ""}`,
+      { cause: error },
+    );
+  }
+}
+
+async function linkFlowArtifactWithWasiThreads({
+  runtimeSource,
+  invokeHeader,
+  generatedInc,
+  manifestSource,
+  programSource,
+  dependencyObjects,
+  engineLinked = false,
+}) {
+  const toolchain = resolveWasiThreadsToolchain();
+  const workDir = await mkdtemp(
+    path.join(os.tmpdir(), "space-data-module-flow-wasi-threads-"),
+  );
+  try {
+    const runtimePath = path.join(workDir, "flow_runtime.cpp");
+    const manifestPath = path.join(workDir, "flow-manifest-exports.cpp");
+    const programPath = path.join(workDir, "flow-program-exports.cpp");
+    const runtimeObjectPath = path.join(workDir, "flow_runtime.o");
+    const manifestObjectPath = path.join(workDir, "flow-manifest-exports.o");
+    const programObjectPath = path.join(workDir, "flow-program-exports.o");
+    const outputPath = path.join(workDir, "flow.wasm");
+
+    await Promise.all([
+      writeFile(path.join(workDir, "space_data_module_invoke.h"), invokeHeader),
+      writeFile(path.join(workDir, "flow_generated.inc"), generatedInc),
+      writeFile(runtimePath, runtimeSource),
+      writeFile(manifestPath, manifestSource),
+      writeFile(programPath, programSource),
+    ]);
+    const dependencyObjectPaths = [];
+    for (let index = 0; index < dependencyObjects.length; index += 1) {
+      const objectPath = path.join(workDir, `dep${index}.o`);
+      await writeFile(objectPath, dependencyObjects[index]);
+      dependencyObjectPaths.push(objectPath);
+    }
+
+    const commonCompileArgs = [
+      ...toolchain.toolchainArgs,
+      "-c",
+      "-std=c++17",
+      `-I${workDir}`,
+      "-O3",
+      "-matomics",
+      "-mbulk-memory",
+      "-pthread",
+      "-fno-exceptions",
+      "-DNDEBUG",
+    ];
+    const compileUnits = [
+      [runtimePath, runtimeObjectPath],
+      [manifestPath, manifestObjectPath],
+      [programPath, programObjectPath],
+    ];
+    for (const [sourcePath, objectPath] of compileUnits) {
+      const args = [
+        ...commonCompileArgs,
+        ...(sourcePath === runtimePath && engineLinked
+          ? ["-DSDN_FLATSQL_LINKED=1"]
+          : []),
+        sourcePath,
+        "-o",
+        objectPath,
+      ];
+      await runWasiThreadsCompiler(toolchain.clangxx, args, workDir);
+    }
+
+    const exportSymbols = engineLinked
+      ? [...FLOW_ARTIFACT_EXPORTS, ...FLOW_LINKED_EXPORTS]
+      : FLOW_ARTIFACT_EXPORTS;
+    const linkArgs = [
+      ...toolchain.toolchainArgs,
+      runtimeObjectPath,
+      manifestObjectPath,
+      programObjectPath,
+      ...dependencyObjectPaths,
+      "-O3",
+      "-mexec-model=reactor",
+      ...PTHREAD_FINAL_LINK_FLAGS,
+      "-Wl,--export-memory",
+      "-Wl,--allow-undefined",
+      ...exportSymbols.map((symbol) => `-Wl,--export=${symbol}`),
+      "-o",
+      outputPath,
+    ];
+    assertPthreadFlagsPresent(linkArgs, {
+      threadModel: HISTORICAL_PTHREAD_THREAD_MODEL,
+    });
+    await runWasiThreadsCompiler(toolchain.clangxx, linkArgs, workDir);
+    return new Uint8Array(await readFile(outputPath));
+  } finally {
+    await rm(workDir, { recursive: true, force: true });
+  }
+}
+
 /**
  * Compile a validated flow document into the linked-direct flow bundle.
  * Returns { check, manifest, artifact, outputs, report }.
  */
-export async function compileFlowProgram({ flow, dependencies, outDir, flowSourcePath = null }) {
+export async function compileFlowProgram({
+  flow,
+  dependencies,
+  outDir,
+  flowSourcePath = null,
+  catalog,
+  standardsRoot,
+}) {
   const check = checkFlowProgram({ flow, dependencies });
   if (!check.ok) {
     const error = new Error(
@@ -1553,16 +2404,68 @@ export async function compileFlowProgram({ flow, dependencies, outDir, flowSourc
     throw error;
   }
 
-  const { source: generatedInc, linkedDependencies } = generateFlowTables({
+  await verifyIsomorphicNodeArtifacts({
     flow,
     check,
     dependencies,
+    flowSourcePath,
   });
+
+  const standardsOptions = { catalog, standardsRoot };
+  const dependencyPluginIds = [
+    ...new Set(
+      check.nodes
+        .filter(
+          (node) =>
+            node.dispatchModel === "linked-direct" ||
+            node.dispatchModel === "isomorphic",
+        )
+        .map((node) => node.pluginId),
+    ),
+  ];
+  for (const pluginId of dependencyPluginIds) {
+    const dependency = dependencies.get(pluginId);
+    const report = await validateArtifactWithStandards({
+      manifest: dependency.manifest,
+      sourceName: `dependency[${JSON.stringify(pluginId)}]`,
+      ...standardsOptions,
+    });
+    if (!report.ok) {
+      const error = new Error(
+        `Dependency manifest standards validation failed for plugin "${pluginId}".`,
+      );
+      error.report = report;
+      error.dependencyPluginId = pluginId;
+      throw error;
+    }
+  }
+
+  const {
+    source: generatedInc,
+    linkedDependencies,
+    runtimeDependencies,
+  } = generateFlowTables({ flow, check, dependencies });
   const manifest = buildFlowModuleManifest({ flow, check, dependencies });
+  const sourceName = outDir
+    ? path.join(outDir, "isomorphic", "module.wasm")
+    : `${flow.programId} (flow bundle)`;
+  const manifestReport = await validateArtifactWithStandards({
+    manifest,
+    sourceName,
+    ...standardsOptions,
+  });
+  if (!manifestReport.ok) {
+    const error = new Error("Flow manifest compliance validation failed.");
+    error.report = manifestReport;
+    throw error;
+  }
+  const flowPlgBytes = encodePluginManifest(manifest);
   const programBytes = encodeFlowDocumentProgram(flow);
 
   const runtimeSource = await readFile(RUNTIME_TEMPLATE_PATH, "utf8");
-  const manifestSource = generateEmbeddedManifestSource({ manifest });
+  const manifestSource = generateEmbeddedManifestSource({
+    manifest: flowPlgBytes,
+  });
   const programSource = generateEmbeddedManifestSource({
     manifest: programBytes,
     bytesSymbol: "flow_get_manifest_flatbuffer",
@@ -1570,7 +2473,11 @@ export async function compileFlowProgram({ flow, dependencies, outDir, flowSourc
     bufferSymbol: "g_flow_program",
   });
 
-  let wasmBytes = await linkFlowArtifactWithEmception({
+  const linkFlowArtifact =
+    check.threadModel === FLOW_THREAD_MODEL.WASI_THREADS
+      ? linkFlowArtifactWithWasiThreads
+      : linkFlowArtifactWithEmception;
+  let wasmBytes = await linkFlowArtifact({
     runtimeSource,
     invokeHeader: generateInvokeSupportHeader(),
     generatedInc,
@@ -1582,16 +2489,35 @@ export async function compileFlowProgram({ flow, dependencies, outDir, flowSourc
   wasmBytes = appendWasmCustomSection(
     wasmBytes,
     SDS_MANIFEST_SECTION_NAME,
-    encodePluginManifest(manifest),
+    flowPlgBytes,
   );
+  if (check.threadModel === FLOW_THREAD_MODEL.WASI_THREADS) {
+    assertPthreadArtifact(wasmBytes, { source: sourceName });
+  }
+
+  const report = await validateArtifactWithStandards({
+    manifest,
+    wasmBytes,
+    sourceName,
+    ...standardsOptions,
+  });
+  if (!report.ok) {
+    const error = new Error("Flow artifact compliance validation failed.");
+    error.report = report;
+    throw error;
+  }
 
   const dependencyRecords = [];
-  for (const dependency of linkedDependencies) {
-    let sha256 = null;
-    try {
-      sha256 = bytesToHex(await sha256Bytes(new Uint8Array(await readFile(dependency.wasmPath))));
-    } catch {
-      sha256 = null;
+  for (const dependency of runtimeDependencies) {
+    let sha256 = dependency.artifactLock?.sha256 ?? null;
+    if (!sha256) {
+      try {
+        sha256 = bytesToHex(
+          await sha256Bytes(new Uint8Array(await readFile(dependency.wasmPath))),
+        );
+      } catch {
+        sha256 = null;
+      }
     }
     dependencyRecords.push({
       kind: "node",
@@ -1599,8 +2525,11 @@ export async function compileFlowProgram({ flow, dependencies, outDir, flowSourc
       pluginId: dependency.pluginId,
       version: dependency.manifest?.version ?? null,
       sha256,
-      symbolPrefix: dependency.guestLink.metadata?.symbolPrefix ?? null,
-      methodSymbols: dependency.guestLink.metadata?.methodSymbols ?? {},
+      dispatchModel: dependency.artifactLock ? "isomorphic" : "linked-direct",
+      artifactPath: dependency.artifactLock?.path ?? null,
+      publisher: dependency.artifactLock?.publisher ?? null,
+      symbolPrefix: dependency.guestLink?.metadata?.symbolPrefix ?? null,
+      methodSymbols: dependency.guestLink?.metadata?.methodSymbols ?? {},
     });
   }
   for (const component of check.componentDependencies ?? []) {
@@ -1619,7 +2548,11 @@ export async function compileFlowProgram({ flow, dependencies, outDir, flowSourc
     programId: flow.programId,
     name: flow.name ?? null,
     version: flow.version ?? null,
-    compiler: "space-data-module flow compile (linked-direct, emception)",
+    compiler:
+      check.threadModel === FLOW_THREAD_MODEL.WASI_THREADS
+        ? "space-data-module flow compile (isomorphic, wasi-threads)"
+        : "space-data-module flow compile (isomorphic, emception)",
+    threadModel: check.threadModel,
     nodes: (flow.nodes ?? []).length,
     edges: (flow.edges ?? []).length,
     triggers: (flow.triggers ?? []).length,
@@ -1641,6 +2574,8 @@ export async function compileFlowProgram({ flow, dependencies, outDir, flowSourc
     await writeFile(runtimeWasmPath, wasmBytes);
     const manifestPath = path.join(outDir, "plugin-manifest.json");
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    const flowPlgPath = path.join(outDir, "flow.plg");
+    await writeFile(flowPlgPath, flowPlgBytes);
     const artifactPath = path.join(outDir, "artifact.json");
     await writeFile(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`);
     const flowJsonPath = path.join(outDir, "flow.json");
@@ -1651,6 +2586,7 @@ export async function compileFlowProgram({ flow, dependencies, outDir, flowSourc
     outputs.moduleWasmPath = moduleWasmPath;
     outputs.runtimeWasmPath = runtimeWasmPath;
     outputs.manifestPath = manifestPath;
+    outputs.flowPlgPath = flowPlgPath;
     outputs.artifactPath = artifactPath;
     outputs.flowJsonPath = flowJsonPath;
     if (check.engineLinkage) {
@@ -1663,11 +2599,13 @@ export async function compileFlowProgram({ flow, dependencies, outDir, flowSourc
     }
   }
 
-  const report = await validateArtifactWithStandards({
+  return {
+    check,
     manifest,
+    flowPlgBytes,
+    artifact,
     wasmBytes,
-    sourceName: outputs.moduleWasmPath ?? `${flow.programId} (flow bundle)`,
-  });
-
-  return { check, manifest, artifact, wasmBytes, outputs, report };
+    outputs,
+    report,
+  };
 }

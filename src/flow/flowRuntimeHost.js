@@ -16,6 +16,10 @@
 
 import { createBrowserWasiShim } from "../host/wasiShim.js";
 import {
+  isPayloadSchemaHashValid,
+  normalizePayloadSchemaHash,
+} from "../manifest/typeRefs.js";
+import {
   ENGINE_REF_ENTRY_SIZE,
   instantiateFlatsqlLinkShim,
   isEngineBodyRefToken,
@@ -30,6 +34,108 @@ const DISPATCH_DESCRIPTOR_SIZE = 60;
 const DEPENDENCY_DESCRIPTOR_SIZE = 72;
 const NODE_STATE_SIZE = 32;
 const INGRESS_STATE_SIZE = 24;
+const ROUTING_STATE_SIZE = 32;
+
+const WireFormatCode = Object.freeze({
+  flatbuffer: 0,
+  "aligned-binary": 1,
+});
+const OwnershipCode = Object.freeze({
+  "host-owned": 0,
+  "plugin-owned": 1,
+  transferred: 2,
+});
+const MutabilityCode = Object.freeze({
+  immutable: 0,
+  mutable: 1,
+  "single-writer-mutable": 1,
+  "append-only": 2,
+});
+
+function normalizeWireFormat(value) {
+  const normalized = String(value ?? "").toLowerCase().replace(/_/g, "-");
+  if (value === 1 || normalized === "aligned-binary") return "aligned-binary";
+  if (
+    value === 0 ||
+    value === undefined ||
+    value === null ||
+    normalized === "" ||
+    normalized === "flatbuffer"
+  ) {
+    return "flatbuffer";
+  }
+  throw new TypeError(`Unsupported frame wire format: ${String(value)}.`);
+}
+
+function normalizeOwnership(value) {
+  const normalized = String(value ?? "host-owned").toLowerCase().replace(/_/g, "-");
+  if (value === 1 || normalized === "plugin-owned" || normalized === "producer-owned") {
+    return "plugin-owned";
+  }
+  if (value === 2 || normalized === "transferred" || normalized === "shared") {
+    return "transferred";
+  }
+  if (value === 0 || normalized === "host-owned" || normalized === "borrowed") {
+    return "host-owned";
+  }
+  throw new TypeError(`Unsupported frame ownership: ${String(value)}.`);
+}
+
+function normalizeMutability(value) {
+  const normalized = String(value ?? "immutable").toLowerCase().replace(/_/g, "-");
+  if (value === 2 || normalized === "append-only") return "append-only";
+  if (value === 1 || normalized === "mutable" || normalized === "single-writer-mutable") {
+    return "single-writer-mutable";
+  }
+  if (value === 0 || normalized === "immutable") return "immutable";
+  throw new TypeError(`Unsupported frame mutability: ${String(value)}.`);
+}
+
+function isPowerOfTwo(value) {
+  return (
+    Number.isSafeInteger(value) &&
+    value > 0 &&
+    value <= 0xffff &&
+    (value & (value - 1)) === 0
+  );
+}
+
+function bytesEqual(left, right) {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+function typeRefMatchesDescriptor(typeRef = {}, descriptor, wireFormat) {
+  if (typeRef.schemaName && typeRef.schemaName !== descriptor.schemaName) return false;
+  if (typeRef.fileIdentifier && typeRef.fileIdentifier !== descriptor.fileIdentifier) return false;
+  if (typeRef.rootTypeName && typeRef.rootTypeName !== descriptor.rootTypeName) return false;
+  if (typeRef.schemaVersion && typeRef.schemaVersion !== descriptor.schemaVersion) return false;
+
+  const schemaHashInput = typeRef.schemaHash;
+  if (schemaHashInput !== undefined && schemaHashInput !== null) {
+    if (!isPayloadSchemaHashValid(schemaHashInput)) return false;
+    const schemaHash = normalizePayloadSchemaHash(schemaHashInput);
+    if (schemaHash?.length > 0 && !bytesEqual(schemaHash, descriptor.schemaHash)) return false;
+  }
+
+  if (wireFormat === "aligned-binary") {
+    if (!descriptor.alignedEligible) return false;
+    if (Number(typeRef.byteLength ?? 0) !== descriptor.alignedByteLength) return false;
+    if (Number(typeRef.requiredAlignment ?? 0) !== descriptor.alignedRequiredAlignment) {
+      return false;
+    }
+    if (
+      typeRef.fixedStringLength !== undefined &&
+      Number(typeRef.fixedStringLength) !== descriptor.alignedFixedStringLength
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -135,6 +241,10 @@ export async function createFlowRuntimeHost(options = {}) {
   if (!malloc) {
     throw new Error("Flow artifact must export malloc for host-side frame allocation.");
   }
+  const free = exportFn(exports, "free");
+  if (!free) {
+    throw new Error("Flow artifact must export free for host-side frame lifetime management.");
+  }
 
   const call = (name, ...args) => {
     const fn = exportFn(exports, `space_data_module_runtime_${name}`);
@@ -159,17 +269,42 @@ export async function createFlowRuntimeHost(options = {}) {
     new Uint8Array(memory.buffer).set(bytes, ptr);
   }
 
-  function allocBytes(bytes) {
-    const ptr = malloc(bytes.length);
-    if (!ptr) throw new Error(`malloc(${bytes.length}) failed in flow artifact`);
+  function allocTracked(size, allocations, description) {
+    const ptr = malloc(size);
+    if (!ptr) throw new Error(`${description} malloc(${size}) failed in flow artifact`);
+    allocations.push(ptr);
+    return ptr;
+  }
+
+  function releaseAllocations(allocations) {
+    for (let index = allocations.length - 1; index >= 0; index -= 1) {
+      free(allocations[index]);
+    }
+    allocations.length = 0;
+  }
+
+  function allocAlignedBytes(bytes, alignment = 1, allocations = []) {
+    if (!isPowerOfTwo(alignment)) {
+      throw new RangeError(`Frame alignment ${alignment} must be a positive power of two.`);
+    }
+    if (bytes.length === 0) return 0;
+    const rawPtr = allocTracked(
+      bytes.length + alignment - 1,
+      allocations,
+      "aligned frame payload",
+    );
+    const ptr = Math.ceil(rawPtr / alignment) * alignment;
     writeBytes(ptr, bytes);
     return ptr;
   }
 
-  function allocCString(text) {
+  function allocCString(text, allocations = []) {
     const encoded = textEncoder.encode(String(text ?? ""));
-    const ptr = malloc(encoded.length + 1);
-    if (!ptr) throw new Error("malloc for string failed in flow artifact");
+    const ptr = allocTracked(
+      encoded.length + 1,
+      allocations,
+      "frame port string",
+    );
     writeBytes(ptr, encoded);
     new Uint8Array(memory.buffer)[ptr + encoded.length] = 0;
     return ptr;
@@ -178,7 +313,7 @@ export async function createFlowRuntimeHost(options = {}) {
   function writeFrameDescriptor(ptr, frame) {
     const v = view();
     v.setUint32(ptr + 0, frame.ingressIndex ?? 0, true);
-    v.setUint32(ptr + 4, frame.typeDescriptorIdx ?? 0, true);
+    v.setUint32(ptr + 4, frame.typeDescriptorIdx ?? FLOW_INVALID_INDEX, true);
     v.setUint32(ptr + 8, frame.portIdPtr ?? 0, true);
     v.setUint32(ptr + 12, frame.alignment ?? 1, true);
     v.setUint32(ptr + 16, frame.offset ?? 0, true);
@@ -188,6 +323,11 @@ export async function createFlowRuntimeHost(options = {}) {
     v.setBigUint64(ptr + 32, BigInt(frame.traceToken ?? 0), true);
     v.setUint8(ptr + 40, frame.endOfStream ? 1 : 0);
     v.setUint8(ptr + 41, frame.occupied === false ? 0 : 1);
+    v.setUint8(ptr + 42, frame.wireFormat ?? 0);
+    v.setUint8(ptr + 43, frame.ownership ?? 0);
+    v.setUint8(ptr + 44, frame.mutability ?? 0);
+    v.setUint8(ptr + 45, frame.lifetime ?? 0);
+    v.setUint16(ptr + 46, 0, true);
   }
 
   function readFrameDescriptor(ptr) {
@@ -204,6 +344,10 @@ export async function createFlowRuntimeHost(options = {}) {
       traceToken: v.getBigUint64(ptr + 32, true),
       endOfStream: v.getUint8(ptr + 40) !== 0,
       occupied: v.getUint8(ptr + 41) !== 0,
+      wireFormat: v.getUint8(ptr + 42),
+      ownership: v.getUint8(ptr + 43),
+      mutability: v.getUint8(ptr + 44),
+      lifetime: v.getUint8(ptr + 45),
     };
   }
 
@@ -216,11 +360,14 @@ export async function createFlowRuntimeHost(options = {}) {
     return out;
   }
 
+  let nextExternalFrameId = 1n;
+
   const host = {
     instance,
     memory,
     nodeCount: call("get_node_descriptor_count") >>> 0,
-    edgeCount: call("get_edge_descriptor_count") >>> 0,
+    typeDescriptorCount: call("get_edge_descriptor_count") >>> 0,
+    edgeCount: call("get_route_edge_descriptor_count") >>> 0,
     triggerCount: call("get_trigger_descriptor_count") >>> 0,
     dependencyCount: call("get_dependency_descriptor_count") >>> 0,
 
@@ -266,6 +413,62 @@ export async function createFlowRuntimeHost(options = {}) {
         dependencyId: readCString(d.dependencyIdPtr),
         pluginId: readCString(d.pluginIdPtr),
         version: readCString(d.versionPtr),
+        sha256: readCString(d.sha256Ptr) || null,
+        signature: readCString(d.signaturePtr) || null,
+        signerPublicKey: readCString(d.signerPublicKeyPtr) || null,
+      };
+    },
+
+    getEdgeDescriptor(index) {
+      if (
+        !Number.isInteger(index) ||
+        index < 0 ||
+        index >= this.typeDescriptorCount
+      ) {
+        throw new RangeError(`edge descriptor index ${index} is out of range`);
+      }
+      const base = call("get_edge_descriptors") >>> 0;
+      if (!base) throw new Error("no edge descriptors");
+      const ptr = base + index * 64;
+      const d = readU32Fields(ptr, [
+        "fromNode", "fromPortPtr", "toNode", "toPortPtr",
+        "schemaNamePtr", "fileIdentifierPtr", "schemaVersionPtr",
+        "schemaHashPtr", "schemaHashSize", "rootTypeNamePtr",
+        "canonicalFallbackAvailable", "alignedEligible", "alignedLayoutFields",
+        "alignedByteLength", "alignedFixedStringLength", "alignedRequiredAlignment",
+      ]);
+      return {
+        ...d,
+        fromPort: readCString(d.fromPortPtr),
+        toPort: readCString(d.toPortPtr),
+        schemaName: readCString(d.schemaNamePtr),
+        fileIdentifier: readCString(d.fileIdentifierPtr),
+        schemaVersion: readCString(d.schemaVersionPtr) || null,
+        schemaHash:
+          d.schemaHashPtr && d.schemaHashSize
+            ? bytesAt(d.schemaHashPtr, d.schemaHashSize)
+            : new Uint8Array(),
+        rootTypeName: readCString(d.rootTypeNamePtr),
+      };
+    },
+
+    getTypeDescriptor(index) {
+      return index < this.typeDescriptorCount
+        ? this.getEdgeDescriptor(index)
+        : null;
+    },
+
+    getRoutingState() {
+      const ptr = call("get_routing_state") >>> 0;
+      if (!ptr || ptr + ROUTING_STATE_SIZE > memory.buffer.byteLength) {
+        throw new Error("no routing state");
+      }
+      const v = view();
+      return {
+        alignedSharedRoutes: v.getBigUint64(ptr + 0, true),
+        alignedCopiedRoutes: v.getBigUint64(ptr + 8, true),
+        canonicalRoutes: v.getBigUint64(ptr + 16, true),
+        rejectedFrames: v.getBigUint64(ptr + 24, true),
       };
     },
 
@@ -328,26 +531,89 @@ export async function createFlowRuntimeHost(options = {}) {
     },
 
     enqueueTriggerFrame(triggerIndex, frame = {}) {
-      const payload =
-        frame.bytes instanceof Uint8Array
-          ? frame.bytes
-          : frame.bytes
-            ? new Uint8Array(frame.bytes)
-            : new Uint8Array(0);
-      const payloadPtr = payload.length > 0 ? allocBytes(payload) : 0;
-      const portPtr = frame.portId ? allocCString(frame.portId) : 0;
-      const framePtr = malloc(FRAME_DESCRIPTOR_SIZE);
-      if (!framePtr) throw new Error("malloc for frame descriptor failed");
-      writeFrameDescriptor(framePtr, {
-        portIdPtr: portPtr,
-        offset: payloadPtr,
-        size: payload.length,
-        streamId: frame.streamId ?? 0,
-        sequence: frame.sequence ?? 0,
-        endOfStream: frame.endOfStream === true,
-        occupied: true,
-      });
-      call("enqueue_trigger_frame", triggerIndex, framePtr);
+      const allocations = [];
+      try {
+        const payload =
+          frame.bytes instanceof Uint8Array
+            ? frame.bytes
+            : frame.bytes
+              ? new Uint8Array(frame.bytes)
+              : new Uint8Array(0);
+        const typeRef = frame.typeRef ?? {};
+        const wireFormat = normalizeWireFormat(typeRef.wireFormat ?? frame.wireFormat);
+        const alignment = Number(
+          frame.alignment ??
+            (wireFormat === "aligned-binary" ? typeRef.requiredAlignment : 1) ??
+            1,
+        );
+        if (!isPowerOfTwo(alignment)) {
+          throw new RangeError(`Frame alignment ${alignment} must be a positive power of two.`);
+        }
+        if (
+          wireFormat === "aligned-binary" &&
+          Number(typeRef.byteLength ?? 0) !== payload.length
+        ) {
+          throw new RangeError(
+            `Aligned frame byteLength ${typeRef.byteLength ?? 0} does not match payload length ${payload.length}.`,
+          );
+        }
+        let typeDescriptorIdx = FLOW_INVALID_INDEX;
+        const explicitType =
+          wireFormat === "aligned-binary" ||
+          [
+            "schemaName", "fileIdentifier", "rootTypeName", "schemaVersion",
+            "schemaHash", "byteLength", "fixedStringLength", "requiredAlignment",
+          ].some((field) => typeRef[field] !== undefined && typeRef[field] !== null);
+        if (explicitType) {
+          for (let index = 0; index < this.typeDescriptorCount; index += 1) {
+            const descriptor = this.getEdgeDescriptor(index);
+            if (!typeRefMatchesDescriptor(typeRef, descriptor, wireFormat)) continue;
+            typeDescriptorIdx = index;
+            break;
+          }
+          if (typeDescriptorIdx === FLOW_INVALID_INDEX) {
+            throw new Error("Trigger frame does not match any compiled exact SDS identity.");
+          }
+        }
+        const ownershipName = normalizeOwnership(frame.ownership);
+        const mutabilityName = normalizeMutability(frame.mutability);
+        if (mutabilityName !== "immutable" && ownershipName !== "transferred") {
+          throw new Error("Mutable aligned frames require transferred ownership.");
+        }
+        const payloadPtr =
+          payload.length > 0
+            ? allocAlignedBytes(payload, alignment, allocations)
+            : 0;
+        const portPtr = frame.portId ? allocCString(frame.portId, allocations) : 0;
+        const framePtr = allocTracked(
+          FRAME_DESCRIPTOR_SIZE,
+          allocations,
+          "frame descriptor",
+        );
+        const frameId = BigInt(frame.frameId ?? frame.traceToken ?? nextExternalFrameId++);
+        writeFrameDescriptor(framePtr, {
+          typeDescriptorIdx,
+          portIdPtr: portPtr,
+          alignment,
+          offset: payloadPtr,
+          size: payload.length,
+          streamId: frame.streamId ?? 0,
+          sequence: frame.sequence ?? 0,
+          traceToken: frameId,
+          endOfStream: frame.endOfStream === true,
+          occupied: true,
+          wireFormat: WireFormatCode[wireFormat],
+          ownership: OwnershipCode[ownershipName],
+          mutability: MutabilityCode[mutabilityName],
+        });
+        const enqueued = call("enqueue_trigger_frame", triggerIndex, framePtr) | 0;
+        if (enqueued < 0) {
+          throw new Error(`Flow runtime rejected trigger frame (${enqueued}).`);
+        }
+        return enqueued;
+      } finally {
+        releaseAllocations(allocations);
+      }
     },
 
     /**
@@ -430,9 +696,41 @@ export async function createFlowRuntimeHost(options = {}) {
         for (let f = 0; f < inv.frameCount; f++) {
           const fd = readFrameDescriptor(inv.framesPtr + f * FRAME_DESCRIPTOR_SIZE);
           if (!fd.occupied) continue;
+          const typeDescriptor = this.getTypeDescriptor(fd.typeDescriptorIdx);
+          const wireFormat = fd.wireFormat === 1 ? "aligned-binary" : "flatbuffer";
+          const typeRef = typeDescriptor
+            ? {
+                schemaName: typeDescriptor.schemaName,
+                fileIdentifier: typeDescriptor.fileIdentifier,
+                ...(typeDescriptor.schemaVersion
+                  ? { schemaVersion: typeDescriptor.schemaVersion }
+                  : {}),
+                ...(typeDescriptor.schemaHash.length > 0
+                  ? { schemaHash: typeDescriptor.schemaHash }
+                  : {}),
+                rootTypeName: typeDescriptor.rootTypeName,
+                wireFormat,
+                ...(wireFormat === "aligned-binary"
+                  ? {
+                      byteLength: typeDescriptor.alignedByteLength,
+                      ...(typeDescriptor.alignedFixedStringLength > 0
+                        ? { fixedStringLength: typeDescriptor.alignedFixedStringLength }
+                        : {}),
+                      requiredAlignment: typeDescriptor.alignedRequiredAlignment,
+                    }
+                  : {}),
+              }
+            : null;
           frames.push({
             portId: readCString(fd.portIdPtr),
             bytes: fd.size > 0 && fd.offset > 0 ? bytesAt(fd.offset, fd.size) : new Uint8Array(0),
+            typeRef,
+            wireFormat,
+            alignment: fd.alignment,
+            ownership: ["host-owned", "plugin-owned", "transferred"][fd.ownership] ?? "unknown",
+            mutability: ["immutable", "single-writer-mutable", "append-only"][fd.mutability] ?? "unknown",
+            frameId: fd.traceToken,
+            arenaGeneration: fd.ingressIndex,
             streamId: fd.streamId,
             sequence: fd.sequence,
             endOfStream: fd.endOfStream,
@@ -449,33 +747,102 @@ export async function createFlowRuntimeHost(options = {}) {
         }
 
         const outputs = Array.isArray(handlerResult.outputs) ? handlerResult.outputs : [];
+        const allocations = [];
         let framesPtr = 0;
-        if (outputs.length > 0) {
-          framesPtr = malloc(outputs.length * FRAME_DESCRIPTOR_SIZE);
-          outputs.forEach((out, idx) => {
-            const payload =
-              out.bytes instanceof Uint8Array ? out.bytes : new Uint8Array(out.bytes ?? []);
-            writeFrameDescriptor(framesPtr + idx * FRAME_DESCRIPTOR_SIZE, {
-              portIdPtr: out.portId ? allocCString(out.portId) : 0,
-              offset: payload.length > 0 ? allocBytes(payload) : 0,
-              size: payload.length,
-              streamId: out.streamId ?? 0,
-              sequence: out.sequence ?? 0,
-              endOfStream: out.endOfStream === true,
-              occupied: true,
+        try {
+          if (outputs.length > 0) {
+            framesPtr = allocTracked(
+              outputs.length * FRAME_DESCRIPTOR_SIZE,
+              allocations,
+              "invocation output descriptors",
+            );
+            outputs.forEach((out, idx) => {
+              const payload =
+                out.bytes instanceof Uint8Array
+                  ? out.bytes
+                  : new Uint8Array(out.bytes ?? []);
+              const outputTypeRef = out.typeRef ?? {};
+              const outputWireFormat = normalizeWireFormat(
+                outputTypeRef.wireFormat ?? out.wireFormat,
+              );
+              let typeDescriptorIdx = FLOW_INVALID_INDEX;
+              let hasOutgoingPort = false;
+              for (let edgeIndex = 0; edgeIndex < this.edgeCount; edgeIndex += 1) {
+                const edge = this.getEdgeDescriptor(edgeIndex);
+                if (edge.fromNode !== nodeIndex || edge.fromPort !== out.portId) continue;
+                hasOutgoingPort = true;
+                if (!typeRefMatchesDescriptor(outputTypeRef, edge, outputWireFormat)) continue;
+                typeDescriptorIdx = edgeIndex;
+                break;
+              }
+              if (hasOutgoingPort && typeDescriptorIdx === FLOW_INVALID_INDEX) {
+                throw new Error(
+                  `Output frame on port "${out.portId ?? ""}" does not match the compiled exact SDS identity.`,
+                );
+              }
+              const alignment = Number(
+                out.alignment ??
+                  (outputWireFormat === "aligned-binary"
+                    ? outputTypeRef.requiredAlignment
+                    : 1) ??
+                  1,
+              );
+              if (!isPowerOfTwo(alignment)) {
+                throw new RangeError(
+                  `Frame alignment ${alignment} must be a positive power of two.`,
+                );
+              }
+              if (
+                outputWireFormat === "aligned-binary" &&
+                Number(outputTypeRef.byteLength ?? 0) !== payload.length
+              ) {
+                throw new RangeError(
+                  `Aligned frame byteLength ${outputTypeRef.byteLength ?? 0} does not match payload length ${payload.length}.`,
+                );
+              }
+              const ownershipName = normalizeOwnership(out.ownership);
+              const mutabilityName = normalizeMutability(out.mutability);
+              if (mutabilityName !== "immutable" && ownershipName !== "transferred") {
+                throw new Error("Mutable aligned frames require transferred ownership.");
+              }
+              writeFrameDescriptor(framesPtr + idx * FRAME_DESCRIPTOR_SIZE, {
+                ingressIndex: call("get_current_invocation_generation") >>> 0,
+                typeDescriptorIdx,
+                portIdPtr: out.portId ? allocCString(out.portId, allocations) : 0,
+                alignment,
+                offset:
+                  payload.length > 0
+                    ? allocAlignedBytes(payload, alignment, allocations)
+                    : 0,
+                size: payload.length,
+                streamId: out.streamId ?? 0,
+                sequence: out.sequence ?? 0,
+                traceToken: BigInt(out.frameId ?? nextExternalFrameId++),
+                endOfStream: out.endOfStream === true,
+                occupied: true,
+                wireFormat: WireFormatCode[outputWireFormat],
+                ownership: OwnershipCode[ownershipName],
+                mutability: MutabilityCode[mutabilityName],
+                lifetime: 1,
+              });
             });
-          });
+          }
+          const applied = call(
+            "apply_node_invocation_result",
+            nodeIndex,
+            handlerResult.statusCode ?? 0,
+            handlerResult.backlogRemaining ?? 0,
+            handlerResult.yielded ? 1 : 0,
+            framesPtr,
+            outputs.length,
+          ) | 0;
+          if (applied < 0) {
+            throw new Error(`Flow runtime rejected invocation outputs (${applied}).`);
+          }
+        } finally {
+          releaseAllocations(allocations);
+          call("complete_node_invocation", nodeIndex);
         }
-        call(
-          "apply_node_invocation_result",
-          nodeIndex,
-          handlerResult.statusCode ?? 0,
-          handlerResult.backlogRemaining ?? 0,
-          handlerResult.yielded ? 1 : 0,
-          framesPtr,
-          outputs.length,
-        );
-        call("complete_node_invocation", nodeIndex);
         result.nodesInvoked++;
       }
       return result;

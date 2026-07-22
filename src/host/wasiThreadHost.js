@@ -37,6 +37,11 @@ const IS_NODE =
   !!process.release &&
   process.release.name === "node";
 
+const BROWSER_WORKER_URL = new URL(
+  "./wasiThreadBrowserWorker.mjs",
+  import.meta.url,
+);
+
 /**
  * Does the compiled module require the wasi-threads host (i.e. does it import
  * `wasi.thread-spawn`)? Single-thread artifacts do not, so the host is only
@@ -46,86 +51,6 @@ export function isWasiThreadsModule(wasmModule) {
   return WebAssembly.Module.imports(wasmModule).some(
     (entry) => entry.module === "wasi" && entry.name === "thread-spawn",
   );
-}
-
-// Classic (non-module) Blob worker source for the browser warm pool. Provides
-// the WASI preview1 import set a spawned thread needs (a leaf compute thread
-// barely touches WASI — args/environ/fd stubs are sufficient), the shared
-// imported memory, and a failing nested thread-spawn. Protocol:
-//   parent -> {t:"probe", wasmModule, memory}
-//     worker instantiates the module over the shared memory to PROVE it is
-//     ready, replies {t:"ready", ok:true|false}. (Instantiation runs no guest
-//     code — reactors/commands have no wasm start section — so it never touches
-//     shared state; only wasi_thread_start does.)
-//   parent -> {t:"run", tid, startArg}
-//     worker instantiates a FRESH instance (the wasi-threads contract: new
-//     globals + stack pointer, same shared linear memory) and runs
-//     wasi_thread_start(tid, startArg) to completion, then replies {t:"exit"}.
-const BROWSER_WORKER_SOURCE = `
-var OK = 0, SPIPE = 70;
-var WASM_MODULE = null;
-var SHARED_MEMORY = null;
-function makeImports(memory) {
-  function dv() { return new DataView(memory.buffer); }
-  var wasi = {
-    args_get: function () { return OK; },
-    args_sizes_get: function (a, b) { var d = dv(); d.setUint32(a, 0, true); d.setUint32(b, 0, true); return OK; },
-    environ_get: function () { return OK; },
-    environ_sizes_get: function (a, b) { var d = dv(); d.setUint32(a, 0, true); d.setUint32(b, 0, true); return OK; },
-    clock_time_get: function (id, p, ptr) { dv().setBigUint64(ptr, BigInt(Math.round((performance.timeOrigin + performance.now()) * 1e6)), true); return OK; },
-    fd_close: function () { return OK; },
-    fd_seek: function () { return SPIPE; },
-    fd_read: function (fd, iovs, len, nread) { dv().setUint32(nread, 0, true); return OK; },
-    fd_write: function (fd, iovs, len, nwritten) {
-      var d = dv(), total = 0;
-      for (var i = 0; i < len; i++) { total += d.getUint32(iovs + i * 8 + 4, true); }
-      d.setUint32(nwritten, total, true); return OK;
-    },
-    fd_fdstat_get: function () { return OK; },
-    random_get: function (ptr, n) { self.crypto.getRandomValues(new Uint8Array(memory.buffer, ptr, n)); return OK; },
-    proc_exit: function (code) { throw { name: "WasiExitError", code: code }; },
-    sched_yield: function () { return OK; }
-  };
-  return { wasi_snapshot_preview1: wasi, env: { memory: memory }, wasi: { "thread-spawn": function () { return -1; } } };
-}
-self.onmessage = function (event) {
-  var data = event.data || {};
-  if (data.t === "probe") {
-    WASM_MODULE = data.wasmModule;
-    SHARED_MEMORY = data.memory;
-    try {
-      new WebAssembly.Instance(WASM_MODULE, makeImports(SHARED_MEMORY));
-      self.postMessage({ t: "ready", ok: true });
-    } catch (err) {
-      self.postMessage({ t: "ready", ok: false, error: String((err && err.message) || err) });
-    }
-    return;
-  }
-  if (data.t === "run") {
-    var tid = data.tid;
-    var startArg = data.startArg;
-    try {
-      var instance = new WebAssembly.Instance(WASM_MODULE, makeImports(SHARED_MEMORY));
-      instance.exports.wasi_thread_start(tid, startArg);
-    } catch (err) {
-      if (!(err && err.name === "WasiExitError")) {
-        // Keep the pooled worker alive for reuse; surface the fault for
-        // diagnosis of a hung join rather than crashing the worker silently.
-        self.postMessage({ t: "error", tid: tid, error: String((err && err.message) || err) });
-      }
-    }
-    self.postMessage({ t: "exit", tid: tid });
-    return;
-  }
-};
-`;
-
-let cachedBrowserBlobUrl = null;
-function browserBlobUrl() {
-  if (cachedBrowserBlobUrl) return cachedBrowserBlobUrl;
-  const blob = new Blob([BROWSER_WORKER_SOURCE], { type: "text/javascript" });
-  cachedBrowserBlobUrl = URL.createObjectURL(blob);
-  return cachedBrowserBlobUrl;
 }
 
 // How long to wait for a pooled worker to confirm readiness before giving up and
@@ -147,7 +72,10 @@ const BROWSER_POOL_PROBE_TIMEOUT_MS = 1500;
 // never a wait for the slowest loser. The per-worker onmessage handler installed
 // here is PERSISTENT: after arming it keeps dispatching {t:"exit"} (idle return)
 // and {t:"error"} (guest fault surfacing) for the life of the pool.
-function armBrowserPool(created, { wasmModule, memory, timeoutMs, onExit }) {
+function armBrowserPool(
+  created,
+  { wasmModule, memory, hostcallChannel, timeoutMs, onExit },
+) {
   return new Promise((resolve) => {
     let remaining = created.length;
     let settled = false;
@@ -199,7 +127,12 @@ function armBrowserPool(created, { wasmModule, memory, timeoutMs, onExit }) {
         );
         finish(false);
       };
-      worker.postMessage({ t: "probe", wasmModule, memory });
+      worker.postMessage({
+        t: "probe",
+        wasmModule,
+        memory,
+        hostcallChannel: hostcallChannel ?? null,
+      });
     }
   });
 }
@@ -239,15 +172,34 @@ function detectHardwareConcurrency() {
  * @param {number} [options.requestedThreads] upper bound on how many guest
  *   threads the module will ask for (browser warm-pool sizing). Defaults to the
  *   host's hardware concurrency.
+ * @param {object} [options.hostcallChannel] request-isolated channel owned by
+ *   the controlling host. Required when pthread workers import the generic
+ *   module-host ABI.
+ * @param {boolean} [options.requiresHostcalls] whether worker instances import
+ *   the generic module-host ABI.
+ * @param {boolean} [options.enableBrowserThreads] explicit successful host
+ *   capability negotiation for an owning cross-origin-isolated worker harness.
  * @returns {Promise<{ threadSpawn: Function, activeThreadCount: () => number, spawnCount: () => number, distinctOsThreadCount: () => number, terminateAll: () => Promise<void> }>}
  */
 export async function createWasiThreadSpawn({
   wasmModule,
   memory,
   requestedThreads,
+  hostcallChannel,
+  requiresHostcalls = false,
+  enableBrowserThreads,
 } = {}) {
   let nextTid = 0;
   let spawnCount = 0;
+  if (requiresHostcalls && !hostcallChannel) {
+    return {
+      threadSpawn: () => -1,
+      activeThreadCount: () => 0,
+      spawnCount: () => 0,
+      distinctOsThreadCount: () => 0,
+      async terminateAll() {},
+    };
+  }
 
   if (IS_NODE) {
     // NODE: lazy per-spawn worker_threads. Node workers start on their own OS
@@ -263,7 +215,13 @@ export async function createWasiThreadSpawn({
       const tid = (nextTid += 1);
       try {
         const worker = new NodeWorker(nodeWorkerUrl, {
-          workerData: { wasmModule, memory, tid, startArg },
+          workerData: {
+            wasmModule,
+            memory,
+            tid,
+            startArg,
+            hostcallChannel: hostcallChannel ?? null,
+          },
         });
         // Node exposes the OS-thread id per Worker — distinct ids are direct
         // evidence that pthread_create ran real concurrent threads.
@@ -318,8 +276,11 @@ export async function createWasiThreadSpawn({
   // the entire pool comes up green. Any probe failure/timeout disables it.
   let poolDisabled = true;
 
+  const browserThreadsEnabled =
+    enableBrowserThreads ??
+    (globalThis.__SDM_ENABLE_BROWSER_WASI_THREADS__ === true);
   const armed =
-    globalThis.__SDM_ENABLE_BROWSER_WASI_THREADS__ === true &&
+    browserThreadsEnabled === true &&
     globalThis.crossOriginIsolated === true &&
     isSharedMemoryBacked(memory);
 
@@ -350,11 +311,12 @@ export async function createWasiThreadSpawn({
   if (poolSize > 0) {
     const created = [];
     for (let i = 0; i < poolSize; i += 1) {
-      created.push(new Worker(browserBlobUrl()));
+      created.push(new Worker(BROWSER_WORKER_URL, { type: "module" }));
     }
     const armed = await armBrowserPool(created, {
       wasmModule,
       memory,
+      hostcallChannel,
       timeoutMs: BROWSER_POOL_PROBE_TIMEOUT_MS,
       onExit: returnWorkerToIdle,
     });

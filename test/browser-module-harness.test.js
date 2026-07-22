@@ -13,6 +13,22 @@ import {
   isSharedArrayBufferLike,
 } from "../src/testing/browserModuleHarness.js";
 
+const ALIGNED_ATM_TYPE_REF = Object.freeze({
+  schemaName: "ATM.fbs",
+  fileIdentifier: "$ATM",
+  schemaVersion: "1.0.2",
+  schemaHash: Object.freeze([
+    0x0f, 0xef, 0xdc, 0xa4, 0xbb, 0xcb, 0x78, 0x57,
+    0xe9, 0x34, 0x03, 0xdd, 0x11, 0xf2, 0x9a, 0x67,
+    0x8d, 0x45, 0x4a, 0xb7, 0x1b, 0x14, 0x38, 0x57,
+    0x15, 0xc5, 0x2f, 0x6a, 0x72, 0xdd, 0x77, 0xec,
+  ]),
+  rootTypeName: "ATM",
+  wireFormat: "aligned-binary",
+  byteLength: 8,
+  requiredAlignment: 4,
+});
+
 function readSource(relativePath) {
   return readFileSync(new URL(relativePath, import.meta.url), "utf8");
 }
@@ -159,13 +175,27 @@ function createSharedMemoryOrSkip(t) {
   }
 }
 
+const TEST_FRAME_IDENTITY = Object.freeze({
+  schemaName: "CAT.fbs",
+  fileIdentifier: "$CAT",
+  rootTypeName: "CAT",
+});
+
 function createPort(portId, required = true) {
   return {
     portId,
     acceptedTypeSets: [
       {
-        setId: `${portId}-any`,
-        allowedTypes: [{ acceptsAnyFlatbuffer: true }],
+        setId: `${portId}-test-frame`,
+        allowedTypes: [
+          { ...TEST_FRAME_IDENTITY, wireFormat: "flatbuffer" },
+          {
+            ...TEST_FRAME_IDENTITY,
+            wireFormat: "aligned-binary",
+            byteLength: 64,
+            requiredAlignment: 8,
+          },
+        ],
       },
     ],
     minStreams: required ? 1 : 0,
@@ -374,8 +404,8 @@ test("browser module harness exposes awaited host dispatch alongside module invo
       {
         portId: "request",
         typeRef: {
-          schemaName: "Blob.fbs",
-          fileIdentifier: "BLOB",
+          ...TEST_FRAME_IDENTITY,
+          wireFormat: "flatbuffer",
         },
         payload: new TextEncoder().encode("hello from harness"),
       },
@@ -606,7 +636,7 @@ test("browser module harness direct invoke decodes external arena outputs as mod
   });
 
   const moduleArena = new Uint8Array(harness.memory.buffer);
-  const outputBytes = new TextEncoder().encode("module-owned output");
+  const outputBytes = Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8);
   const outputPtr = harness.instance.exports.plugin_alloc(outputBytes.byteLength);
   assert.ok(outputPtr > 0);
   t.after(() => {
@@ -622,13 +652,8 @@ test("browser module harness direct invoke decodes external arena outputs as mod
         portId: "response",
         offset: outputPtr,
         size: outputBytes.byteLength,
-        alignment: 8,
-        typeRef: {
-          schemaName: "SCV/main.fbs",
-          fileIdentifier: "$SCV",
-          rootTypeName: "SCVResult",
-          wireFormat: "aligned-binary",
-        },
+        alignment: 4,
+        typeRef: ALIGNED_ATM_TYPE_REF,
       },
     ],
   });
@@ -675,7 +700,7 @@ test("browser module harness direct invoke decodes outputs against grown shared 
 
   const initialMemoryBuffer = harness.memory.buffer;
   const moduleArenaBeforeInvoke = new Uint8Array(initialMemoryBuffer);
-  const outputBytes = new TextEncoder().encode("output before memory growth");
+  const outputBytes = Uint8Array.of(8, 7, 6, 5, 4, 3, 2, 1);
   const outputPtr = harness.instance.exports.plugin_alloc(outputBytes.byteLength);
   assert.ok(outputPtr > 0);
   moduleArenaBeforeInvoke.set(outputBytes, outputPtr);
@@ -688,13 +713,8 @@ test("browser module harness direct invoke decodes outputs against grown shared 
         portId: "response",
         offset: outputPtr,
         size: outputBytes.byteLength,
-        alignment: 8,
-        typeRef: {
-          schemaName: "SCV/main.fbs",
-          fileIdentifier: "$SCV",
-          rootTypeName: "SCVResult",
-          wireFormat: "aligned-binary",
-        },
+        alignment: 4,
+        typeRef: ALIGNED_ATM_TYPE_REF,
       },
     ],
   });

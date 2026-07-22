@@ -36,6 +36,22 @@ function emscriptenAvailable() {
   }
 }
 
+function dualTypeSet(setId, schemaName, fileIdentifier, rootTypeName) {
+  const identity = { schemaName, fileIdentifier, rootTypeName };
+  return {
+    setId,
+    allowedTypes: [
+      { ...identity, wireFormat: "flatbuffer" },
+      {
+        ...identity,
+        wireFormat: "aligned-binary",
+        byteLength: 64,
+        requiredAlignment: 8,
+      },
+    ],
+  };
+}
+
 function createTestManifest(overrides = {}) {
   return {
     pluginId: "com.digitalarsenal.examples.pthreads-guardrail",
@@ -53,10 +69,7 @@ function createTestManifest(overrides = {}) {
           {
             portId: "request",
             acceptedTypeSets: [
-              {
-                setId: "omm",
-                allowedTypes: [{ schemaName: "OMM.fbs", fileIdentifier: "$OMM" }],
-              },
+              dualTypeSet("omm", "OMM.fbs", "$OMM", "OMM"),
             ],
             minStreams: 1,
             maxStreams: 1,
@@ -67,10 +80,7 @@ function createTestManifest(overrides = {}) {
           {
             portId: "state",
             acceptedTypeSets: [
-              {
-                setId: "cat",
-                allowedTypes: [{ schemaName: "CAT.fbs", fileIdentifier: "$CAT" }],
-              },
+              dualTypeSet("cat", "CAT.fbs", "$CAT", "CAT"),
             ],
             minStreams: 1,
             maxStreams: 1,

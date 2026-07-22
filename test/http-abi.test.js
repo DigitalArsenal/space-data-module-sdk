@@ -164,11 +164,11 @@ test("compliance catalog resolves the HTTP envelope type refs", async () => {
   const catalog = await loadKnownTypeCatalog();
   const requestEntry = resolveStandardsTypeRef(HTTP_REQUEST_TYPE_REF, catalog);
   assert.ok(requestEntry, "HttpRequestAbi.fbs must resolve in the known-type catalog");
-  assert.equal(requestEntry.fileIdentifier, "HTQ");
+  assert.equal(requestEntry.fileIdentifier, "$HTQ");
   const responseEntry = resolveStandardsTypeRef(HTTP_RESPONSE_TYPE_REF, catalog);
   assert.ok(responseEntry, "HttpResponseAbi.fbs must resolve in the known-type catalog");
-  assert.equal(responseEntry.fileIdentifier, "HTR");
-  // Match by "$"-prefixed wire identifier alone as manifests declare it.
+  assert.equal(responseEntry.fileIdentifier, "$HTR");
+  // Match by the exact wire identifier alone as manifests declare it.
   assert.ok(resolveStandardsTypeRef({ fileIdentifier: "$HTQ" }, catalog));
   assert.ok(resolveStandardsTypeRef({ fileIdentifier: "$HTR" }, catalog));
 });

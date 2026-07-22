@@ -17,6 +17,11 @@ import {
   PLG,
   PLGAcceptedTypeSet,
   PLGBuildArtifact,
+  PLGFlowEdge,
+  PLGFlowEdgeContract,
+  PLGFlowNode,
+  PLGFlowTrigger,
+  PLGFlowTriggerBinding,
   PLGHostCapability,
   PLGMethodManifest,
   PLGPortManifest,
@@ -25,6 +30,7 @@ import {
   PluginCapability,
   PluginDependency,
   drainBehavior,
+  flowEdgeRoutePolicy,
   hostCapabilityKind,
   invokeSurfaceKind,
   payloadWireFormat,
@@ -192,6 +198,25 @@ function payloadWireFormatName(value) {
   return resolvePayloadWireFormat(value) === payloadWireFormat.ALIGNED_BINARY
     ? "aligned-binary"
     : "flatbuffer";
+}
+
+const flowEdgeRoutePolicyByName = Object.freeze({
+  canonical_only: flowEdgeRoutePolicy.CANONICAL_ONLY,
+  aligned_shared_arena_or_canonical:
+    flowEdgeRoutePolicy.ALIGNED_SHARED_ARENA_OR_CANONICAL,
+});
+
+function resolveFlowEdgeRoutePolicy(value) {
+  if (typeof value === "number") return value;
+  return flowEdgeRoutePolicyByName[canonicalEnumKey(value)] ??
+    flowEdgeRoutePolicy.CANONICAL_ONLY;
+}
+
+function flowEdgeRoutePolicyName(value) {
+  return resolveFlowEdgeRoutePolicy(value) ===
+    flowEdgeRoutePolicy.ALIGNED_SHARED_ARENA_OR_CANONICAL
+    ? "aligned-shared-arena-or-canonical"
+    : "canonical-only";
 }
 
 const invokeSurfaceByName = Object.freeze({
@@ -520,21 +545,14 @@ function typeRefToObject(typeRef) {
 }
 
 function normalizeAllowedWireFormats(typeSet = {}) {
-  const explicit = pick(
-    typeSet,
-    "allowedWireFormats",
-    "allowed_wire_formats",
-    "ALLOWED_WIRE_FORMATS",
-  );
-  const values = Array.isArray(explicit)
-    ? explicit.map((entry) => resolvePayloadWireFormat(entry))
-    : [];
-  if (values.length === 0) {
-    for (const allowedType of Array.isArray(typeSet.allowedTypes)
-      ? typeSet.allowedTypes
-      : []) {
-      values.push(resolvePayloadWireFormat(allowedType?.wireFormat));
-    }
+  const values = [];
+  const allowedTypes = Array.isArray(typeSet.allowedTypes)
+    ? typeSet.allowedTypes
+    : Array.isArray(typeSet.ALLOWED_TYPES)
+      ? typeSet.ALLOWED_TYPES
+      : [];
+  for (const allowedType of allowedTypes) {
+    values.push(resolvePayloadWireFormat(allowedType?.wireFormat));
   }
   const unique = [];
   const seen = new Set();
@@ -957,6 +975,256 @@ function buildArtifactToObject(artifact) {
   };
 }
 
+function addFlowNode(builder, node = {}) {
+  const nodeId = normalizeOptionalString(
+    pick(node, "nodeId", "node_id", "NODE_ID"),
+  );
+  const pluginId = normalizeOptionalString(
+    pick(node, "pluginId", "plugin_id", "PLUGIN_ID"),
+  );
+  if (!nodeId || !pluginId) {
+    throw new TypeError("PLG flow node requires nodeId and pluginId.");
+  }
+  const methodId = normalizeOptionalString(
+    pick(node, "methodId", "method_id", "METHOD_ID"),
+  );
+  const kind = normalizeOptionalString(pick(node, "kind", "KIND"));
+  const dispatchModel = normalizeOptionalString(
+    pick(node, "dispatchModel", "dispatch_model", "DISPATCH_MODEL"),
+  );
+  const config = normalizeByteVector(pick(node, "config", "CONFIG"));
+  const nodeIdOffset = builder.createString(nodeId);
+  const pluginIdOffset = builder.createString(pluginId);
+  const methodIdOffset = methodId ? builder.createString(methodId) : 0;
+  const kindOffset = kind ? builder.createString(kind) : 0;
+  const dispatchModelOffset = dispatchModel
+    ? builder.createString(dispatchModel)
+    : 0;
+  const configOffset = addByteVector(
+    builder,
+    config,
+    PLGFlowNode.startConfigVector,
+  );
+  PLGFlowNode.startPLGFlowNode(builder);
+  PLGFlowNode.addNodeId(builder, nodeIdOffset);
+  PLGFlowNode.addPluginId(builder, pluginIdOffset);
+  if (methodIdOffset) PLGFlowNode.addMethodId(builder, methodIdOffset);
+  if (kindOffset) PLGFlowNode.addKind(builder, kindOffset);
+  if (dispatchModelOffset)
+    PLGFlowNode.addDispatchModel(builder, dispatchModelOffset);
+  if (configOffset) PLGFlowNode.addConfig(builder, configOffset);
+  const uiX = Number(pick(node, "uiX", "ui_x", "UI_X") ?? 0);
+  const uiY = Number(pick(node, "uiY", "ui_y", "UI_Y") ?? 0);
+  if (Number.isFinite(uiX) && uiX !== 0) PLGFlowNode.addUiX(builder, uiX);
+  if (Number.isFinite(uiY) && uiY !== 0) PLGFlowNode.addUiY(builder, uiY);
+  return PLGFlowNode.endPLGFlowNode(builder);
+}
+
+function flowNodeToObject(node) {
+  const config = node.configArray?.() ?? null;
+  return {
+    nodeId: node.NODE_ID(),
+    pluginId: node.PLUGIN_ID(),
+    methodId: node.METHOD_ID() || undefined,
+    kind: node.KIND() || undefined,
+    dispatchModel: node.DISPATCH_MODEL() || undefined,
+    ...(config && config.length > 0
+      ? { config: new Uint8Array(config) }
+      : {}),
+    uiX: node.UI_X(),
+    uiY: node.UI_Y(),
+  };
+}
+
+function addFlowEdge(builder, edge = {}) {
+  const fromNodeId = normalizeOptionalString(
+    pick(edge, "fromNodeId", "from_node_id", "FROM_NODE_ID"),
+  );
+  const fromPortId = normalizeOptionalString(
+    pick(edge, "fromPortId", "from_port_id", "FROM_PORT_ID"),
+  );
+  const toNodeId = normalizeOptionalString(
+    pick(edge, "toNodeId", "to_node_id", "TO_NODE_ID"),
+  );
+  const toPortId = normalizeOptionalString(
+    pick(edge, "toPortId", "to_port_id", "TO_PORT_ID"),
+  );
+  if (!fromNodeId || !fromPortId || !toNodeId || !toPortId) {
+    const missing = [
+      ["fromNodeId", fromNodeId],
+      ["fromPortId", fromPortId],
+      ["toNodeId", toNodeId],
+      ["toPortId", toPortId],
+    ]
+      .filter(([, value]) => !value)
+      .map(([field]) => field)
+      .join(", ");
+    throw new TypeError(`PLG flow edge requires ${missing}.`);
+  }
+  const edgeId = normalizeOptionalString(
+    pick(edge, "edgeId", "edge_id", "EDGE_ID"),
+  );
+  const edgeIdOffset = edgeId ? builder.createString(edgeId) : 0;
+  const fromNodeIdOffset = builder.createString(fromNodeId);
+  const fromPortIdOffset = builder.createString(fromPortId);
+  const toNodeIdOffset = builder.createString(toNodeId);
+  const toPortIdOffset = builder.createString(toPortId);
+  const contract = pick(edge, "contract", "CONTRACT");
+  if (!contract) {
+    throw new TypeError("PLG flow edge requires an exact contract.");
+  }
+  const canonicalType = pick(
+    contract,
+    "canonicalType",
+    "canonical_type",
+    "CANONICAL_TYPE",
+  );
+  if (!canonicalType) {
+    throw new TypeError("PLG flow edge contract requires canonicalType.");
+  }
+  const alignedType = pick(
+    contract,
+    "alignedType",
+    "aligned_type",
+    "ALIGNED_TYPE",
+  );
+  const canonicalTypeOffset = addFlatBufferTypeRef(builder, canonicalType);
+  const alignedTypeOffset = alignedType
+    ? addFlatBufferTypeRef(builder, alignedType)
+    : 0;
+  PLGFlowEdgeContract.startPLGFlowEdgeContract(builder);
+  PLGFlowEdgeContract.addCanonicalType(builder, canonicalTypeOffset);
+  if (alignedTypeOffset) {
+    PLGFlowEdgeContract.addAlignedType(builder, alignedTypeOffset);
+  }
+  PLGFlowEdgeContract.addCanonicalFallbackAvailable(
+    builder,
+    pick(
+      contract,
+      "canonicalFallbackAvailable",
+      "canonical_fallback_available",
+      "CANONICAL_FALLBACK_AVAILABLE",
+    ) !== false,
+  );
+  PLGFlowEdgeContract.addAlignedEligible(
+    builder,
+    pick(contract, "alignedEligible", "aligned_eligible", "ALIGNED_ELIGIBLE") === true,
+  );
+  PLGFlowEdgeContract.addRoutePolicy(
+    builder,
+    resolveFlowEdgeRoutePolicy(
+      pick(contract, "routePolicy", "route_policy", "ROUTE_POLICY"),
+    ),
+  );
+  const contractOffset = PLGFlowEdgeContract.endPLGFlowEdgeContract(builder);
+
+  PLGFlowEdge.startPLGFlowEdge(builder);
+  if (edgeIdOffset) PLGFlowEdge.addEdgeId(builder, edgeIdOffset);
+  PLGFlowEdge.addFromNodeId(builder, fromNodeIdOffset);
+  PLGFlowEdge.addFromPortId(builder, fromPortIdOffset);
+  PLGFlowEdge.addToNodeId(builder, toNodeIdOffset);
+  PLGFlowEdge.addToPortId(builder, toPortIdOffset);
+  PLGFlowEdge.addContract(builder, contractOffset);
+  return PLGFlowEdge.endPLGFlowEdge(builder);
+}
+
+function flowEdgeToObject(edge) {
+  const contract = edge.CONTRACT?.();
+  const canonicalType = contract?.CANONICAL_TYPE?.();
+  if (!contract || !canonicalType) {
+    throw new TypeError("Decoded PLG flow edge is missing its exact contract.");
+  }
+  const alignedType = contract.ALIGNED_TYPE?.();
+  return {
+    edgeId: edge.EDGE_ID() || undefined,
+    fromNodeId: edge.FROM_NODE_ID(),
+    fromPortId: edge.FROM_PORT_ID(),
+    toNodeId: edge.TO_NODE_ID(),
+    toPortId: edge.TO_PORT_ID(),
+    contract: {
+      canonicalType: typeRefToObject(canonicalType),
+      alignedType: alignedType ? typeRefToObject(alignedType) : null,
+      canonicalFallbackAvailable: contract.CANONICAL_FALLBACK_AVAILABLE(),
+      alignedEligible: contract.ALIGNED_ELIGIBLE(),
+      routePolicy: flowEdgeRoutePolicyName(contract.ROUTE_POLICY()),
+    },
+  };
+}
+
+function addFlowTrigger(builder, trigger = {}) {
+  const triggerId = normalizeOptionalString(
+    pick(trigger, "triggerId", "trigger_id", "TRIGGER_ID"),
+  );
+  if (!triggerId) {
+    throw new TypeError("PLG flow trigger requires triggerId.");
+  }
+  const kind = normalizeOptionalString(pick(trigger, "kind", "KIND"));
+  const source = normalizeOptionalString(pick(trigger, "source", "SOURCE"));
+  const httpPath = normalizeOptionalString(
+    pick(trigger, "httpPath", "http_path", "HTTP_PATH"),
+  );
+  const triggerIdOffset = builder.createString(triggerId);
+  const kindOffset = kind ? builder.createString(kind) : 0;
+  const sourceOffset = source ? builder.createString(source) : 0;
+  const httpPathOffset = httpPath ? builder.createString(httpPath) : 0;
+  return PLGFlowTrigger.createPLGFlowTrigger(
+    builder,
+    triggerIdOffset,
+    kindOffset,
+    sourceOffset,
+    toBigInt(
+      pick(
+        trigger,
+        "defaultIntervalMs",
+        "default_interval_ms",
+        "DEFAULT_INTERVAL_MS",
+      ),
+    ),
+    httpPathOffset,
+  );
+}
+
+function flowTriggerToObject(trigger) {
+  return {
+    triggerId: trigger.TRIGGER_ID(),
+    kind: trigger.KIND() || undefined,
+    source: trigger.SOURCE() || undefined,
+    defaultIntervalMs: trigger.DEFAULT_INTERVAL_MS(),
+    httpPath: trigger.HTTP_PATH() || undefined,
+  };
+}
+
+function addFlowTriggerBinding(builder, binding = {}) {
+  const triggerId = normalizeOptionalString(
+    pick(binding, "triggerId", "trigger_id", "TRIGGER_ID"),
+  );
+  const targetNodeId = normalizeOptionalString(
+    pick(binding, "targetNodeId", "target_node_id", "TARGET_NODE_ID"),
+  );
+  const targetPortId = normalizeOptionalString(
+    pick(binding, "targetPortId", "target_port_id", "TARGET_PORT_ID"),
+  );
+  if (!triggerId || !targetNodeId || !targetPortId) {
+    throw new TypeError(
+      "PLG flow trigger binding requires triggerId, targetNodeId, and targetPortId.",
+    );
+  }
+  return PLGFlowTriggerBinding.createPLGFlowTriggerBinding(
+    builder,
+    builder.createString(triggerId),
+    builder.createString(targetNodeId),
+    builder.createString(targetPortId),
+  );
+}
+
+function flowTriggerBindingToObject(binding) {
+  return {
+    triggerId: binding.TRIGGER_ID(),
+    targetNodeId: binding.TARGET_NODE_ID(),
+    targetPortId: binding.TARGET_PORT_ID(),
+  };
+}
+
 /**
  * Encode a PLG manifest object to a canonical `$PLG`-identified FlatBuffer.
  * Returns a Uint8Array over a fresh buffer.
@@ -1374,6 +1642,59 @@ export function encodePlgManifest(manifest = {}) {
     pick(manifest, "runtimeTargets", "runtime_targets", "RUNTIME_TARGETS"),
   );
 
+  const flowNodes = pick(manifest, "flowNodes", "flow_nodes", "FLOW_NODES");
+  const flowNodeOffsets = Array.isArray(flowNodes)
+    ? flowNodes.map((node) => addFlowNode(builder, node)).filter(Boolean)
+    : [];
+  const flowNodesOffset =
+    flowNodeOffsets.length > 0
+      ? PLG.createFlowNodesVector(builder, flowNodeOffsets)
+      : 0;
+
+  const flowEdges = pick(manifest, "flowEdges", "flow_edges", "FLOW_EDGES");
+  const flowEdgeOffsets = Array.isArray(flowEdges)
+    ? flowEdges.map((edge) => addFlowEdge(builder, edge)).filter(Boolean)
+    : [];
+  const flowEdgesOffset =
+    flowEdgeOffsets.length > 0
+      ? PLG.createFlowEdgesVector(builder, flowEdgeOffsets)
+      : 0;
+
+  const flowTriggers = pick(
+    manifest,
+    "flowTriggers",
+    "flow_triggers",
+    "FLOW_TRIGGERS",
+  );
+  const flowTriggerOffsets = Array.isArray(flowTriggers)
+    ? flowTriggers
+        .map((trigger) => addFlowTrigger(builder, trigger))
+        .filter(Boolean)
+    : [];
+  const flowTriggersOffset =
+    flowTriggerOffsets.length > 0
+      ? PLG.createFlowTriggersVector(builder, flowTriggerOffsets)
+      : 0;
+
+  const flowTriggerBindings = pick(
+    manifest,
+    "flowTriggerBindings",
+    "flow_trigger_bindings",
+    "FLOW_TRIGGER_BINDINGS",
+  );
+  const flowTriggerBindingOffsets = Array.isArray(flowTriggerBindings)
+    ? flowTriggerBindings
+        .map((binding) => addFlowTriggerBinding(builder, binding))
+        .filter(Boolean)
+    : [];
+  const flowTriggerBindingsOffset =
+    flowTriggerBindingOffsets.length > 0
+      ? PLG.createFlowTriggerBindingsVector(
+          builder,
+          flowTriggerBindingOffsets,
+        )
+      : 0;
+
   PLG.startPLG(builder);
   PLG.addPluginId(builder, pluginIdOffset);
   PLG.addName(builder, nameOffset);
@@ -1441,6 +1762,11 @@ export function encodePlgManifest(manifest = {}) {
   if (schemasUsedOffset) PLG.addSchemasUsed(builder, schemasUsedOffset);
   if (buildArtifactsOffset) PLG.addBuildArtifacts(builder, buildArtifactsOffset);
   if (runtimeTargetsOffset) PLG.addRuntimeTargets(builder, runtimeTargetsOffset);
+  if (flowNodesOffset) PLG.addFlowNodes(builder, flowNodesOffset);
+  if (flowEdgesOffset) PLG.addFlowEdges(builder, flowEdgesOffset);
+  if (flowTriggersOffset) PLG.addFlowTriggers(builder, flowTriggersOffset);
+  if (flowTriggerBindingsOffset)
+    PLG.addFlowTriggerBindings(builder, flowTriggerBindingsOffset);
   const rootOffset = PLG.endPLG(builder);
   PLG.finishPLGBuffer(builder, rootOffset);
   return builder.asUint8Array();
@@ -1573,6 +1899,32 @@ export function decodePlgManifest(data) {
       buildArtifacts.push(buildArtifactToObject(artifact));
     }
   }
+  const flowNodes = [];
+  for (let index = 0; index < (root.flowNodesLength?.() ?? 0); index += 1) {
+    const node = root.FLOW_NODES(index);
+    if (node) flowNodes.push(flowNodeToObject(node));
+  }
+  const flowEdges = [];
+  for (let index = 0; index < (root.flowEdgesLength?.() ?? 0); index += 1) {
+    const edge = root.FLOW_EDGES(index);
+    if (edge) flowEdges.push(flowEdgeToObject(edge));
+  }
+  const flowTriggers = [];
+  for (let index = 0; index < (root.flowTriggersLength?.() ?? 0); index += 1) {
+    const trigger = root.FLOW_TRIGGERS(index);
+    if (trigger) flowTriggers.push(flowTriggerToObject(trigger));
+  }
+  const flowTriggerBindings = [];
+  for (
+    let index = 0;
+    index < (root.flowTriggerBindingsLength?.() ?? 0);
+    index += 1
+  ) {
+    const binding = root.FLOW_TRIGGER_BINDINGS(index);
+    if (binding) {
+      flowTriggerBindings.push(flowTriggerBindingToObject(binding));
+    }
+  }
 
   return {
     pluginId: root.PLUGIN_ID(),
@@ -1647,6 +1999,10 @@ export function decodePlgManifest(data) {
     schemasUsed,
     buildArtifacts,
     runtimeTargets: readStringVector(root, "runtimeTargetsLength", "RUNTIME_TARGETS"),
+    flowNodes,
+    flowEdges,
+    flowTriggers,
+    flowTriggerBindings,
   };
 }
 

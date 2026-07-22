@@ -288,6 +288,19 @@ test("disabled gate (__SDM_ENABLE false) creates no workers", async () => {
   assert.equal(h.threadSpawn(1), -1);
 });
 
+test("an owning worker harness can explicitly negotiate browser pthreads", async () => {
+  installBrowserEnv({ hardwareConcurrency: 8, armed: false, autoExit: false });
+  const h = await createWasiThreadSpawn({
+    wasmModule: WASM_MODULE,
+    memory: SHARED_MEMORY,
+    requestedThreads: 2,
+    enableBrowserThreads: true,
+  });
+  assert.equal(MockWorker.instances.length, 2);
+  assert.ok(h.threadSpawn(1) > 0);
+  await h.terminateAll();
+});
+
 test("no cross-origin isolation creates no workers", async () => {
   installBrowserEnv({ hardwareConcurrency: 8, isolated: false });
   const h = await host({ requestedThreads: 4 });

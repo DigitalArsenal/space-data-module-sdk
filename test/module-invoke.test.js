@@ -28,13 +28,68 @@ import {
 import { BufferMutability } from "../src/generated/orbpro/stream/buffer-mutability.js";
 import { BufferOwnership } from "../src/generated/orbpro/stream/buffer-ownership.js";
 
-function createPort(portId, required = true) {
+const ATM_TYPE = Object.freeze({
+  schemaName: "ATM.fbs",
+  fileIdentifier: "$ATM",
+  rootTypeName: "ATM",
+  byteLength: 8,
+  requiredAlignment: 4,
+});
+
+const ATM_SCHEMA_HASH = Object.freeze([
+  0x0f, 0xef, 0xdc, 0xa4, 0xbb, 0xcb, 0x78, 0x57,
+  0xe9, 0x34, 0x03, 0xdd, 0x11, 0xf2, 0x9a, 0x67,
+  0x8d, 0x45, 0x4a, 0xb7, 0x1b, 0x14, 0x38, 0x57,
+  0x15, 0xc5, 0x2f, 0x6a, 0x72, 0xdd, 0x77, 0xec,
+]);
+
+const VERSIONED_ATM_TYPE = Object.freeze({
+  ...ATM_TYPE,
+  schemaVersion: "1.0.2",
+  schemaHash: ATM_SCHEMA_HASH,
+});
+
+const GRV_TYPE = Object.freeze({
+  schemaName: "GRV.fbs",
+  fileIdentifier: "$GRV",
+  rootTypeName: "GRV",
+  byteLength: 72,
+  requiredAlignment: 8,
+});
+
+function createCanonicalType(type = ATM_TYPE, overrides = {}) {
+  return {
+    schemaName: type.schemaName,
+    fileIdentifier: type.fileIdentifier,
+    rootTypeName: type.rootTypeName,
+    ...(type.schemaVersion ? { schemaVersion: type.schemaVersion } : {}),
+    ...(type.schemaHash ? { schemaHash: [...type.schemaHash] } : {}),
+    wireFormat: "flatbuffer",
+    ...overrides,
+  };
+}
+
+function createAlignedType(type = ATM_TYPE, overrides = {}) {
+  return {
+    schemaName: type.schemaName,
+    fileIdentifier: type.fileIdentifier,
+    rootTypeName: type.rootTypeName,
+    ...(type.schemaVersion ? { schemaVersion: type.schemaVersion } : {}),
+    ...(type.schemaHash ? { schemaHash: [...type.schemaHash] } : {}),
+    wireFormat: "aligned-binary",
+    byteLength: type.byteLength,
+    requiredAlignment: type.requiredAlignment,
+    ...overrides,
+  };
+}
+
+function createPort(portId, required = true, type = ATM_TYPE) {
   return {
     portId,
     acceptedTypeSets: [
       {
-        setId: `${portId}-any`,
-        allowedTypes: [{ acceptsAnyFlatbuffer: true }],
+        setId: `${portId}-${type.rootTypeName.toLowerCase()}`,
+        allowedTypes: [createCanonicalType(type), createAlignedType(type)],
       },
     ],
     minStreams: required ? 1 : 0,
@@ -49,6 +104,8 @@ function createInvokeManifest({
   methodId = "echo",
   inputPortIds = ["in"],
   outputPortIds = ["out"],
+  inputType = ATM_TYPE,
+  outputType = ATM_TYPE,
 } = {}) {
   return {
     pluginId,
@@ -62,8 +119,8 @@ function createInvokeManifest({
       {
         methodId,
         displayName: methodId,
-        inputPorts: inputPortIds.map((portId) => createPort(portId, true)),
-        outputPorts: outputPortIds.map((portId) => createPort(portId, false)),
+        inputPorts: inputPortIds.map((portId) => createPort(portId, true, inputType)),
+        outputPorts: outputPortIds.map((portId) => createPort(portId, false, outputType)),
         maxBatch: 1,
         drainPolicy: "single-shot",
       },
@@ -122,7 +179,7 @@ function encodeExternalArenaPivRequest({
           size,
           8,
           0,
-          new FlatBufferTypeRefT("PluginManifest.fbs", "PMAN", null, null),
+          new FlatBufferTypeRefT("ATM.fbs", "$ATM", null, "ATM"),
           SdsBufferMutability.IMMUTABLE,
           SdsBufferOwnership.HOST_OWNED,
           0n,
@@ -156,7 +213,7 @@ function encodePivRequestWithTabRange({
           size,
           8,
           0,
-          new FlatBufferTypeRefT("PluginManifest.fbs", "PMAN", null, null),
+          new FlatBufferTypeRefT("ATM.fbs", "$ATM", null, "ATM"),
           SdsBufferMutability.IMMUTABLE,
           SdsBufferOwnership.HOST_OWNED,
           0n,
@@ -165,6 +222,61 @@ function encodePivRequestWithTabRange({
       ],
       arena,
       traceId,
+      0,
+    ),
+    null,
+  ).pack(builder);
+  PIV.finishPIVBuffer(builder, root);
+  return builder.asUint8Array();
+}
+
+function encodePivRequestWithSingleFrame({
+  methodId = "guarded",
+  portId = "alpha",
+  typeRef = createCanonicalType(VERSIONED_ATM_TYPE),
+  tabWireFormat,
+  alignment,
+  mutability = SdsBufferMutability.IMMUTABLE,
+  ownership = SdsBufferOwnership.HOST_OWNED,
+  frameId = 0n,
+  payload = Uint8Array.from([0, 0, 0, 0, 0, 0, 0, 0]),
+} = {}) {
+  const wireFormat = tabWireFormat ??
+    (typeRef.wireFormat === "aligned-binary" ? 1 : 0);
+  const frameAlignment = alignment ?? Math.max(
+    4,
+    Number(typeRef.requiredAlignment ?? 0),
+  );
+  const builder = new flatbuffers.Builder(1024);
+  const root = new PIVT(
+    new PIVRequestT(
+      methodId,
+      [
+        new TABT(
+          0,
+          payload.length,
+          frameAlignment,
+          wireFormat,
+          new FlatBufferTypeRefT(
+            typeRef.schemaName ?? null,
+            typeRef.fileIdentifier ?? null,
+            typeRef.schemaVersion ?? null,
+            typeRef.rootTypeName ?? null,
+            typeRef.schemaHash ? [...typeRef.schemaHash] : [],
+            false,
+            typeRef.wireFormat === "aligned-binary" ? 1 : 0,
+            typeRef.fixedStringLength ?? 0,
+            typeRef.byteLength ?? 0,
+            typeRef.requiredAlignment ?? 0,
+          ),
+          mutability,
+          ownership,
+          frameId,
+          portId,
+        ),
+      ],
+      [...payload],
+      0n,
       0,
     ),
     null,
@@ -192,7 +304,7 @@ function encodeExternalArenaPivResponse({
           size,
           8,
           0,
-          new FlatBufferTypeRefT("PluginManifest.fbs", "PMAN", null, null),
+          new FlatBufferTypeRefT("ATM.fbs", "$ATM", null, "ATM"),
           SdsBufferMutability.IMMUTABLE,
           SdsBufferOwnership.HOST_OWNED,
           0n,
@@ -259,6 +371,15 @@ int fanout(void) {
 }
 `;
 
+const REJECTED_INPUT_GUARD_SOURCE = `#include <stdint.h>
+#include "space_data_module_invoke.h"
+
+int guarded(void) {
+  plugin_set_error("handler-executed", "The guest handler executed.");
+  return 91;
+}
+`;
+
 const LOCAL_OUTPUT_SOURCE = `#include <stdint.h>
 #include "space_data_module_invoke.h"
 
@@ -267,8 +388,8 @@ int local_output(void) {
   uint8_t payload[8] = { 1, 1, 2, 3, 5, 8, 13, 21 };
   const int32_t output_index = plugin_push_output(
     "alpha",
-    "Blob.fbs",
-    "BLOB",
+    "ATM.fbs",
+    "$ATM",
     payload,
     8
   );
@@ -290,8 +411,8 @@ int stream_output(void) {
   plugin_reset_output_state();
   int32_t output_index = plugin_push_output(
     "out",
-    "PluginManifest.fbs",
-    "PMAN",
+    "ATM.fbs",
+    "$ATM",
     payload,
     4
   );
@@ -310,10 +431,16 @@ const MIXED_FORMAT_SOURCE = `#include <stdint.h>
 
 int propagate(void) {
   const plugin_input_frame_t *frame = plugin_get_input_frame(0);
-  static const uint8_t state_vector_bytes[24] = {
+  static const uint8_t gravity_model_bytes[72] = {
     0, 1, 2, 3, 4, 5, 6, 7,
     8, 9, 10, 11, 12, 13, 14, 15,
-    16, 17, 18, 19, 20, 21, 22, 23
+    16, 17, 18, 19, 20, 21, 22, 23,
+    24, 25, 26, 27, 28, 29, 30, 31,
+    32, 33, 34, 35, 36, 37, 38, 39,
+    40, 41, 42, 43, 44, 45, 46, 47,
+    48, 49, 50, 51, 52, 53, 54, 55,
+    56, 57, 58, 59, 60, 61, 62, 63,
+    64, 65, 66, 67, 68, 69, 70, 71
   };
   if (!frame) {
     plugin_set_error("missing-frame", "No input frame was provided.");
@@ -321,15 +448,15 @@ int propagate(void) {
   }
   plugin_push_output_typed(
     "state",
-    "StateVector.fbs",
-    "STVC",
+    "GRV.fbs",
+    "$GRV",
     1,
-    "StateVector",
+    "GRV",
     0,
-    24,
+    72,
     8,
-    state_vector_bytes,
-    24
+    gravity_model_bytes,
+    72
   );
   return 0;
 }
@@ -807,18 +934,12 @@ test("direct invoke ABI routes multi-port frames and round-trips payload bytes",
       inputs: [
         {
           portId: "alpha",
-          typeRef: {
-            schemaName: "PluginManifest.fbs",
-            fileIdentifier: "PMAN",
-          },
+          typeRef: createCanonicalType(),
           payload: payloadAlpha,
         },
         {
           portId: "beta",
-          typeRef: {
-            schemaName: "PluginManifest.fbs",
-            fileIdentifier: "PMAN",
-          },
+          typeRef: createCanonicalType(),
           payload: payloadBeta,
         },
       ],
@@ -840,23 +961,55 @@ test("direct invoke ABI routes multi-port frames and round-trips payload bytes",
   }
 });
 
-test("direct invoke ABI accepts PIV frames with omitted root type when schema identity matches", async () => {
-  const manifest = {
-    ...createInvokeManifest({
-      pluginId: "com.digitalarsenal.examples.invoke-root-type-optional",
-      invokeSurfaces: ["direct"],
-      methodId: "fanout",
-      inputPortIds: ["alpha"],
-      outputPortIds: ["alpha"],
-    }),
-  };
-  manifest.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
-    {
-      schemaName: "PluginManifest.fbs",
-      fileIdentifier: "PMAN",
-      rootTypeName: "PluginManifest",
-    },
-  ];
+test("zero-length canonical inputs do not force plugin-owned output descriptors", async () => {
+  const manifest = createInvokeManifest({
+    pluginId: "com.digitalarsenal.examples.invoke-zero-length-input",
+    invokeSurfaces: ["direct"],
+    methodId: "local_output",
+    inputPortIds: ["alpha"],
+    outputPortIds: ["alpha"],
+  });
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: LOCAL_OUTPUT_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    const requestBytes = encodePluginInvokeRequest({
+      methodId: "local_output",
+      inputs: [
+        {
+          portId: "alpha",
+          typeRef: createCanonicalType(),
+          payload: new Uint8Array(),
+        },
+      ],
+    });
+    const { responseBytes } = invokeDirectBytes(instance, requestBytes);
+    const response = decodePluginInvokeResponse(responseBytes);
+
+    assert.equal(response.statusCode, 0);
+    assert.equal(response.outputs.length, 1);
+    assert.equal(response.outputs[0].ownership, BufferOwnership.HOST_OWNED);
+    assert.deepEqual(
+      Array.from(response.outputs[0].payload),
+      [1, 1, 2, 3, 5, 8, 13, 21],
+    );
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
+test("direct invoke ABI accepts an exact canonical SDS input identity", async () => {
+  const manifest = createInvokeManifest({
+    pluginId: "com.digitalarsenal.examples.invoke-exact-canonical-input",
+    invokeSurfaces: ["direct"],
+    methodId: "fanout",
+    inputPortIds: ["alpha"],
+    outputPortIds: ["alpha"],
+  });
 
   const compilation = await compileModuleFromSource({
     manifest,
@@ -866,7 +1019,7 @@ test("direct invoke ABI accepts PIV frames with omitted root type when schema id
 
   try {
     const { instance } = instantiateWithWasi(compilation.wasmBytes);
-    const payload = createPayload("root-type-optional");
+    const payload = createPayload("exact-canonical-input");
     const { response } = invokeDirect(
       instance,
       encodePluginInvokeRequest({
@@ -874,10 +1027,7 @@ test("direct invoke ABI accepts PIV frames with omitted root type when schema id
         inputs: [
           {
             portId: "alpha",
-            typeRef: {
-              schemaName: "PluginManifest.fbs",
-              fileIdentifier: "PMAN",
-            },
+            typeRef: createCanonicalType(),
             payload,
           },
         ],
@@ -887,6 +1037,55 @@ test("direct invoke ABI accepts PIV frames with omitted root type when schema id
     assert.equal(response.statusCode, 0);
     assert.equal(response.outputs.length, 1);
     assert.deepEqual(Array.from(response.outputs[0].payload), Array.from(payload));
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
+test("generated guest outputs carry the exact declared SDS schema identity", async () => {
+  const manifest = createInvokeManifest({
+    pluginId: "com.digitalarsenal.examples.invoke-exact-output-identity",
+    invokeSurfaces: ["direct"],
+    methodId: "fanout",
+    inputPortIds: ["state"],
+    outputPortIds: ["state"],
+    inputType: VERSIONED_ATM_TYPE,
+    outputType: VERSIONED_ATM_TYPE,
+  });
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: FANOUT_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    for (const typeRef of [
+      createCanonicalType(VERSIONED_ATM_TYPE),
+      createAlignedType(VERSIONED_ATM_TYPE),
+    ]) {
+      const payload = Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8]);
+      const { response } = invokeDirect(
+        instance,
+        encodePluginInvokeRequest({
+          methodId: "fanout",
+          inputs: [{ portId: "state", typeRef, payload }],
+        }),
+      );
+
+      assert.equal(response.statusCode, 0, typeRef.wireFormat);
+      assert.equal(response.outputs.length, 1, typeRef.wireFormat);
+      assert.equal(
+        response.outputs[0].typeRef?.schemaVersion,
+        VERSIONED_ATM_TYPE.schemaVersion,
+        typeRef.wireFormat,
+      );
+      assert.deepEqual(
+        Array.from(response.outputs[0].typeRef?.schemaHash ?? []),
+        [...ATM_SCHEMA_HASH],
+        typeRef.wireFormat,
+      );
+    }
   } finally {
     await cleanupCompilation(compilation);
   }
@@ -914,15 +1113,7 @@ test("direct invoke ABI preserves SDS PIV/TAB aligned layout metadata", async ()
       inputs: [
         {
           portId: "state",
-          typeRef: {
-            schemaName: "StateVector.fbs",
-            fileIdentifier: "STVC",
-            wireFormat: "aligned-binary",
-            rootTypeName: "StateVector",
-            fixedStringLength: 255,
-            byteLength: 64,
-            requiredAlignment: 16,
-          },
+          typeRef: createAlignedType(),
           payload,
         },
       ],
@@ -933,11 +1124,11 @@ test("direct invoke ABI preserves SDS PIV/TAB aligned layout metadata", async ()
     assert.equal(response.outputs[0].portId, "state");
     assert.deepEqual(Array.from(response.outputs[0].payload), Array.from(payload));
     assert.equal(response.outputs[0].typeRef?.wireFormat, "aligned-binary");
-    assert.equal(response.outputs[0].typeRef?.rootTypeName, "StateVector");
+    assert.equal(response.outputs[0].typeRef?.rootTypeName, "ATM");
     assert.equal(response.outputs[0].typeRef?.fixedStringLength, 0);
-    assert.equal(response.outputs[0].typeRef?.byteLength, payload.length);
-    assert.equal(response.outputs[0].typeRef?.requiredAlignment, 16);
-    assert.equal(response.outputs[0].alignment, 16);
+    assert.equal(response.outputs[0].typeRef?.byteLength, ATM_TYPE.byteLength);
+    assert.equal(response.outputs[0].typeRef?.requiredAlignment, ATM_TYPE.requiredAlignment);
+    assert.equal(response.outputs[0].alignment, ATM_TYPE.requiredAlignment);
   } finally {
     await cleanupCompilation(compilation);
   }
@@ -951,61 +1142,9 @@ test("direct invoke ABI supports regular flatbuffer inputs and aligned-binary ou
       methodId: "propagate",
       inputPortIds: ["request"],
       outputPortIds: ["state"],
+      inputType: ATM_TYPE,
+      outputType: GRV_TYPE,
     }),
-    methods: [
-      {
-        methodId: "propagate",
-        displayName: "propagate",
-        inputPorts: [
-          {
-            portId: "request",
-            acceptedTypeSets: [
-              {
-                setId: "omm",
-                allowedTypes: [
-                  {
-                    schemaName: "OMM.fbs",
-                    fileIdentifier: "$OMM",
-                  },
-                ],
-              },
-            ],
-            minStreams: 1,
-            maxStreams: 1,
-            required: true,
-          },
-        ],
-        outputPorts: [
-          {
-            portId: "state",
-            acceptedTypeSets: [
-              {
-                setId: "aligned-state",
-                allowedTypes: [
-                  {
-                    schemaName: "StateVector.fbs",
-                    fileIdentifier: "STVC",
-                  },
-                  {
-                    schemaName: "StateVector.fbs",
-                    fileIdentifier: "STVC",
-                    wireFormat: "aligned-binary",
-                    rootTypeName: "StateVector",
-                    byteLength: 24,
-                    requiredAlignment: 8,
-                  },
-                ],
-              },
-            ],
-            minStreams: 0,
-            maxStreams: 1,
-            required: false,
-          },
-        ],
-        maxBatch: 1,
-        drainPolicy: "single-shot",
-      },
-    ],
   };
   const compilation = await compileModuleFromSource({
     manifest,
@@ -1020,10 +1159,7 @@ test("direct invoke ABI supports regular flatbuffer inputs and aligned-binary ou
       inputs: [
         {
           portId: "request",
-          typeRef: {
-            schemaName: "OMM.fbs",
-            fileIdentifier: "$OMM",
-          },
+          typeRef: createCanonicalType(),
           payload: createPayload("omm-request"),
         },
       ],
@@ -1032,15 +1168,15 @@ test("direct invoke ABI supports regular flatbuffer inputs and aligned-binary ou
     assert.equal(response.statusCode, 0);
     assert.equal(response.outputs.length, 1);
     assert.equal(response.outputs[0].portId, "state");
-    assert.equal(response.outputs[0].typeRef?.schemaName, "StateVector.fbs");
-    assert.equal(response.outputs[0].typeRef?.fileIdentifier, "STVC");
+    assert.equal(response.outputs[0].typeRef?.schemaName, "GRV.fbs");
+    assert.equal(response.outputs[0].typeRef?.fileIdentifier, "$GRV");
     assert.equal(response.outputs[0].typeRef?.wireFormat, "aligned-binary");
-    assert.equal(response.outputs[0].typeRef?.rootTypeName, "StateVector");
-    assert.equal(response.outputs[0].typeRef?.byteLength, 24);
+    assert.equal(response.outputs[0].typeRef?.rootTypeName, "GRV");
+    assert.equal(response.outputs[0].typeRef?.byteLength, 72);
     assert.equal(response.outputs[0].typeRef?.requiredAlignment, 8);
     assert.deepEqual(
       Array.from(response.outputs[0].payload),
-      Array.from({ length: 24 }, (_, index) => index),
+      Array.from({ length: 72 }, (_, index) => index),
     );
   } finally {
     await cleanupCompilation(compilation);
@@ -1078,7 +1214,7 @@ test("direct invoke ABI returns canonical error responses for invalid requests",
         inputs: [
           {
             portId: "wrong-port",
-            typeRef: { schemaName: "PluginManifest.fbs", fileIdentifier: "PMAN" },
+            typeRef: createCanonicalType(),
             payload: createPayload("wrong-port"),
           },
         ],
@@ -1126,56 +1262,13 @@ test("direct invoke ABI returns canonical error responses for invalid requests",
 });
 
 test("direct invoke ABI rejects unsupported declared input frame types", async () => {
-  const manifest = {
-    ...createInvokeManifest({
-      pluginId: "com.digitalarsenal.examples.invoke-input-type-guards",
-      invokeSurfaces: ["direct"],
-      methodId: "fanout",
-      inputPortIds: ["alpha"],
-      outputPortIds: ["alpha"],
-    }),
-    methods: [
-      {
-        methodId: "fanout",
-        displayName: "fanout",
-        inputPorts: [
-          {
-            portId: "alpha",
-            acceptedTypeSets: [
-              {
-                setId: "plugin-manifest-only",
-                allowedTypes: [
-                  {
-                    schemaName: "PluginManifest.fbs",
-                    fileIdentifier: "PMAN",
-                  },
-                ],
-              },
-            ],
-            minStreams: 1,
-            maxStreams: 1,
-            required: true,
-          },
-        ],
-        outputPorts: [
-          {
-            portId: "alpha",
-            acceptedTypeSets: [
-              {
-                setId: "alpha-any",
-                allowedTypes: [{ acceptsAnyFlatbuffer: true }],
-              },
-            ],
-            minStreams: 0,
-            maxStreams: 1,
-            required: false,
-          },
-        ],
-        maxBatch: 1,
-        drainPolicy: "single-shot",
-      },
-    ],
-  };
+  const manifest = createInvokeManifest({
+    pluginId: "com.digitalarsenal.examples.invoke-input-type-guards",
+    invokeSurfaces: ["direct"],
+    methodId: "fanout",
+    inputPortIds: ["alpha"],
+    outputPortIds: ["alpha"],
+  });
   const compilation = await compileModuleFromSource({
     manifest,
     sourceCode: FANOUT_SOURCE,
@@ -1192,8 +1285,7 @@ test("direct invoke ABI rejects unsupported declared input frame types", async (
           {
             portId: "alpha",
             typeRef: {
-              schemaName: "Other.fbs",
-              fileIdentifier: "OTHR",
+              ...createCanonicalType(GRV_TYPE),
             },
             payload: createPayload("unsupported-input-type"),
           },
@@ -1203,6 +1295,170 @@ test("direct invoke ABI rejects unsupported declared input frame types", async (
 
     assert.equal(unsupportedType.statusCode, 400);
     assert.equal(unsupportedType.errorCode, "unsupported-input-type");
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
+test("generated guest validation matches exact SDS schema identity before dispatch", async () => {
+  const manifest = createInvokeManifest({
+    pluginId: "com.digitalarsenal.examples.invoke-exact-input-identity",
+    invokeSurfaces: ["direct"],
+    methodId: "guarded",
+    inputPortIds: ["alpha"],
+    outputPortIds: [],
+    inputType: VERSIONED_ATM_TYPE,
+  });
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: REJECTED_INPUT_GUARD_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    const exactType = createCanonicalType(VERSIONED_ATM_TYPE);
+    const accepted = invokeDirect(
+      instance,
+      encodePivRequestWithSingleFrame({ typeRef: exactType }),
+    ).response;
+    assert.equal(accepted.statusCode, 91);
+    assert.equal(accepted.errorCode, "handler-executed");
+
+    const mismatches = [
+      ["schema name", { schemaName: "atm.fbs" }],
+      ["file identifier", { fileIdentifier: "$GRV" }],
+      ["root type", { rootTypeName: "GRV" }],
+      ["schema version", { schemaVersion: "1.0.3" }],
+      [
+        "schema hash",
+        { schemaHash: [...ATM_SCHEMA_HASH.slice(0, -1), 0xed] },
+      ],
+    ];
+    for (const [label, mutation] of mismatches) {
+      const response = invokeDirect(
+        instance,
+        encodePivRequestWithSingleFrame({
+          typeRef: { ...exactType, ...mutation },
+        }),
+      ).response;
+      assert.equal(response.statusCode, 400, label);
+      assert.equal(response.errorCode, "unsupported-input-type", label);
+    }
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
+test("generated guest validation matches aligned wire and fixed layout before dispatch", async () => {
+  const manifest = createInvokeManifest({
+    pluginId: "com.digitalarsenal.examples.invoke-exact-aligned-layout",
+    invokeSurfaces: ["direct"],
+    methodId: "guarded",
+    inputPortIds: ["alpha"],
+    outputPortIds: [],
+    inputType: VERSIONED_ATM_TYPE,
+  });
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: REJECTED_INPUT_GUARD_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    const exactType = createAlignedType(VERSIONED_ATM_TYPE);
+    const accepted = invokeDirect(
+      instance,
+      encodePivRequestWithSingleFrame({ typeRef: exactType }),
+    ).response;
+    assert.equal(accepted.statusCode, 91);
+    assert.equal(accepted.errorCode, "handler-executed");
+
+    const mismatches = [
+      ["byte length", { typeRef: { ...exactType, byteLength: 16 } }],
+      [
+        "required alignment",
+        {
+          typeRef: { ...exactType, requiredAlignment: 8 },
+          alignment: 4,
+        },
+      ],
+      [
+        "fixed string length",
+        { typeRef: { ...exactType, fixedStringLength: 1 } },
+      ],
+      ["wire format", { typeRef: exactType, tabWireFormat: 0 }],
+      ["payload size", { typeRef: exactType, payload: Uint8Array.from([1, 2, 3, 4]) }],
+      ["TAB alignment", { typeRef: exactType, alignment: 1 }],
+    ];
+    for (const [label, mutation] of mismatches) {
+      const response = invokeDirect(
+        instance,
+        encodePivRequestWithSingleFrame(mutation),
+      ).response;
+      assert.equal(response.statusCode, 400, label);
+      assert.equal(response.errorCode, "unsupported-input-type", label);
+    }
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
+test("generated guest validation rejects incompatible TAB ownership and mutability before dispatch", async () => {
+  const manifest = createInvokeManifest({
+    pluginId: "com.digitalarsenal.examples.invoke-input-buffer-contract",
+    invokeSurfaces: ["direct"],
+    methodId: "guarded",
+    inputPortIds: ["alpha"],
+    outputPortIds: [],
+    inputType: VERSIONED_ATM_TYPE,
+  });
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: REJECTED_INPUT_GUARD_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    const exactType = createAlignedType(VERSIONED_ATM_TYPE);
+    const admissibleContracts = [
+      [SdsBufferMutability.IMMUTABLE, SdsBufferOwnership.HOST_OWNED],
+      [SdsBufferMutability.IMMUTABLE, SdsBufferOwnership.PLUGIN_OWNED],
+      [SdsBufferMutability.IMMUTABLE, SdsBufferOwnership.TRANSFERRED],
+      [SdsBufferMutability.SINGLE_WRITER_MUTABLE, SdsBufferOwnership.TRANSFERRED],
+      [SdsBufferMutability.APPEND_ONLY, SdsBufferOwnership.TRANSFERRED],
+    ];
+    for (const [mutability, ownership] of admissibleContracts) {
+      const response = invokeDirect(
+        instance,
+        encodePivRequestWithSingleFrame({ typeRef: exactType, mutability, ownership }),
+      ).response;
+      assert.equal(response.statusCode, 91, `${mutability}/${ownership}`);
+      assert.equal(response.errorCode, "handler-executed", `${mutability}/${ownership}`);
+    }
+
+    const incompatibleContracts = [
+      [SdsBufferMutability.SINGLE_WRITER_MUTABLE, SdsBufferOwnership.HOST_OWNED],
+      [SdsBufferMutability.SINGLE_WRITER_MUTABLE, SdsBufferOwnership.PLUGIN_OWNED],
+      [SdsBufferMutability.APPEND_ONLY, SdsBufferOwnership.HOST_OWNED],
+      [SdsBufferMutability.APPEND_ONLY, SdsBufferOwnership.PLUGIN_OWNED],
+      [SdsBufferMutability.IMMUTABLE, 255],
+      [255, SdsBufferOwnership.HOST_OWNED],
+    ];
+    for (const [mutability, ownership] of incompatibleContracts) {
+      const response = invokeDirect(
+        instance,
+        encodePivRequestWithSingleFrame({ typeRef: exactType, mutability, ownership }),
+      ).response;
+      assert.equal(response.statusCode, 400, `${mutability}/${ownership}`);
+      assert.equal(
+        response.errorCode,
+        "incompatible-input-buffer-contract",
+        `${mutability}/${ownership}`,
+      );
+    }
   } finally {
     await cleanupCompilation(compilation);
   }
@@ -1403,7 +1659,7 @@ test("direct invoke ABI fails closed for invalid guest ABI pointers", async () =
       inputs: [
         {
           portId: "alpha",
-          typeRef: { schemaName: "PluginManifest.fbs", fileIdentifier: "PMAN" },
+          typeRef: createCanonicalType(),
           payload: createPayload("pointer-guard"),
         },
       ],
@@ -1445,10 +1701,7 @@ test("direct invoke ABI serializes explicit output stream frame metadata into TA
         inputs: [
           {
             portId: "in",
-            typeRef: {
-              schemaName: "PluginManifest.fbs",
-              fileIdentifier: "PMAN",
-            },
+            typeRef: createCanonicalType(),
             payload: createPayload("stream-frame-input"),
           },
         ],
@@ -1482,7 +1735,7 @@ test("WASI command mode reads canonical invoke envelopes from stdin and writes r
       inputs: [
         {
           portId: "in",
-          typeRef: { schemaName: "PluginManifest.fbs", fileIdentifier: "PMAN" },
+          typeRef: createCanonicalType(),
           payload,
         },
       ],

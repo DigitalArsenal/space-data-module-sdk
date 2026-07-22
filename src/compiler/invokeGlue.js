@@ -38,6 +38,29 @@ function wireFormatLiteral(value) {
   return String(value ?? "").toLowerCase() === "aligned-binary" ? "1u" : "0u";
 }
 
+function schemaHashBytes(value) {
+  if (typeof value === "string") {
+    const hex = value.startsWith("0x") ? value.slice(2) : value;
+    if (hex.length === 0 || hex.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(hex)) {
+      return [];
+    }
+    const bytes = [];
+    for (let index = 0; index < hex.length; index += 2) {
+      bytes.push(Number.parseInt(hex.slice(index, index + 2), 16));
+    }
+    return bytes;
+  }
+  if (Array.isArray(value) || value instanceof Uint8Array) {
+    return Array.from(value, (entry) => Number(entry));
+  }
+  return [];
+}
+
+function unsignedLiteral(value) {
+  const numeric = Number(value ?? 0);
+  return `${Number.isFinite(numeric) ? Math.max(0, Math.trunc(numeric)) : 0}u`;
+}
+
 export function resolveInvokeSurfaces(manifest = {}) {
   if (!Array.isArray(manifest.invokeSurfaces) || manifest.invokeSurfaces.length === 0) {
     return [InvokeSurface.DIRECT, InvokeSurface.COMMAND];
@@ -82,7 +105,7 @@ typedef struct plugin_input_frame_t {
   const char *root_type_name;
   /* Legacy TABF-only metadata. SDS PIV/TAB inputs set this to 0. */
   uint16_t fixed_string_length;
-  /* SDS PIV/TAB inputs expose the payload byte length here. */
+  /* SDS PIV/TAB inputs expose TYPE_REF.BYTE_LENGTH here (zero for canonical). */
   uint32_t byte_length;
   uint16_t required_alignment;
   uint16_t alignment;
@@ -99,6 +122,13 @@ typedef struct plugin_input_frame_t {
   int32_t end_of_stream;
   const uint8_t *payload;
   uint32_t payload_length;
+  /* Exact SDS type identity and TAB access metadata; appended for ABI-prefix stability. */
+  const char *schema_version;
+  const uint8_t *schema_hash;
+  uint32_t schema_hash_length;
+  uint32_t ownership;
+  uint32_t mutability;
+  uint64_t frame_id;
 } plugin_input_frame_t;
 
 uint32_t plugin_get_input_count(void);
@@ -170,12 +200,24 @@ function renderAcceptedTypeArrays(method, ports, direction) {
       if (acceptedTypes.length === 0) {
         return "";
       }
-      return `static const AcceptedTypeRef kMethod_${methodSymbol(method)}_${direction}_port_${portIndex}_accepted_types[] = {
+      const arrayPrefix = `kMethod_${methodSymbol(method)}_${direction}_port_${portIndex}`;
+      const hashArrays = acceptedTypes
+        .map((type, typeIndex) => {
+          const bytes = schemaHashBytes(type.schemaHash);
+          if (bytes.length === 0) {
+            return "";
+          }
+          return `static const uint8_t ${arrayPrefix}_type_${typeIndex}_schema_hash[] = { ${bytes
+            .map((entry) => `0x${entry.toString(16).padStart(2, "0")}`)
+            .join(", ")} };\n`;
+        })
+        .join("");
+      return `${hashArrays}static const AcceptedTypeRef ${arrayPrefix}_accepted_types[] = {
 ${acceptedTypes
-  .map(
-    (type) =>
-      `  { ${boolLiteral(type.acceptsAnyFlatbuffer === true)}, ${quoteCString(type.schemaName)}, ${quoteCString(type.fileIdentifier)}, ${wireFormatLiteral(type.wireFormat)}, ${boolLiteral(type.wireFormat !== undefined)}, ${quoteCString(type.rootTypeName)} },`,
-  )
+  .map((type, typeIndex) => {
+    const hash = schemaHashBytes(type.schemaHash);
+    return `  { ${boolLiteral(type.acceptsAnyFlatbuffer === true)}, ${quoteCString(type.schemaName)}, ${quoteCString(type.fileIdentifier)}, ${wireFormatLiteral(type.wireFormat)}, ${boolLiteral(type.wireFormat !== undefined)}, ${quoteCString(type.rootTypeName)}, ${quoteCString(type.schemaVersion)}, ${hash.length > 0 ? `${arrayPrefix}_type_${typeIndex}_schema_hash` : "nullptr"}, ${hash.length}u, ${unsignedLiteral(type.fixedStringLength)}, ${unsignedLiteral(type.byteLength)}, ${unsignedLiteral(type.requiredAlignment)} },`;
+  })
   .join("\n")}
 };
 `;
@@ -208,8 +250,17 @@ function renderOutputPortArrays(method) {
   if (outputPorts.length === 0) {
     return "";
   }
-  return `static const char *kMethod_${methodSymbol(method)}_output_ports[] = {
-${outputPorts.map((port) => `  ${quoteCString(port.portId)},`).join("\n")}
+  return `${renderAcceptedTypeArrays(method, outputPorts, "output")}static const PortRequirement kMethod_${methodSymbol(method)}_output_ports[] = {
+${outputPorts
+  .map((port, portIndex) => {
+    const acceptedTypes = acceptedTypesForPort(port);
+    return `  { ${quoteCString(port.portId)}, ${boolLiteral(port.required !== false)}, ${
+      acceptedTypes.length > 0
+        ? `kMethod_${methodSymbol(method)}_output_port_${portIndex}_accepted_types`
+        : "nullptr"
+    }, ${acceptedTypes.length}u },`;
+  })
+  .join("\n")}
 };
 `;
 }
@@ -281,10 +332,16 @@ constexpr payloadWireFormat kPayloadWireFormatAlignedBinary =
   static_cast<payloadWireFormat>(1);
 constexpr bufferMutability kBufferMutabilityImmutable =
   static_cast<bufferMutability>(0);
+constexpr bufferMutability kBufferMutabilitySingleWriterMutable =
+  static_cast<bufferMutability>(1);
+constexpr bufferMutability kBufferMutabilityAppendOnly =
+  static_cast<bufferMutability>(2);
 constexpr bufferOwnership kBufferOwnershipHostOwned =
   static_cast<bufferOwnership>(0);
 constexpr bufferOwnership kBufferOwnershipPluginOwned =
   static_cast<bufferOwnership>(1);
+constexpr bufferOwnership kBufferOwnershipTransferred =
+  static_cast<bufferOwnership>(2);
 constexpr pivStatus kPivStatusOk = static_cast<pivStatus>(0);
 constexpr pivStatus kPivStatusNotFound = static_cast<pivStatus>(1);
 constexpr pivStatus kPivStatusYielded = static_cast<pivStatus>(2);
@@ -297,6 +354,12 @@ struct AcceptedTypeRef {
   uint32_t wire_format;
   bool has_wire_format;
   const char *root_type_name;
+  const char *schema_version;
+  const uint8_t *schema_hash;
+  uint32_t schema_hash_length;
+  uint16_t fixed_string_length;
+  uint32_t byte_length;
+  uint16_t required_alignment;
 };
 
 struct PortRequirement {
@@ -311,7 +374,7 @@ struct MethodDescriptor {
   int (*handler)(void);
   const PortRequirement *input_ports;
   size_t input_port_count;
-  const char *const *output_ports;
+  const PortRequirement *output_ports;
   size_t output_port_count;
   bool raw_shortcut_allowed;
   const char *raw_input_port_id;
@@ -324,6 +387,9 @@ struct InputFrameOwned {
   std::string schema_name{};
   std::string file_identifier{};
   std::string root_type_name{};
+  std::string schema_version{};
+  std::vector<uint8_t> schema_hash{};
+  uint32_t type_wire_format = 0;
   // Owned storage is only used for the raw stdin shortcut path; the direct
   // invoke path points views straight into the (8-aligned) request arena.
   std::vector<uint8_t> payload{};
@@ -345,6 +411,8 @@ struct OutputFrameOwned {
   std::string schema_name{};
   std::string file_identifier{};
   std::string root_type_name{};
+  std::string schema_version{};
+  std::vector<uint8_t> schema_hash{};
   uint32_t wire_format = 0;
   uint16_t fixed_string_length = 0;
   uint32_t byte_length = 0;
@@ -460,12 +528,32 @@ static const MethodDescriptor *FindMethod(std::string_view method_id) {
   return nullptr;
 }
 
-static bool CStringEmpty(const char *value) {
-  return !value || !value[0];
+static bool CStringExactlyMatches(const char *expected, const std::string &actual) {
+  return actual == (expected ? expected : "");
 }
 
-static bool CStringMatchesIfPresent(const char *expected, const std::string &actual) {
-  return CStringEmpty(expected) || actual == expected;
+static bool SchemaHashExactlyMatches(
+  const AcceptedTypeRef &accepted,
+  const std::vector<uint8_t> &actual
+) {
+  if (accepted.schema_hash_length != actual.size()) {
+    return false;
+  }
+  if (accepted.schema_hash_length == 0u) {
+    return true;
+  }
+  if (!accepted.schema_hash) {
+    return false;
+  }
+  return std::equal(
+    accepted.schema_hash,
+    accepted.schema_hash + accepted.schema_hash_length,
+    actual.begin()
+  );
+}
+
+static bool IsPowerOfTwo(uint32_t value) {
+  return value > 0u && (value & (value - 1u)) == 0u;
 }
 
 static const PortRequirement *FindInputPort(const MethodDescriptor *method, const std::string &port_id) {
@@ -483,7 +571,7 @@ static const PortRequirement *FindInputPort(const MethodDescriptor *method, cons
 
 static bool InputTypeMatches(const AcceptedTypeRef &accepted, const InputFrameOwned &frame) {
   if (accepted.accepts_any_flatbuffer) {
-    return true;
+    return frame.view.wire_format == static_cast<uint32_t>(kPayloadWireFormatFlatbuffer);
   }
   if (accepted.has_wire_format && frame.view.wire_format != accepted.wire_format) {
     return false;
@@ -492,19 +580,37 @@ static bool InputTypeMatches(const AcceptedTypeRef &accepted, const InputFrameOw
       frame.view.wire_format != static_cast<uint32_t>(kPayloadWireFormatFlatbuffer)) {
     return false;
   }
-  const bool schema_matches = CStringMatchesIfPresent(accepted.schema_name, frame.schema_name);
-  const bool file_identifier_matches =
-    CStringMatchesIfPresent(accepted.file_identifier, frame.file_identifier);
-  if (!schema_matches || !file_identifier_matches) {
+  if (frame.type_wire_format != frame.view.wire_format) {
     return false;
   }
-  if (CStringEmpty(accepted.root_type_name)) {
-    return true;
+  if (
+    !CStringExactlyMatches(accepted.schema_name, frame.schema_name) ||
+    !CStringExactlyMatches(accepted.file_identifier, frame.file_identifier) ||
+    !CStringExactlyMatches(accepted.root_type_name, frame.root_type_name) ||
+    !CStringExactlyMatches(accepted.schema_version, frame.schema_version) ||
+    !SchemaHashExactlyMatches(accepted, frame.schema_hash)
+  ) {
+    return false;
   }
-  if (!frame.root_type_name.empty()) {
-    return frame.root_type_name == accepted.root_type_name;
+  if (
+    frame.view.fixed_string_length != accepted.fixed_string_length ||
+    frame.view.byte_length != accepted.byte_length ||
+    frame.view.required_alignment != accepted.required_alignment
+  ) {
+    return false;
   }
-  return !CStringEmpty(accepted.schema_name) || !CStringEmpty(accepted.file_identifier);
+  if (frame.view.wire_format == static_cast<uint32_t>(kPayloadWireFormatAlignedBinary)) {
+    if (
+      accepted.byte_length == 0u ||
+      frame.view.size != accepted.byte_length ||
+      accepted.required_alignment == 0u ||
+      !IsPowerOfTwo(frame.view.alignment) ||
+      frame.view.alignment < accepted.required_alignment
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 static bool InputTypeAllowed(const PortRequirement &port, const InputFrameOwned &frame) {
@@ -519,16 +625,112 @@ static bool InputTypeAllowed(const PortRequirement &port, const InputFrameOwned 
   return false;
 }
 
-static bool MethodDeclaresOutputPort(const MethodDescriptor *method, const char *port_id) {
-  if (!method || !port_id || !port_id[0]) {
-    return false;
-  }
-  for (size_t index = 0; index < method->output_port_count; index += 1) {
-    if (std::strcmp(method->output_ports[index], port_id) == 0) {
-      return true;
+static const AcceptedTypeRef *FindCanonicalInputType(const PortRequirement &port) {
+  for (size_t index = 0; index < port.accepted_type_count; index += 1) {
+    const auto &accepted = port.accepted_types[index];
+    if (
+      accepted.wire_format == static_cast<uint32_t>(kPayloadWireFormatFlatbuffer) &&
+      !accepted.accepts_any_flatbuffer
+    ) {
+      return &accepted;
     }
   }
-  return false;
+  return nullptr;
+}
+
+static const PortRequirement *FindOutputPort(
+  const MethodDescriptor *method,
+  const char *port_id
+) {
+  if (!method || !port_id || !port_id[0]) {
+    return nullptr;
+  }
+  for (size_t index = 0; index < method->output_port_count; index += 1) {
+    const auto &port = method->output_ports[index];
+    if (port.port_id && std::strcmp(port.port_id, port_id) == 0) {
+      return &port;
+    }
+  }
+  return nullptr;
+}
+
+static bool OptionalCStringMatches(const char *actual, const char *expected) {
+  return !actual || !actual[0] || std::strcmp(actual, expected ? expected : "") == 0;
+}
+
+static bool OutputTypeMatches(
+  const AcceptedTypeRef &accepted,
+  const char *schema_name,
+  const char *file_identifier,
+  uint32_t wire_format,
+  const char *root_type_name,
+  uint16_t fixed_string_length,
+  uint32_t byte_length,
+  uint16_t required_alignment,
+  uint32_t payload_length
+) {
+  if (accepted.accepts_any_flatbuffer) {
+    return wire_format == static_cast<uint32_t>(kPayloadWireFormatFlatbuffer);
+  }
+  if (
+    !schema_name || !schema_name[0] ||
+    !file_identifier || !file_identifier[0] ||
+    std::strcmp(schema_name, accepted.schema_name ? accepted.schema_name : "") != 0 ||
+    std::strcmp(file_identifier, accepted.file_identifier ? accepted.file_identifier : "") != 0 ||
+    !OptionalCStringMatches(root_type_name, accepted.root_type_name)
+  ) {
+    return false;
+  }
+  const uint32_t accepted_wire_format = accepted.has_wire_format
+    ? accepted.wire_format
+    : static_cast<uint32_t>(kPayloadWireFormatFlatbuffer);
+  if (wire_format != accepted_wire_format) {
+    return false;
+  }
+  if (wire_format == static_cast<uint32_t>(kPayloadWireFormatAlignedBinary)) {
+    return
+      fixed_string_length == accepted.fixed_string_length &&
+      byte_length == accepted.byte_length &&
+      required_alignment == accepted.required_alignment &&
+      accepted.byte_length > 0u &&
+      payload_length == accepted.byte_length &&
+      accepted.required_alignment > 0u;
+  }
+  return fixed_string_length == 0u && byte_length == 0u && required_alignment == 0u;
+}
+
+static const AcceptedTypeRef *ResolveOutputType(
+  const PortRequirement &port,
+  const char *schema_name,
+  const char *file_identifier,
+  uint32_t wire_format,
+  const char *root_type_name,
+  uint16_t fixed_string_length,
+  uint32_t byte_length,
+  uint16_t required_alignment,
+  uint32_t payload_length
+) {
+  const AcceptedTypeRef *match = nullptr;
+  for (size_t index = 0; index < port.accepted_type_count; index += 1) {
+    const auto &accepted = port.accepted_types[index];
+    if (!OutputTypeMatches(
+          accepted,
+          schema_name,
+          file_identifier,
+          wire_format,
+          root_type_name,
+          fixed_string_length,
+          byte_length,
+          required_alignment,
+          payload_length)) {
+      continue;
+    }
+    if (match) {
+      return nullptr;
+    }
+    match = &accepted;
+  }
+  return match;
 }
 
 static void ResetInvokeContext(const MethodDescriptor *method) {
@@ -602,6 +804,10 @@ static void PopulateInputView(InputFrameOwned *owned) {
   owned->view.schema_name = owned->schema_name.empty() ? nullptr : owned->schema_name.c_str();
   owned->view.file_identifier = owned->file_identifier.empty() ? nullptr : owned->file_identifier.c_str();
   owned->view.root_type_name = owned->root_type_name.empty() ? nullptr : owned->root_type_name.c_str();
+  owned->view.schema_version = owned->schema_version.empty() ? nullptr : owned->schema_version.c_str();
+  owned->view.schema_hash = owned->schema_hash.empty() ? nullptr : owned->schema_hash.data();
+  owned->view.schema_hash_length = static_cast<uint32_t>(owned->schema_hash.size());
+  owned->view.frame_id = owned->view.trace_id;
   if (owned->external_payload && owned->external_payload_length > 0u) {
     owned->view.payload = owned->external_payload;
     owned->view.payload_length = owned->external_payload_length;
@@ -673,14 +879,19 @@ static bool LoadInputsFromPivRequest(const PIVRequest &request) {
       owned.schema_name = FlatBufferStringValue(type_ref->SCHEMA_NAME());
       owned.file_identifier = FlatBufferStringValue(type_ref->FILE_IDENTIFIER());
       owned.root_type_name = FlatBufferStringValue(type_ref->ROOT_TYPE());
+      owned.schema_version = FlatBufferStringValue(type_ref->SCHEMA_VERSION());
+      if (const auto *schema_hash = type_ref->SCHEMA_HASH()) {
+        owned.schema_hash.assign(schema_hash->begin(), schema_hash->end());
+      }
+      owned.type_wire_format = static_cast<uint32_t>(type_ref->WIRE_FORMAT());
+      owned.view.fixed_string_length = type_ref->FIXED_STRING_LENGTH();
+      owned.view.byte_length = type_ref->BYTE_LENGTH();
+      owned.view.required_alignment = type_ref->REQUIRED_ALIGNMENT();
     }
     owned.external_payload = payload_ptr;
     owned.external_payload_length = static_cast<uint32_t>(payload_size);
 
     owned.view.wire_format = static_cast<uint32_t>(frame->WIRE_FORMAT());
-    owned.view.fixed_string_length = 0;
-    owned.view.byte_length = static_cast<uint32_t>(payload_size);
-    owned.view.required_alignment = static_cast<uint16_t>(frame_alignment);
     owned.view.alignment = static_cast<uint16_t>(frame_alignment);
     owned.view.size = frame->SIZE();
     owned.view.generation = 0;
@@ -689,6 +900,8 @@ static bool LoadInputsFromPivRequest(const PIVRequest &request) {
     owned.view.stream_id = 0;
     owned.view.sequence = DecodeSdsFrameSequence(frame_id);
     owned.view.end_of_stream = DecodeSdsFrameEndOfStream(frame_id) ? 1 : 0;
+    owned.view.ownership = static_cast<uint32_t>(frame->OWNERSHIP());
+    owned.view.mutability = static_cast<uint32_t>(frame->MUTABILITY());
     PopulateInputView(&owned);
   }
 
@@ -697,7 +910,22 @@ static bool LoadInputsFromPivRequest(const PIVRequest &request) {
 
 static bool PivRequestUsesExternalPayloadArena(const PIVRequest &request) {
   const auto *payload_arena = request.PAYLOAD_ARENA();
-  return !payload_arena || payload_arena->size() == 0u;
+  if (payload_arena && payload_arena->size() > 0u) {
+    return false;
+  }
+  const auto *input_frames = request.INPUTS();
+  if (!input_frames) {
+    return false;
+  }
+  for (size_t index = 0; index < input_frames->size(); index += 1) {
+    const auto *frame = input_frames->Get(
+      static_cast<::flatbuffers::uoffset_t>(index)
+    );
+    if (frame && frame->SIZE() > 0u) {
+      return true;
+    }
+  }
+  return false;
 }
 
 static bool ValidateRequiredInputs(const MethodDescriptor *method) {
@@ -727,6 +955,23 @@ static bool ValidateRequiredInputs(const MethodDescriptor *method) {
   return true;
 }
 
+static bool InputBufferContractAllowed(const plugin_input_frame_t &frame) {
+  const bool known_ownership =
+    frame.ownership == static_cast<uint32_t>(kBufferOwnershipHostOwned) ||
+    frame.ownership == static_cast<uint32_t>(kBufferOwnershipPluginOwned) ||
+    frame.ownership == static_cast<uint32_t>(kBufferOwnershipTransferred);
+  const bool immutable =
+    frame.mutability == static_cast<uint32_t>(kBufferMutabilityImmutable);
+  const bool mutable_or_append_only =
+    frame.mutability == static_cast<uint32_t>(kBufferMutabilitySingleWriterMutable) ||
+    frame.mutability == static_cast<uint32_t>(kBufferMutabilityAppendOnly);
+  if (!known_ownership || (!immutable && !mutable_or_append_only)) {
+    return false;
+  }
+  return immutable ||
+    frame.ownership == static_cast<uint32_t>(kBufferOwnershipTransferred);
+}
+
 static bool ValidateInputFrames(const MethodDescriptor *method) {
   if (!method) {
     return false;
@@ -737,6 +982,14 @@ static bool ValidateInputFrames(const MethodDescriptor *method) {
       SetError(
         "unknown-input-port",
         std::string("Input frame uses undeclared port: ") + frame.port_id
+      );
+      return false;
+    }
+    if (!InputBufferContractAllowed(frame.view)) {
+      SetError(
+        "incompatible-input-buffer-contract",
+        std::string("Input frame ownership/mutability is incompatible with port: ") +
+          frame.port_id
       );
       return false;
     }
@@ -873,17 +1126,23 @@ static std::vector<uint8_t> SerializePivResponse(
   output_frames.reserve(packed_outputs.size());
   for (const auto &packed : packed_outputs) {
     const auto *output = packed.output;
-    const auto type_ref = CreateFlatBufferTypeRefDirect(
-      builder,
-      output && !output->schema_name.empty() ? output->schema_name.c_str() : nullptr,
-      output && !output->file_identifier.empty() ? output->file_identifier.c_str() : nullptr,
-      nullptr,
-      output && !output->root_type_name.empty() ? output->root_type_name.c_str() : nullptr
-    );
     const auto wire_format =
       output && output->wire_format == static_cast<uint32_t>(kPayloadWireFormatAlignedBinary)
         ? kPayloadWireFormatAlignedBinary
         : kPayloadWireFormatFlatbuffer;
+    const auto type_ref = CreateFlatBufferTypeRefDirect(
+      builder,
+      output && !output->schema_name.empty() ? output->schema_name.c_str() : nullptr,
+      output && !output->file_identifier.empty() ? output->file_identifier.c_str() : nullptr,
+      output && !output->schema_version.empty() ? output->schema_version.c_str() : nullptr,
+      output && !output->root_type_name.empty() ? output->root_type_name.c_str() : nullptr,
+      output && !output->schema_hash.empty() ? &output->schema_hash : nullptr,
+      false,
+      wire_format,
+      output ? output->fixed_string_length : 0u,
+      output ? output->byte_length : 0u,
+      output ? output->required_alignment : 0u
+    );
     output_frames.push_back(CreateTABDirect(
       builder,
       packed.offset,
@@ -1111,12 +1370,30 @@ static bool LoadRawShortcutInput(
   g_invoke_context.inputs.emplace_back();
   auto &owned = g_invoke_context.inputs.back();
   owned = InputFrameOwned{};
+  if (method->input_port_count != 1u) {
+    return false;
+  }
+  const auto *accepted = FindCanonicalInputType(method->input_ports[0]);
+  if (!accepted) {
+    return false;
+  }
   owned.port_id = method->raw_input_port_id ? method->raw_input_port_id : "";
+  owned.schema_name = accepted->schema_name ? accepted->schema_name : "";
+  owned.file_identifier = accepted->file_identifier ? accepted->file_identifier : "";
+  owned.root_type_name = accepted->root_type_name ? accepted->root_type_name : "";
+  owned.schema_version = accepted->schema_version ? accepted->schema_version : "";
+  if (accepted->schema_hash && accepted->schema_hash_length > 0u) {
+    owned.schema_hash.assign(
+      accepted->schema_hash,
+      accepted->schema_hash + accepted->schema_hash_length
+    );
+  }
+  owned.type_wire_format = accepted->wire_format;
   owned.payload = stdin_bytes;
   owned.view.wire_format = static_cast<uint32_t>(kPayloadWireFormatFlatbuffer);
-  owned.view.fixed_string_length = 0;
-  owned.view.byte_length = static_cast<uint32_t>(stdin_bytes.size());
-  owned.view.required_alignment = 1;
+  owned.view.fixed_string_length = accepted->fixed_string_length;
+  owned.view.byte_length = accepted->byte_length;
+  owned.view.required_alignment = accepted->required_alignment;
   owned.view.alignment = 1;
   owned.view.size = static_cast<uint32_t>(stdin_bytes.size());
   owned.view.generation = 0;
@@ -1124,6 +1401,8 @@ static bool LoadRawShortcutInput(
   owned.view.stream_id = 0;
   owned.view.sequence = 0;
   owned.view.end_of_stream = 0;
+  owned.view.ownership = static_cast<uint32_t>(kBufferOwnershipHostOwned);
+  owned.view.mutability = static_cast<uint32_t>(kBufferMutabilityImmutable);
   PopulateInputView(&owned);
   return true;
 }
@@ -1216,7 +1495,8 @@ extern "C" int32_t plugin_push_output_typed(
     SetError("invalid-output-port", "Output frames must declare a non-empty port id.");
     return -1;
   }
-  if (!MethodDeclaresOutputPort(g_invoke_context.method, port_id)) {
+  const PortRequirement *output_port = FindOutputPort(g_invoke_context.method, port_id);
+  if (!output_port) {
     SetError(
       "unknown-output-port",
       std::string("Output port is not declared on the active method: ") + port_id
@@ -1227,17 +1507,65 @@ extern "C" int32_t plugin_push_output_typed(
     SetError("invalid-output-payload", "Output payload pointer is null but payload length is non-zero.");
     return -1;
   }
+  const AcceptedTypeRef *accepted_type = output_port->accepted_type_count > 0u
+    ? ResolveOutputType(
+        *output_port,
+        schema_name,
+        file_identifier,
+        wire_format,
+        root_type_name,
+        fixed_string_length,
+        byte_length,
+        required_alignment,
+        payload_length)
+    : nullptr;
+  if (output_port->accepted_type_count > 0u && !accepted_type) {
+    SetError(
+      "unsupported-output-type",
+      std::string("Output frame does not match a declared type on port: ") + port_id
+    );
+    return -1;
+  }
 
   OutputFrameOwned frame{};
   frame.port_id = ReadCString(port_id);
-  frame.schema_name = ReadCString(schema_name);
-  frame.file_identifier = ReadCString(file_identifier);
-  frame.root_type_name = ReadCString(root_type_name);
-  frame.wire_format = wire_format;
-  frame.fixed_string_length = fixed_string_length;
-  frame.byte_length = byte_length > 0u ? byte_length : payload_length;
-  frame.required_alignment = required_alignment;
-  frame.alignment = required_alignment > 0 ? required_alignment : 8;
+  frame.schema_name = accepted_type
+    ? ReadCString(accepted_type->schema_name)
+    : ReadCString(schema_name);
+  frame.file_identifier = accepted_type
+    ? ReadCString(accepted_type->file_identifier)
+    : ReadCString(file_identifier);
+  frame.root_type_name = accepted_type
+    ? ReadCString(accepted_type->root_type_name)
+    : ReadCString(root_type_name);
+  frame.schema_version = accepted_type
+    ? ReadCString(accepted_type->schema_version)
+    : std::string{};
+  if (accepted_type && accepted_type->schema_hash && accepted_type->schema_hash_length > 0u) {
+    frame.schema_hash.assign(
+      accepted_type->schema_hash,
+      accepted_type->schema_hash + accepted_type->schema_hash_length
+    );
+  }
+  frame.wire_format = accepted_type && accepted_type->has_wire_format
+    ? accepted_type->wire_format
+    : wire_format;
+  const bool aligned_binary =
+    frame.wire_format == static_cast<uint32_t>(kPayloadWireFormatAlignedBinary);
+  frame.fixed_string_length = aligned_binary
+    ? (accepted_type ? accepted_type->fixed_string_length : fixed_string_length)
+    : 0u;
+  frame.byte_length = aligned_binary
+    ? (accepted_type
+        ? accepted_type->byte_length
+        : (byte_length > 0u ? byte_length : payload_length))
+    : 0u;
+  frame.required_alignment = aligned_binary
+    ? (accepted_type ? accepted_type->required_alignment : required_alignment)
+    : 0u;
+  frame.alignment = aligned_binary && frame.required_alignment > 0
+    ? frame.required_alignment
+    : 8;
   frame.payload_ptr = payload_ptr;
   frame.payload_length = payload_length;
   bool payload_is_sdk_owned = false;
@@ -1285,7 +1613,9 @@ extern "C" int32_t plugin_push_output_ex(
     wire_format,
     root_type_name,
     fixed_string_length,
-    payload_length,
+    wire_format == static_cast<uint32_t>(kPayloadWireFormatAlignedBinary)
+      ? payload_length
+      : 0u,
     required_alignment,
     payload_ptr,
     payload_length

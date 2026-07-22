@@ -316,6 +316,9 @@ async function instantiateBrowserModule(options = {}) {
       // Browser warm-pool sizing: cap pooled workers at how many guest threads
       // the module will actually ask for. Ignored by the Node lazy path.
       requestedThreads: options.maxThreads,
+      hostcallChannel: options.threadHostcallChannel,
+      requiresHostcalls: needsHostBridge,
+      enableBrowserThreads: options.enableBrowserWasiThreads,
     });
     importObject.wasi = {
       ...(importObject.wasi ?? {}),
@@ -487,6 +490,8 @@ export async function createBrowserModuleHarness(options = {}) {
     initialMemoryBytes: options.initialMemoryBytes,
     maximumMemoryBytes: options.maximumMemoryBytes,
     maxThreads: options.maxThreads,
+    threadHostcallChannel: options.threadHostcallChannel,
+    enableBrowserWasiThreads: options.enableBrowserWasiThreads,
   });
   const { instance, bridge, wasi, memory, threadHost } = activeContext;
   const allowRawInvoke = options.allowRawInvoke !== false;
@@ -743,6 +748,9 @@ export async function createBrowserModuleHarness(options = {}) {
       sharedMemory: options.sharedMemory,
       initialMemoryBytes: options.initialMemoryBytes,
       maximumMemoryBytes: options.maximumMemoryBytes,
+      maxThreads: options.maxThreads,
+      threadHostcallChannel: options.threadHostcallChannel,
+      enableBrowserWasiThreads: options.enableBrowserWasiThreads,
     });
     try {
       const commandExport = commandContext.instance.exports[DefaultInvokeExports.commandSymbol];
