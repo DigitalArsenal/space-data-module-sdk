@@ -884,9 +884,18 @@ static bool LoadInputsFromPivRequest(const PIVRequest &request) {
         owned.schema_hash.assign(schema_hash->begin(), schema_hash->end());
       }
       owned.type_wire_format = static_cast<uint32_t>(type_ref->WIRE_FORMAT());
-      owned.view.fixed_string_length = type_ref->FIXED_STRING_LENGTH();
-      owned.view.byte_length = type_ref->BYTE_LENGTH();
-      owned.view.required_alignment = type_ref->REQUIRED_ALIGNMENT();
+      // A compiled edge descriptor describes the canonical/aligned pair. A
+      // host may therefore carry the aligned peer's fixed-layout scalars on a
+      // canonical PIV type reference. They are not part of the canonical
+      // representation and the public input ABI promises canonical zeroes.
+      // Preserve them only for aligned-binary frames, where exact layout and
+      // alignment validation below remains mandatory.
+      if (owned.type_wire_format ==
+          static_cast<uint32_t>(kPayloadWireFormatAlignedBinary)) {
+        owned.view.fixed_string_length = type_ref->FIXED_STRING_LENGTH();
+        owned.view.byte_length = type_ref->BYTE_LENGTH();
+        owned.view.required_alignment = type_ref->REQUIRED_ALIGNMENT();
+      }
     }
     owned.external_payload = payload_ptr;
     owned.external_payload_length = static_cast<uint32_t>(payload_size);

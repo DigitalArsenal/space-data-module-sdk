@@ -1350,6 +1350,41 @@ test("generated guest validation matches exact SDS schema identity before dispat
   }
 });
 
+test("generated guest normalizes aligned-peer layout hints on canonical PIV inputs", async () => {
+  const manifest = createInvokeManifest({
+    pluginId: "com.digitalarsenal.examples.invoke-canonical-layout-normalization",
+    invokeSurfaces: ["direct"],
+    methodId: "guarded",
+    inputPortIds: ["alpha"],
+    outputPortIds: [],
+    inputType: VERSIONED_ATM_TYPE,
+  });
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: REJECTED_INPUT_GUARD_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    const response = invokeDirect(
+      instance,
+      encodePivRequestWithSingleFrame({
+        typeRef: createCanonicalType(VERSIONED_ATM_TYPE, {
+          fixedStringLength: 16,
+          byteLength: VERSIONED_ATM_TYPE.byteLength,
+          requiredAlignment: VERSIONED_ATM_TYPE.requiredAlignment,
+        }),
+      }),
+    ).response;
+
+    assert.equal(response.statusCode, 91);
+    assert.equal(response.errorCode, "handler-executed");
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
 test("generated guest validation matches aligned wire and fixed layout before dispatch", async () => {
   const manifest = createInvokeManifest({
     pluginId: "com.digitalarsenal.examples.invoke-exact-aligned-layout",
