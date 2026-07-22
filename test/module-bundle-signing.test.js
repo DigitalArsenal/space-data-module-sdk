@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   BUNDLE_SIGNATURE_HASH_ALGORITHM,
   ModuleSignatureError,
+  computeModuleBundleSignatureHash,
   signModuleArtifact,
   verifyModuleArtifact,
 } from "../src/bundle/signing.js";
@@ -57,6 +58,39 @@ async function unsignedBundle() {
     entries: requiredEntries(),
   });
 }
+
+test("bundle digest uses bytewise JSON key ordering shared by Go hosts", async () => {
+  const unsigned = await unsignedBundle();
+  const parsed = await parseSingleFileBundle(unsigned.wasmBytes);
+  const digest = await computeModuleBundleSignatureHash(parsed.bundle, {
+    wasmBytes: parsed.wasmBytes,
+  });
+
+  assert.equal(
+    digest.hashHex,
+    "c0d49118c6e404f48f5886498278624e27eeedfd17434bc1b119b9e0071e2200",
+  );
+});
+
+test("bundle digest orders entry identifiers by UTF-8 bytes", async () => {
+  const unsigned = await createSingleFileBundle({
+    wasmBytes: testWasm(),
+    manifestBytes: new Uint8Array([9, 10, 11]),
+    entries: [
+      { entryId: "a", payload: new Uint8Array([1]) },
+      { entryId: "B", payload: new Uint8Array([2]) },
+    ],
+  });
+  const parsed = await parseSingleFileBundle(unsigned.wasmBytes);
+  const digest = await computeModuleBundleSignatureHash(parsed.bundle, {
+    wasmBytes: parsed.wasmBytes,
+  });
+
+  assert.deepEqual(
+    digest.statement.entries.map((entry) => entry.entryId),
+    ["B", "a", "manifest"],
+  );
+});
 
 test("bundle-scoped signatures bind the module and every non-signature MBL member", async () => {
   const unsigned = await unsignedBundle();

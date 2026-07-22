@@ -13,7 +13,6 @@ import {
   ed25519Sign,
   ed25519Verify,
 } from "../utils/wasmCrypto.js";
-import { canonicalBytes } from "../auth/canonicalize.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { ModuleBundleEntryRole } from "spacedatastandards.org/lib/js/MBL/main.js";
 
@@ -95,6 +94,56 @@ function equalBytes(left, right) {
   const a = new Uint8Array(left ?? []);
   const b = new Uint8Array(right ?? []);
   return a.length === b.length && a.every((byte, index) => byte === b[index]);
+}
+
+const bundleStatementTextEncoder = new TextEncoder();
+
+function compareUtf8Keys(left, right) {
+  const leftBytes = bundleStatementTextEncoder.encode(left);
+  const rightBytes = bundleStatementTextEncoder.encode(right);
+  const length = Math.min(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < length; index += 1) {
+    if (leftBytes[index] !== rightBytes[index]) {
+      return leftBytes[index] - rightBytes[index];
+    }
+  }
+  return leftBytes.length - rightBytes.length;
+}
+
+function normalizeBundleStatementValue(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      const normalized = normalizeBundleStatementValue(item);
+      return normalized === undefined ? null : normalized;
+    });
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, nestedValue]) => nestedValue !== undefined)
+      .sort(([left], [right]) => compareUtf8Keys(left, right))
+      .map(([key, nestedValue]) => [
+        key,
+        normalizeBundleStatementValue(nestedValue),
+      ]),
+  );
+}
+
+function canonicalBundleStatementBytes(statement) {
+  // Go's encoding/json orders map keys by their UTF-8 bytes and escapes these
+  // five code points by default. Match that host-side representation exactly
+  // so a bundle digest is independent of JavaScript's locale configuration.
+  const json = JSON.stringify(normalizeBundleStatementValue(statement)).replace(
+    /[<>&\u2028\u2029]/g,
+    (character) =>
+      `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+  return bundleStatementTextEncoder.encode(json);
 }
 
 function normalizedBundleEntryForSignature(entry) {
@@ -216,9 +265,9 @@ export async function computeModuleBundleSignatureHash(bundle, options = {}) {
     manifestSizeSymbol: bundle.manifestSizeSymbol ?? null,
     entries: entries
       .map(normalizedBundleEntryForSignature)
-      .sort((left, right) => left.entryId.localeCompare(right.entryId)),
+      .sort((left, right) => compareUtf8Keys(left.entryId, right.entryId)),
   };
-  const hashBytes = await sha256Bytes(canonicalBytes(statement));
+  const hashBytes = await sha256Bytes(canonicalBundleStatementBytes(statement));
   return {
     statement,
     hashBytes,
