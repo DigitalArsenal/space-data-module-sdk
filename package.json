@@ -91,7 +91,7 @@
     "flatsql": "^0.4.2",
     "hd-wallet-wasm": "2.0.28",
     "sdn-emception": "1.0.0",
-    "spacedatastandards.org": "https://github.com/DigitalArsenal/spacedatastandards.org/archive/96d61cc782f12b0c2a64665ee4c363f04073bcee.tar.gz"
+    "spacedatastandards.org": "https://github.com/DigitalArsenal/spacedatastandards.org/archive/91d9487b5e9759561d2a9aa45a8f815bf900fc72.tar.gz"
   },
   "devDependencies": {
     "esbuild": "^0.28.0",
