@@ -115,8 +115,26 @@ test("hex encoding is injective — no two distinct ids can share a prefix", () 
 const OD_PLUGIN_ID = "orbit-determination";
 const COMMITTED_OD_FIT_SYMBOL = "sdm_guest_6f726269742d64657465726d_fit";
 
-function wildcardTypeSet(setId) {
-  return { setId, allowedTypes: [{ acceptsAnyFlatbuffer: true }] };
+function canonicalFixtureTypeSet(setId) {
+  const identity = {
+    schemaName: "FSO.fbs",
+    fileIdentifier: "$FSO",
+    schemaVersion: "1.158.2",
+    schemaHash: "a298ef96af29624073edf749848e8ff1e5b8f45e56966c2e210cb719f3c5e821",
+    rootTypeName: "FSO",
+  };
+  return {
+    setId,
+    allowedTypes: [
+      { ...identity, wireFormat: "flatbuffer" },
+      {
+        ...identity,
+        wireFormat: "aligned-binary",
+        byteLength: 361648,
+        requiredAlignment: 8,
+      },
+    ],
+  };
 }
 
 function port(portId, required = true) {
@@ -125,7 +143,7 @@ function port(portId, required = true) {
     required,
     minStreams: required ? 1 : 0,
     maxStreams: 1,
-    acceptedTypeSets: [wildcardTypeSet(`${portId}-any`)],
+    acceptedTypeSets: [canonicalFixtureTypeSet(`${portId}-fso`)],
   };
 }
 

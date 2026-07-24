@@ -39,11 +39,22 @@
           "portId": "records",
           "acceptedTypeSets": [
             {
-              "setId": "any-flatbuffer",
-              "description": "Accept any FlatBuffer payload, including REC-wrapped SDS records.",
+              "setId": "stored-record-ref",
+              "description": "Accept a concrete stored-record reference using either canonical or aligned form.",
               "allowedTypes": [
                 {
-                  "acceptsAnyFlatbuffer": true
+                  "schemaName": "StoredRecordRef.fbs",
+                  "fileIdentifier": "STRF",
+                  "rootTypeName": "StoredRecordRef",
+                  "wireFormat": "flatbuffer"
+                },
+                {
+                  "schemaName": "StoredRecordRef.fbs",
+                  "fileIdentifier": "STRF",
+                  "rootTypeName": "StoredRecordRef",
+                  "wireFormat": "aligned-binary",
+                  "byteLength": 64,
+                  "requiredAlignment": 8
                 }
               ]
             }
@@ -62,7 +73,17 @@
               "allowedTypes": [
                 {
                   "schemaName": "StoredRecordRef.fbs",
-                  "fileIdentifier": "STRF"
+                  "fileIdentifier": "STRF",
+                  "rootTypeName": "StoredRecordRef",
+                  "wireFormat": "flatbuffer"
+                },
+                {
+                  "schemaName": "StoredRecordRef.fbs",
+                  "fileIdentifier": "STRF",
+                  "rootTypeName": "StoredRecordRef",
+                  "wireFormat": "aligned-binary",
+                  "byteLength": 64,
+                  "requiredAlignment": 8
                 }
               ]
             }
@@ -88,7 +109,17 @@
               "allowedTypes": [
                 {
                   "schemaName": "SqlQueryRequest.fbs",
-                  "fileIdentifier": "SQLQ"
+                  "fileIdentifier": "SQLQ",
+                  "rootTypeName": "SqlQueryRequest",
+                  "wireFormat": "flatbuffer"
+                },
+                {
+                  "schemaName": "SqlQueryRequest.fbs",
+                  "fileIdentifier": "SQLQ",
+                  "rootTypeName": "SqlQueryRequest",
+                  "wireFormat": "aligned-binary",
+                  "byteLength": 64,
+                  "requiredAlignment": 8
                 }
               ]
             }
@@ -107,7 +138,17 @@
               "allowedTypes": [
                 {
                   "schemaName": "SqlQueryResult.fbs",
-                  "fileIdentifier": "SQLR"
+                  "fileIdentifier": "SQLR",
+                  "rootTypeName": "SqlQueryResult",
+                  "wireFormat": "flatbuffer"
+                },
+                {
+                  "schemaName": "SqlQueryResult.fbs",
+                  "fileIdentifier": "SQLR",
+                  "rootTypeName": "SqlQueryResult",
+                  "wireFormat": "aligned-binary",
+                  "byteLength": 64,
+                  "requiredAlignment": 8
                 }
               ]
             }
@@ -133,7 +174,17 @@
               "allowedTypes": [
                 {
                   "schemaName": "AnchorRadiusQuery.fbs",
-                  "fileIdentifier": "ARQY"
+                  "fileIdentifier": "ARQY",
+                  "rootTypeName": "AnchorRadiusQuery",
+                  "wireFormat": "flatbuffer"
+                },
+                {
+                  "schemaName": "AnchorRadiusQuery.fbs",
+                  "fileIdentifier": "ARQY",
+                  "rootTypeName": "AnchorRadiusQuery",
+                  "wireFormat": "aligned-binary",
+                  "byteLength": 64,
+                  "requiredAlignment": 8
                 }
               ]
             }
@@ -152,7 +203,17 @@
               "allowedTypes": [
                 {
                   "schemaName": "ProximitySelection.fbs",
-                  "fileIdentifier": "PRXY"
+                  "fileIdentifier": "PRXY",
+                  "rootTypeName": "ProximitySelection",
+                  "wireFormat": "flatbuffer"
+                },
+                {
+                  "schemaName": "ProximitySelection.fbs",
+                  "fileIdentifier": "PRXY",
+                  "rootTypeName": "ProximitySelection",
+                  "wireFormat": "aligned-binary",
+                  "byteLength": 64,
+                  "requiredAlignment": 8
                 }
               ]
             }

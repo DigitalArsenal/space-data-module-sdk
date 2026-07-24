@@ -18,7 +18,17 @@
               "allowedTypes": [
                 {
                   "schemaName": "OMM.fbs",
-                  "fileIdentifier": "$OMM"
+                  "fileIdentifier": "$OMM",
+                  "rootTypeName": "OMM",
+                  "wireFormat": "flatbuffer"
+                },
+                {
+                  "schemaName": "OMM.fbs",
+                  "fileIdentifier": "$OMM",
+                  "rootTypeName": "OMM",
+                  "wireFormat": "aligned-binary",
+                  "byteLength": 64,
+                  "requiredAlignment": 8
                 }
               ]
             }
@@ -37,7 +47,17 @@
               "allowedTypes": [
                 {
                   "schemaName": "CAT.fbs",
-                  "fileIdentifier": "$CAT"
+                  "fileIdentifier": "$CAT",
+                  "rootTypeName": "CAT",
+                  "wireFormat": "flatbuffer"
+                },
+                {
+                  "schemaName": "CAT.fbs",
+                  "fileIdentifier": "$CAT",
+                  "rootTypeName": "CAT",
+                  "wireFormat": "aligned-binary",
+                  "byteLength": 64,
+                  "requiredAlignment": 8
                 }
               ]
             }
@@ -52,4 +72,3 @@
     }
   ]
 }
-

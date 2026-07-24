@@ -23,9 +23,23 @@ import { createAsyncHostDispatcher } from "../host/abi.js";
 import {
   createSabHostcallBuffer,
   createSabHostcallServer,
+  DEFAULT_SAB_HOSTCALL_RESPONSE_BYTES,
 } from "../host/sabHostcallChannel.js";
+import { WASI_THREAD_HOSTCALL_MESSAGE } from "../host/wasiThreadWorkerRuntime.js";
 
 const WORKER_URL = new URL("./workerModuleHarnessWorker.js", import.meta.url);
+
+function randomChannelToken() {
+  const bytes = new Uint8Array(16);
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  return [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
 
 function isNodeRuntime() {
   return (
@@ -89,6 +103,35 @@ export async function createWorkerModuleHarness(options = {}) {
     maxResponseBytes: options.maxHostcallResponseBytes,
   });
   const server = createSabHostcallServer({ buffer, dispatch });
+  if (typeof BroadcastChannel !== "function") {
+    throw new Error(
+      "BroadcastChannel is unavailable; nested pthread hostcalls require it.",
+    );
+  }
+  const threadHostcallToken = randomChannelToken();
+  const threadHostcallChannelName =
+    `sdm.thread-hostcall.${threadHostcallToken}.${randomChannelToken()}`;
+  const threadHostcallChannel = new BroadcastChannel(threadHostcallChannelName);
+  const threadHostcallServers = new WeakMap();
+  threadHostcallChannel.onmessage = (event) => {
+    const message = event.data ?? {};
+    if (
+      message.type !== WASI_THREAD_HOSTCALL_MESSAGE ||
+      message.token !== threadHostcallToken ||
+      !(message.buffer instanceof SharedArrayBuffer)
+    ) {
+      return;
+    }
+    let nestedServer = threadHostcallServers.get(message.buffer);
+    if (!nestedServer) {
+      nestedServer = createSabHostcallServer({
+        buffer: message.buffer,
+        dispatch,
+      });
+      threadHostcallServers.set(message.buffer, nestedServer);
+    }
+    void nestedServer.handleRequest(message);
+  };
   const port = await spawnWorker(options.workerUrl ?? WORKER_URL);
 
   let nextId = 1;
@@ -110,7 +153,21 @@ export async function createWorkerModuleHarness(options = {}) {
           wasmBytes,
           buffer,
           hostcallTimeoutMs: options.hostcallTimeoutMs,
-          harnessOptions: options.harnessOptions ?? {},
+          harnessOptions: {
+            ...(options.harnessOptions ?? {}),
+            enableBrowserWasiThreads:
+              options.harnessOptions?.enableBrowserWasiThreads !== false,
+            threadHostcallChannel: {
+              channelName: threadHostcallChannelName,
+              token: threadHostcallToken,
+              maxResponseBytes: Number.isInteger(
+                options.maxHostcallResponseBytes,
+              )
+                ? options.maxHostcallResponseBytes
+                : DEFAULT_SAB_HOSTCALL_RESPONSE_BYTES,
+              timeoutMs: options.hostcallTimeoutMs,
+            },
+          },
         });
         return;
       case "ready":
@@ -179,6 +236,7 @@ export async function createWorkerModuleHarness(options = {}) {
       } catch {
         // termination is best-effort
       }
+      threadHostcallChannel.close();
     },
   };
 }

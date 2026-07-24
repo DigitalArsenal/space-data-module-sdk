@@ -38,7 +38,15 @@ function wasiThreadsAvailable() {
   }
 }
 
-function createTestManifest() {
+const VERSIONED_TEST_IDENTITY = Object.freeze({
+  schemaVersion: "1.0.0",
+  schemaHash: Object.freeze([0x10, 0x20, 0x30, 0x40]),
+});
+
+function createTestManifest(options = {}) {
+  const identity = options.versionedIdentity
+    ? VERSIONED_TEST_IDENTITY
+    : {};
   return {
     pluginId: "com.digitalarsenal.examples.basic-propagator",
     name: "Basic Propagator",
@@ -54,15 +62,9 @@ function createTestManifest() {
           {
             portId: "request",
             acceptedTypeSets: [
-              {
-                setId: "omm",
-                allowedTypes: [
-                  {
-                    schemaName: "OMM.fbs",
-                    fileIdentifier: "$OMM",
-                  },
-                ],
-              },
+              createDualTypeSet("omm", "OMM.fbs", "$OMM", "OMM", {
+                identity,
+              }),
             ],
             minStreams: 1,
             maxStreams: 1,
@@ -73,15 +75,9 @@ function createTestManifest() {
           {
             portId: "state",
             acceptedTypeSets: [
-              {
-                setId: "cat",
-                allowedTypes: [
-                  {
-                    schemaName: "CAT.fbs",
-                    fileIdentifier: "$CAT",
-                  },
-                ],
-              },
+              createDualTypeSet("cat", "CAT.fbs", "$CAT", "CAT", {
+                identity,
+              }),
             ],
             minStreams: 1,
             maxStreams: 1,
@@ -90,6 +86,33 @@ function createTestManifest() {
         ],
         maxBatch: 32,
         drainPolicy: "drain-to-empty",
+      },
+    ],
+  };
+}
+
+function createDualTypeSet(
+  setId,
+  schemaName,
+  fileIdentifier,
+  rootTypeName,
+  overrides = {},
+) {
+  const identity = {
+    schemaName,
+    fileIdentifier,
+    rootTypeName,
+    ...(overrides.identity ?? {}),
+  };
+  return {
+    setId,
+    allowedTypes: [
+      { ...identity, wireFormat: "flatbuffer" },
+      {
+        ...identity,
+        wireFormat: "aligned-binary",
+        byteLength: overrides.byteLength ?? 64,
+        requiredAlignment: overrides.requiredAlignment ?? 8,
       },
     ],
   };
@@ -134,6 +157,8 @@ function createAlignedType(overrides = {}) {
   return {
     schemaName: "StateVector.fbs",
     fileIdentifier: "STVC",
+    schemaVersion: "1.0.0",
+    schemaHash: [0x10, 0x20, 0x30, 0x40],
     wireFormat: "aligned-binary",
     rootTypeName: "StateVector",
     byteLength: 64,
@@ -146,6 +171,10 @@ function createFlatbufferType(overrides = {}) {
   return {
     schemaName: "StateVector.fbs",
     fileIdentifier: "STVC",
+    schemaVersion: "1.0.0",
+    schemaHash: [0x10, 0x20, 0x30, 0x40],
+    rootTypeName: "StateVector",
+    wireFormat: "flatbuffer",
     ...overrides,
   };
 }
@@ -184,8 +213,41 @@ test("plugin manifests round-trip through FlatBuffer encoding", () => {
   );
 });
 
-test("plugin manifest decoder accepts canonical PLG artifact buffers", () => {
+test("PLG encoding derives both allowed wire formats from the required pair", () => {
   const manifest = createTestManifest();
+  manifest.methods[0].inputPorts[0].acceptedTypeSets[0].allowedWireFormats = [
+    "aligned-binary",
+  ];
+
+  const decoded = decodePluginManifest(encodePluginManifest(manifest));
+
+  assert.deepEqual(
+    decoded.methods[0].inputPorts[0].acceptedTypeSets[0].allowedWireFormats,
+    ["flatbuffer", "aligned-binary"],
+  );
+});
+
+test("PLG encoding rejects malformed graph records instead of dropping them", () => {
+  const manifest = {
+    ...createTestManifest(),
+    flowEdges: [
+      {
+        edgeId: "broken",
+        fromNodeId: "source",
+        toNodeId: "sink",
+        toPortId: "in",
+      },
+    ],
+  };
+
+  assert.throws(
+    () => encodePluginManifest(manifest),
+    /flow edge.*fromPortId/i,
+  );
+});
+
+test("plugin manifest decoder accepts canonical PLG artifact buffers", () => {
+  const manifest = createTestManifest({ versionedIdentity: true });
   const embeddedManifest = legacyManifestToPlg(manifest);
   assert.deepEqual(embeddedManifest.requiredSchemas, ["OMM.fbs", "CAT.fbs"]);
   assert.deepEqual(embeddedManifest.entryFunctions[0].inputSchemas, ["OMM.fbs"]);
@@ -196,24 +258,27 @@ test("plugin manifest decoder accepts canonical PLG artifact buffers", () => {
   assert.equal(decoded.name, manifest.name);
   assert.equal(decoded.version, manifest.version);
   assert.equal(decoded.methods[0].methodId, "propagate");
-  assert.deepEqual(decoded.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes, [
-    {
-      schemaName: "OMM.fbs",
-      fileIdentifier: "$OMM",
-      schemaVersion: undefined,
-      rootTypeName: undefined,
-      wireFormat: "flatbuffer",
-    },
-  ]);
-  assert.deepEqual(decoded.methods[0].outputPorts[0].acceptedTypeSets[0].allowedTypes, [
-    {
-      schemaName: "CAT.fbs",
-      fileIdentifier: "$CAT",
-      schemaVersion: undefined,
-      rootTypeName: undefined,
-      wireFormat: "flatbuffer",
-    },
-  ]);
+  for (const [port, expectedSchema, expectedFileId, expectedRoot] of [
+    [decoded.methods[0].inputPorts[0], "OMM.fbs", "$OMM", "OMM"],
+    [decoded.methods[0].outputPorts[0], "CAT.fbs", "$CAT", "CAT"],
+  ]) {
+    const allowedTypes = port.acceptedTypeSets[0].allowedTypes;
+    assert.equal(allowedTypes.length, 2);
+    assert.deepEqual(
+      allowedTypes.map((typeRef) => typeRef.wireFormat),
+      ["flatbuffer", "aligned-binary"],
+    );
+    for (const typeRef of allowedTypes) {
+      assert.equal(typeRef.schemaName, expectedSchema);
+      assert.equal(typeRef.fileIdentifier, expectedFileId);
+      assert.equal(typeRef.schemaVersion, "1.0.0");
+      assert.equal(typeRef.rootTypeName, expectedRoot);
+      assert.deepEqual(
+        Array.from(typeRef.schemaHash),
+        [0x10, 0x20, 0x30, 0x40],
+      );
+    }
+  }
 });
 
 test("plugin manifest encoder preserves numeric PMAN plugin families in PLG buffers", () => {
@@ -426,6 +491,8 @@ test("aligned payload type refs round-trip through FlatBuffer encoding", () => {
   const alignedType =
     decoded.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes[1];
   assert.equal(alignedType.wireFormat, "aligned-binary");
+  assert.equal(alignedType.schemaVersion, "1.0.0");
+  assert.deepEqual(Array.from(alignedType.schemaHash), [0x10, 0x20, 0x30, 0x40]);
   assert.equal(alignedType.rootTypeName, "StateVector");
   assert.equal(alignedType.byteLength, 64);
   assert.equal(alignedType.requiredAlignment, 8);
@@ -515,6 +582,88 @@ test("embedded manifest source stays a raw byte buffer for c and c++ modules", (
   assert.equal(source.includes("FlatBufferBuilder"), false);
 });
 
+test("source compiler rejects a PLG port without its aligned representation before toolchain execution", async () => {
+  const manifest = createTestManifest();
+  manifest.methods[0].outputPorts[0].acceptedTypeSets[0].allowedTypes =
+    manifest.methods[0].outputPorts[0].acceptedTypeSets[0].allowedTypes.filter(
+      (typeRef) => typeRef.wireFormat === "flatbuffer",
+    );
+
+  await assert.rejects(
+    () =>
+      compileModuleFromSource({
+        manifest,
+        sourceCode: "int propagate(void) { return 7; }\n",
+        language: "c",
+      }),
+    (error) =>
+      error?.report?.errors?.some(
+        (issue) => issue.code === "missing-aligned-peer",
+      ) === true,
+  );
+});
+
+test("source compiler rejects a paired non-SDS port before toolchain execution", async () => {
+  const manifest = createTestManifest();
+  manifest.methods[0].inputPorts[0].acceptedTypeSets = [
+    createDualTypeSet(
+      "unregistered-record",
+      "UnregisteredRecord.fbs",
+      "ZZZZ",
+      "UnregisteredRecord",
+    ),
+  ];
+
+  await assert.rejects(
+    () =>
+      compileModuleFromSource({
+        manifest,
+        sourceCode: "int propagate(void) { return 7; }\n",
+        language: "c",
+      }),
+    (error) =>
+      error?.report?.errors?.some(
+        (issue) => issue.code === "unresolved-standards-type",
+      ) === true,
+  );
+});
+
+test("source compiler honors an explicit standards catalog for both validation passes", async () => {
+  const manifest = createTestManifest({ versionedIdentity: true });
+  const catalog = [
+    {
+      schemaCode: "OMM",
+      schemaName: "OMM.fbs",
+      fileIdentifier: "$OMM",
+      rootTypeName: "OMM",
+      version: "1.0.0",
+      hash: "10203040",
+      idl: "",
+      files: [],
+    },
+    {
+      schemaCode: "CAT",
+      schemaName: "CAT.fbs",
+      fileIdentifier: "$CAT",
+      rootTypeName: "CAT",
+      version: "1.0.0",
+      hash: "10203040",
+      idl: "",
+      files: [],
+    },
+  ];
+
+  const result = await compileModuleFromSource({
+    manifest,
+    sourceCode: "int propagate(void) { return 7; }\n",
+    language: "c",
+    catalog,
+  });
+
+  assert.equal(result.report.ok, true);
+  assert.deepEqual(result.report.warnings, []);
+});
+
 test("source compile emits a compliant wasm module", async () => {
   const manifest = createTestManifest();
   const result = await compileModuleFromSource({
@@ -538,6 +687,21 @@ test("source compile emits a compliant wasm module", async () => {
     result.guestLink?.methodSymbols?.propagate?.endsWith("propagate"),
     true,
   );
+});
+
+test("source compile records an explicit guest-link capability slice", async () => {
+  const manifest = {
+    ...createTestManifest(),
+    capabilities: ["clock", "http"],
+  };
+  const result = await compileModuleFromSource({
+    manifest,
+    sourceCode: "int propagate(void) { return 7; }\n",
+    language: "c",
+    guestLinkCapabilities: ["http"],
+  });
+
+  assert.deepEqual(result.guestLink?.capabilities, ["http"]);
 });
 
 test("source compile emits growable memory for dense browser module outputs", async () => {
@@ -573,11 +737,53 @@ test("artifact compliance can validate a built module from its embedded PLG mani
   const manifest = {
     ...createTestManifest(),
     capabilities: ["clock", "random"],
+    methods: [
+      {
+        ...createTestManifest().methods[0],
+        inputPorts: [
+          {
+            ...createTestManifest().methods[0].inputPorts[0],
+            acceptedTypeSets: [
+              createDualTypeSet(
+                "versioned-record",
+                "VersionedRecord.fbs",
+                "VREC",
+                "VersionedRecord",
+                { identity: VERSIONED_TEST_IDENTITY },
+              ),
+            ],
+          },
+        ],
+      },
+    ],
   };
+  const catalog = [
+    {
+      schemaCode: "VREC",
+      schemaName: "VersionedRecord.fbs",
+      fileIdentifier: "VREC",
+      rootTypeName: "VersionedRecord",
+      version: VERSIONED_TEST_IDENTITY.schemaVersion,
+      hash: "10203040",
+      idl: "",
+      files: [],
+    },
+    {
+      schemaCode: "CAT",
+      schemaName: "CAT.fbs",
+      fileIdentifier: "$CAT",
+      rootTypeName: "CAT",
+      version: null,
+      hash: null,
+      idl: "",
+      files: [],
+    },
+  ];
   const result = await compileModuleFromSource({
     manifest,
     sourceCode: "int propagate(void) { return 7; }\n",
     language: "c",
+    catalog,
   });
   const wasi = new WASI({
     version: "preview1",
@@ -605,10 +811,45 @@ test("artifact compliance can validate a built module from its embedded PLG mani
     embeddedManifest.capabilities.map((capability) => capability.name),
     manifest.capabilities,
   );
+  const embeddedInputTypes =
+    embeddedManifest.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes;
+  assert.equal(embeddedInputTypes.length, 2);
+  assert.deepEqual(
+    embeddedInputTypes.map((typeRef) => ({
+      schemaName: typeRef.schemaName,
+      fileIdentifier: typeRef.fileIdentifier,
+      schemaVersion: typeRef.schemaVersion,
+      schemaHash: Array.from(typeRef.schemaHash ?? []),
+      rootTypeName: typeRef.rootTypeName,
+      wireFormat: typeRef.wireFormat,
+      requiredAlignment: typeRef.requiredAlignment,
+    })),
+    [
+      {
+        schemaName: "VersionedRecord.fbs",
+        fileIdentifier: "VREC",
+        schemaVersion: "1.0.0",
+        schemaHash: [0x10, 0x20, 0x30, 0x40],
+        rootTypeName: "VersionedRecord",
+        wireFormat: "flatbuffer",
+        requiredAlignment: undefined,
+      },
+      {
+        schemaName: "VersionedRecord.fbs",
+        fileIdentifier: "VREC",
+        schemaVersion: "1.0.0",
+        schemaHash: [0x10, 0x20, 0x30, 0x40],
+        rootTypeName: "VersionedRecord",
+        wireFormat: "aligned-binary",
+        requiredAlignment: 8,
+      },
+    ],
+  );
 
   const validation = await validateArtifactWithStandards({
     manifest,
     wasmPath: result.outputPath,
+    catalog,
   });
   assert.equal(validation.ok, true);
 });
@@ -873,24 +1114,12 @@ test("shared module and current OrbPro type refs resolve without warnings", asyn
           {
             portId: "tick",
             acceptedTypeSets: [
-              {
-                setId: "tick",
-                allowedTypes: [
-                  {
-                    schemaName: "TimerTick.fbs",
-                    fileIdentifier: "TICK",
-                  },
-                ],
-              },
-              {
-                setId: "propagator",
-                allowedTypes: [
-                  {
-                    schemaName: "orbpro.propagator.PropagatorBatchRequest",
-                    fileIdentifier: "PROP",
-                  },
-                ],
-              },
+              createDualTypeSet(
+                "tick",
+                "TimerTick.fbs",
+                "TICK",
+                "TimerTick",
+              ),
             ],
             minStreams: 1,
             maxStreams: 1,
@@ -901,19 +1130,12 @@ test("shared module and current OrbPro type refs resolve without warnings", asyn
           {
             portId: "state",
             acceptedTypeSets: [
-              {
-                setId: "state",
-                allowedTypes: [
-                  {
-                    schemaName: "StateVector.fbs",
-                    fileIdentifier: "STVC",
-                  },
-                  {
-                    schemaName: "DetachedSignature.fbs",
-                    fileIdentifier: "SIGD",
-                  },
-                ],
-              },
+              createDualTypeSet(
+                "state",
+                "StateVector.fbs",
+                "STVC",
+                "StateVector",
+              ),
             ],
             minStreams: 1,
             maxStreams: 1,
@@ -928,10 +1150,22 @@ test("shared module and current OrbPro type refs resolve without warnings", asyn
       {
         schemaName: "HttpRequest.fbs",
         fileIdentifier: "HREQ",
+        rootTypeName: "HttpRequest",
       },
       {
         schemaName: "OMM.fbs",
         fileIdentifier: "$OMM",
+        rootTypeName: "OMM",
+      },
+      {
+        schemaName: "PropagatorBatchRequest.fbs",
+        fileIdentifier: "PROP",
+        rootTypeName: "PropagatorBatchRequest",
+      },
+      {
+        schemaName: "DetachedSignature.fbs",
+        fileIdentifier: "SIGD",
+        rootTypeName: "DetachedSignature",
       },
     ],
   };
@@ -940,7 +1174,7 @@ test("shared module and current OrbPro type refs resolve without warnings", asyn
   assert.deepEqual(report.warnings, []);
 });
 
-test("module-local stream type refs produce standards warnings", async () => {
+test("module-local stream type refs fail closed outside the standards catalog", async () => {
   const manifest = {
     pluginId: "com.digitalarsenal.examples.local-type-registry",
     name: "Local Type Registry Coverage",
@@ -956,24 +1190,12 @@ test("module-local stream type refs produce standards warnings", async () => {
           {
             portId: "coverage",
             acceptedTypeSets: [
-              {
-                setId: "local-metric",
-                allowedTypes: [
-                  {
-                    schemaName: "LocalCoverageMetric.fbs",
-                    fileIdentifier: "LCM1",
-                  },
-                ],
-              },
-              {
-                setId: "local-product",
-                allowedTypes: [
-                  {
-                    schemaName: "LocalCoverageProduct.fbs",
-                    fileIdentifier: "LCP1",
-                  },
-                ],
-              },
+              createDualTypeSet(
+                "local-metric",
+                "LocalCoverageMetric.fbs",
+                "LCM1",
+                "LocalCoverageMetric",
+              ),
             ],
             minStreams: 1,
             maxStreams: 1,
@@ -989,18 +1211,25 @@ test("module-local stream type refs produce standards warnings", async () => {
       {
         schemaName: "LocalAccessRequest.fbs",
         fileIdentifier: "LAR1",
+        rootTypeName: "LocalAccessRequest",
       },
       {
         schemaName: "LocalAccessResult.fbs",
         fileIdentifier: "LAS1",
+        rootTypeName: "LocalAccessResult",
+      },
+      {
+        schemaName: "LocalCoverageProduct.fbs",
+        fileIdentifier: "LCP1",
+        rootTypeName: "LocalCoverageProduct",
       },
     ],
   };
   const report = await validateManifestWithStandards(manifest);
-  assert.equal(report.ok, true);
-  assert.equal(report.warnings.length, 4);
+  assert.equal(report.ok, false);
+  assert.ok(report.errors.length >= 4);
   assert.equal(
-    report.warnings.every((warning) => warning.code === "unresolved-standards-type"),
+    report.errors.every((error) => error.code === "unresolved-standards-type"),
     true,
   );
 });
@@ -1140,7 +1369,7 @@ test("known type catalog includes shared module and SDS entries", async () => {
   );
   assert.ok(
     catalog.some(
-      (entry) => entry.schemaName === "OMM.fbs" && entry.fileIdentifier === "OMM",
+      (entry) => entry.schemaName === "OMM.fbs" && entry.fileIdentifier === "$OMM",
     ),
   );
 });
@@ -1148,9 +1377,9 @@ test("known type catalog includes shared module and SDS entries", async () => {
 test("reentry launch-ascent and hypersonics SDS type refs resolve without warnings", async () => {
   const catalog = await loadKnownTypeCatalog();
   for (const expected of [
-    ["HFC.fbs", "HFC"],
-    ["REM.fbs", "REM"],
-    ["LAM.fbs", "LAM"],
+    ["HFC.fbs", "$HFC"],
+    ["REM.fbs", "$REM"],
+    ["LAM.fbs", "$LAM"],
   ]) {
     assert.ok(
       catalog.some(
@@ -1179,7 +1408,7 @@ test("reentry launch-ascent and hypersonics SDS type refs resolve without warnin
             acceptedTypeSets: [
               {
                 setId: "atm",
-                allowedTypes: [{ schemaName: "ATM.fbs", fileIdentifier: "$ATM" }],
+                ...createDualTypeSet("atm", "ATM.fbs", "$ATM", "ATM"),
               },
             ],
             minStreams: 1,
@@ -1193,7 +1422,7 @@ test("reentry launch-ascent and hypersonics SDS type refs resolve without warnin
             acceptedTypeSets: [
               {
                 setId: "hfc",
-                allowedTypes: [{ schemaName: "HFC.fbs", fileIdentifier: "$HFC" }],
+                ...createDualTypeSet("hfc", "HFC.fbs", "$HFC", "HFC"),
               },
             ],
             minStreams: 1,
@@ -1211,13 +1440,12 @@ test("reentry launch-ascent and hypersonics SDS type refs resolve without warnin
           {
             portId: "trajectory",
             acceptedTypeSets: [
-              {
-                setId: "trajectory",
-                allowedTypes: [
-                  { schemaName: "OEM.fbs", fileIdentifier: "$OEM" },
-                  { schemaName: "OCM.fbs", fileIdentifier: "$OCM" },
-                ],
-              },
+              createDualTypeSet(
+                "trajectory",
+                "OEM.fbs",
+                "$OEM",
+                "OEM",
+              ),
             ],
             minStreams: 1,
             maxStreams: 1,
@@ -1228,7 +1456,7 @@ test("reentry launch-ascent and hypersonics SDS type refs resolve without warnin
             acceptedTypeSets: [
               {
                 setId: "atm",
-                allowedTypes: [{ schemaName: "ATM.fbs", fileIdentifier: "$ATM" }],
+                ...createDualTypeSet("atm", "ATM.fbs", "$ATM", "ATM"),
               },
             ],
             minStreams: 1,
@@ -1242,7 +1470,7 @@ test("reentry launch-ascent and hypersonics SDS type refs resolve without warnin
             acceptedTypeSets: [
               {
                 setId: "hfc",
-                allowedTypes: [{ schemaName: "HFC.fbs", fileIdentifier: "$HFC" }],
+                ...createDualTypeSet("hfc", "HFC.fbs", "$HFC", "HFC"),
               },
             ],
             minStreams: 1,
@@ -1262,7 +1490,7 @@ test("reentry launch-ascent and hypersonics SDS type refs resolve without warnin
             acceptedTypeSets: [
               {
                 setId: "rdm",
-                allowedTypes: [{ schemaName: "RDM.fbs", fileIdentifier: "$RDM" }],
+                ...createDualTypeSet("rdm", "RDM.fbs", "$RDM", "RDM"),
               },
             ],
             minStreams: 1,
@@ -1276,7 +1504,7 @@ test("reentry launch-ascent and hypersonics SDS type refs resolve without warnin
             acceptedTypeSets: [
               {
                 setId: "rem",
-                allowedTypes: [{ schemaName: "REM.fbs", fileIdentifier: "$REM" }],
+                ...createDualTypeSet("rem", "REM.fbs", "$REM", "REM"),
               },
             ],
             minStreams: 1,
@@ -1296,7 +1524,7 @@ test("reentry launch-ascent and hypersonics SDS type refs resolve without warnin
             acceptedTypeSets: [
               {
                 setId: "ldm",
-                allowedTypes: [{ schemaName: "LDM.fbs", fileIdentifier: "$LDM" }],
+                ...createDualTypeSet("ldm", "LDM.fbs", "$LDM", "LDM"),
               },
             ],
             minStreams: 1,
@@ -1310,7 +1538,7 @@ test("reentry launch-ascent and hypersonics SDS type refs resolve without warnin
             acceptedTypeSets: [
               {
                 setId: "lam",
-                allowedTypes: [{ schemaName: "LAM.fbs", fileIdentifier: "$LAM" }],
+                ...createDualTypeSet("lam", "LAM.fbs", "$LAM", "LAM"),
               },
             ],
             minStreams: 1,
@@ -1323,10 +1551,11 @@ test("reentry launch-ascent and hypersonics SDS type refs resolve without warnin
       },
     ],
     schemasUsed: [
-      { schemaName: "ATM.fbs", fileIdentifier: "$ATM" },
-      { schemaName: "HFC.fbs", fileIdentifier: "$HFC" },
-      { schemaName: "REM.fbs", fileIdentifier: "$REM" },
-      { schemaName: "LAM.fbs", fileIdentifier: "$LAM" },
+      { schemaName: "ATM.fbs", fileIdentifier: "$ATM", rootTypeName: "ATM" },
+      { schemaName: "HFC.fbs", fileIdentifier: "$HFC", rootTypeName: "HFC" },
+      { schemaName: "REM.fbs", fileIdentifier: "$REM", rootTypeName: "REM" },
+      { schemaName: "LAM.fbs", fileIdentifier: "$LAM", rootTypeName: "LAM" },
+      { schemaName: "OCM.fbs", fileIdentifier: "$OCM", rootTypeName: "OCM" },
     ],
   };
 
@@ -1353,15 +1582,26 @@ test("standards catalogs can load from an explicit standards root", async () => 
   const standardsCatalog = await loadStandardsCatalog({ standardsRoot });
   assert.ok(
     standardsCatalog.some(
-      (entry) => entry.schemaName === "TMX.fbs" && entry.fileIdentifier === "TMX",
+      (entry) =>
+        entry.schemaName === "TMX.fbs" && entry.fileIdentifier === "$TMX",
     ),
   );
 
   const manifest = createTestManifest();
-  const tmxType = { schemaName: "spacedata.TMX", fileIdentifier: "TMX" };
-  manifest.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [tmxType];
-  manifest.methods[0].outputPorts[0].acceptedTypeSets[0].allowedTypes = [tmxType];
-  manifest.schemasUsed = [tmxType];
+  const tmxTypeSet = createDualTypeSet(
+    "tmx",
+    "TMX.fbs",
+    "$TMX",
+    "TMX",
+    {
+      identity: { schemaVersion: undefined, schemaHash: undefined },
+      byteLength: 4,
+      requiredAlignment: 4,
+    },
+  );
+  manifest.methods[0].inputPorts[0].acceptedTypeSets = [tmxTypeSet];
+  manifest.methods[0].outputPorts[0].acceptedTypeSets = [tmxTypeSet];
+  manifest.schemasUsed = tmxTypeSet.allowedTypes;
 
   const report = await validateManifestWithStandards(manifest, { standardsRoot });
   assert.equal(
@@ -1379,6 +1619,83 @@ test("standards catalogs can load from an explicit standards root", async () => 
     ),
     false,
   );
+
+  const mismatchedManifest = structuredClone(manifest);
+  for (const direction of ["inputPorts", "outputPorts"]) {
+    for (const typeRef of mismatchedManifest.methods[0][direction][0]
+      .acceptedTypeSets[0].allowedTypes) {
+      typeRef.fileIdentifier = "$BAD";
+    }
+  }
+  const mismatchedReport = await validateManifestWithStandards(
+    mismatchedManifest,
+    { standardsRoot },
+  );
+  assert.equal(mismatchedReport.ok, false);
+  assert.ok(
+    mismatchedReport.errors.some(
+      (issue) => issue.code === "standards-type-identity-mismatch",
+    ),
+    JSON.stringify(mismatchedReport.issues),
+  );
+
+  for (const [field, value] of [
+    ["schemaName", "tmx.fbs"],
+    ["fileIdentifier", "$tmx"],
+  ]) {
+    const caseChangedManifest = structuredClone(manifest);
+    for (const direction of ["inputPorts", "outputPorts"]) {
+      for (const typeRef of caseChangedManifest.methods[0][direction][0]
+        .acceptedTypeSets[0].allowedTypes) {
+        typeRef[field] = value;
+      }
+    }
+    for (const typeRef of caseChangedManifest.schemasUsed) {
+      typeRef[field] = value;
+    }
+    const caseChangedReport = await validateManifestWithStandards(
+      caseChangedManifest,
+      { standardsRoot },
+    );
+    assert.equal(caseChangedReport.ok, false, `${field} must be case-exact`);
+    assert.ok(
+      caseChangedReport.errors.some(
+        (issue) => issue.code === "standards-type-identity-mismatch",
+      ),
+      JSON.stringify(caseChangedReport.issues),
+    );
+  }
+});
+
+test("standards validation treats every empty schema-hash encoding as absent", async () => {
+  const catalog = [
+    {
+      schemaCode: "TST",
+      schemaName: "TestRecord.fbs",
+      fileIdentifier: "TSTR",
+      rootTypeName: "TestRecord",
+      hash: "10203040",
+      version: null,
+      idl: "",
+      files: [],
+    },
+  ];
+
+  for (const schemaHash of [undefined, [], new Uint8Array(), "", "0x"]) {
+    const manifest = createTestManifest();
+    const typeSet = createDualTypeSet(
+      "test-record",
+      "TestRecord.fbs",
+      "TSTR",
+      "TestRecord",
+      { identity: { schemaHash } },
+    );
+    manifest.methods[0].inputPorts[0].acceptedTypeSets = [typeSet];
+    manifest.methods[0].outputPorts[0].acceptedTypeSets = [typeSet];
+
+    const report = await validateManifestWithStandards(manifest, { catalog });
+    assert.equal(report.ok, true, JSON.stringify(report.issues));
+  }
 });
 
 test("standards validation fails closed for stale SCV generated bindings", async () => {

@@ -45,6 +45,42 @@ function serializeWorkerError(error) {
   };
 }
 
+function detachInvokeFrame(frame = {}) {
+  const {
+    arenaLease: _arenaLease,
+    arenaGeneration: _arenaGeneration,
+    generation: _generation,
+    ...detached
+  } = frame;
+  return {
+    ...detached,
+    payload: new Uint8Array(frame.payload ?? new Uint8Array()),
+  };
+}
+
+function detachInvokeResponse(response = {}) {
+  const outputs = (response.outputs ?? response.outputFrames ?? []).map(
+    detachInvokeFrame,
+  );
+  const {
+    arenaLease,
+    outputs: _outputs,
+    outputFrames: _outputFrames,
+    payloadArena,
+    ...detached
+  } = response;
+  try {
+    return {
+      ...detached,
+      outputs,
+      outputFrames: outputs,
+      payloadArena: new Uint8Array(payloadArena ?? new Uint8Array()),
+    };
+  } finally {
+    arenaLease?.close?.();
+  }
+}
+
 const port = await resolvePort();
 let harness = null;
 
@@ -84,7 +120,7 @@ async function handleCommand(message) {
       return fn(...(message.args ?? []));
     }
     case "invoke":
-      return harness.invoke(message.request);
+      return detachInvokeResponse(await harness.invoke(message.request));
     case "invokeRaw":
       return harness.invokeRaw(
         message.requestBytes instanceof Uint8Array

@@ -24,12 +24,12 @@ function createValidManifest() {
           {
             portId: "in",
             acceptedTypeSets: [
-              {
+              createExactDualFormatTypeSet({
                 setId: "omm",
-                allowedTypes: [
-                  { schemaName: "OMM.fbs", fileIdentifier: "$OMM" },
-                ],
-              },
+                schemaName: "OMM.fbs",
+                fileIdentifier: "$OMM",
+                rootTypeName: "OMM",
+              }),
             ],
             minStreams: 1,
             maxStreams: 1,
@@ -40,12 +40,12 @@ function createValidManifest() {
           {
             portId: "out",
             acceptedTypeSets: [
-              {
+              createExactDualFormatTypeSet({
                 setId: "cat",
-                allowedTypes: [
-                  { schemaName: "CAT.fbs", fileIdentifier: "$CAT" },
-                ],
-              },
+                schemaName: "CAT.fbs",
+                fileIdentifier: "$CAT",
+                rootTypeName: "CAT",
+              }),
             ],
             minStreams: 0,
             maxStreams: 1,
@@ -63,6 +63,8 @@ function createAlignedAllowedType(overrides = {}) {
   return {
     schemaName: "StateVector.fbs",
     fileIdentifier: "STVC",
+    schemaVersion: "1.0.0",
+    schemaHash: [0x10, 0x20, 0x30, 0x40],
     wireFormat: "aligned-binary",
     rootTypeName: "StateVector",
     byteLength: 64,
@@ -75,6 +77,10 @@ function createFlatbufferAllowedType(overrides = {}) {
   return {
     schemaName: "StateVector.fbs",
     fileIdentifier: "STVC",
+    schemaVersion: "1.0.0",
+    schemaHash: [0x10, 0x20, 0x30, 0x40],
+    rootTypeName: "StateVector",
+    wireFormat: "flatbuffer",
     ...overrides,
   };
 }
@@ -87,10 +93,67 @@ function createDualFormatTypeSet(overrides = {}) {
       createFlatbufferAllowedType({
         schemaName: alignedType.schemaName,
         fileIdentifier: alignedType.fileIdentifier,
+        schemaVersion: alignedType.schemaVersion,
+        schemaHash: alignedType.schemaHash,
+        rootTypeName: alignedType.rootTypeName,
       }),
       alignedType,
     ],
   };
+}
+
+function createExactDualFormatTypeSet({
+  setId = "state-vector",
+  schemaName = "StateVector.fbs",
+  fileIdentifier = "STVC",
+  schemaVersion = "1.0.0",
+  schemaHash = [0x10, 0x20, 0x30, 0x40],
+  rootTypeName = "StateVector",
+  byteLength = 64,
+  fixedStringLength,
+  requiredAlignment = 8,
+} = {}) {
+  const identity = {
+    schemaName,
+    fileIdentifier,
+    schemaVersion,
+    schemaHash,
+    rootTypeName,
+  };
+  return {
+    setId,
+    allowedTypes: [
+      { ...identity, wireFormat: "flatbuffer" },
+      {
+        ...identity,
+        wireFormat: "aligned-binary",
+        byteLength,
+        ...(fixedStringLength === undefined ? {} : { fixedStringLength }),
+        requiredAlignment,
+      },
+    ],
+  };
+}
+
+function createDualPortManifest() {
+  const manifest = createValidManifest();
+  manifest.methods[0].inputPorts[0].acceptedTypeSets = [
+    createExactDualFormatTypeSet({
+      setId: "omm",
+      schemaName: "OMM.fbs",
+      fileIdentifier: "$OMM",
+      rootTypeName: "OMM",
+    }),
+  ];
+  manifest.methods[0].outputPorts[0].acceptedTypeSets = [
+    createExactDualFormatTypeSet({
+      setId: "cat",
+      schemaName: "CAT.fbs",
+      fileIdentifier: "$CAT",
+      rootTypeName: "CAT",
+    }),
+  ];
+  return manifest;
 }
 
 let generatedAlignedFallbackTypePromise = null;
@@ -342,13 +405,14 @@ test("allowed type without any identity field produces error", () => {
   assert.ok(report.errors.some((e) => e.code === "missing-type-identity"));
 });
 
-test("acceptsAnyFlatbuffer type passes without identity fields", () => {
+test("acceptsAnyFlatbuffer is rejected on mandatory paired ABI ports", () => {
   const m = createValidManifest();
   m.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
     { acceptsAnyFlatbuffer: true },
   ];
   const report = validatePluginManifest(m);
-  assert.equal(report.ok, true);
+  assert.equal(report.ok, false);
+  assert.ok(report.errors.some((e) => e.code === "wildcard-port-type"));
 });
 
 test("aligned-binary type requires a regular flatbuffer fallback in the same type set", async () => {
@@ -368,6 +432,9 @@ test("aligned-binary type passes with required layout fields and a regular fallb
     createFlatbufferAllowedType({
       schemaName: alignedType.schemaName,
       fileIdentifier: alignedType.fileIdentifier,
+      schemaVersion: alignedType.schemaVersion,
+      schemaHash: alignedType.schemaHash,
+      rootTypeName: alignedType.rootTypeName,
     }),
     alignedType,
   ];
@@ -402,14 +469,20 @@ test("aligned-binary type requires rootTypeName", () => {
   );
 });
 
-test("aligned-binary type allows omitted byteLength for variable-length layouts", () => {
+test("aligned-binary type requires positive byteLength for its fixed inline layout", () => {
   const missing = createValidManifest();
   missing.methods[0].inputPorts[0].acceptedTypeSets[0] = createDualFormatTypeSet({
     byteLength: undefined,
   });
   const missingReport = validatePluginManifest(missing);
-  assert.equal(missingReport.ok, true);
-  assert.equal(missingReport.errors.length, 0);
+  assert.equal(missingReport.ok, false);
+  assert.ok(
+    missingReport.errors.some(
+      (e) =>
+        e.code === "invalid-integer" &&
+        e.location?.endsWith(".byteLength"),
+    ),
+  );
 
   const zero = createValidManifest();
   zero.methods[0].inputPorts[0].acceptedTypeSets[0] = createDualFormatTypeSet({
@@ -456,13 +529,264 @@ test("aligned-binary type requires positive requiredAlignment", () => {
   );
 });
 
-test("schemaHash byte arrays count as stable identity fields", () => {
+test("aligned layout metadata must fit the canonical TAB integer widths", async (t) => {
+  for (const [name, field, value] of [
+    ["fixedStringLength uint16 overflow", "fixedStringLength", 0x1_0000],
+    ["byteLength uint32 overflow", "byteLength", 0x1_0000_0000],
+    ["requiredAlignment uint16 overflow", "requiredAlignment", 0x1_0000],
+  ]) {
+    await t.test(name, () => {
+      const manifest = createDualPortManifest();
+      const alignedType = manifest.methods[0].inputPorts[0]
+        .acceptedTypeSets[0].allowedTypes.find(
+          (typeRef) => typeRef.wireFormat === "aligned-binary",
+        );
+      alignedType[field] = value;
+
+      const report = validatePluginManifest(manifest);
+
+      assert.equal(report.ok, false);
+      assert.ok(
+        report.errors.some(
+          (issue) =>
+            issue.code === "integer-range" &&
+            issue.location?.endsWith(`.${field}`),
+        ),
+        JSON.stringify(report.issues),
+      );
+    });
+  }
+});
+
+test("schemaHash byte arrays are accepted as a paired identity field", () => {
   const m = createValidManifest();
-  m.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
-    { schemaHash: [0xde, 0xad, 0xbe, 0xef] },
+  m.methods[0].inputPorts[0].acceptedTypeSets = [
+    createExactDualFormatTypeSet({
+      schemaHash: [0xde, 0xad, 0xbe, 0xef],
+    }),
   ];
   const report = validatePluginManifest(m);
   assert.equal(report.ok, true);
+});
+
+test("schemaHash hex strings and byte arrays identify the same SDS schema", () => {
+  const manifest = createDualPortManifest();
+  const [canonical, aligned] =
+    manifest.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes;
+  canonical.schemaHash = "0xdeadbeef";
+  aligned.schemaHash = [0xde, 0xad, 0xbe, 0xef];
+
+  const report = validatePluginManifest(manifest);
+
+  assert.equal(report.ok, true, JSON.stringify(report.issues));
+});
+
+test("schemaHash rejects malformed hex and invalid byte values", async (t) => {
+  const invalidHashes = [
+    ["odd-length hex", "abc"],
+    ["non-hex string", "0xnothex"],
+    ["byte above 255", [0, 256]],
+    ["negative byte", [-1, 0]],
+    ["fractional byte", [1.5, 2]],
+  ];
+
+  for (const [name, invalidHash] of invalidHashes) {
+    await t.test(name, () => {
+      const manifest = createDualPortManifest();
+      manifest.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes[0]
+        .schemaHash = invalidHash;
+
+      const report = validatePluginManifest(manifest);
+
+      assert.equal(report.ok, false);
+      assert.ok(
+        report.errors.some((issue) => issue.code === "invalid-schema-hash"),
+        JSON.stringify(report.issues),
+      );
+    });
+  }
+});
+
+test("paired type refs require an exact four-byte printable file identifier", async (t) => {
+  for (const [name, fileIdentifier] of [
+    ["too short", "ABC"],
+    ["too long", "ABCDE"],
+    ["multi-byte Unicode", "éABC"],
+    ["control byte", "A\nBC"],
+  ]) {
+    await t.test(name, () => {
+      const manifest = createDualPortManifest();
+      for (const typeRef of manifest.methods[0].inputPorts[0]
+        .acceptedTypeSets[0].allowedTypes) {
+        typeRef.fileIdentifier = fileIdentifier;
+      }
+
+      const report = validatePluginManifest(manifest);
+
+      assert.equal(report.ok, false);
+      assert.ok(
+        report.errors.some(
+          (issue) => issue.code === "invalid-file-identifier",
+        ),
+        JSON.stringify(report.issues),
+      );
+    });
+  }
+});
+
+test("explicit allowedWireFormats cannot remove either required representation", () => {
+  const manifest = createDualPortManifest();
+  manifest.methods[0].inputPorts[0].acceptedTypeSets[0].allowedWireFormats = [
+    "aligned-binary",
+  ];
+
+  const report = validatePluginManifest(manifest);
+
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some(
+      (issue) => issue.code === "allowed-wire-formats-mismatch",
+    ),
+    JSON.stringify(report.issues),
+  );
+});
+
+test("canonical PLG graph records are validated instead of silently discarded", () => {
+  const manifest = createDualPortManifest();
+  manifest.flowNodes = [
+    { nodeId: "source", pluginId: "com.test.source", methodId: "run" },
+  ];
+  manifest.flowEdges = [
+    {
+      edgeId: "broken",
+      fromNodeId: "source",
+      toNodeId: "missing",
+      toPortId: "in",
+    },
+  ];
+
+  const report = validatePluginManifest(manifest);
+
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some((issue) => issue.code === "invalid-flow-edge"),
+    JSON.stringify(report.issues),
+  );
+  assert.ok(
+    report.errors.some((issue) => issue.code === "unknown-flow-node"),
+    JSON.stringify(report.issues),
+  );
+});
+
+test("dual-representation contract rejects canonical-only input and output ports", async (t) => {
+  for (const direction of ["inputPorts", "outputPorts"]) {
+    await t.test(direction, () => {
+      const manifest = createDualPortManifest();
+      const typeSet = manifest.methods[0][direction][0].acceptedTypeSets[0];
+      typeSet.allowedTypes = typeSet.allowedTypes.filter(
+        (typeRef) => typeRef.wireFormat === "flatbuffer",
+      );
+
+      const report = validatePluginManifest(manifest);
+
+      assert.equal(report.ok, false);
+      assert.ok(
+        report.errors.some((issue) => issue.code === "missing-aligned-peer"),
+        JSON.stringify(report.issues),
+      );
+    });
+  }
+});
+
+test("dual-representation contract rejects every mismatched paired identity field", async (t) => {
+  const mismatches = [
+    ["schemaName", "Different.fbs"],
+    ["fileIdentifier", "DIFF"],
+    ["schemaVersion", "2.0.0"],
+    ["schemaHash", [0xaa, 0xbb, 0xcc, 0xdd]],
+    ["rootTypeName", "DifferentRoot"],
+  ];
+
+  for (const [field, value] of mismatches) {
+    await t.test(field, () => {
+      const manifest = createDualPortManifest();
+      const aligned =
+        manifest.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes[1];
+      aligned[field] = value;
+
+      const report = validatePluginManifest(manifest);
+
+      assert.equal(report.ok, false);
+      assert.ok(
+        report.errors.some(
+          (issue) => issue.code === "paired-type-identity-mismatch",
+        ),
+        JSON.stringify(report.issues),
+      );
+    });
+  }
+});
+
+test("dual-representation contract rejects wildcard port types", () => {
+  const manifest = createDualPortManifest();
+  manifest.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
+    { acceptsAnyFlatbuffer: true },
+  ];
+
+  const report = validatePluginManifest(manifest);
+
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some((issue) => issue.code === "wildcard-port-type"),
+    JSON.stringify(report.issues),
+  );
+});
+
+test("dual-representation contract rejects multiple accepted type sets per port", () => {
+  const manifest = createDualPortManifest();
+  manifest.methods[0].inputPorts[0].acceptedTypeSets.push(
+    createExactDualFormatTypeSet({ setId: "second" }),
+  );
+
+  const report = validatePluginManifest(manifest);
+
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some(
+      (issue) => issue.code === "invalid-accepted-type-set-count",
+    ),
+    JSON.stringify(report.issues),
+  );
+});
+
+test("dual-representation contract requires root type on the canonical peer", () => {
+  const manifest = createDualPortManifest();
+  delete manifest.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes[0]
+    .rootTypeName;
+
+  const report = validatePluginManifest(manifest);
+
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some(
+      (issue) => issue.code === "missing-canonical-root-type-name",
+    ),
+    JSON.stringify(report.issues),
+  );
+});
+
+test("dual-representation contract rejects non-power-of-two alignment", () => {
+  const manifest = createDualPortManifest();
+  manifest.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes[1]
+    .requiredAlignment = 3;
+
+  const report = validatePluginManifest(manifest);
+
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some((issue) => issue.code === "invalid-aligned-layout"),
+    JSON.stringify(report.issues),
+  );
 });
 
 // --- Capabilities ---
@@ -540,6 +864,18 @@ test("browser runtime target accepts browser-safe capabilities", () => {
   ];
   const report = validatePluginManifest(m);
   assert.equal(report.ok, true);
+});
+
+test("browser runtime target accepts the generic opaque storage adapter", () => {
+  const m = createValidManifest();
+  m.runtimeTargets = ["browser", "wasmedge"];
+  m.capabilities = ["storage_adapter"];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, true, JSON.stringify(report.errors));
+  assert.equal(
+    report.errors.some((error) => error.code === "capability-runtime-conflict"),
+    false,
+  );
 });
 
 test("wasi runtime target rejects capabilities that need host wrappers", () => {
@@ -809,13 +1145,29 @@ test("no WASM artifact produces skipped-check warning", async () => {
 
 // --- Standards validation ---
 
-test("unresolvable schema produces warning via standards validation", async () => {
+test("unresolvable paired port schema fails standards validation", async () => {
   const m = createValidManifest();
   m.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes = [
-    { schemaName: "DoesNotExist.fbs", fileIdentifier: "XXXX" },
+    {
+      schemaName: "DoesNotExist.fbs",
+      fileIdentifier: "XXXX",
+      rootTypeName: "DoesNotExist",
+      wireFormat: "flatbuffer",
+    },
+    {
+      schemaName: "DoesNotExist.fbs",
+      fileIdentifier: "XXXX",
+      rootTypeName: "DoesNotExist",
+      wireFormat: "aligned-binary",
+      byteLength: 64,
+      requiredAlignment: 8,
+    },
   ];
   const report = await validateManifestWithStandards(m);
-  assert.ok(report.warnings.length > 0);
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some((error) => error.code === "unresolved-standards-type"),
+  );
 });
 
 test("OrbPro local analysis and propagator type refs resolve via standards validation", async () => {

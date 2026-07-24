@@ -282,6 +282,34 @@ export function legacyManifestToPlg(input = {}) {
     : Array.isArray(input.min_permissions)
       ? input.min_permissions
       : runtimeTargets;
+  const flowNodes = Array.isArray(input.flowNodes)
+    ? input.flowNodes
+    : Array.isArray(input.flow_nodes)
+      ? input.flow_nodes
+      : Array.isArray(input.FLOW_NODES)
+        ? input.FLOW_NODES
+        : [];
+  const flowEdges = Array.isArray(input.flowEdges)
+    ? input.flowEdges
+    : Array.isArray(input.flow_edges)
+      ? input.flow_edges
+      : Array.isArray(input.FLOW_EDGES)
+        ? input.FLOW_EDGES
+        : [];
+  const flowTriggers = Array.isArray(input.flowTriggers)
+    ? input.flowTriggers
+    : Array.isArray(input.flow_triggers)
+      ? input.flow_triggers
+      : Array.isArray(input.FLOW_TRIGGERS)
+        ? input.FLOW_TRIGGERS
+        : [];
+  const flowTriggerBindings = Array.isArray(input.flowTriggerBindings)
+    ? input.flowTriggerBindings
+    : Array.isArray(input.flow_trigger_bindings)
+      ? input.flow_trigger_bindings
+      : Array.isArray(input.FLOW_TRIGGER_BINDINGS)
+        ? input.FLOW_TRIGGER_BINDINGS
+        : [];
 
   return {
     pluginId: input.pluginId ?? input.plugin_id ?? input.PLUGIN_ID,
@@ -324,6 +352,10 @@ export function legacyManifestToPlg(input = {}) {
       : Array.isArray(input.build_artifacts)
         ? input.build_artifacts
         : [],
+    flowNodes,
+    flowEdges,
+    flowTriggers,
+    flowTriggerBindings,
     providerPeerId: input.providerPeerId ?? input.provider_peer_id,
     providerEpmCid: input.providerEpmCid ?? input.provider_epm_cid,
     encrypted: input.encrypted === true,

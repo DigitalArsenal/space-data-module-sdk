@@ -16,10 +16,21 @@
           "portId": "request",
           "acceptedTypeSets": [
             {
-              "setId": "request-any",
+              "setId": "request-cat",
               "allowedTypes": [
                 {
-                  "acceptsAnyFlatbuffer": true
+                  "schemaName": "CAT.fbs",
+                  "fileIdentifier": "$CAT",
+                  "rootTypeName": "CAT",
+                  "wireFormat": "flatbuffer"
+                },
+                {
+                  "schemaName": "CAT.fbs",
+                  "fileIdentifier": "$CAT",
+                  "rootTypeName": "CAT",
+                  "wireFormat": "aligned-binary",
+                  "byteLength": 64,
+                  "requiredAlignment": 8
                 }
               ]
             }
@@ -34,10 +45,21 @@
           "portId": "response",
           "acceptedTypeSets": [
             {
-              "setId": "response-any",
+              "setId": "response-cat",
               "allowedTypes": [
                 {
-                  "acceptsAnyFlatbuffer": true
+                  "schemaName": "CAT.fbs",
+                  "fileIdentifier": "$CAT",
+                  "rootTypeName": "CAT",
+                  "wireFormat": "flatbuffer"
+                },
+                {
+                  "schemaName": "CAT.fbs",
+                  "fileIdentifier": "$CAT",
+                  "rootTypeName": "CAT",
+                  "wireFormat": "aligned-binary",
+                  "byteLength": 64,
+                  "requiredAlignment": 8
                 }
               ]
             }

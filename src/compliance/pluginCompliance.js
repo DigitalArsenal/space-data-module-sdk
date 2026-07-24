@@ -21,6 +21,10 @@ import {
   decodePlgManifest,
   isPlgManifestBuffer,
 } from "../manifest/plgCodec.js";
+import {
+  isPayloadSchemaHashValid,
+  payloadSchemaIdentitiesEqual,
+} from "../manifest/typeRefs.js";
 import { SDS_MANIFEST_SECTION_NAME } from "../bundle/constants.js";
 import {
   decodeUnsignedLeb128,
@@ -52,7 +56,6 @@ const BrowserIncompatibleCapabilitySet = new Set([
   "mqtt",
   "tls",
   "database",
-  "storage_adapter",
   "storage_write",
   "protocol_dial",
   "protocol_handle",
@@ -104,57 +107,6 @@ function hasNonEmptyByteSequence(value) {
   if (ArrayBuffer.isView(value)) {
     return value.byteLength > 0;
   }
-  return false;
-}
-
-function normalizeTypeIdentityString(value) {
-  if (!isNonEmptyString(value)) {
-    return null;
-  }
-  return value.trim().toLowerCase();
-}
-
-function normalizeTypeIdentityBytes(value) {
-  if (typeof value === "string") {
-    const trimmed = value.trim().toLowerCase();
-    return trimmed.length > 0 ? trimmed : null;
-  }
-  const bytes = ArrayBuffer.isView(value)
-    ? Array.from(value)
-    : Array.isArray(value)
-      ? value
-      : null;
-  if (!bytes || bytes.length === 0) {
-    return null;
-  }
-  return bytes
-    .map((entry) => Number(entry).toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function allowedTypesReferToSameLogicalSchema(left, right) {
-  const leftSchemaName = normalizeTypeIdentityString(left?.schemaName);
-  const rightSchemaName = normalizeTypeIdentityString(right?.schemaName);
-  if (leftSchemaName && rightSchemaName && leftSchemaName === rightSchemaName) {
-    return true;
-  }
-
-  const leftFileIdentifier = normalizeTypeIdentityString(left?.fileIdentifier);
-  const rightFileIdentifier = normalizeTypeIdentityString(right?.fileIdentifier);
-  if (
-    leftFileIdentifier &&
-    rightFileIdentifier &&
-    leftFileIdentifier === rightFileIdentifier
-  ) {
-    return true;
-  }
-
-  const leftSchemaHash = normalizeTypeIdentityBytes(left?.schemaHash);
-  const rightSchemaHash = normalizeTypeIdentityBytes(right?.schemaHash);
-  if (leftSchemaHash && rightSchemaHash && leftSchemaHash === rightSchemaHash) {
-    return true;
-  }
-
   return false;
 }
 
@@ -345,6 +297,27 @@ function validateAllowedType(type, issues, location) {
     );
     return;
   }
+  if (!isPayloadSchemaHashValid(type.schemaHash)) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-schema-hash",
+      "Allowed type schemaHash must be an even-length hexadecimal string or a byte sequence containing only integers from 0 through 255.",
+      `${location}.schemaHash`,
+    );
+  }
+  if (
+    isNonEmptyString(type.fileIdentifier) &&
+    !/^[\x20-\x7e]{4}$/.test(type.fileIdentifier)
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-file-identifier",
+      "Allowed type fileIdentifier must contain exactly four printable ASCII bytes.",
+      `${location}.fileIdentifier`,
+    );
+  }
   if (wireFormat === "aligned-binary") {
     if (type.acceptsAnyFlatbuffer === true) {
       pushIssue(
@@ -364,6 +337,15 @@ function validateAllowedType(type, issues, location) {
         `${location}.schemaName`,
       );
     }
+    if (!isNonEmptyString(type.fileIdentifier)) {
+      pushIssue(
+        issues,
+        "error",
+        "missing-aligned-file-identifier",
+        "Aligned-binary allowed types must declare fileIdentifier.",
+        `${location}.fileIdentifier`,
+      );
+    }
     if (!isNonEmptyString(type.rootTypeName)) {
       pushIssue(
         issues,
@@ -373,27 +355,45 @@ function validateAllowedType(type, issues, location) {
         `${location}.rootTypeName`,
       );
     }
+    validateOptionalStringField(
+      issues,
+      type.schemaVersion,
+      `${location}.schemaVersion`,
+      "Allowed type schemaVersion",
+    );
     validateOptionalIntegerField(
       issues,
       type.fixedStringLength,
       `${location}.fixedStringLength`,
       "Allowed type fixedStringLength",
-      { min: 0 },
+      { min: 0, max: 0xffff },
     );
-    validateOptionalIntegerField(
+    validateIntegerField(
       issues,
       type.byteLength,
       `${location}.byteLength`,
       "Aligned-binary allowed type byteLength",
-      { min: 1 },
+      { min: 1, max: 0xffffffff },
     );
-    validateIntegerField(
+    const alignmentValid = validateIntegerField(
       issues,
       type.requiredAlignment,
       `${location}.requiredAlignment`,
       "Aligned-binary allowed type requiredAlignment",
-      { min: 1 },
+      { min: 1, max: 0xffff },
     );
+    if (
+      alignmentValid &&
+      !Number.isInteger(Math.log2(type.requiredAlignment))
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-aligned-layout",
+        "Aligned-binary requiredAlignment must be a power of two.",
+        `${location}.requiredAlignment`,
+      );
+    }
     return;
   }
   if (type.acceptsAnyFlatbuffer === true) {
@@ -412,26 +412,59 @@ function validateAllowedType(type, issues, location) {
       location,
     );
   }
+  if (!isNonEmptyString(type.schemaName)) {
+    pushIssue(
+      issues,
+      "error",
+      "missing-canonical-schema-name",
+      "Canonical FlatBuffer allowed types must declare schemaName.",
+      `${location}.schemaName`,
+    );
+  }
+  if (!isNonEmptyString(type.fileIdentifier)) {
+    pushIssue(
+      issues,
+      "error",
+      "missing-canonical-file-identifier",
+      "Canonical FlatBuffer allowed types must declare fileIdentifier.",
+      `${location}.fileIdentifier`,
+    );
+  }
+  if (!isNonEmptyString(type.rootTypeName)) {
+    pushIssue(
+      issues,
+      "error",
+      "missing-canonical-root-type-name",
+      "Canonical FlatBuffer allowed types must declare rootTypeName.",
+      `${location}.rootTypeName`,
+    );
+  }
+  validateOptionalStringField(
+    issues,
+    type.schemaVersion,
+    `${location}.schemaVersion`,
+    "Allowed type schemaVersion",
+  );
   validateOptionalIntegerField(
     issues,
     type.fixedStringLength,
     `${location}.fixedStringLength`,
     "Allowed type fixedStringLength",
-    { min: 0 },
+    { min: 0, max: 0xffff },
   );
   validateOptionalIntegerField(
     issues,
     type.byteLength,
     `${location}.byteLength`,
     "Allowed type byteLength",
-    { min: 0 },
+    { min: 0, max: 0xffffffff },
   );
   validateOptionalIntegerField(
     issues,
     type.requiredAlignment,
     `${location}.requiredAlignment`,
     "Allowed type requiredAlignment",
-    { min: 0 },
+    { min: 0, max: 0xffff },
   );
 }
 
@@ -455,8 +488,9 @@ function validateAcceptedTypeSet(typeSet, issues, location) {
     validateAllowedType(allowedType, issues, `${location}.allowedTypes[${index}]`);
   });
 
-  const regularConcreteTypes = [];
+  const canonicalTypes = [];
   const alignedTypes = [];
+  const wildcardTypes = [];
 
   typeSet.allowedTypes.forEach((allowedType, index) => {
     const wireFormat = normalizePayloadWireFormatName(allowedType?.wireFormat);
@@ -464,25 +498,99 @@ function validateAcceptedTypeSet(typeSet, issues, location) {
       alignedTypes.push({ allowedType, index });
       return;
     }
-    if (wireFormat === "flatbuffer" && allowedType?.acceptsAnyFlatbuffer !== true) {
-      regularConcreteTypes.push({ allowedType, index });
+    if (wireFormat === "flatbuffer" && allowedType?.acceptsAnyFlatbuffer === true) {
+      wildcardTypes.push({ allowedType, index });
+      return;
+    }
+    if (wireFormat === "flatbuffer") {
+      canonicalTypes.push({ allowedType, index });
     }
   });
 
-  alignedTypes.forEach(({ allowedType, index }) => {
-    const hasRegularFallback = regularConcreteTypes.some(({ allowedType: regularType }) =>
-      allowedTypesReferToSameLogicalSchema(allowedType, regularType),
+  const declaredWireFormats =
+    typeSet.allowedWireFormats ??
+    typeSet.allowed_wire_formats ??
+    typeSet.ALLOWED_WIRE_FORMATS;
+  if (declaredWireFormats !== undefined) {
+    const normalized = Array.isArray(declaredWireFormats)
+      ? declaredWireFormats.map(normalizePayloadWireFormatName)
+      : [];
+    const unique = new Set(normalized);
+    if (
+      !Array.isArray(declaredWireFormats) ||
+      normalized.some((value) => value === null) ||
+      normalized.length !== 2 ||
+      unique.size !== 2 ||
+      !unique.has("flatbuffer") ||
+      !unique.has("aligned-binary")
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "allowed-wire-formats-mismatch",
+        "acceptedTypeSet.allowedWireFormats, when present, must declare exactly flatbuffer and aligned-binary to match the required type pair.",
+        `${location}.allowedWireFormats`,
+      );
+    }
+  }
+
+  wildcardTypes.forEach(({ index }) => {
+    pushIssue(
+      issues,
+      "error",
+      "wildcard-port-type",
+      "PLG input and output ports must declare one concrete SDS identity with canonical and aligned-binary peers; acceptsAnyFlatbuffer is not permitted.",
+      `${location}.allowedTypes[${index}]`,
     );
-    if (!hasRegularFallback) {
+  });
+
+  if (canonicalTypes.length === 0 && alignedTypes.length > 0) {
+    alignedTypes.forEach(({ index }) => {
       pushIssue(
         issues,
         "error",
         "missing-flatbuffer-fallback",
-        "Aligned-binary allowed types must be paired with a regular flatbuffer fallback for the same schema in the same acceptedTypeSet.",
+        "Aligned-binary allowed types must be paired with a canonical FlatBuffer peer for the same SDS identity in the same acceptedTypeSet.",
         `${location}.allowedTypes[${index}]`,
       );
+    });
+  }
+
+  if (alignedTypes.length === 0 && canonicalTypes.length > 0) {
+    canonicalTypes.forEach(({ index }) => {
+      pushIssue(
+        issues,
+        "error",
+        "missing-aligned-peer",
+        "Canonical FlatBuffer allowed types must be paired with an aligned-binary peer for the same SDS identity in the same acceptedTypeSet.",
+        `${location}.allowedTypes[${index}]`,
+      );
+    });
+  }
+
+  if (canonicalTypes.length > 1 || alignedTypes.length > 1) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-representation-pair-count",
+      "Each accepted type set must contain exactly one canonical FlatBuffer type and one aligned-binary peer.",
+      `${location}.allowedTypes`,
+    );
+  }
+
+  if (canonicalTypes.length === 1 && alignedTypes.length === 1) {
+    const canonicalType = canonicalTypes[0].allowedType;
+    const alignedType = alignedTypes[0].allowedType;
+    if (!payloadSchemaIdentitiesEqual(canonicalType, alignedType)) {
+      pushIssue(
+        issues,
+        "error",
+        "paired-type-identity-mismatch",
+        "Canonical FlatBuffer and aligned-binary peers must declare identical schemaName, fileIdentifier, rootTypeName, and schemaVersion/schemaHash when present.",
+        location,
+      );
     }
-  });
+  }
 }
 
 function validatePort(port, issues, location, label) {
@@ -500,6 +608,15 @@ function validatePort(port, issues, location, label) {
       `${location}.acceptedTypeSets`,
     );
   } else {
+    if (port.acceptedTypeSets.length !== 1) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-accepted-type-set-count",
+        `${label} must declare exactly one acceptedTypeSet containing its canonical and aligned-binary representation pair.`,
+        `${location}.acceptedTypeSets`,
+      );
+    }
     port.acceptedTypeSets.forEach((typeSet, index) => {
       validateAcceptedTypeSet(typeSet, issues, `${location}.acceptedTypeSets[${index}]`);
     });
@@ -1098,6 +1215,169 @@ function validateInvokeSurfaces(invokeSurfaces, issues, sourceName) {
   return normalized;
 }
 
+function validateFlowGraph(manifest, issues, sourceName) {
+  const arrayFields = [
+    ["flowNodes", "invalid-flow-nodes-array"],
+    ["flowEdges", "invalid-flow-edges-array"],
+    ["flowTriggers", "invalid-flow-triggers-array"],
+    ["flowTriggerBindings", "invalid-flow-trigger-bindings-array"],
+  ];
+  for (const [field, code] of arrayFields) {
+    if (manifest[field] !== undefined && !Array.isArray(manifest[field])) {
+      pushIssue(
+        issues,
+        "error",
+        code,
+        `manifest.${field} must be an array when present.`,
+        `${sourceName}.${field}`,
+      );
+    }
+  }
+
+  const nodeIds = new Set();
+  for (const [index, node] of (Array.isArray(manifest.flowNodes)
+    ? manifest.flowNodes
+    : []).entries()) {
+    const location = `${sourceName}.flowNodes[${index}]`;
+    if (!node || typeof node !== "object" || Array.isArray(node)) {
+      pushIssue(issues, "error", "invalid-flow-node", "Flow nodes must be objects.", location);
+      continue;
+    }
+    if (!isNonEmptyString(node.nodeId) || !isNonEmptyString(node.pluginId)) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-flow-node",
+        "Flow nodes must declare non-empty nodeId and pluginId fields.",
+        location,
+      );
+      continue;
+    }
+    if (nodeIds.has(node.nodeId)) {
+      pushIssue(
+        issues,
+        "error",
+        "duplicate-flow-node-id",
+        `Duplicate flow node id "${node.nodeId}".`,
+        `${location}.nodeId`,
+      );
+    }
+    nodeIds.add(node.nodeId);
+  }
+
+  for (const [index, edge] of (Array.isArray(manifest.flowEdges)
+    ? manifest.flowEdges
+    : []).entries()) {
+    const location = `${sourceName}.flowEdges[${index}]`;
+    if (
+      !edge ||
+      typeof edge !== "object" ||
+      Array.isArray(edge) ||
+      !isNonEmptyString(edge.fromNodeId) ||
+      !isNonEmptyString(edge.fromPortId) ||
+      !isNonEmptyString(edge.toNodeId) ||
+      !isNonEmptyString(edge.toPortId)
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-flow-edge",
+        "Flow edges must declare non-empty fromNodeId, fromPortId, toNodeId, and toPortId fields.",
+        location,
+      );
+    }
+    for (const field of ["fromNodeId", "toNodeId"]) {
+      if (isNonEmptyString(edge?.[field]) && !nodeIds.has(edge[field])) {
+        pushIssue(
+          issues,
+          "error",
+          "unknown-flow-node",
+          `Flow edge references unknown node "${edge[field]}".`,
+          `${location}.${field}`,
+        );
+      }
+    }
+  }
+
+  const triggerIds = new Set();
+  for (const [index, trigger] of (Array.isArray(manifest.flowTriggers)
+    ? manifest.flowTriggers
+    : []).entries()) {
+    const location = `${sourceName}.flowTriggers[${index}]`;
+    if (
+      !trigger ||
+      typeof trigger !== "object" ||
+      Array.isArray(trigger) ||
+      !isNonEmptyString(trigger.triggerId)
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-flow-trigger",
+        "Flow triggers must declare a non-empty triggerId.",
+        location,
+      );
+      continue;
+    }
+    if (triggerIds.has(trigger.triggerId)) {
+      pushIssue(
+        issues,
+        "error",
+        "duplicate-flow-trigger-id",
+        `Duplicate flow trigger id "${trigger.triggerId}".`,
+        `${location}.triggerId`,
+      );
+    }
+    triggerIds.add(trigger.triggerId);
+  }
+
+  for (const [index, binding] of (Array.isArray(manifest.flowTriggerBindings)
+    ? manifest.flowTriggerBindings
+    : []).entries()) {
+    const location = `${sourceName}.flowTriggerBindings[${index}]`;
+    if (
+      !binding ||
+      typeof binding !== "object" ||
+      Array.isArray(binding) ||
+      !isNonEmptyString(binding.triggerId) ||
+      !isNonEmptyString(binding.targetNodeId) ||
+      !isNonEmptyString(binding.targetPortId)
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-flow-trigger-binding",
+        "Flow trigger bindings must declare non-empty triggerId, targetNodeId, and targetPortId fields.",
+        location,
+      );
+    }
+    if (
+      isNonEmptyString(binding?.triggerId) &&
+      !triggerIds.has(binding.triggerId)
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-flow-trigger",
+        `Flow trigger binding references unknown trigger "${binding.triggerId}".`,
+        `${location}.triggerId`,
+      );
+    }
+    if (
+      isNonEmptyString(binding?.targetNodeId) &&
+      !nodeIds.has(binding.targetNodeId)
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "unknown-flow-node",
+        `Flow trigger binding references unknown node "${binding.targetNodeId}".`,
+        `${location}.targetNodeId`,
+      );
+    }
+  }
+}
+
 export function validatePluginManifest(manifest, options = {}) {
   const { sourceName = "manifest" } = options;
   const issues = [];
@@ -1225,12 +1505,12 @@ export function validatePluginManifest(manifest, options = {}) {
         seenMethodIds.add(method.methodId);
         methodLookup.set(method.methodId, method);
       }
-      if (!Array.isArray(method.inputPorts) || method.inputPorts.length === 0) {
+      if (!Array.isArray(method.inputPorts)) {
         pushIssue(
           issues,
           "error",
           "missing-input-ports",
-          "Methods must declare one or more inputPorts.",
+          "Methods must declare inputPorts as an array.",
           `${location}.inputPorts`,
         );
       } else {
@@ -1321,6 +1601,7 @@ export function validatePluginManifest(manifest, options = {}) {
     issues,
     sourceName,
   );
+  validateFlowGraph(manifest, issues, sourceName);
 
   if (manifest.schemasUsed !== undefined && !Array.isArray(manifest.schemasUsed)) {
     pushIssue(

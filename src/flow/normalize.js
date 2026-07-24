@@ -11,6 +11,7 @@ import {
 } from "../generated/orbpro/manifest.js";
 import { PayloadWireFormat } from "../generated/orbpro/stream.js";
 import { decodeFlowProgram, decodePluginManifestPman } from "./flowCodec.js";
+import { normalizePayloadSchemaHash } from "../manifest/typeRefs.js";
 
 function enumSymbol(enumType, value, fallback = null) {
   if (typeof value === "number" && enumType[value]) {
@@ -31,14 +32,14 @@ function toKebabEnum(enumType, value, fallback) {
 }
 
 function toPlainTypeRef(typeRef) {
-  const schemaHash = ArrayBuffer.isView(typeRef?.schemaHash)
-    ? Array.from(typeRef.schemaHash)
-    : Array.isArray(typeRef?.schemaHash)
-      ? [...typeRef.schemaHash]
-      : [];
+  const rawSchemaHash = typeRef?.schemaHash ?? typeRef?.SCHEMA_HASH;
+  const schemaHash = normalizePayloadSchemaHash(rawSchemaHash) ?? [];
   return {
-    schemaName: typeRef?.schemaName ?? null,
-    fileIdentifier: typeRef?.fileIdentifier ?? null,
+    schemaName: typeRef?.schemaName ?? typeRef?.SCHEMA_NAME ?? null,
+    fileIdentifier:
+      typeRef?.fileIdentifier ?? typeRef?.FILE_IDENTIFIER ?? null,
+    schemaVersion:
+      typeRef?.schemaVersion ?? typeRef?.SCHEMA_VERSION ?? null,
     schemaHash,
     acceptsAnyFlatbuffer: typeRef?.acceptsAnyFlatbuffer === true,
     wireFormat:
@@ -47,7 +48,8 @@ function toPlainTypeRef(typeRef) {
         : typeRef?.wireFormat === "aligned-binary"
           ? "aligned-binary"
           : "flatbuffer",
-    rootTypeName: typeRef?.rootTypeName ?? null,
+    rootTypeName:
+      typeRef?.rootTypeName ?? typeRef?.rootType ?? typeRef?.ROOT_TYPE ?? null,
     fixedStringLength: Number(typeRef?.fixedStringLength ?? 0),
     byteLength: Number(typeRef?.byteLength ?? 0),
     requiredAlignment: Number(typeRef?.requiredAlignment ?? 0),

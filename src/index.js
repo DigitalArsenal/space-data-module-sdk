@@ -13,6 +13,9 @@ export * from "./runtime-host/index.js";
 export * from "./invoke/index.js";
 export * from "./testing/index.js";
 export * from "./deployment/index.js";
+export * from "./app/index.js";
+export { FLOW_INVALID_INDEX, createFlowRuntimeHost } from "./flow/flowRuntimeHost.js";
+export { createIsomorphicFlowRuntimeHost } from "./flow/isomorphicFlowHost.js";
 export {
   DefaultInvokeExports,
   DefaultManifestExports,

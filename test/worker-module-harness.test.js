@@ -93,6 +93,27 @@ int guest_response_len(void) {
 }
 `;
 
+const TEST_FRAME_IDENTITY = Object.freeze({
+  schemaName: "CAT.fbs",
+  fileIdentifier: "$CAT",
+  rootTypeName: "CAT",
+});
+
+function createTestTypeSet(setId) {
+  return {
+    setId,
+    allowedTypes: [
+      { ...TEST_FRAME_IDENTITY, wireFormat: "flatbuffer" },
+      {
+        ...TEST_FRAME_IDENTITY,
+        wireFormat: "aligned-binary",
+        byteLength: 64,
+        requiredAlignment: 8,
+      },
+    ],
+  };
+}
+
 function createMethod(methodId) {
   return {
     methodId,
@@ -101,7 +122,7 @@ function createMethod(methodId) {
       {
         portId: "request",
         acceptedTypeSets: [
-          { setId: "any-input", allowedTypes: [{ acceptsAnyFlatbuffer: true }] },
+          createTestTypeSet("test-input"),
         ],
         minStreams: 1,
         maxStreams: 1,
@@ -112,7 +133,7 @@ function createMethod(methodId) {
       {
         portId: "response",
         acceptedTypeSets: [
-          { setId: "any-output", allowedTypes: [{ acceptsAnyFlatbuffer: true }] },
+          createTestTypeSet("test-output"),
         ],
         minStreams: 0,
         maxStreams: 1,
