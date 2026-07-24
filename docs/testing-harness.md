@@ -1,5 +1,11 @@
 # Testing Harness
 
+> Cross-runtime acceptance is owned by the **tri-runtime parity harness**
+> (`space-data-module parity`): one `dist/isomorphic/module.wasm`, identical
+> behavior in browser / native WasmEdge / Docker WasmEdge, byte-diffed. See
+> [`docs/tri-runtime-parity.md`](./tri-runtime-parity.md). "Works in X" is not
+> module evidence.
+
 This repo now includes two related testing/runtime surfaces in
 `space-data-module-sdk/testing`:
 

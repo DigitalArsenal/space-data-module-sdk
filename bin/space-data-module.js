@@ -36,6 +36,8 @@ async function main(argv) {
       return runCompile(rest);
     case "flow":
       return runFlow(rest);
+    case "parity":
+      return runParity(rest);
     case "protect":
       return runProtect(rest);
     case "sign":
@@ -112,6 +114,34 @@ function parseArgs(argv) {
       case "--require-signature":
         options.requireSignature = true;
         break;
+      case "--fixture":
+        options.fixturePath = path.resolve(requireValue(argv, ++index, value));
+        break;
+      case "--lanes":
+        options.lanes = requireValue(argv, ++index, value)
+          .split(",")
+          .map((lane) => lane.trim())
+          .filter(Boolean);
+        break;
+      case "--timeout-sec":
+        options.timeoutMs =
+          Number(requireValue(argv, ++index, value)) * 1000;
+        break;
+      case "--self-test-divergence":
+        options.injectDivergence = requireValue(argv, ++index, value);
+        break;
+      case "--chrome-binary":
+        options.chromeBinary = requireValue(argv, ++index, value);
+        break;
+      case "--wasmedge-binary":
+        options.wasmedgeBinary = requireValue(argv, ++index, value);
+        break;
+      case "--docker-platform":
+        options.dockerPlatform = requireValue(argv, ++index, value);
+        break;
+      case "--allow-single-lane":
+        options.allowSingleLane = true;
+        break;
       default:
         throw new Error(`Unknown argument: ${value}`);
     }
@@ -133,6 +163,9 @@ function printUsage() {
   space-data-module check --repo-root .
   space-data-module check --manifest ./manifest.json --wasm ./dist/module.wasm
   space-data-module compile --manifest ./manifest.json --source ./src/module.c --out ./dist/module.wasm
+  space-data-module parity --wasm ./dist/isomorphic/module.wasm --fixture ./fixtures/parity/basic.json
+  space-data-module parity --wasm ./dist/isomorphic/module.wasm --fixture ./f.json --lanes browser,wasmedge,docker-wasmedge [--json]
+  space-data-module parity ... --self-test-divergence docker-wasmedge   (fire drill: prove the diff fails loudly)
   space-data-module flow check ./flows/my.flow.json --deps ./modules-root
   space-data-module flow compile ./flows/my.flow.json --deps ./modules-root [--out ./flows/my/dist]
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
@@ -246,6 +279,47 @@ async function runFlow(argv) {
     printReport(result.report);
   }
   return result.report.ok ? 0 : 1;
+}
+
+// space-data-module parity --wasm <module.wasm> --fixture <fixture.json>
+//   [--lanes browser,wasmedge,docker-wasmedge] [--json] [--timeout-sec N]
+//   [--self-test-divergence <lane>] [--chrome-binary|--wasmedge-binary <bin>]
+//   [--docker-platform <p>] [--allow-single-lane]
+//
+// ONE module.wasm, three runtimes, byte-identical behavior. Exit 0 only when
+// every lane × thread-count run matches; any divergence, missing lane, or
+// WasmEdge pin drift exits non-zero with a per-case mismatch report.
+async function runParity(argv) {
+  const options = parseArgs(argv);
+  if (!options.wasmPath || !options.fixturePath) {
+    throw new Error("parity requires --wasm and --fixture.");
+  }
+  const { runParityHarness, formatParityReport } = await import(
+    "../src/testing/parityHarness.js"
+  );
+  const report = await runParityHarness({
+    wasmPath: options.wasmPath,
+    fixturePath: options.fixturePath,
+    lanes: options.lanes,
+    timeoutMs: options.timeoutMs,
+    injectDivergence: options.injectDivergence,
+    chromeBinary: options.chromeBinary,
+    wasmedgeBinary: options.wasmedgeBinary,
+    dockerPlatform: options.dockerPlatform,
+    allowSingleLane: options.allowSingleLane === true,
+    log: (line) => console.error(line),
+  });
+  if (options.json) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    const text = formatParityReport(report);
+    if (report.ok) {
+      console.log(text);
+    } else {
+      console.error(text);
+    }
+  }
+  return report.ok ? 0 : 2;
 }
 
 async function runCheck(argv) {

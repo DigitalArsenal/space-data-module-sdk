@@ -28,6 +28,26 @@ export {
   resolveModuleHarnessLaunchPlan,
 } from "./moduleHarness.js";
 export { createModuleFlatBufferStreamPump } from "./moduleFlatbufferStreamPump.js";
+export {
+  PARITY_LANES,
+  ExitClass as ParityExitClass,
+  assertWasmEdgeVersionMatchesPin,
+  diffParityRuns,
+  formatParityReport,
+  loadParityFixture,
+  loadWasmEdgePin,
+  normalizeParityFixture,
+  runParityHarness,
+} from "./parityHarness.js";
+export {
+  defaultParityLaneRunners,
+  ensureDockerParityImage,
+  resolveChromeBinary,
+  resolveWasmEdgeBinary,
+  runBrowserLane,
+  runDockerWasmEdgeLane,
+  runNativeWasmEdgeLane,
+} from "./parityLanes.js";
 
 const CapabilitySurfaceMatrix = Object.freeze({
   logging: Object.freeze({

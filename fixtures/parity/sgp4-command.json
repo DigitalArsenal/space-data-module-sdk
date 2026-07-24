@@ -1,0 +1,28 @@
+{
+  "name": "sgp4-command-parity",
+  "threadEnvVar": "SDM_PARITY_THREADS",
+  "threadCounts": [1, 2, 4, 8],
+  "cases": [
+    {
+      "id": "ingest-omm",
+      "expect": "ok",
+      "request": {
+        "methodId": "ingest_omm",
+        "inputs": [
+          {
+            "portId": "omm",
+            "payloadFile": "omm-25544.fb",
+            "typeRef": {
+              "schemaName": "orbpro.sds.omm",
+              "fileIdentifier": "$OMM"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "malformed-stdin",
+      "stdinUtf8": "this is not a PIV invoke frame — trap/error class must match across every lane"
+    }
+  ]
+}

@@ -479,3 +479,121 @@ export function buildWasmEdgeEmscriptenPthreadRunner(options: {
   output?: string;
   cwd?: string;
 }): Promise<string>;
+
+// --- Tri-runtime parity harness (browser / WasmEdge / Docker WasmEdge) -------
+
+export declare const PARITY_LANES: readonly ["browser", "wasmedge", "docker-wasmedge"];
+export type ParityLaneName = (typeof PARITY_LANES)[number];
+
+export declare const ParityExitClass: Readonly<{
+  Ok: "ok";
+  GuestError: "guest-error";
+  Trap: "trap";
+  HarnessFailure: "harness-failure";
+}>;
+
+export interface WasmEdgePin {
+  wasmedgeVersion: string;
+  dockerImageRepository: string;
+  dockerImage: string;
+  dockerfilePath: string;
+  dockerfileContextDir: string;
+  pinPath: string;
+}
+
+export interface ParityPlanCase {
+  id: string;
+  stdinBytes: Uint8Array;
+  env: Record<string, string>;
+  args: readonly string[];
+  expect: "ok" | "guest-error" | "trap" | null;
+  threadCounts: readonly number[];
+}
+
+export interface ParityPlan {
+  name: string;
+  threadEnvVar: string;
+  cases: readonly ParityPlanCase[];
+}
+
+export interface ParityRunResult {
+  lane?: ParityLaneName;
+  caseId: string;
+  threadCount: number;
+  exitClass: string;
+  exitDetail?: string | null;
+  stdout: Uint8Array;
+  stderr?: Uint8Array;
+  stateFiles?: Record<string, string> | null;
+}
+
+export interface ParityFailure {
+  caseId?: string;
+  kind: string;
+  message: string;
+}
+
+export interface ParityReport {
+  ok: boolean;
+  fixture: string;
+  wasmPath: string;
+  artifactSha256: string;
+  moduleSha256: string;
+  pin: string;
+  lanes: Array<{ lane: string; runs: number; durationMs: number }>;
+  cases: string[];
+  comparisons: number;
+  failures: ParityFailure[];
+  runs: Array<{
+    lane: string;
+    caseId: string;
+    threadCount: number;
+    exitClass: string;
+    exitDetail: string | null;
+    stdoutSha256: string;
+    stdoutLength: number;
+  }>;
+}
+
+export declare function loadWasmEdgePin(): WasmEdgePin;
+export declare function assertWasmEdgeVersionMatchesPin(
+  versionOutput: string,
+  pin: WasmEdgePin,
+  context: string,
+): string;
+export declare function normalizeParityFixture(
+  fixture: unknown,
+  options?: { fixtureDir?: string },
+): Promise<ParityPlan>;
+export declare function loadParityFixture(fixturePath: string): Promise<ParityPlan>;
+export declare function diffParityRuns(
+  plan: ParityPlan,
+  runs: ParityRunResult[],
+): { ok: boolean; failures: ParityFailure[]; comparisons: number };
+export declare function formatParityReport(report: ParityReport): string;
+export declare function runParityHarness(options: {
+  wasmPath: string;
+  plan?: ParityPlan;
+  fixturePath?: string;
+  lanes?: string[];
+  laneRunners?: Record<string, (context: unknown) => Promise<ParityRunResult[]>>;
+  injectDivergence?: string;
+  chromeBinary?: string;
+  wasmedgeBinary?: string;
+  dockerBinary?: string;
+  dockerPlatform?: string;
+  autoBuildDockerImage?: boolean;
+  allowSingleLane?: boolean;
+  timeoutMs?: number;
+  log?: (line: string) => void;
+}): Promise<ParityReport>;
+
+export declare const defaultParityLaneRunners: Readonly<
+  Record<ParityLaneName, (context: unknown) => Promise<ParityRunResult[]>>
+>;
+export declare function ensureDockerParityImage(context: unknown): Promise<string>;
+export declare function resolveChromeBinary(context?: unknown): Promise<string>;
+export declare function resolveWasmEdgeBinary(context?: unknown): Promise<string>;
+export declare function runBrowserLane(context: unknown): Promise<ParityRunResult[]>;
+export declare function runDockerWasmEdgeLane(context: unknown): Promise<ParityRunResult[]>;
+export declare function runNativeWasmEdgeLane(context: unknown): Promise<ParityRunResult[]>;

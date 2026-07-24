@@ -1,0 +1,6 @@
+{
+  "//": "THE single source of truth for the WasmEdge runtime pin. The native lane (host-embedded / local wasmedge binary) and the Docker parity lane both read THIS version and must match it exactly; the parity harness fails loudly on drift. The Docker image tag is DERIVED from this version (never written anywhere else), so the host/container pin pair bumps together by editing one string. Keep in sync with the node host's verified runtime (space-data-network scripts/install-wasmedge.sh + build-static-wasmedge.sh, currently 0.16.4 per loop C.9: fixes libwasmedge atomic-wait defects proven broken on 0.14.x).",
+  "wasmedgeVersion": "0.16.4",
+  "dockerImageRepository": "space-data-module-sdk/parity-wasmedge",
+  "dockerfile": "docker/wasmedge-parity.Dockerfile"
+}
