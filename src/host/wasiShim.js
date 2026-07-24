@@ -5,10 +5,14 @@
  * WASI modules (the same .wasm that runs in WasmEdge) can be instantiated
  * directly in the browser via WebAssembly.instantiate().
  *
- * Covers the 11 imports observed across all SDN plugin standalone builds:
+ * Covers the imports observed across all SDN plugin standalone builds:
  *   clock_time_get, fd_write, fd_read, fd_close, fd_seek, fd_fdstat_get,
+ *   fd_fdstat_set_flags, fd_prestat_get, fd_prestat_dir_name, path_open,
  *   environ_sizes_get, environ_get, proc_exit, args_get, args_sizes_get,
  *   random_get
+ *
+ * No filesystem is exposed: prestat/path_open report no preopened
+ * directories, so wasi-libc file APIs fail cleanly inside the guest.
  */
 
 const ERRNO_SUCCESS = 0;
@@ -156,6 +160,24 @@ export function createBrowserWasiShim(options = {}) {
     return ERRNO_SUCCESS;
   }
 
+  function fd_fdstat_set_flags(fd, _flags) {
+    if (fd <= 2) return ERRNO_SUCCESS;
+    return ERRNO_BADF;
+  }
+
+  // No preopened directories: returning BADF ends wasi-libc's preopen scan.
+  function fd_prestat_get(_fd, _bufPtr) {
+    return ERRNO_BADF;
+  }
+
+  function fd_prestat_dir_name(_fd, _pathPtr, _pathLen) {
+    return ERRNO_BADF;
+  }
+
+  function path_open() {
+    return ERRNO_BADF;
+  }
+
   function environ_sizes_get(countPtr, bufSizePtr) {
     const dv = view();
     dv.setUint32(countPtr, encodedEnvEntries.length, true);
@@ -274,6 +296,10 @@ export function createBrowserWasiShim(options = {}) {
         fd_close,
         fd_seek,
         fd_fdstat_get,
+        fd_fdstat_set_flags,
+        fd_prestat_get,
+        fd_prestat_dir_name,
+        path_open,
         environ_sizes_get,
         environ_get,
         args_sizes_get,
