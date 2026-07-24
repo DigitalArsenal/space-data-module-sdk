@@ -7,9 +7,12 @@
  *
  * Covers the preview1 imports observed across SDN plugin standalone builds:
  *   clock_time_get, fd_write, fd_read, fd_close, fd_seek, fd_fdstat_get,
- *   fd_prestat_get, fd_prestat_dir_name,
+ *   fd_fdstat_set_flags, fd_prestat_get, fd_prestat_dir_name, path_open,
  *   environ_sizes_get, environ_get, proc_exit, args_get, args_sizes_get,
  *   random_get
+ *
+ * No filesystem is exposed: prestat/path_open report no preopened
+ * directories, so wasi-libc file APIs fail cleanly inside the guest.
  */
 
 const ERRNO_SUCCESS = 0;
@@ -157,8 +160,13 @@ export function createBrowserWasiShim(options = {}) {
     return ERRNO_SUCCESS;
   }
 
+  function fd_fdstat_set_flags(fd, _flags) {
+    if (fd <= 2) return ERRNO_SUCCESS;
+    return ERRNO_BADF;
+  }
+
   // This browser shim exposes no ambient preopened directories. Toolchains
-  // commonly probe these two preview1 calls during startup; returning BADF is
+  // commonly probe these preview1 calls during startup; returning BADF is
   // the fail-closed WASI result and lets the guest continue without filesystem
   // authority.
   function fd_prestat_get(_fd, _bufPtr) {
@@ -168,6 +176,11 @@ export function createBrowserWasiShim(options = {}) {
   function fd_prestat_dir_name(_fd, _pathPtr, _pathLen) {
     return ERRNO_BADF;
   }
+
+  function path_open() {
+    return ERRNO_BADF;
+  }
+
 
   function environ_sizes_get(countPtr, bufSizePtr) {
     const dv = view();
@@ -287,8 +300,10 @@ export function createBrowserWasiShim(options = {}) {
         fd_close,
         fd_seek,
         fd_fdstat_get,
+        fd_fdstat_set_flags,
         fd_prestat_get,
         fd_prestat_dir_name,
+        path_open,
         environ_sizes_get,
         environ_get,
         args_sizes_get,
