@@ -40,12 +40,18 @@ const EMSCRIPTEN_PTHREADS = "emscripten-pthreads";
 // cannot be used to slip off the isomorphic toolchain via SDN_WASI_TARGET.
 export const SANCTIONED_WASI_TARGET = "wasm32-wasip1-threads";
 
-// Link flags a wasi-sequential final link must NEVER carry. `--import-memory`
-// makes the guest depend on a host-supplied memory it has no contract to
-// receive; `--shared-memory` is accepted by wasm-ld even WITHOUT
-// `--import-memory` and yields a module-DECLARED shared memory, which is the
-// hole an artifact-only check misses. Both are rejected at flag time because
-// that is the layer where the decision is actually made.
+// Link flags a wasi-sequential final link must NEVER carry.
+//
+// The one that MATTERS is `--import-memory`: it makes the guest depend on a
+// host-supplied memory it has no wasi-threads contract to receive, which is
+// precisely what WasmEdge refuses to instantiate.
+//
+// `--shared-memory` is listed too, but NOT because shared memory is a defect —
+// on `wasm32-wasip1-threads` a DECLARED shared memory is the normal, expected
+// driver output for a sequential artifact (the triple implies atomics; see
+// assertSequentialArtifact). Passing it EXPLICITLY is rejected only as a
+// configuration smell: it signals someone reaching for the threaded profile in
+// a sequential link, and it is free to catch at flag time.
 const SEQUENTIAL_FORBIDDEN_LINK_FLAGS = Object.freeze([
   "-Wl,--shared-memory",
   "-Wl,--import-memory",
@@ -69,10 +75,10 @@ export function assertSequentialFlagsAbsent(args, context = {}) {
     throw new Error(
       `wasi-sequential final-link args must not contain ${present.join(" ")} ` +
         `(threadModel ${JSON.stringify(context.threadModel ?? "wasi-sequential")}). ` +
-        "--import-memory gives the guest a memory it has no wasi-threads contract " +
-        "to receive, and --shared-memory alone still emits a module-declared shared " +
-        "memory, imposing a SharedArrayBuffer/COOP-COEP requirement on a guest that " +
-        "was declared sequential precisely so it would not need one.",
+        "--import-memory gives the guest a memory it has no wasi-threads contract to " +
+        "receive, which is what WasmEdge refuses to instantiate. --shared-memory is " +
+        "rejected as a configuration smell, NOT because shared memory is wrong: a " +
+        "declared shared memory is the expected driver output on this triple.",
     );
   }
   return args;
@@ -797,6 +803,12 @@ export function assertSequentialArtifact(wasmBytes, options = {}) {
   const failures = [];
 
   // WHY THIS GUARD REJECTS AN IMPORTED MEMORY BUT NOT THE SHARED LIMITS BIT.
+  //
+  // READ THIS FIRST: on `wasm32-wasip1-threads` a DECLARED shared memory is the
+  // NORMAL, EXPECTED output for a sequential artifact — it is not a defect and
+  // not a hole. "Self-contained" here means the guest OWNS its memory; it does
+  // NOT mean "has no SharedArrayBuffer dependency". Those are different claims,
+  // and conflating them is what re-opens this argument.
   //
   // Read this before tightening the guard to "no shared memory" — on the
   // mandated target that change is UNSATISFIABLE, and here is the measured

@@ -370,7 +370,7 @@ async function readGuestThreadStackSize(stackSizeBytes) {
 
 // --- C2 link-side guard -------------------------------------------------------
 
-test("sequential final-link args reject the thread-memory flags", async () => {
+test("sequential final-link args reject --import-memory (and explicit --shared-memory as a smell)", async () => {
   const { assertSequentialFlagsAbsent } = await import("../src/compiler/index.js");
 
   // --import-memory: the guest would depend on a host-supplied memory it has no
@@ -379,13 +379,15 @@ test("sequential final-link args reject the thread-memory flags", async () => {
     () => assertSequentialFlagsAbsent(["-O3", "-Wl,--import-memory"]),
     /must not contain/,
   );
-  // --shared-memory ALONE is the subtle one: wasm-ld accepts it without
-  // --import-memory and emits a module-DECLARED shared memory, which imposes a
-  // SharedArrayBuffer/COOP-COEP requirement on a guest declared sequential
-  // precisely so it would not need one. An artifact-only check misses this.
+  // --shared-memory is rejected as a CONFIGURATION SMELL, not because shared
+  // memory is wrong. On wasm32-wasip1-threads a declared shared memory is the
+  // NORMAL driver output for a sequential artifact (the triple implies atomics),
+  // so "self-contained" means the guest OWNS its memory — it does NOT mean the
+  // guest has no SharedArrayBuffer dependency. Do not "fix" this into a
+  // shared-memory rejection; that was measured unsatisfiable and arbitrated.
   assert.throws(
     () => assertSequentialFlagsAbsent(["-O3", "-Wl,--shared-memory"]),
-    /SharedArrayBuffer/,
+    /configuration smell/,
   );
   assert.doesNotThrow(() =>
     assertSequentialFlagsAbsent(["-O3", "-mbulk-memory", "-Wl,-z,stack-size=4194304"]),
@@ -404,6 +406,8 @@ test("the sequential link profile never reuses the pthreads flag set", async (t)
     sequentialJustification: VALID_JUSTIFICATION,
   });
   const module = await WebAssembly.compile(compilation.wasmBytes);
+  // Note what is and is NOT asserted: the artifact must not IMPORT a memory.
+  // Its own declared memory is expected to carry shared limits on this triple.
   assert.ok(
     !WebAssembly.Module.imports(module).some((entry) => entry.kind === "memory"),
     "sequential artifact must not import a memory",
