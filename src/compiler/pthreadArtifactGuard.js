@@ -817,6 +817,22 @@ export function assertSequentialArtifact(wasmBytes, options = {}) {
   // flags; (b) the same objects with `-matomics -pthread`; (c) `--shared-memory`
   // passed WITHOUT `--import-memory`.
   //
+  // ARBITRATED 2026-07-28 on the SDK's OWN resolved toolchain (the exact
+  // clang/sysroot/resource-dir that resolveWasiThreadsToolchain picks), because
+  // an architecture review initially measured the opposite and required a
+  // "no shared memory" clause. Three independent re-runs:
+  //   1. bare `--target=wasm32-wasip1-threads`, zero feature flags
+  //      -> `+atomics` present in target_features. Triple-implies-atomics holds.
+  //   2. driver-default link of `int main(){}` on that triple
+  //      -> DECLARED shared memory (0x03) with no shared/import flag anywhere.
+  //   3. the review's own counter-artifacts were found to LACK `+atomics`,
+  //      i.e. they had been built on the NON-threads triple that the same
+  //      review's target clause forbids — so the counter-measurement did not
+  //      apply to the mandated target.
+  // The "no shared memory" clause was therefore DROPPED as
+  // unsatisfiable-as-measured. Recorded here so nobody re-derives it from
+  // first principles and re-breaks the model.
+  //
   // WHAT THE GUARD DOES ENFORCE, and why it is the property that matters:
   // an artifact that IMPORTS `env.memory` while exporting no `wasi_thread_start`
   // is an incomplete wasi-threads contract, and WasmEdge refuses to instantiate
@@ -827,8 +843,15 @@ export function assertSequentialArtifact(wasmBytes, options = {}) {
   // The residual exposure — a module-declared shared memory implies a
   // SharedArrayBuffer / COOP-COEP dependency in the browser — is REAL, but it is
   // a property of the mandated target itself and is shared by EVERY SDK guest,
-  // so this guard cannot remove it. It is instead closed at FLAG time by
-  // assertSequentialFlagsAbsent(), which is where it is actually fixable.
+  // so this guard cannot remove it. Tracked as its own task because it decides
+  // whether browser-served modules need cross-origin isolation.
+  //
+  // What IS fixable here is a misconfiguration: explicitly passing
+  // `--shared-memory` / `--import-memory` into a sequential link. wasm-ld
+  // accepts `--shared-memory` even WITHOUT `--import-memory`, and an
+  // artifact-only check cannot tell that apart from the driver's own doing.
+  // assertSequentialFlagsAbsent() rejects it at flag time, which is the layer
+  // where the intent actually exists.
   const importedMemories = analysis.memories.filter((memory) => memory.source === "import");
   if (importedMemories.length > 0) {
     failures.push(
