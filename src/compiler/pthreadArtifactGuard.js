@@ -35,6 +35,12 @@ const EMSCRIPTEN_PTHREADS = "emscripten-pthreads";
 // delivered by these flags AND validated on the emitted artifact by
 // assertPthreadArtifact() below (shared memory + atomics + wasi.thread-spawn
 // import + wasi_thread_start export, and NO Emscripten thread hooks).
+// The ONE sanctioned clang target for every SDK-built guest, threaded or not.
+// assertSequentialArtifact holds the sequential model to it so that the model
+// cannot be used to slip off the isomorphic toolchain via SDN_WASI_TARGET.
+export const SANCTIONED_WASI_TARGET = "wasm32-wasip1-threads";
+const SEQUENTIAL_MIRROR_PTHREAD_MODEL = "emscripten-pthreads";
+
 export const PTHREAD_FINAL_LINK_FLAGS = Object.freeze([
   "-pthread",
   "-matomics",
@@ -707,6 +713,106 @@ export function assertPthreadArtifact(wasmBytes, options = {}) {
         "claims the pthreads thread model but the emitted wasm is not a valid " +
         `wasi-threads shared-memory/atomics artifact — ${failures.join("; ")}. ` +
         "This build must not ship.",
+    );
+  }
+  return analysis;
+}
+
+/**
+ * The MIRROR of assertPthreadArtifact, for the wasi-sequential thread model.
+ *
+ * A module that declares itself sequential is making a permanent architectural
+ * claim: this guest can never spawn a thread. That claim buys it a
+ * self-contained artifact (its own memory, no wasi-threads contract) which is
+ * what lets an inherently-sequential guest instantiate under WasmEdge at all —
+ * an artifact that imports `env.memory` without exporting `wasi_thread_start`
+ * is an INCOMPLETE wasi-threads contract and WasmEdge refuses it with
+ * "unknown import: env.memory".
+ *
+ * So the guard is the exact inverse of the pthreads one. To pass, the emitted
+ * wasm MUST:
+ *   - declare NO shared memory (a sequential guest owns an unshared memory), and
+ *   - NOT import the wasi `thread-spawn` host function, and
+ *   - NOT export `wasi_thread_start`, and
+ *   - NOT import Emscripten's browser-only Web Worker thread hooks.
+ *
+ * It must ALSO have been produced by the sanctioned target. Without that check
+ * `SDN_WASI_TARGET` would be an unpoliced route to a plain `wasm32-wasip1`
+ * object: the sequential model would become a way to leave the isomorphic
+ * toolchain entirely, which is the opposite of its purpose.
+ *
+ * @param {Uint8Array|ArrayBuffer|ArrayBufferView} wasmBytes
+ * @param {{ source?: string, target?: string }} [options]
+ */
+export function assertSequentialArtifact(wasmBytes, options = {}) {
+  const source = options.source ? String(options.source) : "emitted wasm";
+  let analysis;
+  try {
+    analysis = analyzeWasmThreadFeatures(wasmBytes);
+  } catch (error) {
+    throw new Error(
+      `wasi-sequential artifact validation failed for ${source}: could not parse the ` +
+        `emitted wasm (${error instanceof Error ? error.message : String(error)}).`,
+    );
+  }
+
+  const failures = [];
+
+  // NOTE ON THE ACTUAL INVARIANT — it is "owns its memory", NOT "unshared".
+  //
+  // The obvious rule would be "a sequential artifact must not have a shared
+  // memory". That rule is WRONG here and was measured to be wrong: the
+  // wasm32-wasip1-threads sysroot builds its libc for threads, so EVERY object
+  // linked against it emits shared memory limits (flags 0x03) whether or not
+  // the guest can spawn a thread. Since C2 also requires that exact target, a
+  // no-shared-memory rule would make the sequential model unsatisfiable.
+  //
+  // What actually breaks instantiation is IMPORTING the memory: an artifact
+  // that imports `env.memory` while exporting no `wasi_thread_start` is an
+  // incomplete wasi-threads contract, and WasmEdge refuses it with
+  // "unknown import: env.memory" (reproduced on both the native 0.16.4 binary
+  // and the pinned Docker image). A module that OWNS and exports its memory
+  // instantiates cleanly in every runtime, shared limits or not.
+  const importedMemories = analysis.memories.filter((memory) => memory.source === "import");
+  if (importedMemories.length > 0) {
+    failures.push(
+      "it IMPORTS its memory — a sequential guest must declare and export its own " +
+        "memory, because importing one without exporting `wasi_thread_start` is an " +
+        "incomplete wasi-threads contract that WasmEdge refuses to instantiate",
+    );
+  }
+  if (analysis.hasWasiThreadSpawnImport) {
+    failures.push(
+      "it imports the wasi `thread-spawn` host function — a guest that can spawn " +
+        `threads must declare threadModel "${SEQUENTIAL_MIRROR_PTHREAD_MODEL}", not wasi-sequential`,
+    );
+  }
+  if (analysis.hasWasiThreadStartExport) {
+    failures.push(
+      "it exports `wasi_thread_start` — that is the wasi-threads entry point, " +
+        "which a sequential guest must not have",
+    );
+  }
+  if (analysis.emscriptenThreadHooks.length > 0) {
+    failures.push(
+      "it imports Emscripten's browser-only Web Worker thread hooks " +
+        `(${analysis.emscriptenThreadHooks.join(", ")})`,
+    );
+  }
+
+  const target = options.target === undefined ? null : String(options.target);
+  if (target !== null && target !== SANCTIONED_WASI_TARGET) {
+    failures.push(
+      `it was built for target "${target}" rather than "${SANCTIONED_WASI_TARGET}" — ` +
+        "the sequential model is a concurrency exemption, NOT a toolchain exemption, " +
+        "and must not become an unpoliced route off the isomorphic target (check SDN_WASI_TARGET)",
+    );
+  }
+
+  if (failures.length > 0) {
+    throw new Error(
+      `wasi-sequential artifact validation REJECTED ${source}: the build claims the ` +
+        `sequential thread model but — ${failures.join("; ")}. This build must not ship.`,
     );
   }
   return analysis;

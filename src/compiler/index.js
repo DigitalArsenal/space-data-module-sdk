@@ -9,6 +9,8 @@ export {
 export {
   analyzeWasmThreadFeatures,
   assertPthreadArtifact,
+  assertSequentialArtifact,
+  SANCTIONED_WASI_TARGET,
   assertPthreadFlagsPresent,
   PTHREAD_FINAL_LINK_FLAGS,
 } from "./pthreadArtifactGuard.js";
