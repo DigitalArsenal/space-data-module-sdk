@@ -31,6 +31,7 @@ import {
   assertPthreadArtifact,
   assertPthreadFlagsPresent,
   assertSequentialArtifact,
+  assertSequentialFlagsAbsent,
   PTHREAD_FINAL_LINK_FLAGS,
 } from "./pthreadArtifactGuard.js";
 import { resolveWasiThreadsToolchain } from "./wasiThreadsToolchain.js";
@@ -204,6 +205,10 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
       sequentialArgs.push("-Wl,--allow-undefined");
     }
     sequentialArgs.push(...linkerExports);
+    // Defensive invariant, mirroring assertPthreadFlagsPresent: a future edit
+    // that reuses PTHREAD_FINAL_LINK_FLAGS here must fail at flag time, not
+    // ship a "sequential" guest that needs cross-origin isolation to load.
+    assertSequentialFlagsAbsent(sequentialArgs, { threadModel: options.threadModel });
     return sequentialArgs;
   }
 

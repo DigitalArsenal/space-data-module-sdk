@@ -39,6 +39,44 @@ const EMSCRIPTEN_PTHREADS = "emscripten-pthreads";
 // assertSequentialArtifact holds the sequential model to it so that the model
 // cannot be used to slip off the isomorphic toolchain via SDN_WASI_TARGET.
 export const SANCTIONED_WASI_TARGET = "wasm32-wasip1-threads";
+
+// Link flags a wasi-sequential final link must NEVER carry. `--import-memory`
+// makes the guest depend on a host-supplied memory it has no contract to
+// receive; `--shared-memory` is accepted by wasm-ld even WITHOUT
+// `--import-memory` and yields a module-DECLARED shared memory, which is the
+// hole an artifact-only check misses. Both are rejected at flag time because
+// that is the layer where the decision is actually made.
+const SEQUENTIAL_FORBIDDEN_LINK_FLAGS = Object.freeze([
+  "-Wl,--shared-memory",
+  "-Wl,--import-memory",
+]);
+
+/**
+ * The mirror of assertPthreadFlagsPresent: after the final-link args are
+ * assembled for the wasi-sequential model, confirm none of the thread-memory
+ * flags survived. A future edit that reuses PTHREAD_FINAL_LINK_FLAGS for the
+ * sequential profile fails here, loudly, instead of silently shipping a guest
+ * that needs cross-origin isolation to load in a browser.
+ *
+ * @param {string[]} args assembled final-link argument list.
+ * @param {{ threadModel?: string }} [context]
+ */
+export function assertSequentialFlagsAbsent(args, context = {}) {
+  const present = SEQUENTIAL_FORBIDDEN_LINK_FLAGS.filter((flag) =>
+    (Array.isArray(args) ? args : []).includes(flag),
+  );
+  if (present.length > 0) {
+    throw new Error(
+      `wasi-sequential final-link args must not contain ${present.join(" ")} ` +
+        `(threadModel ${JSON.stringify(context.threadModel ?? "wasi-sequential")}). ` +
+        "--import-memory gives the guest a memory it has no wasi-threads contract " +
+        "to receive, and --shared-memory alone still emits a module-declared shared " +
+        "memory, imposing a SharedArrayBuffer/COOP-COEP requirement on a guest that " +
+        "was declared sequential precisely so it would not need one.",
+    );
+  }
+  return args;
+}
 const SEQUENTIAL_MIRROR_PTHREAD_MODEL = "emscripten-pthreads";
 
 export const PTHREAD_FINAL_LINK_FLAGS = Object.freeze([
@@ -758,21 +796,39 @@ export function assertSequentialArtifact(wasmBytes, options = {}) {
 
   const failures = [];
 
-  // NOTE ON THE ACTUAL INVARIANT — it is "owns its memory", NOT "unshared".
+  // WHY THIS GUARD REJECTS AN IMPORTED MEMORY BUT NOT THE SHARED LIMITS BIT.
   //
-  // The obvious rule would be "a sequential artifact must not have a shared
-  // memory". That rule is WRONG here and was measured to be wrong: the
-  // wasm32-wasip1-threads sysroot builds its libc for threads, so EVERY object
-  // linked against it emits shared memory limits (flags 0x03) whether or not
-  // the guest can spawn a thread. Since C2 also requires that exact target, a
-  // no-shared-memory rule would make the sequential model unsatisfiable.
+  // Read this before tightening the guard to "no shared memory" — on the
+  // mandated target that change is UNSATISFIABLE, and here is the measured
+  // reason rather than an assertion.
   //
-  // What actually breaks instantiation is IMPORTING the memory: an artifact
-  // that imports `env.memory` while exporting no `wasi_thread_start` is an
-  // incomplete wasi-threads contract, and WasmEdge refuses it with
-  // "unknown import: env.memory" (reproduced on both the native 0.16.4 binary
-  // and the pinned Docker image). A module that OWNS and exports its memory
-  // instantiates cleanly in every runtime, shared limits or not.
+  // ROOT CAUSE: the `wasm32-wasip1-threads` TRIPLE implies the `atomics` target
+  // feature. `wasm-objdump -x` on an object compiled for that triple with
+  // NEITHER `-matomics` NOR `-pthread` still reports
+  // `target_features: [+] atomics`. wasm-ld then infers a shared memory from
+  // that feature, so the DECLARED memory carries limits flags 0x03 with no
+  // `--shared-memory` anywhere on the link line. `--no-shared-memory` is not a
+  // wasm-ld flag ("unknown argument"). So "reject any shared limits bit" and
+  // "require target wasm32-wasip1-threads" cannot both hold — every artifact on
+  // that target would be rejected.
+  //
+  // Measured three ways on clang 22.1.2 + homebrew wasi-libc, all giving a
+  // DECLARED memory with flags 0x03: (a) threads-libc objects with no atomics
+  // flags; (b) the same objects with `-matomics -pthread`; (c) `--shared-memory`
+  // passed WITHOUT `--import-memory`.
+  //
+  // WHAT THE GUARD DOES ENFORCE, and why it is the property that matters:
+  // an artifact that IMPORTS `env.memory` while exporting no `wasi_thread_start`
+  // is an incomplete wasi-threads contract, and WasmEdge refuses to instantiate
+  // it — "unknown import: env.memory", reproduced on both the native 0.16.4
+  // binary and the pinned Docker image. A module that OWNS and exports its
+  // memory instantiates cleanly in every runtime.
+  //
+  // The residual exposure — a module-declared shared memory implies a
+  // SharedArrayBuffer / COOP-COEP dependency in the browser — is REAL, but it is
+  // a property of the mandated target itself and is shared by EVERY SDK guest,
+  // so this guard cannot remove it. It is instead closed at FLAG time by
+  // assertSequentialFlagsAbsent(), which is where it is actually fixable.
   const importedMemories = analysis.memories.filter((memory) => memory.source === "import");
   if (importedMemories.length > 0) {
     failures.push(

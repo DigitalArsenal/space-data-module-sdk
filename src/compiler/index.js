@@ -10,6 +10,7 @@ export {
   analyzeWasmThreadFeatures,
   assertPthreadArtifact,
   assertSequentialArtifact,
+  assertSequentialFlagsAbsent,
   SANCTIONED_WASI_TARGET,
   assertPthreadFlagsPresent,
   PTHREAD_FINAL_LINK_FLAGS,
