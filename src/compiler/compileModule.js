@@ -30,6 +30,8 @@ import { runWithEmceptionLock } from "./emceptionNode.js";
 import {
   assertPthreadArtifact,
   assertPthreadFlagsPresent,
+  assertSequentialArtifact,
+  assertSequentialFlagsAbsent,
   PTHREAD_FINAL_LINK_FLAGS,
 } from "./pthreadArtifactGuard.js";
 import { resolveWasiThreadsToolchain } from "./wasiThreadsToolchain.js";
@@ -79,7 +81,26 @@ extern "C" __attribute__((weak)) void emscripten_notify_memory_growth(int) {}
 export const ModuleThreadModel = Object.freeze({
   SINGLE_THREAD: "single-thread",
   EMSCRIPTEN_PTHREADS: "emscripten-pthreads",
+  // Inherently-sequential guests that must still be built by the sanctioned
+  // clang wasm32-wasip1-threads toolchain. NOT an optimisation and NOT
+  // inferable: see resolveThreadModel + assertSequentialArtifact.
+  WASI_SEQUENTIAL: "wasi-sequential",
 });
+
+// The wasi-sequential model is a DECLARATION, never a deduction. A module that
+// selects it is asserting "this guest can never spawn a thread", which the
+// emitted artifact is then held to by assertSequentialArtifact. Because that
+// assertion is a permanent architectural claim about the guest, the manifest
+// must carry a machine-readable reason for it.
+const SEQUENTIAL_JUSTIFICATION_MIN_LENGTH = 24;
+const SEQUENTIAL_JUSTIFICATION_KINDS = Object.freeze([
+  // The algorithm carries state from item k-1 into item k (e.g. a stateful codec).
+  "inherently-sequential-algorithm",
+  // The guest is a pure transform with no work to fan out.
+  "pure-transform",
+  // Threading exists, but only ACROSS independent invocations, driven by the caller.
+  "caller-level-parallelism",
+]);
 
 function resolveGuestLinkCapabilities(manifest, explicitCapabilities) {
   const source = Array.isArray(explicitCapabilities)
@@ -125,10 +146,72 @@ function usesPthreadCompileFlags(options = {}) {
   );
 }
 
+// wasm-ld's default main stack is 64 KiB. That is far too small for guests with
+// large caller-allocated frames: the vendored CCSDS 124 reference codec has a
+// MEASURED worst-case call chain of ~631 KB on wasm32
+// (ccsds124_decompress -> _packet_internal 335,888 B -> bit_insert 262,144 B)
+// and traps with "memory access out of bounds" on its first input under the
+// default.
+//
+// This must be an explicit, validated number rather than a default anyone can
+// drift off: the stack size is a link-time constant baked into the single
+// artifact, so pinning it is what makes the overflow boundary identical in
+// every runtime.
+const MIN_STACK_SIZE_BYTES = 64 * 1024;
+const MAX_STACK_SIZE_BYTES = 1024 * 1024 * 1024;
+
+function resolveStackSize(stackSize) {
+  if (stackSize === undefined || stackSize === null) {
+    return null;
+  }
+  if (typeof stackSize !== "number" || !Number.isInteger(stackSize)) {
+    throw new Error(
+      `stackSize must be an integer number of bytes, got ${JSON.stringify(stackSize)}.`,
+    );
+  }
+  if (stackSize < MIN_STACK_SIZE_BYTES || stackSize > MAX_STACK_SIZE_BYTES) {
+    throw new Error(
+      `stackSize ${stackSize} is out of range — expected ${MIN_STACK_SIZE_BYTES}..${MAX_STACK_SIZE_BYTES} bytes.`,
+    );
+  }
+  if (stackSize % 16 !== 0) {
+    throw new Error(
+      `stackSize ${stackSize} must be a multiple of 16 (wasm stack alignment).`,
+    );
+  }
+  return stackSize;
+}
+
 function buildCompilerArgs(exportedSymbols, options = {}) {
   const linkerExports = exportedSymbols.map(
     (symbol) => "-Wl,--export=" + symbol,
   );
+  // wasi-sequential: the SAME clang toolchain and the same target as the
+  // pthreads model, but WITHOUT the wasi-threads contract. It must own an
+  // unshared memory: an artifact that imports env.memory while exporting no
+  // wasi_thread_start is an incomplete wasi-threads contract, and WasmEdge
+  // refuses to instantiate it ("unknown import: env.memory"). Held to that
+  // shape by assertSequentialArtifact.
+  if (options.threadModel === ModuleThreadModel.WASI_SEQUENTIAL) {
+    const sequentialArgs = ["-O3", "-mbulk-memory"];
+    if (options.noEntry === true) {
+      sequentialArgs.push("-mexec-model=reactor");
+    }
+    const sequentialStackSize = resolveStackSize(options.stackSize);
+    if (sequentialStackSize !== null) {
+      sequentialArgs.push(`-Wl,-z,stack-size=${sequentialStackSize}`);
+    }
+    if (options.allowUndefinedImports === true) {
+      sequentialArgs.push("-Wl,--allow-undefined");
+    }
+    sequentialArgs.push(...linkerExports);
+    // Defensive invariant, mirroring assertPthreadFlagsPresent: a future edit
+    // that reuses PTHREAD_FINAL_LINK_FLAGS here must fail at flag time, not
+    // ship a "sequential" guest that needs cross-origin isolation to load.
+    assertSequentialFlagsAbsent(sequentialArgs, { threadModel: options.threadModel });
+    return sequentialArgs;
+  }
+
   const isPthreads = options.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS;
   if (isPthreads) {
     // Non-bypassable enforced pthreads final-LINK flag set (source of truth:
@@ -151,6 +234,10 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
       pthreadArgs.push("-mexec-model=reactor");
     }
     pthreadArgs.push(...PTHREAD_FINAL_LINK_FLAGS);
+    const pthreadStackSize = resolveStackSize(options.stackSize);
+    if (pthreadStackSize !== null) {
+      pthreadArgs.push(`-Wl,-z,stack-size=${pthreadStackSize}`);
+    }
     if (options.allowUndefinedImports === true) {
       pthreadArgs.push("-Wl,--allow-undefined");
     }
@@ -194,6 +281,23 @@ function buildSourceCompilerArgs(options = {}) {
   // -mbulk-memory: see buildCompilerArgs — memcpy/memset become native
   // memory.copy/memory.fill (loop C.5).
   const args = ["-O3", "-mbulk-memory", "-DNDEBUG"];
+  if (options.threadModel === ModuleThreadModel.WASI_SEQUENTIAL) {
+    // -fno-exceptions for the same reason as the pthreads model: the wasi
+    // libc++ is built without exception support, so the generated C++ invoke
+    // bridge otherwise fails to link on __cxa_allocate_exception.
+    //
+    // But deliberately NO -matomics and NO -pthread: a sequential guest must
+    // not emit atomics, or the artifact acquires the shared-memory shape that
+    // assertSequentialArtifact rejects.
+    args.push("-fno-exceptions");
+    for (const define of Array.isArray(options.defines) ? options.defines : []) {
+      const text = String(define ?? "").trim();
+      if (/^[A-Za-z_][A-Za-z0-9_]*(=[^\s]*)?$/.test(text)) {
+        args.push(`-D${text}`);
+      }
+    }
+    return args;
+  }
   if (isPthreads) {
     // wasi-threads object compile: enable atomics and disable C++ exceptions
     // (the wasi-threads libc++ is built without exception support, so throwing
@@ -224,9 +328,56 @@ function normalizeThreadModel(value) {
   if (normalized === ModuleThreadModel.EMSCRIPTEN_PTHREADS) {
     return ModuleThreadModel.EMSCRIPTEN_PTHREADS;
   }
+  if (normalized === ModuleThreadModel.WASI_SEQUENTIAL) {
+    return ModuleThreadModel.WASI_SEQUENTIAL;
+  }
   throw new Error(
-    `Unsupported threadModel "${value}". Expected "${ModuleThreadModel.SINGLE_THREAD}" or "${ModuleThreadModel.EMSCRIPTEN_PTHREADS}".`,
+    `Unsupported threadModel "${value}". Expected one of ` +
+      `"${ModuleThreadModel.SINGLE_THREAD}", "${ModuleThreadModel.EMSCRIPTEN_PTHREADS}", ` +
+      `"${ModuleThreadModel.WASI_SEQUENTIAL}".`,
   );
+}
+
+/**
+ * The wasi-sequential model must be justified in the manifest, in a
+ * machine-readable form, or the compile fails. "It happens not to thread today"
+ * is not a reason — the guest is being permanently exempted from the threading
+ * contract, and a future edit that adds a thread must fail loudly rather than
+ * silently re-shape the artifact.
+ *
+ * manifest.sequentialJustification = { kind, detail }
+ */
+function assertSequentialJustification(manifest) {
+  const justification = manifest?.sequentialJustification;
+  const declare =
+    'Declare manifest.sequentialJustification = { "kind": <one of ' +
+    `${JSON.stringify(SEQUENTIAL_JUSTIFICATION_KINDS)}>, "detail": "<why this guest can never spawn a thread>" }.`;
+
+  if (justification === undefined || justification === null) {
+    throw new Error(
+      `threadModel "${ModuleThreadModel.WASI_SEQUENTIAL}" requires an explicit justification. ${declare}`,
+    );
+  }
+  if (typeof justification !== "object" || Array.isArray(justification)) {
+    throw new Error(
+      `manifest.sequentialJustification must be an object, got ${Array.isArray(justification) ? "an array" : typeof justification}. ${declare}`,
+    );
+  }
+  const kind = String(justification.kind ?? "").trim();
+  if (!SEQUENTIAL_JUSTIFICATION_KINDS.includes(kind)) {
+    throw new Error(
+      `manifest.sequentialJustification.kind ${JSON.stringify(kind)} is not recognised. ` +
+        `Expected one of ${JSON.stringify(SEQUENTIAL_JUSTIFICATION_KINDS)}.`,
+    );
+  }
+  const detail = String(justification.detail ?? "").trim();
+  if (detail.length < SEQUENTIAL_JUSTIFICATION_MIN_LENGTH) {
+    throw new Error(
+      `manifest.sequentialJustification.detail must be a substantive explanation ` +
+        `(at least ${SEQUENTIAL_JUSTIFICATION_MIN_LENGTH} characters), got ${detail.length}. ${declare}`,
+    );
+  }
+  return { kind, detail };
 }
 
 function resolveThreadModel({ manifest, threadModel } = {}) {
@@ -239,11 +390,30 @@ function resolveThreadModel({ manifest, threadModel } = {}) {
         .map((target) => String(target ?? "").trim().toLowerCase())
         .filter(Boolean)
     : [];
-  if (runtimeTargets.includes(RuntimeTarget.BROWSER)) {
-    return ModuleThreadModel.SINGLE_THREAD;
-  }
+
+  // BROWSER MUST NOT IMPLY EMCC.
+  //
+  // This test used to run BEFORE the wasmedge test and return SINGLE_THREAD,
+  // which routes to Emscripten. The effect was that the MORE isomorphic a
+  // module declared itself to be, the worse it was treated: a manifest saying
+  // runtimeTargets ["browser","wasmedge"] matched on "browser" first and was
+  // silently compiled by emcc, even though it had explicitly asked to run under
+  // WasmEdge. Targeting a browser says nothing about whether a guest threads —
+  // it is a deployment fact, not a concurrency fact — so it must never select a
+  // toolchain.
   if (runtimeTargets.includes(RuntimeTarget.WASMEDGE)) {
     return ModuleThreadModel.EMSCRIPTEN_PTHREADS;
+  }
+  if (runtimeTargets.includes(RuntimeTarget.BROWSER)) {
+    throw new Error(
+      "Cannot infer a thread model from runtimeTargets [browser]: targeting a " +
+        "browser does not say whether the guest threads, and it must never imply " +
+        "the Emscripten toolchain. Declare threadModel explicitly — " +
+        `"${ModuleThreadModel.EMSCRIPTEN_PTHREADS}" (real wasi-threads), ` +
+        `"${ModuleThreadModel.WASI_SEQUENTIAL}" (clang wasi, provably never spawns a thread; ` +
+        "requires manifest.sequentialJustification), or " +
+        `"${ModuleThreadModel.SINGLE_THREAD}" (legacy Emscripten).`,
+    );
   }
   return ModuleThreadModel.SINGLE_THREAD;
 }
@@ -1057,8 +1227,15 @@ export async function compileModuleFromSource(options = {}) {
       options.guestLinkCapabilities,
     ),
   };
+  if (threadModel === ModuleThreadModel.WASI_SEQUENTIAL) {
+    // Fails the compile when the manifest has not justified the exemption.
+    assertSequentialJustification(manifest);
+  }
+  // BOTH wasi models use the sanctioned clang wasm32-wasip1-threads toolchain.
+  // The difference is the link shape and which artifact guard applies.
   const useWasiThreads =
-    threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS;
+    threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS ||
+    threadModel === ModuleThreadModel.WASI_SEQUENTIAL;
   const useSystemEmscripten =
     !useWasiThreads && requiresSystemEmscripten(threadModel, compileOptions);
   const compileFunction = useWasiThreads
@@ -1097,6 +1274,14 @@ export async function compileModuleFromSource(options = {}) {
     threadFeatures = assertPthreadArtifact(wasmBytes, {
       source: resolvedOutputPath,
     });
+  } else if (threadModel === ModuleThreadModel.WASI_SEQUENTIAL) {
+    // Mirror guard. The target is passed so that SDN_WASI_TARGET cannot be used
+    // to quietly build a plain wasm32-wasip1 object under the sequential model:
+    // it is a concurrency exemption, not a toolchain exemption.
+    threadFeatures = assertSequentialArtifact(wasmBytes, {
+      source: resolvedOutputPath,
+      target: resolveWasiThreadsToolchain().target,
+    });
   }
 
   // Validate the compiled artifact
@@ -1108,7 +1293,9 @@ export async function compileModuleFromSource(options = {}) {
 
   return {
     compiler: useWasiThreads
-      ? "wasm32-wasi-clang++ (wasi-threads)"
+      ? threadModel === ModuleThreadModel.WASI_SEQUENTIAL
+        ? "wasm32-wasi-clang++ (wasi-sequential)"
+        : "wasm32-wasi-clang++ (wasi-threads)"
       : useSystemEmscripten
         ? "em++ (system emscripten pthreads)"
         : "em++ (emception)",

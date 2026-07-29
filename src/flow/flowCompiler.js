@@ -95,6 +95,11 @@ const FLOW_THREAD_MODEL = Object.freeze({
   WASI_THREADS: "wasi-threads",
 });
 const HISTORICAL_PTHREAD_THREAD_MODEL = "emscripten-pthreads";
+// A guest built by the clang wasi toolchain that provably never spawns a
+// thread. For LINKING purposes it is a wasi-threads object — same target, same
+// object format, same ABI — so it unions with wasi-threads rather than
+// conflicting with it. See normalizeGuestThreadModel.
+const WASI_SEQUENTIAL_THREAD_MODEL = "wasi-sequential";
 
 const RUNTIME_ABI_EXPORTS = [
   "get_node_descriptor_count",
@@ -587,7 +592,16 @@ function normalizeGuestThreadModel(value) {
   }
   if (
     normalized === FLOW_THREAD_MODEL.WASI_THREADS ||
-    normalized === HISTORICAL_PTHREAD_THREAD_MODEL
+    normalized === HISTORICAL_PTHREAD_THREAD_MODEL ||
+    // wasi-sequential collapses to wasi-threads HERE, at the linking layer,
+    // and only here. The distinction is a property of a guest (may it spawn?),
+    // not of the object format: both are clang wasm32-wasip1-threads objects
+    // and link together cleanly. Keeping them separate at this layer would
+    // make a flow of one sequential node fall through to the emception branch
+    // and be linked by emcc — exactly the toolchain drift this model exists to
+    // prevent. The per-guest guarantee is enforced where it belongs: on each
+    // MODULE artifact, by assertSequentialArtifact.
+    normalized === WASI_SEQUENTIAL_THREAD_MODEL
   ) {
     return FLOW_THREAD_MODEL.WASI_THREADS;
   }
@@ -1412,7 +1426,10 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
       issues,
       "error",
       "mixed-guest-thread-models",
-      "A flow cannot link single-thread and wasi-threads guest objects into one artifact.",
+      "A flow cannot link single-thread (Emscripten) and wasi (clang) guest objects " +
+        "into one artifact. Note that wasi-threads and wasi-sequential guests DO mix " +
+        "freely — they are the same object format — so only a single-thread/Emscripten " +
+        "node conflicts here.",
       "flow.nodes",
     );
   }
