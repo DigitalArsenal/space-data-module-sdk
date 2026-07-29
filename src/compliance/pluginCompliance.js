@@ -25,6 +25,7 @@ import {
   isPayloadSchemaHashValid,
   payloadSchemaIdentitiesEqual,
 } from "../manifest/typeRefs.js";
+import { isLegacyWildcardPort } from "./legacyWildcardPorts.js";
 import { SDS_MANIFEST_SECTION_NAME } from "../bundle/constants.js";
 import {
   decodeUnsignedLeb128,
@@ -281,6 +282,207 @@ function normalizeProtocolRole(value) {
   return normalized;
 }
 
+/* ------------------------------------------------------------------------- *
+ * WILDCARD PORT BOUNDARY — ruled 2026-07-29 (P1 `upstream-module-sdk-1`).
+ *
+ * `acceptsAnyFlatbuffer` is a wildcard: the port declares that it does not know
+ * its payload's SDS identity. Both halves of that are real, so the boundary is
+ * mechanical, not editorial:
+ *
+ *  TIER A — PERMITTED, nothing to declare. The manifest PROVES it is
+ *    application-blind at the HOST boundary: it declares an `externalInterfaces`
+ *    entry of kind `host-service` whose `capability` it also declares in
+ *    `capabilities`. Such a port's payload is defined by a HOST OP, not by SDS
+ *    (`hostcap/http-request`, `storage-ingest`, `clock`, `random`, `file`,
+ *    `flatsql-query`, `p2p-discovery`, `data-source/retrieval`'s polymorphic row
+ *    stream). Compiled flows inherit their dependencies' host-service interfaces,
+ *    so the flow compiler's OWN synthesized wildcard ports (wildcardPortDefinition)
+ *    validate here with no change to compiler output and no artifact hash churn.
+ *
+ *  TIER B — PERMITTED when justified. A schema-aware module with a genuinely
+ *    untyped port declares `acceptedTypeSet.wildcardJustification = {kind, detail,
+ *    mediaType?}`, mirroring `sequentialJustification`: closed kind enum, each
+ *    kind carrying a predicate this checker enforces, `detail` substantive, and
+ *    `mediaType` (foreign/control frames) rejected outright when it is
+ *    FlatBuffer/SDS-bearing — you cannot claim "no SDS identity" while carrying
+ *    an SDS record.
+ *
+ *  TIER C — WARNING. The (pluginId, methodId, direction, portId) is in the frozen
+ *    legacy ledger (`legacyWildcardPorts.js`): shipped and hash-frozen before this
+ *    rule existed. Shrink-only debt, not permission.
+ *
+ *  TIER D — ERROR `wildcard-port-type`, unchanged. This is what correctly forced
+ *    the CCSDS 124 codec (`capabilities: []`, `externalInterfaces: []`, not in the
+ *    ledger) to declare typed `$CPS`/`$SPP` ports instead of shipping a wildcard.
+ * ------------------------------------------------------------------------- */
+
+export const WildcardJustificationKind = Object.freeze({
+  /** Payload is defined by a host capability op, not by SDS. */
+  HostBoundaryOpaque: "host-boundary-opaque",
+  /** Payload is an external, non-SDS wire format (CSV/TLE/vendor JSON/...). */
+  ForeignWireFormat: "foreign-wire-format",
+  /** Control frame produced and consumed inside one flow; never persisted. */
+  IntraFlowControlFrame: "intra-flow-control-frame",
+});
+
+const WildcardJustificationKindSet = new Set(
+  Object.values(WildcardJustificationKind),
+);
+
+const WildcardJustificationKindsRequiringMediaType = new Set([
+  WildcardJustificationKind.ForeignWireFormat,
+  WildcardJustificationKind.IntraFlowControlFrame,
+]);
+
+const WILDCARD_JUSTIFICATION_MIN_DETAIL_LENGTH = 24;
+
+const MediaTypePattern =
+  /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:;[\x20-\x7e]*)?$/;
+
+function mediaTypeCarriesSdsFlatbuffer(mediaType) {
+  const value = String(mediaType).toLowerCase();
+  return (
+    value.includes("flatbuffer") ||
+    value.startsWith("application/vnd.sds") ||
+    value.startsWith("application/vnd.spacedatastandards")
+  );
+}
+
+/**
+ * TIER A predicate. True when the manifest mechanically proves that its ports
+ * face a HOST capability op rather than an SDS identity.
+ *
+ * @param {unknown} manifest
+ * @returns {boolean}
+ */
+export function manifestDeclaresHostBoundaryBlindness(manifest) {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    return false;
+  }
+  const interfaces = manifest.externalInterfaces;
+  if (!Array.isArray(interfaces)) {
+    return false;
+  }
+  const declaredCapabilities = Array.isArray(manifest.capabilities)
+    ? manifest.capabilities
+    : [];
+  return interfaces.some(
+    (entry) =>
+      entry &&
+      typeof entry === "object" &&
+      !Array.isArray(entry) &&
+      entry.kind === ExternalInterfaceKind.HOST_SERVICE &&
+      isNonEmptyString(entry.capability) &&
+      declaredCapabilities.includes(entry.capability),
+  );
+}
+
+/**
+ * TIER B. Validates `acceptedTypeSet.wildcardJustification` and enforces its
+ * kind predicate.
+ *
+ * @returns {boolean} true when the justification permits the wildcard.
+ */
+function validateWildcardJustification(justification, issues, location, context) {
+  const declare =
+    'Declare acceptedTypeSet.wildcardJustification = { "kind": <one of ' +
+    [...WildcardJustificationKindSet].map((kind) => `"${kind}"`).join(", ") +
+    '>, "detail": "<why this payload has no SDS identity>" } (kinds ' +
+    `"${WildcardJustificationKind.ForeignWireFormat}" and ` +
+    `"${WildcardJustificationKind.IntraFlowControlFrame}" also require "mediaType").`;
+
+  if (
+    !justification ||
+    typeof justification !== "object" ||
+    Array.isArray(justification)
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-wildcard-justification",
+      `wildcardJustification must be an object, got ${
+        Array.isArray(justification) ? "an array" : typeof justification
+      }. ${declare}`,
+      `${location}.wildcardJustification`,
+    );
+    return false;
+  }
+
+  let valid = true;
+  const { kind, detail, mediaType } = justification;
+
+  if (!WildcardJustificationKindSet.has(kind)) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-wildcard-justification",
+      `wildcardJustification.kind ${JSON.stringify(kind)} is not recognised. ${declare}`,
+      `${location}.wildcardJustification.kind`,
+    );
+    valid = false;
+  }
+
+  if (
+    !isNonEmptyString(detail) ||
+    detail.trim().length < WILDCARD_JUSTIFICATION_MIN_DETAIL_LENGTH
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "invalid-wildcard-justification",
+      "wildcardJustification.detail must be a substantive explanation of at least " +
+        `${WILDCARD_JUSTIFICATION_MIN_DETAIL_LENGTH} characters naming the payload this port carries.`,
+      `${location}.wildcardJustification.detail`,
+    );
+    valid = false;
+  }
+
+  if (WildcardJustificationKindsRequiringMediaType.has(kind)) {
+    if (!isNonEmptyString(mediaType) || !MediaTypePattern.test(mediaType)) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-wildcard-justification",
+        `wildcardJustification.kind "${kind}" requires mediaType as a "type/subtype" media type naming the non-SDS payload.`,
+        `${location}.wildcardJustification.mediaType`,
+      );
+      valid = false;
+    } else if (mediaTypeCarriesSdsFlatbuffer(mediaType)) {
+      pushIssue(
+        issues,
+        "error",
+        "unsupported-wildcard-justification",
+        `wildcardJustification.mediaType "${mediaType}" is a FlatBuffer/SDS media type: a port carrying an SDS record must declare that record's concrete identity, not a wildcard.`,
+        `${location}.wildcardJustification.mediaType`,
+      );
+      valid = false;
+    }
+  } else if (mediaType !== undefined) {
+    validateOptionalStringField(
+      issues,
+      mediaType,
+      `${location}.wildcardJustification.mediaType`,
+      "wildcardJustification mediaType",
+    );
+  }
+
+  if (
+    kind === WildcardJustificationKind.HostBoundaryOpaque &&
+    context?.hostBoundaryBlind !== true
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "unsupported-wildcard-justification",
+      `wildcardJustification.kind "${WildcardJustificationKind.HostBoundaryOpaque}" requires the manifest to declare an externalInterfaces entry of kind "${ExternalInterfaceKind.HOST_SERVICE}" whose capability is also declared in manifest.capabilities.`,
+      `${location}.wildcardJustification.kind`,
+    );
+    valid = false;
+  }
+
+  return valid;
+}
+
 function validateAllowedType(type, issues, location) {
   if (!type || typeof type !== "object" || Array.isArray(type)) {
     pushIssue(issues, "error", "invalid-type-record", "Allowed type entries must be objects.", location);
@@ -468,7 +670,7 @@ function validateAllowedType(type, issues, location) {
   );
 }
 
-function validateAcceptedTypeSet(typeSet, issues, location) {
+function validateAcceptedTypeSet(typeSet, issues, location, context) {
   if (!typeSet || typeof typeSet !== "object" || Array.isArray(typeSet)) {
     pushIssue(issues, "error", "invalid-type-set", "Accepted type sets must be objects.", location);
     return;
@@ -534,15 +736,56 @@ function validateAcceptedTypeSet(typeSet, issues, location) {
     }
   }
 
-  wildcardTypes.forEach(({ index }) => {
-    pushIssue(
-      issues,
-      "error",
-      "wildcard-port-type",
-      "PLG input and output ports must declare one concrete SDS identity with canonical and aligned-binary peers; acceptsAnyFlatbuffer is not permitted.",
-      `${location}.allowedTypes[${index}]`,
-    );
-  });
+  if (wildcardTypes.length > 0) {
+    // See "WILDCARD PORT BOUNDARY" above: Tier A permitted, Tier B justified,
+    // Tier C frozen legacy debt (warning), Tier D error.
+    const hostBoundaryBlind = context?.hostBoundaryBlind === true;
+    const hasJustification = typeSet.wildcardJustification !== undefined;
+    let permitted = hostBoundaryBlind;
+
+    if (hasJustification) {
+      // A declared justification is ALWAYS validated, even when Tier A would
+      // have permitted the wildcard anyway — a malformed one is an error, never
+      // a silent pass.
+      permitted =
+        validateWildcardJustification(
+          typeSet.wildcardJustification,
+          issues,
+          location,
+          context,
+        ) || permitted;
+    }
+
+    if (!permitted) {
+      const legacy =
+        context?.allowLegacyWildcards !== false &&
+        isLegacyWildcardPort(
+          context?.pluginId,
+          context?.methodId,
+          context?.direction,
+          context?.portId,
+        );
+      wildcardTypes.forEach(({ index }) => {
+        if (legacy) {
+          pushIssue(
+            issues,
+            "warning",
+            "legacy-wildcard-port-type",
+            `Port "${context?.portId}" carries a wildcard (acceptsAnyFlatbuffer) that was frozen into a shipped artifact before the wildcard-port boundary landed. It is grandfathered, not permitted: declare the concrete SDS identity, or declare acceptedTypeSet.wildcardJustification, at the next rebuild.`,
+            `${location}.allowedTypes[${index}]`,
+          );
+          return;
+        }
+        pushIssue(
+          issues,
+          "error",
+          "wildcard-port-type",
+          "PLG input and output ports must declare one concrete SDS identity with canonical and aligned-binary peers; acceptsAnyFlatbuffer is not permitted.",
+          `${location}.allowedTypes[${index}]`,
+        );
+      });
+    }
+  }
 
   if (canonicalTypes.length === 0 && alignedTypes.length > 0) {
     alignedTypes.forEach(({ index }) => {
@@ -593,7 +836,7 @@ function validateAcceptedTypeSet(typeSet, issues, location) {
   }
 }
 
-function validatePort(port, issues, location, label) {
+function validatePort(port, issues, location, label, context) {
   if (!port || typeof port !== "object" || Array.isArray(port)) {
     pushIssue(issues, "error", "invalid-port", `${label} entries must be objects.`, location);
     return;
@@ -618,7 +861,12 @@ function validatePort(port, issues, location, label) {
       );
     }
     port.acceptedTypeSets.forEach((typeSet, index) => {
-      validateAcceptedTypeSet(typeSet, issues, `${location}.acceptedTypeSets[${index}]`);
+      validateAcceptedTypeSet(
+        typeSet,
+        issues,
+        `${location}.acceptedTypeSets[${index}]`,
+        { ...context, portId: port.portId },
+      );
     });
   }
   const minStreamsValid = validateIntegerField(
@@ -1379,7 +1627,7 @@ function validateFlowGraph(manifest, issues, sourceName) {
 }
 
 export function validatePluginManifest(manifest, options = {}) {
-  const { sourceName = "manifest" } = options;
+  const { sourceName = "manifest", allowLegacyWildcards = true } = options;
   const issues = [];
 
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
@@ -1392,6 +1640,14 @@ export function validatePluginManifest(manifest, options = {}) {
       checkedArtifact: false,
     });
   }
+
+  // Wildcard-port boundary context: resolved once per manifest, carried down to
+  // every acceptedTypeSet. See "WILDCARD PORT BOUNDARY" above.
+  const wildcardContext = Object.freeze({
+    pluginId: manifest.pluginId,
+    hostBoundaryBlind: manifestDeclaresHostBoundaryBlindness(manifest),
+    allowLegacyWildcards: allowLegacyWildcards !== false,
+  });
 
   validateStringField(issues, manifest.pluginId, `${sourceName}.pluginId`, "pluginId");
   validateStringField(issues, manifest.name, `${sourceName}.name`, "name");
@@ -1515,7 +1771,13 @@ export function validatePluginManifest(manifest, options = {}) {
         );
       } else {
         method.inputPorts.forEach((port, portIndex) => {
-          validatePort(port, issues, `${location}.inputPorts[${portIndex}]`, "Input port");
+          validatePort(
+            port,
+            issues,
+            `${location}.inputPorts[${portIndex}]`,
+            "Input port",
+            { ...wildcardContext, methodId: method.methodId, direction: "in" },
+          );
         });
       }
       if (!Array.isArray(method.outputPorts)) {
@@ -1528,7 +1790,13 @@ export function validatePluginManifest(manifest, options = {}) {
         );
       } else {
         method.outputPorts.forEach((port, portIndex) => {
-          validatePort(port, issues, `${location}.outputPorts[${portIndex}]`, "Output port");
+          validatePort(
+            port,
+            issues,
+            `${location}.outputPorts[${portIndex}]`,
+            "Output port",
+            { ...wildcardContext, methodId: method.methodId, direction: "out" },
+          );
         });
       }
       validateIntegerField(issues, method.maxBatch, `${location}.maxBatch`, "maxBatch", {

@@ -61,3 +61,13 @@ export {
   validatePluginArtifact,
   validatePluginManifest,
 };
+
+export {
+  manifestDeclaresHostBoundaryBlindness,
+  WildcardJustificationKind,
+} from "./pluginCompliance.js";
+export {
+  isLegacyWildcardPort,
+  LegacyWildcardPortLedger,
+  LEGACY_WILDCARD_LEDGER_FROZEN_ON,
+} from "./legacyWildcardPorts.js";
