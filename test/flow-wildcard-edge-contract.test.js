@@ -239,9 +239,11 @@ test("a trigger bound to a wildcard-only port compiles as an untyped frame", () 
     triggerEdgeLine.includes("nullptr, nullptr, nullptr, nullptr, 0u, nullptr"),
     `untyped trigger must emit null identity fields: ${triggerEdgeLine}`,
   );
+  // ... no aligned layout, and the trailing flag says WHY: the binding is
+  // OPAQUE. Untyped is a declared fact here, not an absence.
   assert.ok(
-    /nullptr,\s*1u,\s*0u,\s*0u,\s*0u,\s*0u,\s*0u\s*\}/.test(triggerEdgeLine),
-    `untyped trigger must not claim an aligned layout: ${triggerEdgeLine}`,
+    /nullptr,\s*1u,\s*0u,\s*0u,\s*0u,\s*0u,\s*0u,\s*1u\s*\}/.test(triggerEdgeLine),
+    `untyped trigger must not claim an aligned layout and must be marked opaque: ${triggerEdgeLine}`,
   );
 });
 

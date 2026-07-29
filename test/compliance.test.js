@@ -678,7 +678,13 @@ test("canonical PLG graph records are validated instead of silently discarded", 
   );
 });
 
-test("dual-representation contract rejects canonical-only input and output ports", async (t) => {
+// A canonical-only port is LEGAL. The aligned peer is the shared-arena
+// optimization, and it is available only to records with a FIXED layout —
+// byteLength is the exact frame size the router enforces, and a
+// variable-length record ($OEM, $OMM, $OCM, $ACW …) has no such number.
+// Requiring the peer everywhere forced every hand-written manifest to declare
+// a layout it could not honour.
+test("a canonical-only port is legal, and says so as a warning", async (t) => {
   for (const direction of ["inputPorts", "outputPorts"]) {
     await t.test(direction, () => {
       const manifest = createDualPortManifest();
@@ -689,13 +695,51 @@ test("dual-representation contract rejects canonical-only input and output ports
 
       const report = validatePluginManifest(manifest);
 
-      assert.equal(report.ok, false);
+      assert.equal(report.ok, true, JSON.stringify(report.issues));
       assert.ok(
-        report.errors.some((issue) => issue.code === "missing-aligned-peer"),
+        report.warnings.some((issue) => issue.code === "no-aligned-peer"),
         JSON.stringify(report.issues),
       );
     });
   }
+});
+
+// ...but an aligned peer that IS declared must be complete. "I claim a fixed
+// layout" without the size is the declaration that produced the fleet-wide
+// failure, and it stays an error: the router would have nothing to check the
+// frame length against.
+test("an aligned peer declared WITHOUT its byteLength is still refused", () => {
+  const manifest = createDualPortManifest();
+  const typeSet = manifest.methods[0].inputPorts[0].acceptedTypeSets[0];
+  for (const typeRef of typeSet.allowedTypes) {
+    if (typeRef.wireFormat === "aligned-binary") delete typeRef.byteLength;
+  }
+
+  const report = validatePluginManifest(manifest);
+
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some((issue) => String(issue.location ?? "").endsWith(".byteLength")),
+    JSON.stringify(report.issues),
+  );
+});
+
+// The converse pairing rule is NOT relaxed: an aligned type with no canonical
+// fallback cannot cross a boundary that has no shared arena.
+test("an aligned-binary type without a canonical fallback is still refused", () => {
+  const manifest = createDualPortManifest();
+  const typeSet = manifest.methods[0].inputPorts[0].acceptedTypeSets[0];
+  typeSet.allowedTypes = typeSet.allowedTypes.filter(
+    (typeRef) => typeRef.wireFormat === "aligned-binary",
+  );
+
+  const report = validatePluginManifest(manifest);
+
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.errors.some((issue) => issue.code === "missing-flatbuffer-fallback"),
+    JSON.stringify(report.issues),
+  );
 });
 
 test("dual-representation contract rejects every mismatched paired identity field", async (t) => {

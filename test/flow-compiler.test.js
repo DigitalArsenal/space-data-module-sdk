@@ -1029,9 +1029,12 @@ test("flow check rejects dependency ports without dual representations", () => {
     dependencies: dependencyMap(dependency),
   });
 
-  assert.equal(check.ok, false);
+  // Canonical-only is legal — the aligned peer is the shared-arena
+  // optimization, not a conformance obligation — and the flow simply never
+  // takes the aligned route for this port.
+  assert.equal(check.ok, true, JSON.stringify(check.issues));
   assert.ok(
-    check.errors.some((issue) => issue.code === "missing-aligned-peer"),
+    check.warnings.some((issue) => issue.code === "no-aligned-peer"),
     JSON.stringify(check.issues),
   );
 });
@@ -2237,7 +2240,7 @@ extern "C" int second(void) {
 
   const exports = host.instance.exports;
   const edgeDescriptorPtr = exports.space_data_module_runtime_get_edge_descriptors();
-  const edgeView = new DataView(host.memory.buffer, edgeDescriptorPtr, 64);
+  const edgeView = new DataView(host.memory.buffer, edgeDescriptorPtr, 68);
   const u32 = (offset) => edgeView.getUint32(offset, true);
   const readCString = (ptr) => {
     const heap = new Uint8Array(host.memory.buffer);
@@ -2264,6 +2267,7 @@ extern "C" int second(void) {
       alignedByteLength: u32(52),
       alignedFixedStringLength: u32(56),
       alignedRequiredAlignment: u32(60),
+      opaque: u32(64),
     },
     {
       fromNode: 0,
@@ -2281,6 +2285,7 @@ extern "C" int second(void) {
       alignedByteLength: 96,
       alignedFixedStringLength: 24,
       alignedRequiredAlignment: 16,
+      opaque: 0,
     },
   );
 

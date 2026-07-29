@@ -582,12 +582,18 @@ test("embedded manifest source stays a raw byte buffer for c and c++ modules", (
   assert.equal(source.includes("FlatBufferBuilder"), false);
 });
 
-test("source compiler rejects a PLG port without its aligned representation before toolchain execution", async () => {
+// An aligned peer that CLAIMS a fixed layout without stating its size is
+// refused before the toolchain runs: byteLength is the exact frame length the
+// router checks, so a missing one is an unenforceable claim. (A port with NO
+// aligned peer at all is legal — see the compliance suite; the peer is the
+// shared-arena optimization, and variable-length records have no fixed size to
+// declare.)
+test("source compiler rejects an aligned peer with no byteLength before toolchain execution", async () => {
   const manifest = createTestManifest();
-  manifest.methods[0].outputPorts[0].acceptedTypeSets[0].allowedTypes =
-    manifest.methods[0].outputPorts[0].acceptedTypeSets[0].allowedTypes.filter(
-      (typeRef) => typeRef.wireFormat === "flatbuffer",
-    );
+  for (const typeRef of manifest.methods[0].outputPorts[0].acceptedTypeSets[0]
+    .allowedTypes) {
+    if (typeRef.wireFormat === "aligned-binary") delete typeRef.byteLength;
+  }
 
   await assert.rejects(
     () =>
@@ -597,8 +603,8 @@ test("source compiler rejects a PLG port without its aligned representation befo
         language: "c",
       }),
     (error) =>
-      error?.report?.errors?.some(
-        (issue) => issue.code === "missing-aligned-peer",
+      error?.report?.errors?.some((issue) =>
+        String(issue.location ?? "").endsWith(".byteLength"),
       ) === true,
   );
 });

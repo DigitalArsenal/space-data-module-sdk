@@ -2177,6 +2177,8 @@ export interface FlowEdgeDescriptor {
   alignedByteLength: number;
   alignedFixedStringLength: number;
   alignedRequiredAlignment: number;
+  /** OPAQUE byte route (SDS $PLG 1.0.13): no SDS identity, no aligned layout. */
+  opaque: number;
   fromPort: string;
   toPort: string;
   schemaName: string;

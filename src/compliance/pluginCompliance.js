@@ -855,13 +855,37 @@ function validateAcceptedTypeSet(typeSet, issues, location, context) {
     });
   }
 
+  // THE ALIGNED PEER IS AN OPTIMIZATION, NOT A CONFORMANCE OBLIGATION.
+  //
+  // An aligned-binary type asserts a FIXED layout, and `byteLength` is not
+  // descriptive metadata about it — it is the exact frame size the compiled
+  // router enforces (flow_runtime.cpp route_output rejects any frame where
+  // `out.length != edge.aligned_byte_length`). Most SDS records are
+  // variable-length: $OEM carries EPHEMERIS_DATA_BLOCK[], $OMM/$OCM/$OBD/$ACW
+  // are likewise unbounded. There is no honest number to write for them.
+  // Writing one anyway is a lie the runtime enforces; writing 0 produces an
+  // edge that rejects every frame it is given.
+  //
+  // Requiring an aligned peer on EVERY canonical type therefore forced every
+  // hand-written manifest to declare a layout it could not honour, and then
+  // failed it for declaring it incompletely — which is why no shipped manifest
+  // in space-data-network-modules passed. (The declarations were inert anyway:
+  // the flow compiler only sets alignedEligible when BOTH ends supply a
+  // complete layout, so every OD app edge already compiled alignedEligible
+  // false.)
+  //
+  // Ruled: a canonical-only accepted type set is LEGAL. Declaring the aligned
+  // peer is opt-in, and once declared it must be COMPLETE — byteLength and a
+  // power-of-two requiredAlignment, both still errors above. The converse
+  // stays an error too: an aligned type without a canonical fallback has no
+  // way to cross a boundary that cannot take the shared arena.
   if (alignedTypes.length === 0 && canonicalTypes.length > 0) {
     canonicalTypes.forEach(({ index }) => {
       pushIssue(
         issues,
-        "error",
-        "missing-aligned-peer",
-        "Canonical FlatBuffer allowed types must be paired with an aligned-binary peer for the same SDS identity in the same acceptedTypeSet.",
+        "warning",
+        "no-aligned-peer",
+        "Canonical FlatBuffer allowed type declares no aligned-binary peer, so this port never takes the shared-arena zero-copy route. That is correct for a variable-length record; declare the peer (with its exact byteLength) only if the record has a FIXED aligned layout.",
         `${location}.allowedTypes[${index}]`,
       );
     });
