@@ -32,6 +32,10 @@ const FRAME_DESCRIPTOR_SIZE = 48;
 const INVOCATION_DESCRIPTOR_SIZE = 24;
 const DISPATCH_DESCRIPTOR_SIZE = 60;
 const DEPENDENCY_DESCRIPTOR_SIZE = 72;
+// FlowEdge: 16 u32/pointer slots + the OPAQUE byte-route flag. Kept beside the
+// other strides so the browser host and the compiled table can never drift
+// apart silently — a mismatch here reads every edge at the wrong offset.
+const EDGE_DESCRIPTOR_SIZE = 68;
 const NODE_STATE_SIZE = 32;
 const INGRESS_STATE_SIZE = 24;
 const ROUTING_STATE_SIZE = 32;
@@ -429,13 +433,14 @@ export async function createFlowRuntimeHost(options = {}) {
       }
       const base = call("get_edge_descriptors") >>> 0;
       if (!base) throw new Error("no edge descriptors");
-      const ptr = base + index * 64;
+      const ptr = base + index * EDGE_DESCRIPTOR_SIZE;
       const d = readU32Fields(ptr, [
         "fromNode", "fromPortPtr", "toNode", "toPortPtr",
         "schemaNamePtr", "fileIdentifierPtr", "schemaVersionPtr",
         "schemaHashPtr", "schemaHashSize", "rootTypeNamePtr",
         "canonicalFallbackAvailable", "alignedEligible", "alignedLayoutFields",
         "alignedByteLength", "alignedFixedStringLength", "alignedRequiredAlignment",
+        "opaque",
       ]);
       return {
         ...d,

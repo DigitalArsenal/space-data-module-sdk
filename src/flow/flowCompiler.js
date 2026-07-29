@@ -2133,6 +2133,9 @@ export function generateFlowTables({ flow, check, dependencies }) {
       binding,
       canonical,
       sentinelFromPort,
+      // A wildcard trigger target resolves no SDS identity and no aligned
+      // layout — the same fact an opaque edge asserts, recorded the same way.
+      opaque: wildcardTarget,
       alignedEligible: aligned !== null,
       alignedLayoutFields:
         (byteLength.present ? 1 : 0) |
@@ -2179,6 +2182,12 @@ export function generateFlowTables({ flow, check, dependencies }) {
     return {
       edge,
       contract,
+      // OPAQUE (SDS $PLG 1.0.13 / v1.164.0) reaches the compiled routing table.
+      // Without it an opaque edge has neither a canonical type nor an aligned
+      // layout, so BOTH typed routes in flow_runtime.cpp reject every frame and
+      // the flow is inert after its first node. Opacity is the third, explicit
+      // route: bytes, no identity, no layout.
+      opaque: contract.opaque === true,
       canonicalFallbackAvailable,
       alignedEligible,
       alignedLayoutFields:
@@ -2283,7 +2292,7 @@ export function generateFlowTables({ flow, check, dependencies }) {
         `${descriptor.canonicalFallbackAvailable ? 1 : 0}u, ` +
         `${descriptor.alignedEligible ? 1 : 0}u, ${descriptor.alignedLayoutFields}u, ` +
         `${descriptor.byteLength}u, ${descriptor.fixedStringLength}u, ` +
-        `${descriptor.requiredAlignment}u },`,
+        `${descriptor.requiredAlignment}u, ${descriptor.opaque ? 1 : 0}u },`,
     );
   }
   for (const [index, descriptor] of triggerBindingDescriptors.entries()) {
@@ -2297,7 +2306,8 @@ export function generateFlowTables({ flow, check, dependencies }) {
         `${descriptor.schemaHash.length > 0 ? `kTriggerBinding${index}SchemaHash` : "nullptr"}, ` +
         `${descriptor.schemaHash.length}u, ${cNullableString(canonical?.rootTypeName)}, ` +
         `1u, ${descriptor.alignedEligible ? 1 : 0}u, ${descriptor.alignedLayoutFields}u, ${descriptor.byteLength}u, ` +
-        `${descriptor.fixedStringLength}u, ${descriptor.requiredAlignment}u },`,
+        `${descriptor.fixedStringLength}u, ${descriptor.requiredAlignment}u, ` +
+        `${descriptor.opaque ? 1 : 0}u },`,
     );
   }
   lines.push("};");

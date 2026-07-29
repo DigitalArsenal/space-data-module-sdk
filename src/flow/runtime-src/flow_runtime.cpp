@@ -183,8 +183,15 @@ struct FlowEdge {
   uint32_t aligned_byte_length;
   uint32_t aligned_fixed_string_length;
   uint32_t aligned_required_alignment;
+  // OPAQUE (SDS $PLG 1.0.13 / v1.164.0): the edge carries BYTES that have no
+  // SDS identity by signed assertion. Such an edge has neither a canonical
+  // FlatBuffer type nor an aligned layout, so both typed routes reject it —
+  // which, before this field existed, made every opaque edge unroutable and
+  // the flow inert. An opaque edge takes the BYTE route instead: no identity
+  // match, no layout proof, alignment 1.
+  uint32_t opaque;
 };
-static_assert(sizeof(FlowEdge) == 64, "FlowEdge must be 64 bytes on wasm32");
+static_assert(sizeof(FlowEdge) == 68, "FlowEdge must be 68 bytes on wasm32");
 
 struct FlowTriggerBinding {
   uint32_t trigger_index;
@@ -220,6 +227,7 @@ struct FlowTypeDescriptorView {
   uint32_t aligned_byte_length;
   uint32_t aligned_fixed_string_length;
   uint32_t aligned_required_alignment;
+  uint32_t opaque;
 };
 
 static bool flow_resolve_type_descriptor(uint32_t index,
@@ -239,6 +247,7 @@ static bool flow_resolve_type_descriptor(uint32_t index,
     out->aligned_byte_length = edge.aligned_byte_length;
     out->aligned_fixed_string_length = edge.aligned_fixed_string_length;
     out->aligned_required_alignment = edge.aligned_required_alignment;
+    out->opaque = edge.opaque;
     return true;
   }
   return false;
@@ -274,6 +283,13 @@ static bool flow_binding_accepts_descriptor(uint32_t binding_index,
       !flow_resolve_type_descriptor(descriptor_index, &provided_type) ||
       !flow_type_identity_equal(binding_type, provided_type)) {
     return false;
+  }
+  // OPAQUE byte route: an opaque descriptor asserts "these bytes have no SDS
+  // identity". Both sides must agree on the opacity — a typed binding never
+  // accepts an opaque frame and vice versa — and once they do, neither wire
+  // format carries a claim to check, so both are admitted as bytes.
+  if (provided_type.opaque != 0 || binding_type.opaque != 0) {
+    return provided_type.opaque != 0 && binding_type.opaque != 0;
   }
   if (wire_format == kFlowFlatbuffer) {
     return provided_type.canonical_fallback_available != 0;
@@ -407,6 +423,18 @@ static bool flow_is_power_of_two(uint32_t value) {
   return value != 0 && (value & (value - 1u)) == 0;
 }
 
+// A frame descriptor's `alignment` of ZERO is an ABSENT field, not a claim of
+// "aligned to nothing" — and the ABI must give it exactly one meaning, or the
+// hosts diverge on the same artifact. They did: the browser/JS host defaults an
+// unset alignment to 1 while the Go/WasmEdge host leaves the field zeroed, so a
+// timer tick that started the flow in one runtime was rejected (-30) before its
+// first node in the other. Unspecified means byte alignment. An aligned-binary
+// frame still has to satisfy its layout's required alignment below, so nothing
+// a typed route depends on is relaxed.
+static uint32_t flow_effective_alignment(uint32_t alignment) {
+  return alignment == 0 ? 1u : alignment;
+}
+
 static bool flow_valid_c_string(uint32_t ptr, uint32_t max_length = 1024) {
   if (ptr == 0) return true;
   const uint64_t memory_size = flow_memory_byte_size();
@@ -467,6 +495,11 @@ struct FlowOutputFrameView {
   const char *file_identifier = nullptr;
   const char *root_type_name = nullptr;
   const uint8_t *payload = nullptr;
+  // Storage the CALLER already owns for `payload` (the invoke shim copies or
+  // retains at push time). When set the router shares it instead of copying
+  // again; when null the payload is live host/guest memory and is copied here.
+  std::shared_ptr<PayloadStorage> owned_storage;
+  uint32_t owned_offset = 0;
   uint32_t length = 0;
   uint32_t wire_format = kFlowFlatbuffer;
   uint32_t byte_length = 0;
@@ -480,6 +513,16 @@ struct FlowOutputFrameView {
   uint8_t ownership = kFlowHostOwned;
   uint8_t mutability = kFlowImmutable;
 };
+
+// An OPAQUE edge carries bytes with no SDS identity. A producer that names a
+// schema, file identifier or root type is claiming one, which the edge's
+// signed contract says does not exist — that contradiction is refused rather
+// than silently stripped.
+static bool flow_output_declares_identity(const FlowOutputFrameView &out) {
+  return (out.schema_name != nullptr && out.schema_name[0] != '\0') ||
+         (out.file_identifier != nullptr && out.file_identifier[0] != '\0') ||
+         (out.root_type_name != nullptr && out.root_type_name[0] != '\0');
+}
 
 static bool flow_output_matches_edge_identity(const FlowOutputFrameView &out,
                                               const FlowEdge &edge) {
@@ -531,6 +574,17 @@ static int32_t route_output(uint32_t from_node, const FlowOutputFrameView &out) 
 
   for (uint32_t edge_index : matching_edges) {
     const FlowEdge &edge = g_edges[edge_index];
+    // OPAQUE byte route. The edge asserts the payload has NO SDS identity, so
+    // there is nothing to match and no layout to prove — but the assertion
+    // must stay honest in the other direction too: a frame that CLAIMS an SDS
+    // identity may not travel an edge that was signed as carrying none.
+    if (edge.opaque != 0) {
+      if (flow_output_declares_identity(out)) {
+        g_routing_state.rejected_frames++;
+        return -27;
+      }
+      continue;
+    }
     if (!flow_output_matches_edge_identity(out, edge)) {
       g_routing_state.rejected_frames++;
       return -24;
@@ -572,10 +626,22 @@ static int32_t route_output(uint32_t from_node, const FlowOutputFrameView &out) 
     frame.sequence = out.sequence;
     frame.end_of_stream = out.end_of_stream;
     frame.frame_id = out.frame_id != 0 ? out.frame_id : g_next_frame_id++;
-    frame.wire_format = static_cast<uint8_t>(out.wire_format);
+    // An opaque edge has no aligned layout to inherit (the compiler forces
+    // alignedEligible=false, so its layout scalars are all zero). Byte frames
+    // carry alignment 1 and make no layout claim.
+    const bool byte_route = edge.opaque != 0;
+    // `aligned-binary` is a claim about a FIXED SDS layout — byte length,
+    // fixed-string length, required alignment. An opaque payload has none of
+    // those, so the claim cannot be carried across the edge: the frame is
+    // delivered in the UNTYPED form, which is what a wildcard input port
+    // accepts and what the pre-type-contract generation of these artifacts
+    // delivered. Producers that stamp ALIGNED_BINARY to mean "raw bytes" are
+    // normalized here rather than silently rejected at the consumer's port.
+    frame.wire_format =
+        byte_route ? kFlowFlatbuffer : static_cast<uint8_t>(out.wire_format);
     frame.ownership = kFlowHostOwned;
     frame.mutability = kFlowImmutable;
-    if (out.wire_format == kFlowAlignedBinary) {
+    if (!byte_route && out.wire_format == kFlowAlignedBinary) {
       frame.alignment = edge.aligned_required_alignment;
       frame.byte_length = edge.aligned_byte_length;
       frame.fixed_string_length = edge.aligned_fixed_string_length;
@@ -586,20 +652,37 @@ static int32_t route_output(uint32_t from_node, const FlowOutputFrameView &out) 
       frame.fixed_string_length = 0;
       frame.required_alignment = 1;
     }
-    if (aliases_current) {
+    const uint32_t copy_alignment =
+        !byte_route && out.wire_format == kFlowAlignedBinary
+            ? edge.aligned_required_alignment
+            : 1;
+    const bool preowned_usable =
+        out.owned_storage != nullptr && out.length > 0 &&
+        (copy_alignment <= 1 ||
+         (reinterpret_cast<uintptr_t>(out.owned_storage->bytes.data()) +
+          out.owned_offset) %
+                 copy_alignment ==
+             0);
+    if (preowned_usable) {
+      frame.storage = out.owned_storage;
+      frame.payload_offset = out.owned_offset;
+      if (!byte_route && out.wire_format == kFlowAlignedBinary) {
+        g_routing_state.aligned_shared_routes++;
+      } else {
+        g_routing_state.canonical_routes++;
+      }
+    } else if (aliases_current) {
       frame.storage = aliased_storage;
       frame.payload_offset = aliased_offset;
-      if (out.wire_format == kFlowAlignedBinary) {
+      if (!byte_route && out.wire_format == kFlowAlignedBinary) {
         g_routing_state.aligned_shared_routes++;
       } else {
         g_routing_state.canonical_routes++;
       }
     } else {
-      const uint32_t copy_alignment =
-          out.wire_format == kFlowAlignedBinary ? edge.aligned_required_alignment : 1;
       frame.storage = flow_copy_payload(
           out.payload, out.length, copy_alignment, &frame.payload_offset);
-      if (out.wire_format == kFlowAlignedBinary) {
+      if (!byte_route && out.wire_format == kFlowAlignedBinary) {
         g_routing_state.aligned_copied_routes++;
       } else {
         g_routing_state.canonical_routes++;
@@ -627,7 +710,15 @@ struct ShimOutput {
   std::string schema_name;
   std::string file_identifier;
   std::string root_type_name;
-  const uint8_t *payload = nullptr;
+  // OWNED AT PUSH TIME. A guest entry pushes from ITS OWN buffers — very often
+  // a temporary that dies at the end of the pushing statement — and routing
+  // happens only after the entry returns. Borrowing the pointer here was a
+  // use-after-free that corrupted payloads silently instead of failing: the
+  // first shipped symptom was a downstream node receiving another output's
+  // bytes. The push either takes a reference to the invocation storage the
+  // payload already aliases (still zero-copy) or copies immediately.
+  std::shared_ptr<PayloadStorage> storage;
+  uint32_t payload_offset = 0;
   uint32_t payload_length = 0;
   uint32_t wire_format = kFlowFlatbuffer;
   uint32_t fixed_string_length = 0;
@@ -682,8 +773,25 @@ static int32_t shim_push_output(
   out.schema_name = schema_name != nullptr ? schema_name : "";
   out.file_identifier = file_identifier != nullptr ? file_identifier : "";
   out.root_type_name = root_type_name != nullptr ? root_type_name : "";
-  out.payload = payload_ptr;
   out.payload_length = payload_length;
+  if (payload_ptr != nullptr && payload_length > 0) {
+    // Zero-copy stays available for the case it exists to serve: a payload
+    // that IS a slice of one of this invocation's own input buffers (a raw
+    // passthrough, a stream page). That storage outlives the entry because
+    // the invocation owns it. Anything else is copied here, while it is
+    // still alive.
+    std::shared_ptr<PayloadStorage> aliased_storage;
+    uint32_t aliased_offset = 0;
+    if (flow_find_current_alias(payload_ptr, payload_length, &aliased_storage,
+                                &aliased_offset)) {
+      out.storage = aliased_storage;
+      out.payload_offset = aliased_offset;
+    } else {
+      out.storage = flow_copy_payload(
+          payload_ptr, payload_length,
+          required_alignment > 0 ? required_alignment : 1, &out.payload_offset);
+    }
+  }
   out.wire_format = wire_format;
   out.fixed_string_length = fixed_string_length;
   out.byte_length = byte_length;
@@ -752,7 +860,8 @@ extern "C" void plugin_set_error(const char *error_code, const char *error_messa
 static int32_t flow_validate_frame_descriptor(
     const FlowFrameDescriptorC &fd, bool require_active_generation) {
   if (fd.occupied == 0) return 0;
-  if (!flow_is_power_of_two(fd.alignment)) return -30;
+  const uint32_t alignment = flow_effective_alignment(fd.alignment);
+  if (!flow_is_power_of_two(alignment)) return -30;
   if (fd.wire_format > kFlowAlignedBinary || fd.ownership > kFlowTransferred ||
       fd.mutability > kFlowAppendOnly) {
     return -31;
@@ -764,7 +873,7 @@ static int32_t flow_validate_frame_descriptor(
       (fd.offset == 0 || !flow_valid_memory_range(fd.offset, fd.size))) {
     return -33;
   }
-  if (fd.size > 0 && fd.offset % fd.alignment != 0) return -34;
+  if (fd.size > 0 && fd.offset % alignment != 0) return -34;
   if (!flow_valid_c_string(fd.port_id_ptr)) return -35;
   if (require_active_generation &&
       (g_current_node == kInvalidIndex || fd.ingress_index != g_invocation_generation)) {
@@ -783,12 +892,18 @@ static int32_t flow_validate_frame_descriptor(
                                       &type_descriptor)) {
       return -37;
     }
+    // An OPAQUE descriptor has no layout to prove the frame against: the
+    // aligned-binary wire format is the SDK's byte-frame convention here, not
+    // a claim about a fixed SDS layout. Bytes still have to live inside linear
+    // memory (checked above); they simply have no byte_length/alignment
+    // contract to satisfy.
+    if (type_descriptor.opaque != 0) return 0;
     if (type_descriptor.aligned_eligible == 0 ||
         type_descriptor.aligned_byte_length == 0 ||
         type_descriptor.aligned_required_alignment == 0 ||
         !flow_is_power_of_two(type_descriptor.aligned_required_alignment) ||
         fd.size != type_descriptor.aligned_byte_length ||
-        fd.alignment < type_descriptor.aligned_required_alignment ||
+        alignment < type_descriptor.aligned_required_alignment ||
         fd.offset % type_descriptor.aligned_required_alignment != 0) {
       return -38;
     }
@@ -971,7 +1086,7 @@ FLOW_EXPORT int32_t space_data_module_runtime_apply_node_invocation_result(
     output.payload = reinterpret_cast<const uint8_t *>(fd.offset);
     output.length = fd.size;
     output.wire_format = fd.wire_format;
-    output.alignment = fd.alignment;
+    output.alignment = flow_effective_alignment(fd.alignment);
     output.stream_id = fd.stream_id;
     output.sequence = fd.sequence;
     output.frame_id = fd.trace_token;
@@ -1023,7 +1138,7 @@ static void flow_enqueue_binding(const FlowTriggerBinding &binding,
                                  : nullptr;
     frame.payload_size = descriptor->size;
     frame.type_descriptor_idx = binding.type_descriptor_idx;
-    frame.alignment = descriptor->alignment;
+    frame.alignment = flow_effective_alignment(descriptor->alignment);
     frame.stream_id = descriptor->stream_id;
     frame.sequence = descriptor->sequence;
     frame.end_of_stream = descriptor->end_of_stream;
@@ -1037,14 +1152,16 @@ static void flow_enqueue_binding(const FlowTriggerBinding &binding,
     if (descriptor->wire_format == kFlowAlignedBinary) {
       FlowTypeDescriptorView type_descriptor;
       if (flow_resolve_type_descriptor(frame.type_descriptor_idx,
-                                       &type_descriptor)) {
+                                       &type_descriptor) &&
+          type_descriptor.opaque == 0) {
         frame.byte_length = type_descriptor.aligned_byte_length;
         frame.fixed_string_length = type_descriptor.aligned_fixed_string_length;
         frame.required_alignment = type_descriptor.aligned_required_alignment;
       }
     }
     frame.storage = flow_copy_payload(
-        payload, descriptor->size, descriptor->alignment, &frame.payload_offset);
+        payload, descriptor->size, flow_effective_alignment(descriptor->alignment),
+        &frame.payload_offset);
   } else {
     frame.type_descriptor_idx = binding.type_descriptor_idx;
     frame.frame_id = g_next_frame_id++;
@@ -1248,7 +1365,12 @@ FLOW_EXPORT int32_t space_data_module_runtime_dispatch_current_invocation_direct
     output.schema_name = out.schema_name.c_str();
     output.file_identifier = out.file_identifier.c_str();
     output.root_type_name = out.root_type_name.c_str();
-    output.payload = out.payload;
+    output.owned_storage = out.storage;
+    output.owned_offset = out.payload_offset;
+    output.payload =
+        out.storage != nullptr
+            ? out.storage->bytes.data() + out.payload_offset
+            : nullptr;
     output.length = out.payload_length;
     output.wire_format = out.wire_format;
     output.fixed_string_length = out.fixed_string_length;
