@@ -314,6 +314,21 @@ function normalizeProtocolRole(value) {
  *  TIER D — ERROR `wildcard-port-type`, unchanged. This is what correctly forced
  *    the CCSDS 124 codec (`capabilities: []`, `externalInterfaces: []`, not in the
  *    ledger) to declare typed `$CPS`/`$SPP` ports instead of shipping a wildcard.
+ *
+ * TWO LIMITS, STATED RATHER THAN HIDDEN:
+ *
+ *  1. Tier A is MANIFEST-scoped, not port-scoped: one matching host-service
+ *     interface permits every wildcard port of every method in that manifest. So
+ *     adding a host-service capability is a THIRD exit from the legacy ledger
+ *     alongside "declare the type" and "declare a justification", and a product
+ *     module that later acquires one stops warning about ports that do carry an
+ *     SDS identity. Scoping Tier A to the methods that actually bind the
+ *     interface is tracked, not done here.
+ *  2. The Tier A proof lives only in the JSON manifest. `externalInterfaces` is
+ *     NOT representable in the embedded FlatBuffer manifest (see
+ *     `src/manifest/normalize.js`), so a verifier holding only the compiled
+ *     `.wasm` cannot reproduce this verdict — `capabilities` is embedded, the
+ *     interfaces are not.
  * ------------------------------------------------------------------------- */
 
 export const WildcardJustificationKind = Object.freeze({
@@ -348,6 +363,24 @@ function mediaTypeCarriesSdsFlatbuffer(mediaType) {
   );
 }
 
+// "I decline to name the format" is the evasion the wildcard rule exists to
+// stop, so a justification that claims a FOREIGN wire format must name a
+// specific one. A catch-all media type says nothing a bare wildcard did not.
+const OpaqueMediaTypes = new Set([
+  "*/*",
+  "application/*",
+  "application/binary",
+  "application/octet-stream",
+  "application/x-binary",
+  "application/unknown",
+  "binary/octet-stream",
+]);
+
+function mediaTypeIsOpaque(mediaType) {
+  const value = String(mediaType).split(";")[0].trim().toLowerCase();
+  return OpaqueMediaTypes.has(value);
+}
+
 /**
  * TIER A predicate. True when the manifest mechanically proves that its ports
  * face a HOST capability op rather than an SDS identity.
@@ -363,9 +396,23 @@ export function manifestDeclaresHostBoundaryBlindness(manifest) {
   if (!Array.isArray(interfaces)) {
     return false;
   }
-  const declaredCapabilities = Array.isArray(manifest.capabilities)
-    ? manifest.capabilities
-    : [];
+  // Capabilities are legal in BOTH forms — a bare id string, or a host
+  // capability record — so compare against the normalized id, not the raw
+  // entry. Comparing raw made a record-form manifest fail Tier A.
+  const declaredCapabilities = (
+    Array.isArray(manifest.capabilities) ? manifest.capabilities : []
+  )
+    .map((capability) =>
+      isNonEmptyString(capability)
+        ? capability
+        : capability &&
+            typeof capability === "object" &&
+            !Array.isArray(capability) &&
+            isNonEmptyString(capability.capability)
+          ? capability.capability
+          : null,
+    )
+    .filter((capability) => capability !== null);
   return interfaces.some(
     (entry) =>
       entry &&
@@ -453,6 +500,15 @@ function validateWildcardJustification(justification, issues, location, context)
         "error",
         "unsupported-wildcard-justification",
         `wildcardJustification.mediaType "${mediaType}" is a FlatBuffer/SDS media type: a port carrying an SDS record must declare that record's concrete identity, not a wildcard.`,
+        `${location}.wildcardJustification.mediaType`,
+      );
+      valid = false;
+    } else if (mediaTypeIsOpaque(mediaType)) {
+      pushIssue(
+        issues,
+        "error",
+        "unsupported-wildcard-justification",
+        `wildcardJustification.mediaType "${mediaType}" is a catch-all: naming the SPECIFIC non-SDS format the port carries is the entire point of this justification kind.`,
         `${location}.wildcardJustification.mediaType`,
       );
       valid = false;

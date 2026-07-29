@@ -23,6 +23,15 @@
  * is checked mechanically and is why no hostcap node and no compiled flow
  * appears below.
  *
+ * THAT IS ALSO A THIRD EXIT, AND IT IS THE WRONG ONE FOR MOST ENTRIES BELOW.
+ * Tier A is manifest-scoped: adding one host-service interface silently permits
+ * EVERY wildcard port of that plugin. For `com.digitalarsenal.hostcap.flatsql-store`
+ * — a hostcap node that declares `capabilities: []` and `externalInterfaces: []`
+ * — taking that exit is simply correcting an under-declared manifest. For
+ * `orbit-determination`, whose `fit:out:result` carries $OMM/$OCM, taking it
+ * would bury a real typing obligation. Clear entries by TYPING them unless the
+ * plugin genuinely faces a host op.
+ *
  * `test/wildcard-port-boundary.test.js` asserts the frozen totals as an upper
  * bound: shrinking passes untouched, growing fails loudly.
  */

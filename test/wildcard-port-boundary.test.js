@@ -121,6 +121,28 @@ test("a non-host-service external interface does not buy a wildcard", () => {
 
 // --- TIER A: application-blind at the host boundary, proven mechanically ---
 
+test("the host-boundary proof accepts BOTH capability forms", () => {
+  // capabilities entries are legal as a bare id OR as a host capability record
+  // (validateCapabilityEntry). Comparing the raw entry made the record form
+  // fail Tier A.
+  for (const capabilities of [["http"], [{ capability: "http" }]]) {
+    const manifest = createWildcardManifest({
+      capabilities,
+      externalInterfaces: [hostServiceInterface("http")],
+    });
+    assert.equal(
+      manifestDeclaresHostBoundaryBlindness(manifest),
+      true,
+      JSON.stringify(capabilities),
+    );
+    assert.deepEqual(
+      wildcardIssues(validatePluginManifest(manifest)),
+      [],
+      JSON.stringify(capabilities),
+    );
+  }
+});
+
 test("wildcard is permitted when the manifest proves host-boundary blindness", () => {
   const manifest = createWildcardManifest({
     capabilities: ["http"],
@@ -161,6 +183,39 @@ test("a justification claiming a FlatBuffer/SDS media type is rejected", () => {
       (issue) => issue.code === "unsupported-wildcard-justification",
     ),
   );
+});
+
+test("a justification claiming a CATCH-ALL media type is rejected", () => {
+  // "I decline to name the format" says nothing a bare wildcard did not.
+  for (const mediaType of [
+    "application/octet-stream",
+    "application/binary",
+    "*/*",
+    "application/*",
+    "binary/octet-stream",
+    "Application/Octet-Stream; charset=binary",
+  ]) {
+    const manifest = createWildcardManifest();
+    inputTypeSet(manifest).wildcardJustification = {
+      kind: WildcardJustificationKind.ForeignWireFormat,
+      detail: "Carries bytes from somewhere; the format is deliberately unnamed.",
+      mediaType,
+    };
+    const report = validatePluginManifest(manifest);
+    assert.equal(report.ok, false, mediaType);
+    // `*/*` and `application/*` are not even well-formed media types, so they
+    // are caught by the shape check; the rest are caught semantically. Either
+    // way a catch-all never buys a wildcard.
+    assert.ok(
+      report.errors.some((issue) =>
+        [
+          "unsupported-wildcard-justification",
+          "invalid-wildcard-justification",
+        ].includes(issue.code),
+      ),
+      mediaType,
+    );
+  }
 });
 
 test("host-boundary-opaque justification requires a real host-service declaration", () => {
