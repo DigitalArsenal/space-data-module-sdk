@@ -435,6 +435,106 @@ function resolveEdgeTypeContract(fromTypes, toTypes) {
   const fromAligned = concreteTypesByWireFormat(fromTypes, "aligned-binary");
   const toAligned = concreteTypesByWireFormat(toTypes, "aligned-binary");
 
+  // WILDCARD PARTICIPATION — application-blind ports.
+  //
+  // A port declaring `acceptsAnyFlatbuffer` is generic ON PURPOSE.
+  // `hostcap/http-request`, `storage-ingest`, `clock`, `random`, `file` and the
+  // flow compiler's OWN synthesized egress ports (see wildcardPortDefinition,
+  // "for graph endpoints whose backing manifest port cannot be resolved")
+  // cannot name one concrete SDS identity, because they are generic by
+  // construction. 65 shipped manifests across every module family declare one.
+  //
+  // concreteTypesByWireFormat() deliberately filters wildcards out, so such a
+  // port has a NON-EMPTY `types` array but ZERO concrete entries. Without the
+  // cases below it falls past BOTH the `length === 0` host-boundary checks (its
+  // array is not empty) AND the concrete-vs-concrete loop (it has no concrete
+  // entries), landing on the null return that reads as the self-contradictory
+  // "* does not satisfy *" — a wildcard failing to satisfy a wildcard. That
+  // made the shipped, live-deployed celestrak ingest family (gp/satcat/spw +
+  // the publish-trigger variants) unbuildable: 36 errors on `flow check`.
+  //
+  // Resolved HERE, before the concrete paths, and ONLY when a side has no
+  // concrete alternative — a port declaring both a wildcard and a concrete
+  // identity still takes the strict path below, so nothing is widened for
+  // typed edges.
+  const isWildcardOnly = (types, canonical, aligned) =>
+    canonical.length === 0 &&
+    aligned.length === 0 &&
+    types.some((type) => type?.acceptsAnyFlatbuffer === true);
+
+  const fromWildcardOnly = isWildcardOnly(fromTypes, fromCanonical, fromAligned);
+  const toWildcardOnly = isWildcardOnly(toTypes, toCanonical, toAligned);
+
+  // A generic port meeting a genuinely UNTYPED host boundary (the flow egress
+  // sink declares no types at all, so it is neither concrete nor wildcard).
+  // Both sides are application-blind, so this is the same untyped byte edge as
+  // wildcard -> wildcard.
+  if (
+    (fromWildcardOnly && toTypes.length === 0) ||
+    (toWildcardOnly && fromTypes.length === 0)
+  ) {
+    return {
+      schemaName: null,
+      fileIdentifier: null,
+      schemaVersion: null,
+      schemaHash: null,
+      rootTypeName: null,
+      compatibleWireFormats: ["flatbuffer"],
+      canonical: { producer: null, consumer: null },
+      aligned: null,
+      wildcard: true,
+    };
+  }
+
+  if (fromWildcardOnly && toWildcardOnly) {
+    // Generic -> generic: a legitimate untyped byte edge (http-request ->
+    // flow egress). No canonical identity exists to record here, and inventing
+    // one would be a claim the runtime cannot honour.
+    return {
+      schemaName: null,
+      fileIdentifier: null,
+      schemaVersion: null,
+      schemaHash: null,
+      rootTypeName: null,
+      compatibleWireFormats: ["flatbuffer"],
+      canonical: { producer: null, consumer: null },
+      aligned: null,
+      wildcard: true,
+    };
+  }
+  if (fromWildcardOnly && toCanonical.length === 1) {
+    // Generic producer into a typed consumer: the edge carries the CONSUMER's
+    // identity — exactly what the host-boundary case below does for an
+    // untyped side.
+    const canonical = toCanonical[0];
+    return {
+      schemaName: canonical.schemaName ?? null,
+      fileIdentifier: canonical.fileIdentifier ?? null,
+      schemaVersion: canonical.schemaVersion ?? null,
+      schemaHash: canonical.schemaHash ?? null,
+      rootTypeName: canonical.rootTypeName ?? null,
+      compatibleWireFormats: ["flatbuffer"],
+      canonical: { producer: null, consumer: canonical },
+      aligned: null,
+      wildcard: true,
+    };
+  }
+  if (toWildcardOnly && fromCanonical.length === 1) {
+    // Typed producer into a generic consumer: the edge carries the PRODUCER's.
+    const canonical = fromCanonical[0];
+    return {
+      schemaName: canonical.schemaName ?? null,
+      fileIdentifier: canonical.fileIdentifier ?? null,
+      schemaVersion: canonical.schemaVersion ?? null,
+      schemaHash: canonical.schemaHash ?? null,
+      rootTypeName: canonical.rootTypeName ?? null,
+      compatibleWireFormats: ["flatbuffer"],
+      canonical: { producer: canonical, consumer: null },
+      aligned: null,
+      wildcard: true,
+    };
+  }
+
   // Host-model graph boundaries are not PLG ports. They remain
   // application-blind byte ingress/egress and therefore support only the
   // concrete canonical identity declared by the module-facing side.
@@ -2609,3 +2709,6 @@ export async function compileFlowProgram({
     report,
   };
 }
+
+// Internals exposed for regression tests only (see test/flow-wildcard-edge-contract.test.js).
+export const __testables = { resolveEdgeTypeContract };
