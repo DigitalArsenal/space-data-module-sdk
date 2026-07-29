@@ -1320,6 +1320,38 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
         location,
       );
     } else {
+      // OPAQUE (SDS $PLG 1.0.13 / v1.164.0). A contract MUST carry exactly one
+      // of CANONICAL_TYPE or OPAQUE = true, and opacity is a DELIBERATE SIGNED
+      // ASSERTION, never an absent field. The compiler resolves it from the
+      // ports' declared types; an author may also assert it on the edge, and
+      // then the two must agree — a marking that contradicts the resolved types
+      // is a defect, not an override.
+      const resolvedOpaque =
+        edgeTypeContract.wildcard === true &&
+        !(edgeTypeContract.canonical?.producer ?? edgeTypeContract.canonical?.consumer);
+      if (edge?.opaque !== undefined) {
+        if (typeof edge.opaque !== "boolean") {
+          pushIssue(
+            issues,
+            "error",
+            "invalid-edge-opacity",
+            `Edge ${edge.fromNodeId}.${edge.fromPortId} -> ${edge.toNodeId}.${edge.toPortId}: opaque must be a boolean when present.`,
+            location,
+          );
+        } else if (edge.opaque !== resolvedOpaque) {
+          pushIssue(
+            issues,
+            "error",
+            "edge-opacity-mismatch",
+            `Edge ${edge.fromNodeId}.${edge.fromPortId} -> ${edge.toNodeId}.${edge.toPortId} is marked opaque=${edge.opaque}, ` +
+              (resolvedOpaque
+                ? "but its ports declare no SDS identity, so the edge IS opaque."
+                : `but its ports resolve the concrete identity ${edgeTypeContract.fileIdentifier ?? edgeTypeContract.schemaName}, ` +
+                  "which must be declared rather than signed away."),
+            location,
+          );
+        }
+      }
       edgeTypeContracts[index] = {
         edgeIndex: index,
         fromNodeId: edge.fromNodeId,
@@ -1327,6 +1359,7 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
         toNodeId: edge.toNodeId,
         toPortId: edge.toPortId,
         ...edgeTypeContract,
+        opaque: resolvedOpaque,
       };
     }
 
@@ -1587,29 +1620,65 @@ function rawMethod(dependency, methodId) {
   ) ?? null;
 }
 
+/**
+ * THE SIGNING COMPILER'S REFUSAL (SDS $PLG 1.0.13 / v1.164.0).
+ *
+ * `PLGFlowEdge.CONTRACT` and `PLGFlowEdgeContract.CANONICAL_TYPE` are both
+ * OPTIONAL in the schema — marking them `required` would have broken every
+ * pre-1.0.13 buffer — so presence is enforced HERE instead: this compiler
+ * refuses to sign a contract-less edge, and a contract must carry EXACTLY ONE
+ * of `CANONICAL_TYPE` or `OPAQUE = true`. Opacity is a deliberate signed
+ * assertion, never an absent field, which is what keeps "this edge carries
+ * bytes by design" distinguishable from "somebody forgot the type".
+ */
 function signedFlowEdgeContract(contract, fromDispatchModel, toDispatchModel) {
   if (!contract) {
-    throw new Error("Validated flow edge is missing its exact SDS type contract.");
+    throw new Error(
+      "Refusing to sign a flow edge with no type contract: PLGFlowEdge.CONTRACT is schema-optional " +
+        "only for pre-1.0.13 compatibility, and this compiler will not emit an edge without one.",
+    );
   }
   const canonicalType = contract.canonical?.producer ?? contract.canonical?.consumer;
-  if (!canonicalType) {
-    throw new Error("Validated flow edge is missing its canonical SDS fallback type.");
+  // Opacity is derived here as well as annotated upstream: the signer must not
+  // depend on a caller's bookkeeping for a fact it can establish itself, or a
+  // dropped annotation would silently become "somebody forgot the type".
+  const opaque =
+    contract.opaque === true || (contract.wildcard === true && !canonicalType);
+  if (!canonicalType && !opaque) {
+    throw new Error(
+      "Validated flow edge is missing CANONICAL_TYPE and is not marked OPAQUE. " +
+        "An edge that genuinely carries bytes with no SDS identity must assert OPAQUE = true; " +
+        "otherwise declare the concrete SDS identity on its ports.",
+    );
+  }
+  if (canonicalType && opaque) {
+    throw new Error(
+      "Validated flow edge declares BOTH a CANONICAL_TYPE and OPAQUE = true. " +
+        "A contract must carry exactly one: a known identity is never signed away as opaque.",
+    );
   }
   const alignedType = contract.aligned?.producer ?? contract.aligned?.consumer ?? null;
   const sharedArena =
     fromDispatchModel === "linked-direct" &&
     toDispatchModel === "linked-direct";
+  // An opaque edge is ineligible for the aligned route: there is no layout to
+  // prove bounds, alignment, ownership or lifetime against.
   const alignedEligible =
+    !opaque &&
     sharedArena &&
     contract.compatibleWireFormats?.includes("aligned-binary") === true &&
     Boolean(contract.aligned?.producer && contract.aligned?.consumer);
   return {
-    canonicalType: { ...canonicalType, wireFormat: "flatbuffer" },
-    alignedType: alignedType
-      ? { ...alignedType, wireFormat: "aligned-binary" }
+    canonicalType: canonicalType
+      ? { ...canonicalType, wireFormat: "flatbuffer" }
       : null,
+    alignedType:
+      !opaque && alignedType
+        ? { ...alignedType, wireFormat: "aligned-binary" }
+        : null,
     canonicalFallbackAvailable: true,
     alignedEligible,
+    opaque,
     routePolicy: alignedEligible
       ? "aligned-shared-arena-or-canonical"
       : "canonical-only",
@@ -2726,4 +2795,4 @@ export async function compileFlowProgram({
 }
 
 // Internals exposed for regression tests only (see test/flow-wildcard-edge-contract.test.js).
-export const __testables = { resolveEdgeTypeContract };
+export const __testables = { resolveEdgeTypeContract, signedFlowEdgeContract };

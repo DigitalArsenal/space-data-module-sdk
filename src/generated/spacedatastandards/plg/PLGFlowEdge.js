@@ -6,8 +6,10 @@ import { PLGFlowEdgeContract } from './PLGFlowEdgeContract.js';
  * One directed edge wiring a producer output port to a consumer input port.
  */
 export class PLGFlowEdge {
-    bb = null;
-    bb_pos = 0;
+    constructor() {
+        this.bb = null;
+        this.bb_pos = 0;
+    }
     __init(i, bb) {
         this.bb_pos = i;
         this.bb = bb;
@@ -41,7 +43,13 @@ export class PLGFlowEdge {
         return this.bb.__string(this.bb_pos + offset, optionalEncoding);
     }
     /**
-     * Exact identity/layout and compile-time representation policy.
+     * Exact identity/layout and compile-time representation policy. NOT
+     * `required`: marking a NEW field of an EXISTING table required makes the
+     * FlatBuffers verifier reject every $PLG buffer written before 1.0.13,
+     * which is a breaking change to a ratified standard. Presence is enforced
+     * where it belongs — the flow compiler MUST refuse to SIGN a flow whose
+     * edges lack a CONTRACT, and a verifier MUST reject a signed flow edge
+     * without one. Buffers predating 1.0.13 stay readable and stay unsigned.
      */
     CONTRACT(obj) {
         const offset = this.bb.__offset(this.bb_pos, 14);
@@ -74,7 +82,6 @@ export class PLGFlowEdge {
         builder.requiredField(offset, 8); // FROM_PORT_ID
         builder.requiredField(offset, 10); // TO_NODE_ID
         builder.requiredField(offset, 12); // TO_PORT_ID
-        builder.requiredField(offset, 14); // CONTRACT
         return offset;
     }
     unpack() {
@@ -90,12 +97,6 @@ export class PLGFlowEdge {
     }
 }
 export class PLGFlowEdgeT {
-    EDGE_ID;
-    FROM_NODE_ID;
-    FROM_PORT_ID;
-    TO_NODE_ID;
-    TO_PORT_ID;
-    CONTRACT;
     constructor(EDGE_ID = null, FROM_NODE_ID = null, FROM_PORT_ID = null, TO_NODE_ID = null, TO_PORT_ID = null, CONTRACT = null) {
         this.EDGE_ID = EDGE_ID;
         this.FROM_NODE_ID = FROM_NODE_ID;

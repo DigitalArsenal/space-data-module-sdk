@@ -261,3 +261,97 @@ test("a trigger bound to a TYPED port still binds that exact identity", () => {
     `a typed trigger must stay aligned-eligible: ${triggerEdgeLine}`,
   );
 });
+
+// --- OPAQUE: the $PLG 1.0.13 / SDS v1.164.0 narrowing --------------------
+//
+// Themis rejected BOTH `required` markings. `PLGFlowEdge.CONTRACT` and
+// `PLGFlowEdgeContract.CANONICAL_TYPE` ship OPTIONAL — marking them required
+// would have broken every pre-1.0.13 buffer — so presence is enforced by the
+// SIGNING COMPILER refusing to sign, and by verifiers rejecting signed edges
+// without one. A contract carries EXACTLY ONE of CANONICAL_TYPE or
+// OPAQUE = true, and an opaque edge is never aligned-eligible. Opaque-by-design
+// is an explicit flag, never an absent field: "carries bytes by design" must
+// stay distinguishable from "somebody forgot the type".
+
+const { signedFlowEdgeContract } = __testables;
+
+test("an untyped edge is signed as OPAQUE, never as an absent type", () => {
+  const signed = signedFlowEdgeContract(
+    resolveEdgeTypeContract(WILDCARD, WILDCARD),
+    "linked-direct",
+    "linked-direct",
+  );
+  assert.equal(signed.opaque, true);
+  assert.equal(signed.canonicalType, null);
+  assert.equal(signed.alignedType, null);
+  // ALIGNED_ELIGIBLE MUST be false when OPAQUE — there is no layout to prove
+  // bounds, alignment, ownership or lifetime against. Both nodes here are
+  // linked-direct, so this is the case that would otherwise qualify.
+  assert.equal(signed.alignedEligible, false);
+  assert.equal(signed.routePolicy, "canonical-only");
+});
+
+test("the signing compiler refuses an edge with neither a type nor OPAQUE", () => {
+  assert.throws(
+    () =>
+      signedFlowEdgeContract(
+        { canonical: { producer: null, consumer: null }, compatibleWireFormats: ["flatbuffer"] },
+        "linked-direct",
+        "linked-direct",
+      ),
+    /missing CANONICAL_TYPE and is not marked OPAQUE/,
+  );
+});
+
+test("the signing compiler refuses BOTH a type and OPAQUE", () => {
+  assert.throws(
+    () =>
+      signedFlowEdgeContract(
+        {
+          canonical: { producer: OMM[0], consumer: OMM[0] },
+          compatibleWireFormats: ["flatbuffer"],
+          opaque: true,
+        },
+        "linked-direct",
+        "linked-direct",
+      ),
+    /exactly one/,
+  );
+});
+
+test("the signing compiler refuses a contract-less edge outright", () => {
+  assert.throws(
+    () => signedFlowEdgeContract(null, "linked-direct", "linked-direct"),
+    /Refusing to sign a flow edge with no type contract/,
+  );
+});
+
+test("a TYPED edge is never marked opaque and keeps its aligned route", () => {
+  const signed = signedFlowEdgeContract(
+    resolveEdgeTypeContract(OMM, OMM),
+    "linked-direct",
+    "linked-direct",
+  );
+  assert.equal(signed.opaque, false);
+  assert.equal(signed.canonicalType.fileIdentifier, "$OMM");
+  assert.equal(signed.alignedEligible, true);
+  assert.equal(signed.routePolicy, "aligned-shared-arena-or-canonical");
+});
+
+test("an author's opacity marking must agree with the resolved port types", () => {
+  // Marking is an assertion the compiler CHECKS, never an override: you may not
+  // sign away an identity you have, nor claim one you cannot name.
+  const { flow, dependencies } = triggerFixture({ tickTyped: true });
+  flow.edges[0].opaque = true; // src.out -> sink.result resolves to $OMM
+  const lying = checkFlowProgram({ flow, dependencies });
+  assert.equal(lying.ok, false);
+  assert.ok(lying.issues.some((issue) => issue.code === "edge-opacity-mismatch"));
+
+  const honest = triggerFixture({ tickTyped: true });
+  honest.flow.edges[0].opaque = false;
+  const check = checkFlowProgram({
+    flow: honest.flow,
+    dependencies: honest.dependencies,
+  });
+  assert.equal(check.ok, true, JSON.stringify(check.issues ?? ""));
+});

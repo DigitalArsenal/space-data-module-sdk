@@ -79,7 +79,13 @@ TO_PORT_ID(optionalEncoding?:any):string|Uint8Array {
 }
 
 /**
- * Exact identity/layout and compile-time representation policy.
+ * Exact identity/layout and compile-time representation policy. NOT
+ * `required`: marking a NEW field of an EXISTING table required makes the
+ * FlatBuffers verifier reject every $PLG buffer written before 1.0.13,
+ * which is a breaking change to a ratified standard. Presence is enforced
+ * where it belongs — the flow compiler MUST refuse to SIGN a flow whose
+ * edges lack a CONTRACT, and a verifier MUST reject a signed flow edge
+ * without one. Buffers predating 1.0.13 stay readable and stay unsigned.
  */
 CONTRACT(obj?:PLGFlowEdgeContract):PLGFlowEdgeContract|null {
   const offset = this.bb!.__offset(this.bb_pos, 14);
@@ -120,7 +126,6 @@ static endPLGFlowEdge(builder:flatbuffers.Builder):flatbuffers.Offset {
   builder.requiredField(offset, 8) // FROM_PORT_ID
   builder.requiredField(offset, 10) // TO_NODE_ID
   builder.requiredField(offset, 12) // TO_PORT_ID
-  builder.requiredField(offset, 14) // CONTRACT
   return offset;
 }
 

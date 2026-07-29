@@ -1079,8 +1079,19 @@ function addFlowEdge(builder, edge = {}) {
     "canonical_type",
     "CANONICAL_TYPE",
   );
-  if (!canonicalType) {
-    throw new TypeError("PLG flow edge contract requires canonicalType.");
+  const opaque =
+    pick(contract, "opaque", "OPAQUE") === true;
+  // $PLG 1.0.13: exactly one of CANONICAL_TYPE or OPAQUE = true. Neither is a
+  // forgotten type; both is a contradiction.
+  if (!canonicalType && !opaque) {
+    throw new TypeError(
+      "PLG flow edge contract requires canonicalType, or OPAQUE = true when the edge carries bytes with no SDS identity by design.",
+    );
+  }
+  if (canonicalType && opaque) {
+    throw new TypeError(
+      "PLG flow edge contract declares both canonicalType and OPAQUE = true; exactly one is permitted.",
+    );
   }
   const alignedType = pick(
     contract,
@@ -1088,14 +1099,28 @@ function addFlowEdge(builder, edge = {}) {
     "aligned_type",
     "ALIGNED_TYPE",
   );
-  const canonicalTypeOffset = addFlatBufferTypeRef(builder, canonicalType);
+  const alignedEligible =
+    pick(contract, "alignedEligible", "aligned_eligible", "ALIGNED_ELIGIBLE") === true;
+  if (opaque && (alignedEligible || alignedType)) {
+    throw new TypeError(
+      "PLG flow edge contract marked OPAQUE cannot be aligned-eligible or carry an alignedType: an opaque edge has no layout to prove.",
+    );
+  }
+  const canonicalTypeOffset = canonicalType
+    ? addFlatBufferTypeRef(builder, canonicalType)
+    : 0;
   const alignedTypeOffset = alignedType
     ? addFlatBufferTypeRef(builder, alignedType)
     : 0;
   PLGFlowEdgeContract.startPLGFlowEdgeContract(builder);
-  PLGFlowEdgeContract.addCanonicalType(builder, canonicalTypeOffset);
+  if (canonicalTypeOffset) {
+    PLGFlowEdgeContract.addCanonicalType(builder, canonicalTypeOffset);
+  }
   if (alignedTypeOffset) {
     PLGFlowEdgeContract.addAlignedType(builder, alignedTypeOffset);
+  }
+  if (opaque) {
+    PLGFlowEdgeContract.addOpaque(builder, true);
   }
   PLGFlowEdgeContract.addCanonicalFallbackAvailable(
     builder,
@@ -1129,10 +1154,30 @@ function addFlowEdge(builder, edge = {}) {
 }
 
 function flowEdgeToObject(edge) {
+  // The VERIFIER half of the $PLG 1.0.13 bargain: the schema left CONTRACT and
+  // CANONICAL_TYPE optional so pre-1.0.13 buffers stay readable, so a SIGNED
+  // edge without a coherent contract is rejected here rather than by flatc.
   const contract = edge.CONTRACT?.();
-  const canonicalType = contract?.CANONICAL_TYPE?.();
-  if (!contract || !canonicalType) {
+  if (!contract) {
     throw new TypeError("Decoded PLG flow edge is missing its exact contract.");
+  }
+  const canonicalType = contract.CANONICAL_TYPE?.() ?? null;
+  const opaque = contract.OPAQUE?.() === true;
+  if (!canonicalType && !opaque) {
+    throw new TypeError(
+      "Decoded PLG flow edge contract carries neither CANONICAL_TYPE nor OPAQUE = true.",
+    );
+  }
+  if (canonicalType && opaque) {
+    throw new TypeError(
+      "Decoded PLG flow edge contract carries both CANONICAL_TYPE and OPAQUE = true; exactly one is permitted.",
+    );
+  }
+  const alignedEligible = contract.ALIGNED_ELIGIBLE();
+  if (opaque && alignedEligible) {
+    throw new TypeError(
+      "Decoded PLG flow edge contract is OPAQUE and ALIGNED_ELIGIBLE; an opaque edge has no layout to prove.",
+    );
   }
   const alignedType = contract.ALIGNED_TYPE?.();
   return {
@@ -1142,10 +1187,11 @@ function flowEdgeToObject(edge) {
     toNodeId: edge.TO_NODE_ID(),
     toPortId: edge.TO_PORT_ID(),
     contract: {
-      canonicalType: typeRefToObject(canonicalType),
+      canonicalType: canonicalType ? typeRefToObject(canonicalType) : null,
       alignedType: alignedType ? typeRefToObject(alignedType) : null,
       canonicalFallbackAvailable: contract.CANONICAL_FALLBACK_AVAILABLE(),
-      alignedEligible: contract.ALIGNED_ELIGIBLE(),
+      alignedEligible,
+      opaque,
       routePolicy: flowEdgeRoutePolicyName(contract.ROUTE_POLICY()),
     },
   };

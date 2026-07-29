@@ -9,8 +9,10 @@ import { flowEdgeRoutePolicy } from './flowEdgeRoutePolicy.js';
  * ALIGNED_TYPE carries its fixed layout in TAB.FlatBufferTypeRef.
  */
 export class PLGFlowEdgeContract {
-    bb = null;
-    bb_pos = 0;
+    constructor() {
+        this.bb = null;
+        this.bb_pos = 0;
+    }
     __init(i, bb) {
         this.bb_pos = i;
         this.bb = bb;
@@ -23,6 +25,13 @@ export class PLGFlowEdgeContract {
         bb.setPosition(bb.position() + flatbuffers.SIZE_PREFIX_LENGTH);
         return (obj || new PLGFlowEdgeContract()).__init(bb.readInt32(bb.position()) + bb.position(), bb);
     }
+    /**
+     * Canonical SDS identity carried by the edge. NOT `required`: an edge may
+     * be opaque by design (see OPAQUE), and a signer must never be forced to
+     * invent an identity to satisfy the schema. A contract MUST carry exactly
+     * one of CANONICAL_TYPE or OPAQUE = true; a contract with neither, or with
+     * both, is invalid and MUST be rejected by the compiler that signs the flow.
+     */
     CANONICAL_TYPE(obj) {
         const offset = this.bb.__offset(this.bb_pos, 4);
         return offset ? (obj || new FlatBufferTypeRef()).__init(this.bb.__indirect(this.bb_pos + offset), this.bb) : null;
@@ -43,8 +52,21 @@ export class PLGFlowEdgeContract {
         const offset = this.bb.__offset(this.bb_pos, 12);
         return offset ? this.bb.readUint8(this.bb_pos + offset) : flowEdgeRoutePolicy.CANONICAL_ONLY;
     }
+    /**
+     * The edge carries bytes with no SDS identity BY DESIGN — an
+     * application-blind host-capability adapter (an HTTP body, a raw file
+     * chunk) or a timer TICK frame with no payload at all. This is a deliberate
+     * signed assertion of opacity, which is why it is an explicit flag rather
+     * than an absent CANONICAL_TYPE: a missing type must stay distinguishable
+     * from a declared-opaque one. An opaque edge is ineligible for the aligned
+     * route, so ALIGNED_ELIGIBLE MUST be false when OPAQUE is true.
+     */
+    OPAQUE() {
+        const offset = this.bb.__offset(this.bb_pos, 14);
+        return offset ? !!this.bb.readInt8(this.bb_pos + offset) : false;
+    }
     static startPLGFlowEdgeContract(builder) {
-        builder.startObject(5);
+        builder.startObject(6);
     }
     static addCanonicalType(builder, CANONICAL_TYPEOffset) {
         builder.addFieldOffset(0, CANONICAL_TYPEOffset, 0);
@@ -61,13 +83,15 @@ export class PLGFlowEdgeContract {
     static addRoutePolicy(builder, ROUTE_POLICY) {
         builder.addFieldInt8(4, ROUTE_POLICY, flowEdgeRoutePolicy.CANONICAL_ONLY);
     }
+    static addOpaque(builder, OPAQUE) {
+        builder.addFieldInt8(5, +OPAQUE, +false);
+    }
     static endPLGFlowEdgeContract(builder) {
         const offset = builder.endObject();
-        builder.requiredField(offset, 4); // CANONICAL_TYPE
         return offset;
     }
     unpack() {
-        return new PLGFlowEdgeContractT((this.CANONICAL_TYPE() !== null ? this.CANONICAL_TYPE().unpack() : null), (this.ALIGNED_TYPE() !== null ? this.ALIGNED_TYPE().unpack() : null), this.CANONICAL_FALLBACK_AVAILABLE(), this.ALIGNED_ELIGIBLE(), this.ROUTE_POLICY());
+        return new PLGFlowEdgeContractT((this.CANONICAL_TYPE() !== null ? this.CANONICAL_TYPE().unpack() : null), (this.ALIGNED_TYPE() !== null ? this.ALIGNED_TYPE().unpack() : null), this.CANONICAL_FALLBACK_AVAILABLE(), this.ALIGNED_ELIGIBLE(), this.ROUTE_POLICY(), this.OPAQUE());
     }
     unpackTo(_o) {
         _o.CANONICAL_TYPE = (this.CANONICAL_TYPE() !== null ? this.CANONICAL_TYPE().unpack() : null);
@@ -75,20 +99,17 @@ export class PLGFlowEdgeContract {
         _o.CANONICAL_FALLBACK_AVAILABLE = this.CANONICAL_FALLBACK_AVAILABLE();
         _o.ALIGNED_ELIGIBLE = this.ALIGNED_ELIGIBLE();
         _o.ROUTE_POLICY = this.ROUTE_POLICY();
+        _o.OPAQUE = this.OPAQUE();
     }
 }
 export class PLGFlowEdgeContractT {
-    CANONICAL_TYPE;
-    ALIGNED_TYPE;
-    CANONICAL_FALLBACK_AVAILABLE;
-    ALIGNED_ELIGIBLE;
-    ROUTE_POLICY;
-    constructor(CANONICAL_TYPE = null, ALIGNED_TYPE = null, CANONICAL_FALLBACK_AVAILABLE = true, ALIGNED_ELIGIBLE = false, ROUTE_POLICY = flowEdgeRoutePolicy.CANONICAL_ONLY) {
+    constructor(CANONICAL_TYPE = null, ALIGNED_TYPE = null, CANONICAL_FALLBACK_AVAILABLE = true, ALIGNED_ELIGIBLE = false, ROUTE_POLICY = flowEdgeRoutePolicy.CANONICAL_ONLY, OPAQUE = false) {
         this.CANONICAL_TYPE = CANONICAL_TYPE;
         this.ALIGNED_TYPE = ALIGNED_TYPE;
         this.CANONICAL_FALLBACK_AVAILABLE = CANONICAL_FALLBACK_AVAILABLE;
         this.ALIGNED_ELIGIBLE = ALIGNED_ELIGIBLE;
         this.ROUTE_POLICY = ROUTE_POLICY;
+        this.OPAQUE = OPAQUE;
     }
     pack(builder) {
         const CANONICAL_TYPE = (this.CANONICAL_TYPE !== null ? this.CANONICAL_TYPE.pack(builder) : 0);
@@ -99,6 +120,7 @@ export class PLGFlowEdgeContractT {
         PLGFlowEdgeContract.addCanonicalFallbackAvailable(builder, this.CANONICAL_FALLBACK_AVAILABLE);
         PLGFlowEdgeContract.addAlignedEligible(builder, this.ALIGNED_ELIGIBLE);
         PLGFlowEdgeContract.addRoutePolicy(builder, this.ROUTE_POLICY);
+        PLGFlowEdgeContract.addOpaque(builder, this.OPAQUE);
         return PLGFlowEdgeContract.endPLGFlowEdgeContract(builder);
     }
 }

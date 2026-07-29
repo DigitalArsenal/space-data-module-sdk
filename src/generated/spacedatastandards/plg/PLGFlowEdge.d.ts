@@ -35,7 +35,13 @@ export declare class PLGFlowEdge implements flatbuffers.IUnpackableObject<PLGFlo
     TO_PORT_ID(): string;
     TO_PORT_ID(optionalEncoding: flatbuffers.Encoding): string | Uint8Array;
     /**
-     * Exact identity/layout and compile-time representation policy.
+     * Exact identity/layout and compile-time representation policy. NOT
+     * `required`: marking a NEW field of an EXISTING table required makes the
+     * FlatBuffers verifier reject every $PLG buffer written before 1.0.13,
+     * which is a breaking change to a ratified standard. Presence is enforced
+     * where it belongs — the flow compiler MUST refuse to SIGN a flow whose
+     * edges lack a CONTRACT, and a verifier MUST reject a signed flow edge
+     * without one. Buffers predating 1.0.13 stay readable and stay unsigned.
      */
     CONTRACT(obj?: PLGFlowEdgeContract): PLGFlowEdgeContract | null;
     static startPLGFlowEdge(builder: flatbuffers.Builder): void;

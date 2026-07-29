@@ -31,6 +31,13 @@ static getSizePrefixedRootAsPLGFlowEdgeContract(bb:flatbuffers.ByteBuffer, obj?:
   return (obj || new PLGFlowEdgeContract()).__init(bb.readInt32(bb.position()) + bb.position(), bb);
 }
 
+/**
+ * Canonical SDS identity carried by the edge. NOT `required`: an edge may
+ * be opaque by design (see OPAQUE), and a signer must never be forced to
+ * invent an identity to satisfy the schema. A contract MUST carry exactly
+ * one of CANONICAL_TYPE or OPAQUE = true; a contract with neither, or with
+ * both, is invalid and MUST be rejected by the compiler that signs the flow.
+ */
 CANONICAL_TYPE(obj?:FlatBufferTypeRef):FlatBufferTypeRef|null {
   const offset = this.bb!.__offset(this.bb_pos, 4);
   return offset ? (obj || new FlatBufferTypeRef()).__init(this.bb!.__indirect(this.bb_pos + offset), this.bb!) : null;
@@ -56,8 +63,22 @@ ROUTE_POLICY():flowEdgeRoutePolicy {
   return offset ? this.bb!.readUint8(this.bb_pos + offset) : flowEdgeRoutePolicy.CANONICAL_ONLY;
 }
 
+/**
+ * The edge carries bytes with no SDS identity BY DESIGN — an
+ * application-blind host-capability adapter (an HTTP body, a raw file
+ * chunk) or a timer TICK frame with no payload at all. This is a deliberate
+ * signed assertion of opacity, which is why it is an explicit flag rather
+ * than an absent CANONICAL_TYPE: a missing type must stay distinguishable
+ * from a declared-opaque one. An opaque edge is ineligible for the aligned
+ * route, so ALIGNED_ELIGIBLE MUST be false when OPAQUE is true.
+ */
+OPAQUE():boolean {
+  const offset = this.bb!.__offset(this.bb_pos, 14);
+  return offset ? !!this.bb!.readInt8(this.bb_pos + offset) : false;
+}
+
 static startPLGFlowEdgeContract(builder:flatbuffers.Builder) {
-  builder.startObject(5);
+  builder.startObject(6);
 }
 
 static addCanonicalType(builder:flatbuffers.Builder, CANONICAL_TYPEOffset:flatbuffers.Offset) {
@@ -80,9 +101,12 @@ static addRoutePolicy(builder:flatbuffers.Builder, ROUTE_POLICY:flowEdgeRoutePol
   builder.addFieldInt8(4, ROUTE_POLICY, flowEdgeRoutePolicy.CANONICAL_ONLY);
 }
 
+static addOpaque(builder:flatbuffers.Builder, OPAQUE:boolean) {
+  builder.addFieldInt8(5, +OPAQUE, +false);
+}
+
 static endPLGFlowEdgeContract(builder:flatbuffers.Builder):flatbuffers.Offset {
   const offset = builder.endObject();
-  builder.requiredField(offset, 4) // CANONICAL_TYPE
   return offset;
 }
 
@@ -93,7 +117,8 @@ unpack(): PLGFlowEdgeContractT {
     (this.ALIGNED_TYPE() !== null ? this.ALIGNED_TYPE()!.unpack() : null),
     this.CANONICAL_FALLBACK_AVAILABLE(),
     this.ALIGNED_ELIGIBLE(),
-    this.ROUTE_POLICY()
+    this.ROUTE_POLICY(),
+    this.OPAQUE()
   );
 }
 
@@ -104,6 +129,7 @@ unpackTo(_o: PLGFlowEdgeContractT): void {
   _o.CANONICAL_FALLBACK_AVAILABLE = this.CANONICAL_FALLBACK_AVAILABLE();
   _o.ALIGNED_ELIGIBLE = this.ALIGNED_ELIGIBLE();
   _o.ROUTE_POLICY = this.ROUTE_POLICY();
+  _o.OPAQUE = this.OPAQUE();
 }
 }
 
@@ -113,7 +139,8 @@ constructor(
   public ALIGNED_TYPE: FlatBufferTypeRefT|null = null,
   public CANONICAL_FALLBACK_AVAILABLE: boolean = true,
   public ALIGNED_ELIGIBLE: boolean = false,
-  public ROUTE_POLICY: flowEdgeRoutePolicy = flowEdgeRoutePolicy.CANONICAL_ONLY
+  public ROUTE_POLICY: flowEdgeRoutePolicy = flowEdgeRoutePolicy.CANONICAL_ONLY,
+  public OPAQUE: boolean = false
 ){}
 
 
@@ -127,6 +154,7 @@ pack(builder:flatbuffers.Builder): flatbuffers.Offset {
   PLGFlowEdgeContract.addCanonicalFallbackAvailable(builder, this.CANONICAL_FALLBACK_AVAILABLE);
   PLGFlowEdgeContract.addAlignedEligible(builder, this.ALIGNED_ELIGIBLE);
   PLGFlowEdgeContract.addRoutePolicy(builder, this.ROUTE_POLICY);
+  PLGFlowEdgeContract.addOpaque(builder, this.OPAQUE);
 
   return PLGFlowEdgeContract.endPLGFlowEdgeContract(builder);
 }
