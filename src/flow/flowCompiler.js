@@ -97,6 +97,7 @@ const FLOW_THREAD_MODEL = Object.freeze({
 const HISTORICAL_PTHREAD_THREAD_MODEL = "emscripten-pthreads";
 
 const RUNTIME_ABI_EXPORTS = [
+  "get_descriptor_abi_generation",
   "get_node_descriptor_count",
   "get_edge_descriptor_count",
   "get_edge_descriptors",

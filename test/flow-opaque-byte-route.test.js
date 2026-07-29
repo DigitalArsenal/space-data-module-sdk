@@ -304,3 +304,21 @@ test("an unspecified frame alignment means 1 in EVERY host encoding", async () =
   );
   assert.equal(results[0].rc, results[1].rc);
 });
+
+test("a host refuses an artifact whose descriptor ABI generation it does not share", async () => {
+  // Growing FlowEdge from 64 to 68 bytes is invisible from the outside: an
+  // older artifact's edge table is the same pointer, the same count, and every
+  // field past the first edge is read at the wrong offset. The artifact states
+  // its generation and the host refuses a mismatch, because a binary interface
+  // whose only failure mode is "believable garbage" is not an interface.
+  const host = await newHost();
+  assert.equal(host.descriptorAbiGeneration, 2);
+  assert.deepEqual(host.getEdgeDescriptor(0).opaque, 1);
+
+  host.descriptorAbiGeneration = 1; // what a pre-OPAQUE artifact reports
+  assert.throws(
+    () => host.getEdgeDescriptor(0),
+    /descriptor ABI generation 1 does not match this host's 2/,
+    "a stride mismatch must fail loudly, never silently misread",
+  );
+});

@@ -947,6 +947,19 @@ static void flow_release_external_frame_id(const QueuedFrame &frame) {
 // space_data_module_runtime_* exports
 // ---------------------------------------------------------------------------
 
+// The descriptor-table ABI GENERATION. A host reads g_edges as a packed array
+// at a fixed stride, and nothing in the artifact used to say which stride —
+// so a host that had moved on read every edge past the first at the wrong
+// offset and silently believed the garbage. That is the one failure mode a
+// binary interface must never have. Generation 2 is the 68-byte FlowEdge
+// carrying OPAQUE; artifacts predating this export do not export it at all,
+// which is itself the answer (generation 1) and is why the host must treat a
+// MISSING export as a mismatch rather than as permission.
+#define FLOW_DESCRIPTOR_ABI_GENERATION 2u
+
+FLOW_EXPORT uint32_t space_data_module_runtime_get_descriptor_abi_generation(void) {
+  return FLOW_DESCRIPTOR_ABI_GENERATION;
+}
 FLOW_EXPORT uint32_t space_data_module_runtime_get_node_descriptor_count(void) {
   return FLOW_NODE_COUNT;
 }

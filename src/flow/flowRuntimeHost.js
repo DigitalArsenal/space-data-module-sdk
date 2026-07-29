@@ -36,6 +36,12 @@ const DEPENDENCY_DESCRIPTOR_SIZE = 72;
 // other strides so the browser host and the compiled table can never drift
 // apart silently — a mismatch here reads every edge at the wrong offset.
 const EDGE_DESCRIPTOR_SIZE = 68;
+// ...and the stride alone is not enough, because an artifact compiled before
+// the flag exists is 64 bytes and looks identical from the outside. The
+// artifact states its descriptor generation; a host that disagrees REFUSES
+// rather than reading garbage it cannot detect. Artifacts older than the
+// export report nothing, which is generation 1.
+const DESCRIPTOR_ABI_GENERATION = 2;
 const NODE_STATE_SIZE = 32;
 const INGRESS_STATE_SIZE = 24;
 const ROUTING_STATE_SIZE = 32;
@@ -143,6 +149,16 @@ function typeRefMatchesDescriptor(typeRef = {}, descriptor, wireFormat) {
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
+
+function assertDescriptorAbiGeneration(generation) {
+  if (generation === DESCRIPTOR_ABI_GENERATION) return;
+  throw new Error(
+    `flow artifact descriptor ABI generation ${generation} does not match this host's ` +
+      `${DESCRIPTOR_ABI_GENERATION}. Its edge descriptors are a different size, so reading ` +
+      "them here would return silently wrong types, ports and layouts. Recompile the flow " +
+      "with this SDK (v1 carries no back-compat shim for descriptor layouts).",
+  );
+}
 
 function exportFn(exports, name) {
   const fn = exports[name] ?? exports[`_${name}`];
@@ -369,6 +385,8 @@ export async function createFlowRuntimeHost(options = {}) {
   const host = {
     instance,
     memory,
+    descriptorAbiGeneration:
+      exportFn(exports, "space_data_module_runtime_get_descriptor_abi_generation")?.() >>> 0 || 1,
     nodeCount: call("get_node_descriptor_count") >>> 0,
     typeDescriptorCount: call("get_edge_descriptor_count") >>> 0,
     edgeCount: call("get_route_edge_descriptor_count") >>> 0,
@@ -431,6 +449,7 @@ export async function createFlowRuntimeHost(options = {}) {
       ) {
         throw new RangeError(`edge descriptor index ${index} is out of range`);
       }
+      assertDescriptorAbiGeneration(this.descriptorAbiGeneration);
       const base = call("get_edge_descriptors") >>> 0;
       if (!base) throw new Error("no edge descriptors");
       const ptr = base + index * EDGE_DESCRIPTOR_SIZE;
