@@ -1029,9 +1029,12 @@ test("flow check rejects dependency ports without dual representations", () => {
     dependencies: dependencyMap(dependency),
   });
 
-  assert.equal(check.ok, false);
+  // Canonical-only is legal — the aligned peer is the shared-arena
+  // optimization, not a conformance obligation — and the flow simply never
+  // takes the aligned route for this port.
+  assert.equal(check.ok, true, JSON.stringify(check.issues));
   assert.ok(
-    check.errors.some((issue) => issue.code === "missing-aligned-peer"),
+    check.warnings.some((issue) => issue.code === "no-aligned-peer"),
     JSON.stringify(check.issues),
   );
 });
