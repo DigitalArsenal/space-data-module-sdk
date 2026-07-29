@@ -88,6 +88,9 @@ test("browser flow host creates isolated per-node instances and delivers signed 
   const manifest = exactManifest();
   const childHostcalls = [];
   const compilation = await compileModuleFromSource({
+    // Explicit: browser targeting no longer implies a toolchain (wasi-sequential
+    // model). This fixture wants the legacy Emscripten path.
+    threadModel: "single-thread",
     manifest,
     language: "c++",
     catalog: catalog(),

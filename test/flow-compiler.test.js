@@ -2072,6 +2072,8 @@ test("flow compile binds exact edge contracts into the emitted runtime WASM", as
   };
   const compilation = await compileModuleFromSource({
     manifest: chainManifest,
+    // Explicit since browser targeting no longer implies a toolchain.
+    threadModel: "single-thread",
     sourceCode: `
 #include <stdint.h>
 #include "space_data_module_invoke.h"
@@ -2389,6 +2391,8 @@ test("yielded linked work resumes fairly so downstream drains between batches", 
   };
   const compilation = await compileModuleFromSource({
     manifest,
+    // Explicit since browser targeting no longer implies a toolchain.
+    threadModel: "single-thread",
     sourceCode: `
 #include <stdint.h>
 #include "space_data_module_invoke.h"

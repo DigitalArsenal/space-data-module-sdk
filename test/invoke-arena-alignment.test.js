@@ -447,6 +447,9 @@ int probe_alignment(void) {
 
 test("compiled module sees aligned input views and returns aligned response arenas", async () => {
   const compilation = await compileModuleFromSource({
+    // Explicit: browser targeting no longer implies a toolchain (wasi-sequential
+    // model). This fixture wants the legacy Emscripten path.
+    threadModel: "single-thread",
     manifest: createManifest("probe_alignment", ["state"], ["state"]),
     sourceCode: ALIGNMENT_PROBE_SOURCE,
     language: "c",

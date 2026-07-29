@@ -1020,6 +1020,9 @@ test("source compilation can emit an imported shared-memory browser artifact", a
     manifest,
     sourceCode: "int propagate(void) { return 55; }\n",
     language: "c",
+    // Explicit: this test is about the LEGACY Emscripten shared-memory browser
+    // artifact. Browser targeting no longer implies a toolchain.
+    threadModel: "single-thread",
     importedMemory: true,
     sharedMemory: true,
     emscriptenRoot,

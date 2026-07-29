@@ -353,6 +353,9 @@ test("explicit canonical copy forwarding does not require a live source lease", 
 
 test("module-to-module hop forwards producer bytes into the consumer without decode/encode", async () => {
   const producerCompilation = await compileModuleFromSource({
+    // Explicit: browser targeting no longer implies a toolchain (wasi-sequential
+    // model). This fixture wants the legacy Emscripten path.
+    threadModel: "single-thread",
     manifest: createManifest(
       "com.digitalarsenal.examples.forward-producer",
       "produce",
@@ -365,6 +368,9 @@ test("module-to-module hop forwards producer bytes into the consumer without dec
     language: "c",
   });
   const consumerCompilation = await compileModuleFromSource({
+    // Explicit: browser targeting no longer implies a toolchain (wasi-sequential
+    // model). This fixture wants the legacy Emscripten path.
+    threadModel: "single-thread",
     manifest: createManifest(
       "com.digitalarsenal.examples.forward-consumer",
       "consume",

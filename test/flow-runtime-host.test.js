@@ -96,6 +96,9 @@ async function buildNeutralRoutingFixture() {
     abiVersion: 1,
   };
   const compilation = await compileModuleFromSource({
+    // Explicit: browser targeting no longer implies a toolchain (wasi-sequential
+    // model). This fixture wants the legacy Emscripten path.
+    threadModel: "single-thread",
     manifest,
     language: "c++",
     sourceCode: `
