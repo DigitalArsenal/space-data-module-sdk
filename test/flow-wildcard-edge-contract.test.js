@@ -16,7 +16,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { __testables } from "../src/flow/flowCompiler.js";
+import {
+  __testables,
+  checkFlowProgram,
+  generateFlowTables,
+} from "../src/flow/flowCompiler.js";
+import { normalizeManifestForSdnFlow } from "../src/flow/normalize.js";
 
 const { resolveEdgeTypeContract } = __testables;
 
@@ -90,5 +95,169 @@ test("a port mixing a wildcard WITH a concrete identity takes the strict path", 
   assert.ok(
     !contract || contract.errorCode,
     "a mixed wildcard+concrete producer must not silently satisfy a different concrete consumer",
+  );
+});
+
+// --- Trigger bindings: the SAME regression, one surface further in ----------
+//
+// `flow check` passed while `flow compile` still threw "Validated trigger
+// binding 0 (...) must resolve to exactly one paired canonical and aligned-binary
+// SDS type." for the celestrak family: a timer TICK carries no payload, so every
+// timer-driven node's target port is wildcard-only and yielded zero concrete
+// types on both wire formats. An untyped trigger frame is emitted as untyped
+// rather than being refused or given an invented identity.
+
+const PLUGIN_ID = "com.test.wildcard-trigger";
+
+function typedTypeSet(setId) {
+  const identity = {
+    schemaName: "OMM.fbs",
+    fileIdentifier: "$OMM",
+    schemaVersion: "1.0.0",
+    rootTypeName: "OMM",
+  };
+  return {
+    setId,
+    allowedTypes: [
+      { ...identity, wireFormat: "flatbuffer" },
+      { ...identity, wireFormat: "aligned-binary", byteLength: 64, requiredAlignment: 8 },
+    ],
+  };
+}
+
+function wildcardTypeSet(setId) {
+  return {
+    setId,
+    allowedTypes: [{ wireFormat: "flatbuffer", acceptsAnyFlatbuffer: true }],
+  };
+}
+
+function triggerFixture({ tickTyped }) {
+  const manifest = {
+    pluginId: PLUGIN_ID,
+    name: PLUGIN_ID,
+    version: "1.0.0",
+    pluginFamily: "data_source",
+    // Host-boundary-blind, so the wildcard tick port is PERMITTED by the
+    // compliance boundary (see test/wildcard-port-boundary.test.js) and the
+    // compiler is the only thing under test here.
+    capabilities: ["http"],
+    externalInterfaces: [
+      {
+        interfaceId: "host-http",
+        kind: "host-service",
+        direction: "bidirectional",
+        capability: "http",
+        resource: "https://*",
+      },
+    ],
+    invokeSurfaces: ["direct"],
+    runtimeTargets: ["wasmedge"],
+    methods: [
+      {
+        methodId: "emit",
+        displayName: "Emit",
+        inputPorts: [
+          {
+            portId: "tick",
+            required: true,
+            minStreams: 1,
+            maxStreams: 1,
+            acceptedTypeSets: [
+              tickTyped ? typedTypeSet("tick-omm") : wildcardTypeSet("tick-any"),
+            ],
+          },
+        ],
+        outputPorts: [
+          {
+            portId: "out",
+            required: false,
+            minStreams: 0,
+            maxStreams: 1,
+            acceptedTypeSets: [typedTypeSet("out-omm")],
+          },
+        ],
+        maxBatch: 1,
+        drainPolicy: "single-shot",
+      },
+    ],
+    schemasUsed: [],
+    abiVersion: 1,
+  };
+  const dependencies = new Map([
+    [
+      PLUGIN_ID,
+      {
+        pluginId: PLUGIN_ID,
+        manifest,
+        normalized: normalizeManifestForSdnFlow(manifest),
+        guestLink: {
+          objectBytes: new Uint8Array([0]),
+          metadata: {
+            symbolPrefix: "sdm_guest_test_",
+            methodSymbols: { emit: "sdm_guest_test_emit" },
+          },
+        },
+        wasmPath: "/nonexistent/module.wasm",
+      },
+    ],
+  ]);
+  const flow = {
+    programId: "test.trigger-flow",
+    name: "Trigger",
+    version: "0.1.0",
+    nodes: [
+      { nodeId: "src", pluginId: PLUGIN_ID, methodId: "emit", kind: "source" },
+      { nodeId: "sink", pluginId: "test.sink", methodId: "collect", kind: "sink" },
+    ],
+    edges: [
+      { fromNodeId: "src", fromPortId: "out", toNodeId: "sink", toPortId: "result" },
+    ],
+    triggers: [{ triggerId: "tick", kind: "timer", defaultIntervalMs: 1000 }],
+    triggerBindings: [
+      { triggerId: "tick", targetNodeId: "src", targetPortId: "tick" },
+    ],
+    requiredPlugins: [PLUGIN_ID],
+  };
+  return { flow, dependencies };
+}
+
+test("a trigger bound to a wildcard-only port compiles as an untyped frame", () => {
+  const { flow, dependencies } = triggerFixture({ tickTyped: false });
+  const check = checkFlowProgram({ flow, dependencies });
+  assert.equal(check.ok, true, JSON.stringify(check.issues ?? ""));
+
+  const { source } = generateFlowTables({ flow, check, dependencies });
+
+  // The trigger edge is the last entry of g_edges. It must carry no invented
+  // identity and must NOT be advertised as aligned-shared-arena eligible.
+  const triggerEdgeLine = source
+    .split("\n")
+    .find((line) => line.includes('"@trigger:tick:0"'));
+  assert.ok(triggerEdgeLine, "trigger sentinel edge must be emitted");
+  assert.ok(
+    triggerEdgeLine.includes("nullptr, nullptr, nullptr, nullptr, 0u, nullptr"),
+    `untyped trigger must emit null identity fields: ${triggerEdgeLine}`,
+  );
+  assert.ok(
+    /nullptr,\s*1u,\s*0u,\s*0u,\s*0u,\s*0u,\s*0u\s*\}/.test(triggerEdgeLine),
+    `untyped trigger must not claim an aligned layout: ${triggerEdgeLine}`,
+  );
+});
+
+test("a trigger bound to a TYPED port still binds that exact identity", () => {
+  const { flow, dependencies } = triggerFixture({ tickTyped: true });
+  const check = checkFlowProgram({ flow, dependencies });
+  assert.equal(check.ok, true, JSON.stringify(check.issues ?? ""));
+
+  const { source } = generateFlowTables({ flow, check, dependencies });
+  const triggerEdgeLine = source
+    .split("\n")
+    .find((line) => line.includes('"@trigger:tick:0"'));
+  assert.ok(triggerEdgeLine.includes('"OMM.fbs"'), triggerEdgeLine);
+  assert.ok(triggerEdgeLine.includes('"$OMM"'), triggerEdgeLine);
+  assert.ok(
+    triggerEdgeLine.includes("1u, 1u,"),
+    `a typed trigger must stay aligned-eligible: ${triggerEdgeLine}`,
   );
 });

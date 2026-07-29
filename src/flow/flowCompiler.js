@@ -2021,21 +2021,35 @@ export function generateFlowTables({ flow, check, dependencies }) {
     const targetTypes = portAcceptedTypes(targetPort);
     const canonicalTypes = concreteTypesByWireFormat(targetTypes, "flatbuffer");
     const alignedTypes = concreteTypesByWireFormat(targetTypes, "aligned-binary");
-    if (canonicalTypes.length !== 1 || alignedTypes.length !== 1) {
+    // WILDCARD TRIGGER TARGET — the same 4810b01 regression as the edge contract
+    // above, one surface further in. `concreteTypesByWireFormat()` filters
+    // wildcards out, so a trigger aimed at an application-blind port
+    // (celestrak-request `gp.tick`, and every timer-driven hostcap node) yields
+    // ZERO canonical and ZERO aligned types and threw here — `flow check` passed
+    // while `flow compile` could not emit the family. An untyped trigger frame
+    // carries no SDS identity and no aligned layout, exactly like the untyped
+    // edges resolved in resolveEdgeTypeContract; it is emitted as such rather
+    // than inventing one. A target with concrete types still takes the strict
+    // paired path below.
+    const wildcardTarget =
+      canonicalTypes.length === 0 &&
+      alignedTypes.length === 0 &&
+      targetTypes.some((type) => type?.acceptsAnyFlatbuffer === true);
+    if (!wildcardTarget && (canonicalTypes.length !== 1 || alignedTypes.length !== 1)) {
       throw new Error(
         `Validated trigger binding ${index} (${binding.targetNodeId}.${binding.targetPortId}) ` +
           "must resolve to exactly one paired canonical and aligned-binary SDS type.",
       );
     }
-    const canonical = canonicalTypes[0];
-    const aligned = alignedTypes[0];
-    const byteLength = edgeLayoutScalar(aligned.byteLength, "trigger aligned byteLength");
+    const canonical = wildcardTarget ? null : canonicalTypes[0];
+    const aligned = wildcardTarget ? null : alignedTypes[0];
+    const byteLength = edgeLayoutScalar(aligned?.byteLength, "trigger aligned byteLength");
     const fixedStringLength = edgeLayoutScalar(
-      aligned.fixedStringLength,
+      aligned?.fixedStringLength,
       "trigger aligned fixedStringLength",
     );
     const requiredAlignment = edgeLayoutScalar(
-      aligned.requiredAlignment,
+      aligned?.requiredAlignment,
       "trigger aligned requiredAlignment",
     );
     const sentinelBase = `@trigger:${binding.triggerId}:${index}`;
@@ -2050,6 +2064,7 @@ export function generateFlowTables({ flow, check, dependencies }) {
       binding,
       canonical,
       sentinelFromPort,
+      alignedEligible: aligned !== null,
       alignedLayoutFields:
         (byteLength.present ? 1 : 0) |
         (fixedStringLength.present ? 2 : 0) |
@@ -2057,7 +2072,7 @@ export function generateFlowTables({ flow, check, dependencies }) {
       byteLength: byteLength.value,
       fixedStringLength: fixedStringLength.value,
       requiredAlignment: requiredAlignment.value,
-      schemaHash: schemaHashBytes(canonical.schemaHash),
+      schemaHash: schemaHashBytes(canonical?.schemaHash),
     };
   });
 
@@ -2208,11 +2223,11 @@ export function generateFlowTables({ flow, check, dependencies }) {
       `  { ${nodeIndex.get(binding.targetNodeId)}u, ` +
         `${cString(descriptor.sentinelFromPort)}, ` +
         `${nodeIndex.get(binding.targetNodeId)}u, ${cString(binding.targetPortId)}, ` +
-        `${cNullableString(canonical.schemaName)}, ${cNullableString(canonical.fileIdentifier)}, ` +
-        `${cNullableString(canonical.schemaVersion)}, ` +
+        `${cNullableString(canonical?.schemaName)}, ${cNullableString(canonical?.fileIdentifier)}, ` +
+        `${cNullableString(canonical?.schemaVersion)}, ` +
         `${descriptor.schemaHash.length > 0 ? `kTriggerBinding${index}SchemaHash` : "nullptr"}, ` +
-        `${descriptor.schemaHash.length}u, ${cNullableString(canonical.rootTypeName)}, ` +
-        `1u, 1u, ${descriptor.alignedLayoutFields}u, ${descriptor.byteLength}u, ` +
+        `${descriptor.schemaHash.length}u, ${cNullableString(canonical?.rootTypeName)}, ` +
+        `1u, ${descriptor.alignedEligible ? 1 : 0}u, ${descriptor.alignedLayoutFields}u, ${descriptor.byteLength}u, ` +
         `${descriptor.fixedStringLength}u, ${descriptor.requiredAlignment}u },`,
     );
   }
