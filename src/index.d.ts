@@ -12,6 +12,7 @@ export type ProtocolRoleName = "handle" | "dial" | "both";
 export interface PayloadTypeRef {
   schemaName?: string;
   fileIdentifier?: string;
+  schemaVersion?: string;
   schemaHash?: string | number[] | Uint8Array;
   acceptsAnyFlatbuffer?: boolean;
   wireFormat?: PayloadWireFormat;
@@ -38,6 +39,16 @@ export function payloadTypeRefsMatch(
   actualTypeRef?: PayloadTypeRef | null,
 ): boolean;
 
+export function payloadSchemaIdentitiesEqual(
+  leftTypeRef?: PayloadTypeRef | null,
+  rightTypeRef?: PayloadTypeRef | null,
+): boolean;
+
+export function alignedPayloadLayoutsCompatible(
+  leftTypeRef?: PayloadTypeRef | null,
+  rightTypeRef?: PayloadTypeRef | null,
+): boolean;
+
 export function selectPreferredPayloadTypeRef(
   port?: { acceptedTypeSets?: Array<{ allowedTypes?: PayloadTypeRef[] }> } | null,
   options?: { preferredWireFormat?: PayloadWireFormat | string | null },
@@ -48,6 +59,7 @@ export type AllowedType = PayloadTypeRef;
 export interface AcceptedTypeSet {
   setId: string;
   allowedTypes: PayloadTypeRef[];
+  allowedWireFormats?: PayloadWireFormat[];
 }
 
 export interface PortManifest {
@@ -114,6 +126,39 @@ export interface BuildArtifact {
   entrySymbol?: string | null;
 }
 
+export interface PluginFlowNode {
+  nodeId: string;
+  pluginId: string;
+  methodId?: string | null;
+  kind?: string | null;
+  dispatchModel?: string | null;
+  config?: Uint8Array | number[];
+  uiX?: number;
+  uiY?: number;
+}
+
+export interface PluginFlowEdge {
+  edgeId?: string | null;
+  fromNodeId: string;
+  fromPortId: string;
+  toNodeId: string;
+  toPortId: string;
+}
+
+export interface PluginFlowTrigger {
+  triggerId: string;
+  kind?: string | null;
+  source?: string | null;
+  defaultIntervalMs?: number | bigint;
+  httpPath?: string | null;
+}
+
+export interface PluginFlowTriggerBinding {
+  triggerId: string;
+  targetNodeId: string;
+  targetPortId: string;
+}
+
 export interface PluginManifest {
   pluginId: string;
   name: string;
@@ -128,6 +173,10 @@ export interface PluginManifest {
   protocols?: ProtocolSpec[];
   schemasUsed?: PayloadTypeRef[];
   buildArtifacts?: BuildArtifact[];
+  flowNodes?: PluginFlowNode[];
+  flowEdges?: PluginFlowEdge[];
+  flowTriggers?: PluginFlowTrigger[];
+  flowTriggerBindings?: PluginFlowTriggerBinding[];
   abiVersion?: number;
 }
 
@@ -149,6 +198,30 @@ export function writeEmbeddedManifestArtifacts(options: {
 
 // --- Invoke ---
 
+export interface InvokeArenaTransferToken {}
+
+export interface InvokeArenaLease {
+  readonly arena: Uint8Array;
+  readonly generation: number;
+  readonly closed: boolean;
+  advance(
+    nextArena?: Uint8Array | ArrayBuffer | ArrayBufferView,
+  ): number;
+  close(): void;
+  createTransferToken(
+    frame: InvokeFrame,
+    options?: {
+      ownership?: number | string;
+      mutability?: number | string;
+    },
+  ): InvokeArenaTransferToken;
+}
+
+export function createInvokeArenaLease(
+  arena: Uint8Array | ArrayBuffer | ArrayBufferView,
+  options?: { generation?: number },
+): InvokeArenaLease;
+
 export interface InvokeFrame {
   portId?: string | null;
   typeRef?: PayloadTypeRef | null;
@@ -156,6 +229,8 @@ export interface InvokeFrame {
   offset?: number;
   size?: number;
   ownership?: number | string;
+  arenaLease?: InvokeArenaLease;
+  arenaGeneration?: number;
   generation?: number;
   mutability?: number | string;
   frameId?: bigint | number | string;
@@ -193,15 +268,18 @@ export interface PluginInvokeResponseEnvelope {
 export interface DecodedPluginInvokeRequestEnvelope
   extends PluginInvokeRequestEnvelope {
   envelope: "PIV";
+  arenaLease: InvokeArenaLease;
 }
 
 export interface DecodedPluginInvokeResponseEnvelope
   extends PluginInvokeResponseEnvelope {
   envelope: "PIV";
+  arenaLease: InvokeArenaLease;
 }
 
 export interface DecodePluginInvokeEnvelopeOptions {
   externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
+  arenaLease?: InvokeArenaLease;
 }
 
 export function encodePluginInvokeRequest(
@@ -240,7 +318,10 @@ export function assertAlignedInvokeBuffer(
  */
 export function forwardOutputFrameAsInput(
   outputFrame: InvokeFrame,
-  overrides?: Partial<InvokeFrame>,
+  overrides?: Partial<InvokeFrame> & {
+    copyCanonical?: boolean;
+    arenaTransfer?: InvokeArenaTransferToken;
+  },
 ): InvokeFrame;
 export function normalizeInvokeSurfaceName(
   value: InvokeSurface | number | string | null | undefined,
@@ -896,6 +977,7 @@ export interface GuestLinkArtifact {
   symbolPrefix: string;
   methodSymbols: Record<string, string>;
   threadModel: ModuleThreadModelName;
+  capabilities: string[];
   objectBytes: Uint8Array;
 }
 
@@ -946,6 +1028,9 @@ export function compileModuleFromSource(options: {
   maximumMemoryBytes?: number;
   emscriptenRoot?: string;
   allowUndefinedImports?: boolean;
+  guestLinkCapabilities?: string[];
+  catalog?: StandardsEntry[];
+  standardsRoot?: string;
 }): Promise<CompilationResult>;
 
 export function cleanupCompilation(
@@ -1068,6 +1153,9 @@ export interface StandardsEntry {
   hash: string | null;
   version: string | null;
   files: string[];
+  rootTypeName?: string | null;
+  idl?: string;
+  source?: string;
 }
 
 export function loadStandardsCatalog(options?: {

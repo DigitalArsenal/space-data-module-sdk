@@ -5,6 +5,7 @@ export * from "./licensing/index.js";
 export * from "./bundle/index.js";
 export * from "./capabilities.js";
 export * from "./deployment/index.js";
+export * from "./app/index.js";
 export * from "./invoke/index.js";
 export * from "./runtime/index.js";
 export * from "./runtime-host/index.js";

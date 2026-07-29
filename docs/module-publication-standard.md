@@ -148,11 +148,12 @@ extension fields:
 - `byteLength`
 - `requiredAlignment`
 
-Every aligned-binary declaration must be paired with the regular
-`wireFormat: "flatbuffer"` type for the same schema and file identifier in the
-same accepted type set. Publication protection applies to the artifact as a
-whole; aligned-binary is an invoke/payload optimization layered inside the
-manifest contract.
+Every module input and output declaration must include both the aligned-binary
+type and the regular `wireFormat: "flatbuffer"` type for the same schema and
+file identifier in the same accepted type set. Publication protection applies
+to the artifact as a whole; aligned-binary is an invoke/payload optimization
+layered inside the manifest contract, while canonical FlatBuffers remain the
+durable and portable representation.
 
 ## Canonical Descriptor
 

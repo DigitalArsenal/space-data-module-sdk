@@ -8,6 +8,11 @@ unchanged in:
 
 ## Canonical Build Rule
 
+For a published isomorphic module or composed flow, "same artifact" means the
+exact same signed WASM bytes and content hash. JavaScript/browser and WasmEdge
+hosts may implement their generic adapters differently, but neither may replace
+the guest binary or move a flow node into host-language code.
+
 Declare:
 
 ```json
@@ -38,10 +43,28 @@ toolchain (`clang --target=wasm32-wasip1-threads -pthread`), **not** Emscripten
 WasmEdge). It **enforces** the wasi-threads link flags and **validates the
 emitted `.wasm`** — the artifact must import `wasi.thread-spawn`, export
 `wasi_thread_start`, be a shared-memory/atomics wasm, and carry no Emscripten
-worker hooks, or the compile is rejected. That guardrail is documented in
+worker hooks, or the compile is rejected. An isomorphic threaded flow uses that
+same artifact in the browser harness, where the generic host maps
+`wasi.thread-spawn` to workers over `SharedArrayBuffer`. A browser that lacks
+cross-origin isolation fails capability negotiation; it does not receive a
+different fallback binary. That guardrail is documented in
 [`docs/isomorphic-pthreads.md`](./isomorphic-pthreads.md). This present document
-covers the portable `single-thread` loading profile; read the pthreads doc
-before shipping a threaded WasmEdge artifact.
+covers the shared loading contract; read the pthreads doc before shipping a
+threaded artifact.
+
+## Flow-Node Ownership
+
+The host loads and connects signed artifacts; executable behavior remains in
+WASM nodes. FlatSQL is a pluggable WASM node, not a JavaScript database or a
+WasmEdge/Go service. Timer and cron policy are WASM-node behavior; hosts expose
+only clocks and generic wakeups. Provider, query, scheduling, routing, and
+application semantics must therefore be identical in both runtimes.
+
+Every module input and output port declares both canonical FlatBuffer and
+aligned-binary representations for the same SDS identity. `PIV` and
+`TAB.WIRE_FORMAT` select per frame. A host may route a compatible aligned frame
+within a validated shared arena; cross-runtime, network, persistence, or
+incompatible-memory edges use the canonical FlatBuffer representation.
 
 ## Canonical Module Repo Layout
 
@@ -104,8 +127,12 @@ The browser edge shims map host capabilities onto browser-native surfaces:
   adapters
 - `ipfs`, `protocol_handle`, `protocol_dial`: async browser-host adapters that
   can be supplied by the embedding runtime
-- `clock`, `random`, `timers`, `schedule_cron`, `context_*`, `crypto_*`:
+- `clock`, `random`, generic wakeups, `context_*`, and `crypto_*`:
   browser-native implementations in the browser host adapter
+
+Any existing `schedule_cron` host capability is a transitional compatibility
+surface. New isomorphic flows place cron parsing, timezone, retry, and misfire
+policy in a timer WASM node and request only a generic wakeup.
 
 These are host shims, not raw WasmEdge socket imports. When an embedding host
 needs to override the reference behavior, pass `capabilityAdapters` keyed by
@@ -164,15 +191,16 @@ Both demos load the same generated artifact:
 
 ## Streaming Into The Same Artifact
 
-If that shared artifact owns resident state, such as an SDN module that imports
-`flatsql` internally, stream raw FlatBuffer frames into the live instance with
-`createModuleFlatBufferStreamPump(...)`.
+If that shared artifact owns resident state, connect a signed FlatSQL WASM node
+or another stateful node in the graph and stream raw FlatBuffer frames into the
+live instance with `createModuleFlatBufferStreamPump(...)`.
 
 Use:
 
 - a persistent `direct` browser harness for browser-resident state
 - a persistent runtime-backed harness on the server/WasmEdge side
 - chunked size-prefixed FlatBuffer stream input
+- paired canonical and aligned representations on every port
 - many small invokes, not one monolithic invoke envelope
 
 That path is documented in

@@ -10,9 +10,10 @@ is intended to be used.
 - `examples/isomorphic-loader` must demonstrate loading the exact same compiled
   artifact in both the browser and WasmEdge.
 - `examples/single-file-bundle` is the reference for REC+MBL single-file delivery.
-- `examples/flatsql-store-local` and related examples should reflect the
-  canonical binary FlatBuffer ingest path when they demonstrate streaming or
-  storage.
+- `examples/flatsql-store-local` is a legacy migration example. The canonical
+  replacement example must load FlatSQL as a signed WASM node, feed canonical
+  binary FlatBuffer streams, exercise aligned routing, and run the exact same
+  artifact under browser and WasmEdge harnesses.
 - If an example emits generated artifacts, keep their location aligned with the
   canonical module repo layout.
 

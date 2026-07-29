@@ -3,6 +3,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 
 import { sharedModuleCatalog } from "./sharedCatalog.js";
+import { normalizePayloadSchemaHash } from "../manifest/typeRefs.js";
 
 const require = createRequire(import.meta.url);
 const standardsCatalogPromises = new Map();
@@ -68,26 +69,12 @@ function resolveStandardsManifestPath(options = {}) {
   return path.join(path.dirname(packageEntry), "dist", "manifest.json");
 }
 
-function normalizeSchemaStem(value) {
-  const trimmed = String(value ?? "")
-    .trim()
-    .replace(/\\/g, "/")
-    .split("/")
-    .pop();
-  if (!trimmed) {
-    return "";
-  }
-  const withoutExtension = /\.(bfbs|fbs|json)$/i.test(trimmed)
-    ? trimmed.replace(/\.[^.]+$/, "")
-    : trimmed;
-  return withoutExtension.split(".").pop().toUpperCase();
+function normalizeSchemaName(value) {
+  return value === undefined || value === null ? "" : String(value);
 }
 
 function normalizeFileIdentifier(value) {
-  return String(value ?? "")
-    .trim()
-    .replace(/^\$/, "")
-    .toUpperCase();
+  return value === undefined || value === null ? "" : String(value);
 }
 
 function parseStandardsEntry([schemaCode, entry]) {
@@ -95,6 +82,7 @@ function parseStandardsEntry([schemaCode, entry]) {
   const fileIdentifierMatch = idl.match(/file_identifier\s+"([^"]+)"/i);
   const hashMatch = idl.match(/\/\/ Hash:\s*([a-f0-9]+)/i);
   const versionMatch = idl.match(/\/\/ Version:\s*([^\n]+)/i);
+  const rootTypeMatch = idl.match(/root_type\s+([A-Za-z_][A-Za-z0-9_.]*)\s*;/i);
   return {
     schemaCode: schemaCode.toUpperCase(),
     schemaName: `${schemaCode.toUpperCase()}.fbs`,
@@ -102,6 +90,7 @@ function parseStandardsEntry([schemaCode, entry]) {
       ? normalizeFileIdentifier(fileIdentifierMatch[1])
       : null,
     hash: hashMatch ? hashMatch[1].toLowerCase() : null,
+    rootTypeName: rootTypeMatch ? rootTypeMatch[1] : null,
     idl,
     version: versionMatch ? versionMatch[1].trim() : null,
     files: Array.isArray(entry?.files) ? entry.files : [],
@@ -175,22 +164,30 @@ export async function loadKnownTypeCatalog(options = {}) {
 }
 
 export function resolveStandardsTypeRef(typeRef, catalog = []) {
-  const schemaStem = normalizeSchemaStem(typeRef?.schemaName);
+  const schemaName = normalizeSchemaName(typeRef?.schemaName);
   const fileIdentifier = normalizeFileIdentifier(typeRef?.fileIdentifier);
-  if (!schemaStem && !fileIdentifier) {
+  if (!schemaName && !fileIdentifier) {
     return null;
   }
   return (
-    catalog.find((entry) => {
-      if (schemaStem && entry.schemaCode === schemaStem) {
-        return true;
-      }
-      if (fileIdentifier && entry.fileIdentifier === fileIdentifier) {
-        return true;
-      }
-      return false;
-    }) ?? null
+    catalog.find(
+      (entry) =>
+        (!schemaName || normalizeSchemaName(entry.schemaName) === schemaName) &&
+        (!fileIdentifier ||
+          normalizeFileIdentifier(entry.fileIdentifier) === fileIdentifier),
+    ) ?? null
   );
+}
+
+function schemaHashMatchesCatalog(typeRefHash, catalogHash) {
+  if (typeRefHash === undefined || typeRefHash === null) return true;
+  const declared = normalizePayloadSchemaHash(typeRefHash);
+  if (!declared) return true;
+  const canonical = normalizePayloadSchemaHash(catalogHash);
+  if (!canonical || declared.length !== canonical.length) {
+    return false;
+  }
+  return declared.every((byte, index) => byte === canonical[index]);
 }
 
 function collectTypeRefs(manifest) {
@@ -237,13 +234,58 @@ export async function validateManifestAgainstStandardsCatalog(
     }
     const resolved = resolveStandardsTypeRef(typeRef, catalog);
     if (!resolved) {
+      const schemaName = normalizeSchemaName(typeRef?.schemaName);
+      const fileIdentifier = normalizeFileIdentifier(typeRef?.fileIdentifier);
+      const partiallyKnown = catalog.some(
+        (entry) =>
+          (schemaName && normalizeSchemaName(entry.schemaName) === schemaName) ||
+          (fileIdentifier &&
+            normalizeFileIdentifier(entry.fileIdentifier) === fileIdentifier),
+      );
       issues.push({
-        severity: "warning",
-        code: "unresolved-standards-type",
-        message:
-          `Type reference from ${source} does not resolve to a known ` +
-          "shared-module or `spacedatastandards.org` schema by schemaName " +
-          "or fileIdentifier.",
+        severity: "error",
+        code: partiallyKnown
+          ? "standards-type-identity-mismatch"
+          : "unresolved-standards-type",
+        message: partiallyKnown
+          ? `Type reference from ${source} mixes a known schemaName or exact four-byte fileIdentifier with a different standards entry.`
+          : `Type reference from ${source} does not resolve to a known shared-module or \`spacedatastandards.org\` schema by its exact schemaName and fileIdentifier.`,
+        location: `${sourceName}.${source}`,
+      });
+      continue;
+    }
+    if (
+      typeRef?.rootTypeName &&
+      resolved.rootTypeName &&
+      typeRef.rootTypeName !== resolved.rootTypeName
+    ) {
+      issues.push({
+        severity: "error",
+        code: "standards-root-type-mismatch",
+        message: `Type reference from ${source} declares rootTypeName ${JSON.stringify(typeRef.rootTypeName)} but the canonical SDS root is ${JSON.stringify(resolved.rootTypeName)}.`,
+        location: `${sourceName}.${source}`,
+      });
+    }
+    if (
+      typeRef?.schemaVersion &&
+      resolved.version &&
+      typeRef.schemaVersion !== resolved.version
+    ) {
+      issues.push({
+        severity: "error",
+        code: "standards-schema-version-mismatch",
+        message: `Type reference from ${source} declares schemaVersion ${JSON.stringify(typeRef.schemaVersion)} but the canonical SDS version is ${JSON.stringify(resolved.version)}.`,
+        location: `${sourceName}.${source}`,
+      });
+    }
+    if (
+      resolved.hash &&
+      !schemaHashMatchesCatalog(typeRef?.schemaHash, resolved.hash)
+    ) {
+      issues.push({
+        severity: "error",
+        code: "standards-schema-hash-mismatch",
+        message: `Type reference from ${source} declares a schemaHash that differs from the canonical SDS schema hash.`,
         location: `${sourceName}.${source}`,
       });
     }

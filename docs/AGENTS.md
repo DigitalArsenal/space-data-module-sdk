@@ -18,6 +18,10 @@ they use words like "canonical", "required", or "must".
   `docs/module-publication-standard.md`.
 - Keep binary FlatBuffer ingest guidance aligned with
   `docs/flatsql-streaming-standard.md`.
+- Keep FlatSQL documented as a signed, pluggable WASM node. Do not describe
+  host-owned tables, rows, queries, indexes, or cron policy as canonical.
+- Every module ABI example must declare paired canonical FlatBuffer and
+  aligned-binary representations for the same SDS identity on every port.
 - Keep testing claims aligned with `docs/testing-harness.md`.
 - If you change user-facing behavior, update the nearest example README as well.
 

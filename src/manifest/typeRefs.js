@@ -27,37 +27,158 @@ function normalizeAlignedMetadataScalar(value) {
   return value;
 }
 
+function inspectPayloadSchemaHash(value) {
+  if (value === undefined || value === null) {
+    return { valid: true, present: false, bytes: [] };
+  }
+  if (typeof value === "string") {
+    const hex = value.startsWith("0x") ? value.slice(2) : value;
+    if (hex.length === 0) {
+      return { valid: true, present: false, bytes: [] };
+    }
+    if (hex.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(hex)) {
+      return { valid: false, present: true, bytes: [] };
+    }
+    const bytes = [];
+    for (let index = 0; index < hex.length; index += 2) {
+      bytes.push(Number.parseInt(hex.slice(index, index + 2), 16));
+    }
+    return { valid: true, present: true, bytes };
+  }
+  if (!Array.isArray(value) && !(value instanceof Uint8Array)) {
+    return { valid: false, present: true, bytes: [] };
+  }
+  const bytes = Array.from(value);
+  if (bytes.length === 0) {
+    return { valid: true, present: false, bytes: [] };
+  }
+  if (
+    bytes.some(
+      (entry) =>
+        !Number.isInteger(entry) || entry < 0 || entry > 0xff,
+    )
+  ) {
+    return { valid: false, present: true, bytes: [] };
+  }
+  return { valid: true, present: true, bytes };
+}
+
+export function normalizePayloadSchemaHash(value) {
+  const inspected = inspectPayloadSchemaHash(value);
+  return inspected.valid && inspected.present ? inspected.bytes : undefined;
+}
+
+export function isPayloadSchemaHashValid(value) {
+  return inspectPayloadSchemaHash(value).valid;
+}
+
 export function clonePayloadTypeRef(value = null) {
   if (!value || typeof value !== "object") {
     return { acceptsAnyFlatbuffer: true, fileIdentifier: null };
   }
   return {
     schemaName: normalizeNullableString(
-      value.schemaName ?? value.schema_name,
+      value.schemaName ?? value.schema_name ?? value.SCHEMA_NAME,
     ),
     fileIdentifier: normalizeNullableString(
-      value.fileIdentifier ?? value.file_identifier,
+      value.fileIdentifier ?? value.file_identifier ?? value.FILE_IDENTIFIER,
     ),
-    schemaHash: cloneSchemaHash(value.schemaHash ?? value.schema_hash),
+    schemaVersion: normalizeNullableString(
+      value.schemaVersion ?? value.schema_version ?? value.SCHEMA_VERSION,
+    ),
+    schemaHash: cloneSchemaHash(
+      value.schemaHash ?? value.schema_hash ?? value.SCHEMA_HASH,
+    ),
     acceptsAnyFlatbuffer: Boolean(
-      value.acceptsAnyFlatbuffer ?? value.accepts_any_flatbuffer ?? false,
+      value.acceptsAnyFlatbuffer ??
+        value.accepts_any_flatbuffer ??
+        value.ACCEPTS_ANY_FLATBUFFER ??
+        false,
     ),
     wireFormat: normalizePayloadWireFormatName(
-      value.wireFormat ?? value.wire_format,
+      value.wireFormat ?? value.wire_format ?? value.WIRE_FORMAT,
     ),
     rootTypeName: normalizeNullableString(
-      value.rootTypeName ?? value.root_type_name,
+      value.rootTypeName ??
+        value.root_type_name ??
+        value.rootType ??
+        value.ROOT_TYPE,
     ),
     fixedStringLength: normalizeAlignedMetadataScalar(
-      value.fixedStringLength ?? value.fixed_string_length,
+      value.fixedStringLength ??
+        value.fixed_string_length ??
+        value.FIXED_STRING_LENGTH,
     ),
     byteLength: normalizeAlignedMetadataScalar(
-      value.byteLength ?? value.byte_length,
+      value.byteLength ?? value.byte_length ?? value.BYTE_LENGTH,
     ),
     requiredAlignment: normalizeAlignedMetadataScalar(
-      value.requiredAlignment ?? value.required_alignment,
+      value.requiredAlignment ??
+        value.required_alignment ??
+        value.REQUIRED_ALIGNMENT,
     ),
   };
+}
+
+function schemaHashesEqual(left, right) {
+  const inspectedLeft = inspectPayloadSchemaHash(left);
+  const inspectedRight = inspectPayloadSchemaHash(right);
+  if (!inspectedLeft.valid || !inspectedRight.valid) {
+    return false;
+  }
+  if (!inspectedLeft.present || !inspectedRight.present) {
+    return inspectedLeft.present === inspectedRight.present;
+  }
+  if (inspectedLeft.bytes.length !== inspectedRight.bytes.length) {
+    return false;
+  }
+  return inspectedLeft.bytes.every(
+    (entry, index) => entry === inspectedRight.bytes[index],
+  );
+}
+
+/**
+ * Return true only when two concrete payload type refs carry one complete,
+ * identical SDS logical identity. Schema version and hash are optional, but
+ * when either peer declares one, both peers must declare the same value.
+ */
+export function payloadSchemaIdentitiesEqual(leftTypeRef = {}, rightTypeRef = {}) {
+  const left = clonePayloadTypeRef(leftTypeRef);
+  const right = clonePayloadTypeRef(rightTypeRef);
+  const requiredIdentityFields = [
+    "schemaName",
+    "fileIdentifier",
+    "rootTypeName",
+  ];
+  for (const field of requiredIdentityFields) {
+    if (!left[field] || !right[field] || left[field] !== right[field]) {
+      return false;
+    }
+  }
+  if (
+    (left.schemaVersion || right.schemaVersion) &&
+    left.schemaVersion !== right.schemaVersion
+  ) {
+    return false;
+  }
+  return schemaHashesEqual(left.schemaHash, right.schemaHash);
+}
+
+export function alignedPayloadLayoutsCompatible(leftTypeRef = {}, rightTypeRef = {}) {
+  const left = clonePayloadTypeRef(leftTypeRef);
+  const right = clonePayloadTypeRef(rightTypeRef);
+  if (
+    getPayloadTypeWireFormat(left) !== "aligned-binary" ||
+    getPayloadTypeWireFormat(right) !== "aligned-binary" ||
+    !payloadSchemaIdentitiesEqual(left, right)
+  ) {
+    return false;
+  }
+  return (
+    left.fixedStringLength === right.fixedStringLength &&
+    left.byteLength === right.byteLength &&
+    left.requiredAlignment === right.requiredAlignment
+  );
 }
 
 export function normalizePayloadWireFormatName(value) {
@@ -85,22 +206,23 @@ export function getPayloadTypeWireFormat(typeRef = {}) {
 }
 
 function schemaHashMatches(expected, actual) {
-  if (!Array.isArray(expected) && !(expected instanceof Uint8Array)) {
-    return true;
-  }
-  const expectedArray = Array.from(expected);
-  if (expectedArray.length === 0) {
-    return true;
-  }
-  const actualArray =
-    Array.isArray(actual) || actual instanceof Uint8Array
-      ? Array.from(actual)
-      : null;
-  if (!actualArray || actualArray.length !== expectedArray.length) {
+  const inspectedExpected = inspectPayloadSchemaHash(expected);
+  if (!inspectedExpected.valid) {
     return false;
   }
-  for (let index = 0; index < expectedArray.length; index += 1) {
-    if (expectedArray[index] !== actualArray[index]) {
+  if (!inspectedExpected.present) {
+    return true;
+  }
+  const inspectedActual = inspectPayloadSchemaHash(actual);
+  if (
+    !inspectedActual.valid ||
+    !inspectedActual.present ||
+    inspectedActual.bytes.length !== inspectedExpected.bytes.length
+  ) {
+    return false;
+  }
+  for (let index = 0; index < inspectedExpected.bytes.length; index += 1) {
+    if (inspectedExpected.bytes[index] !== inspectedActual.bytes[index]) {
       return false;
     }
   }
@@ -132,13 +254,19 @@ export function payloadTypeRefsMatch(expectedTypeRef = {}, actualTypeRef = {}) {
   ) {
     return false;
   }
+  if (
+    expected.schemaVersion &&
+    expected.schemaVersion !== actual.schemaVersion
+  ) {
+    return false;
+  }
   if (!schemaHashMatches(expected.schemaHash, actual.schemaHash)) {
     return false;
   }
+  if (!optionalScalarMatches(expected.rootTypeName, actual.rootTypeName)) {
+    return false;
+  }
   if (expectedWireFormat === "aligned-binary") {
-    if (!optionalScalarMatches(expected.rootTypeName, actual.rootTypeName)) {
-      return false;
-    }
     if (!optionalScalarMatches(expected.fixedStringLength, actual.fixedStringLength)) {
       return false;
     }

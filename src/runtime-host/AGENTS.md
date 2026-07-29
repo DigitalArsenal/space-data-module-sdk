@@ -1,31 +1,37 @@
 # AGENTS
 
-Apply the root and `src/AGENTS.md` files first. This directory shows the
-host-owned storage and ingest path available to module authors.
+Apply the root and `src/AGENTS.md` files first. This directory contains generic
+binary persistence, arena/descriptor, registry, and ingest adapters available
+to module authors. It must not own FlatSQL or application semantics.
 
 ## What Authors Should Take From This Directory
 
-- Host-owned durable identity is `(schemaFileId, rowId)` for rows and
-  `(regionId, recordIndex)` for aligned-binary regions.
+- FlatSQL row/table/query identity belongs to the pluggable FlatSQL WASM node.
+- Hosts may own opaque blob keys and ephemeral arena handles only; neither is a
+  schema-aware module ABI.
 - The canonical ingest path is direct FlatBuffer bytes, not JSON.
-- If the host owns persistence, use these helpers. If a module owns state, keep
-  the stream binary and use the resident-module pump path from `src/testing`.
+- Use these helpers only as generic adapters. Keep state and query semantics in
+  the resident WASM node and use the pump path from `src/testing`.
 
 ## Storage And Streaming Rules
 
-- Keep durable row identity host-owned as `(schemaFileId, rowId)`.
-- Keep runtime aligned-binary identity host-owned as `(regionId, recordIndex)`.
+- Keep FlatSQL row identity and aligned layout interpretation inside the
+  FlatSQL WASM node.
+- Keep host persistence opaque: byte operations may not expose tables, rows,
+  schemas, SQL, queries, or application record types.
 - The canonical ingest path is binary FlatBuffer bytes, not JSON.
 - Use size-prefixed FlatBuffer frames for streaming transport.
 - Do not coerce row payloads through JSON serialization.
-- If the host owns persistence, use runtime-host ingest helpers.
-- If a resident module owns state, keep the stream binary and push into the
-  module through the harness/pump path rather than inventing JSON wrappers.
+- Every module port must declare both canonical FlatBuffer and aligned-binary
+  representations for the same SDS type.
+- Keep the stream binary and push it into the resident module through the
+  harness/pump path rather than inventing JSON wrappers.
 
 ## Key Files To Read
 
 - `flatbufferStreamIngestor.js`
-- `flatsqlRuntimeStore.js`
+- `flatsqlRuntimeStore.js` (legacy migration surface; not the target FlatSQL
+  ownership model)
 - `index.js`
 
 ## Note

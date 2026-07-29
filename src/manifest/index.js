@@ -14,9 +14,11 @@ export {
 export { legacyManifestToPlg } from "./legacyToPlg.js";
 export { toEmbeddedPluginManifest } from "./normalize.js";
 export {
+  alignedPayloadLayoutsCompatible,
   clonePayloadTypeRef,
   getPayloadTypeWireFormat,
   normalizePayloadWireFormatName,
+  payloadSchemaIdentitiesEqual,
   payloadTypeRefsMatch,
   selectPreferredPayloadTypeRef,
 } from "./typeRefs.js";

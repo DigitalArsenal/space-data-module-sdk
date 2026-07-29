@@ -14,8 +14,8 @@ This repository is the source of truth for module-level concerns:
 - the REC+MBL single-file container
 - deployment authorization plus SDS publication records (`REC`, `PNM`, `ENC`)
 - the first canonical module hostcall/import ABI surface
-- the canonical runtime-host model for append-only standards rows, host-managed
-  runtime regions, and dynamic module installation/loading
+- the canonical generic host-adapter model for opaque persistence,
+  arena/descriptor routing, and dynamic module installation/loading
 - shared module-level testing/runtime harnesses, including the WasmEdge
   process runner used by package-level validation suites
 
@@ -40,29 +40,27 @@ process model.
 
 ## Canonical Runtime Host
 
-The SDK now owns the durable runtime identity model used by OrbPro, browser and
-server SDN hosts, and the evolving WasmEdge harness:
+The SDK defines one application-blind host contract used by OrbPro, browser and
+server SDN hosts, and WasmEdge. It covers signed artifact loading, capability
+enforcement, opaque binary persistence, shared arenas, descriptor validation,
+generic wakeups, and module lifecycle. The browser and WasmEdge implementations
+must expose equivalent guest-visible behavior.
 
-- standards rows are addressed only by `($SCHEMA_FILE_ID, rowId)`
-- `rowId` is append-only and never reused
-- aligned-binary runtime state is addressed only by `(regionId, recordIndex)`
-- raw pointers remain internal execution details and are not durable APIs
+FlatSQL is a signed, pluggable WASM flow node. It owns table, row, query,
+indexing, compaction, and snapshot semantics. A host must not implement FlatSQL
+or expose schema-aware row services. It may store opaque FlatSQL snapshot/WAL
+bytes and return them unchanged to the module.
 
-The minimal host surface lives under `src/runtime-host/` and covers three
-responsibilities:
+The current helpers under `src/runtime-host/` are migration and reference
+surfaces for binary transport, opaque persistence, arenas, and module
+registries. Host-owned FlatSQL or row/region semantics are not the target
+architecture. Raw pointers remain execution details and are never durable ABI
+values.
 
-- `createFlatSqlRuntimeStore()` for append-only row handles and row resolution
-- `createFlatBufferStreamIngestor()` for little-endian size-prefixed FlatBuffer
-  transport ingest into host-owned row storage without JSON transcoding
-- `createModuleFlatBufferStreamPump()` for feeding those same FlatBuffer stream
-  chunks into a resident stateful module instance without JSON envelopes
-- `createRuntimeRegionStore()` for host-allocated aligned-binary regions and
-  externally backed record-view descriptors
-- `createModuleRegistry()` for dynamic install/load/unload/invoke
-
-`createRuntimeHost()` composes those stores into the canonical SDK host model.
-OrbPro layers entity/view helpers on top of that host instead of inventing a
-separate durable identity model.
+`createModuleFlatBufferStreamPump()` feeds size-prefixed binary frames into a
+resident FlatSQL or other stateful WASM node without JSON transcoding.
+`createRuntimeHost()` composes only generic adapters; application and database
+behavior stays inside signed flow nodes.
 
 The canonical FlatBuffer-to-FlatSQL streaming contract is documented in
 [`docs/flatsql-streaming-standard.md`](./docs/flatsql-streaming-standard.md).
@@ -165,13 +163,12 @@ outputs. The reference invoke examples live in
 - `manifest.hybrid.json`
 - `module.c`
 
-Input and output ports can independently declare regular `flatbuffer` payloads
-or `aligned-binary` layouts. Mixed contracts are valid. When a port advertises
-an `aligned-binary` layout, it must also advertise a regular `flatbuffer`
-fallback for the same schema in the same accepted type set. A module can accept
-a regular `OMM.fbs` request and emit an aligned-binary `StateVector.fbs`
-response, provided the output port also declares the regular `StateVector.fbs`
-fallback and the aligned type ref carries the correct layout metadata.
+Every input and output port must declare both a regular `flatbuffer` payload and
+an `aligned-binary` layout for the same schema in the same accepted type set.
+The regular FlatBuffer is the portable, durable, network, and publication
+representation. Aligned-binary is a low-copy routing optimization selected per
+frame by `TAB.WIRE_FORMAT`. The compiler rejects missing peers, schema-identity
+mismatches, and edges without a compatible pair.
 
 ## Runtime Portability
 
@@ -498,12 +495,12 @@ The loader contract is always:
 7. Hand the remaining raw wasm bytes to the runtime.
 
 Aligned-binary payloads are a separate invoke-ABI optimization. They do not
-replace the canonical FlatBuffer schema. If a port advertises
-`wireFormat: "aligned-binary"`, it must also advertise the regular
-`wireFormat: "flatbuffer"` fallback for the same schema and file identifier in
-the same accepted type set. The publication demo in the local lab uses a
-regular `OMM.fbs` request and a `StateVector.fbs` response that advertises both
-the canonical FlatBuffer fallback and the aligned-binary layout metadata.
+replace the canonical FlatBuffer schema. Every port advertises both
+`wireFormat: "flatbuffer"` and `wireFormat: "aligned-binary"` for the same
+schema and file identifier in the same accepted type set. The publication demo
+in the local lab uses a regular `OMM.fbs` request and a `StateVector.fbs`
+response that advertises both the canonical FlatBuffer representation and the
+aligned-binary layout metadata.
 
 ## Module Publication
 
@@ -580,6 +577,12 @@ includes:
 `crypto_verify` `crypto_encrypt` `crypto_decrypt` `crypto_key_agreement`
 `crypto_kdf` `wallet_sign` `ipfs` `gpu_compute` `scene_access`
 `entity_access` `render_hooks`
+
+`schedule_cron`, `database`, `storage_query`, and related storage capability
+IDs remain in the compatibility vocabulary for existing artifacts. New
+isomorphic flows must implement cron policy and FlatSQL behavior as signed WASM
+nodes and request only generic clock/wakeup, filesystem, opaque-byte
+persistence, or network primitives required by those nodes.
 
 Manifests can also declare coarse runtime targets for planning and compliance:
 

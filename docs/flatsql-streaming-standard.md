@@ -1,203 +1,231 @@
-# FlatBuffer Streaming Into FlatSQL
+# FlatBuffer Streaming Through the FlatSQL WASM Node
 
-This document defines the recommended standard for getting streamed
-FlatBuffer payloads into FlatSQL-backed storage while keeping the same model
-portable across browser, server, OrbPro, and WasmEdge.
+This document defines the canonical way to stream SDS FlatBuffers through a
+pluggable FlatSQL module while keeping one flow artifact portable across the
+browser/JavaScript harness and WasmEdge.
 
 ## Short Version
 
-Use three layers, not one:
+Use four layers with explicit ownership:
 
-1. Transport stream:
-   little-endian `u32` size prefix + one FlatBuffer payload per frame
-2. Module invoke ABI:
-   SDS `$PIV` request/response envelopes with `TAB` frame descriptors
-3. Durable storage identity:
-   host-owned append-only row handles and host-owned runtime regions
+1. Stream transport: little-endian `u32` size prefix followed by one canonical
+   FlatBuffer payload per frame.
+2. Module invoke ABI: SDS `$PIV` request/response envelopes containing `TAB`
+   descriptors.
+3. Inter-module representation: every port supports both canonical FlatBuffer
+   and aligned-binary forms for the same SDS identity; `TAB.WIRE_FORMAT`
+   selects per frame.
+4. Database behavior: a signed FlatSQL WASM node owns table, row, query, index,
+   compaction, and snapshot semantics.
 
-Do not treat a module-owned mutable FlatSQL database as the canonical ABI.
-That can exist as an adapter or example, but it is not the durable cross-host
-contract.
+The host is not the database. It may provide opaque byte persistence, shared
+arenas, networking, clocks, and module lifecycle adapters, but it must not
+implement FlatSQL or interpret application records.
 
-## Canonical Transport
+## Canonical Stream Transport
 
-The canonical transport for streamed FlatBuffers is:
+The portable transport for streamed records is:
 
-- `4-byte little-endian payload length`
-- followed by one FlatBuffer payload
-- repeated until end of stream
-- payload bytes stay binary end-to-end; the canonical ingest path does not
-  transcode frames through JSON
+- a 4-byte little-endian payload length;
+- one canonical FlatBuffer payload of that length;
+- repeated until end of stream; and
+- binary bytes end-to-end, without JSON or base64 transcoding.
 
-Each payload must carry a readable FlatBuffer file identifier. The runtime uses
-that identifier to derive the durable `schemaFileId`.
+Each payload carries its SDS FlatBuffer file identifier. The FlatSQL WASM node,
+not the host, validates that identity against the connected method port and
+derives its table/index behavior.
 
-This transport is intentionally separate from module invocation. It is the
-right shape for:
+Use this framing for:
 
-- WebSocket feeds
-- HTTP chunk/file ingestion
-- local file replay
-- browser worker or server-side stream processing
+- WebSocket or HTTP response streams;
+- local file replay;
+- browser worker messages that cannot share memory;
+- process and network boundaries;
+- snapshots, publication, and durable records; and
+- fallback between modules whose arenas cannot be shared safely.
 
-It is not the same thing as a SDS `$PIV` invoke envelope.
+This outer stream is not itself a `$PIV` envelope. A stream pump incrementally
+turns frames into bounded module invocations.
 
-## Canonical Durable Storage
+## Canonical Invoke ABI
 
-The durable storage model is host-owned.
+Module calls use:
 
-Standards records are addressed by:
+- SDS `$PIV` `REQUEST` and `RESPONSE` envelopes;
+- SDS `TAB` descriptors for every input and output frame; and
+- a `PAYLOAD_ARENA` or a validated external guest-memory arena.
 
-- `($SCHEMA_FILE_ID, rowId)`
+A `TAB` preserves:
 
-Rules:
+- `PORT_ID`;
+- `TYPE_REF` and canonical SDS schema identity;
+- `OFFSET` and `SIZE`;
+- `ALIGNMENT`;
+- `WIRE_FORMAT`;
+- `OWNERSHIP` and `MUTABILITY`; and
+- `FRAME_ID` for stream/exchange bookkeeping.
 
-- `rowId` is append-only
-- `rowId` is never reused
-- logical updates create new rows
-- "latest" or "upsert" views are host-side projections or indexes
-- row payloads remain raw binary or native in-memory values; the canonical
-  runtime-host row path does not stringify payloads
+The invoke surface is batch-oriented. Feed a long stream through many bounded
+invocations rather than constructing one monolithic request.
 
-High-performance derived runtime state is addressed by:
+## Required Dual Representation
 
-- `(regionId, recordIndex)`
+Every input and output port must accept both representations of every logical
+SDS type it declares:
 
-Rules:
+- `FLATBUFFER`: canonical DA/SDS FlatBuffer bytes; and
+- `ALIGNED_BINARY`: the fixed-layout, alignment-described execution form.
 
-- the host allocates or registers regions
-- regions are fixed-layout aligned-binary buffers
-- regions are not indexed in FlatSQL
-- raw pointers remain internal execution details only
+The two entries live in the same `PLG` accepted type set and must have the same
+schema name, file identifier, root type, version, and schema hash when those
+fields are present. The aligned entry additionally declares its byte length,
+fixed-string constraints when applicable, and required alignment.
 
-The stable storage ABI lives in [`schemas/HostStorageAbi.fbs`](../schemas/HostStorageAbi.fbs).
+Aligned-binary is never a different logical schema. It is a transient routing
+optimization layered on the canonical FlatBuffer contract.
 
-## Canonical Module ABI
+The flow compiler must reject:
 
-When streamed payloads must cross into a module, use the invoke ABI:
+- a port with only one representation;
+- paired entries with different SDS identity;
+- incomplete or contradictory aligned layout metadata;
+- an edge whose producer and consumer have no compatible pair; or
+- a route that requires host-language schema conversion.
 
-- SDS `$PIV` `REQUEST`
-- SDS `$PIV` `RESPONSE`
-- SDS `TAB` frame descriptors
+## Wire-Format Selection
 
-Each input frame should preserve:
+The flow runtime selects a representation for each edge and frame:
 
-- `portId`
-- `typeRef`
-- `streamId`
-- `sequence`
-- `endOfStream`
-- alignment metadata when required
+1. Match the producer and consumer by canonical SDS identity.
+2. Confirm that both advertise the canonical and aligned forms.
+3. Select aligned-binary only when both nodes use a compatible live arena and
+   the declared layout, start alignment, ownership, mutability, and lifetime
+   can be enforced.
+4. Otherwise select canonical FlatBuffer bytes.
 
-This is the correct way to tell a module "these frames belong to the same
-logical stream."
+Canonical FlatBuffer is mandatory for network, process, publication,
+persistence, and other non-shared-memory boundaries. It is also the required
+fallback whenever aligned compatibility is uncertain.
 
-It is not a byte-streaming transport. The current invoke ABI is still
-buffer-oriented:
+The host may validate and route descriptors, but it must not decode or
+transcode the application schema. The producing module, consuming module, or
+compiler-generated WASM glue emits the representation selected by the route.
 
-- the full request is materialized before `plugin_invoke_stream(...)`
-- the full response is materialized before it is returned
+## Aligned-Frame Safety
 
-So a single 1 GiB SDS `$PIV` invoke request is not the intended path.
+An aligned frame is valid only inside its declared arena and exchange:
 
-## FlatSQL-Specific Rules
+- `OFFSET + SIZE` must be overflow-safe and within the active arena or
+  validated guest memory;
+- `ALIGNMENT` and `TYPE_REF.REQUIRED_ALIGNMENT` must both hold;
+- ownership and mutability must be compatible with the receiving method;
+- a borrowed or plugin-owned buffer must not be freed by the host;
+- transferred buffers must have a single, explicit owner after transfer; and
+- `FRAME_ID` is stream/exchange identity, not a persistent address.
 
-If the goal is "stream FlatBuffers into FlatSQL", standardize the host-side
-behavior first:
+Raw pointers must never be stored, published, or sent over the network. Data
+that must survive the current frame lifetime is materialized as canonical
+FlatBuffer bytes or moved through a separately declared generic arena
+lifecycle.
 
-1. split the outer size-prefixed transport stream into payload frames
-2. derive `schemaFileId` from the FlatBuffer file identifier
-3. append immutable host-owned rows
-4. maintain host-side logical indexes or latest-record projections as needed
-5. expose query and row-resolution APIs on top of that store
+## FlatSQL Is a Pluggable WASM Module
 
-That means the durable primitive is `append`, not `upsert`.
+A flow that needs a database declares the canonical signed FlatSQL WASM
+artifact as a dependency and instantiates it as a node. The graph connects
+typed record, query, result, maintenance, and state ports to that node.
 
-`upsert_records` is allowed as a higher-level adapter surface, but only if it
-is defined as:
+The FlatSQL node owns:
 
-- append new immutable row(s)
-- update a logical index/view
-- never rewrite an existing durable `rowId`
+- schema/file-identifier validation;
+- table and row identity;
+- append, query, index, and logical upsert-view semantics;
+- retention and compaction behavior exposed by typed methods;
+- canonical snapshot and write-ahead serialization;
+- reload/rebuild behavior; and
+- canonical/aligned representation handling at its ports.
 
-If a module or flow needs fast numeric state, keep that data in runtime regions,
-not in FlatSQL tables.
+FlatSQL is not:
+
+- a Go `hostcap` store;
+- a JavaScript database implementation;
+- a WasmEdge extension or built-in WASI service;
+- a host-owned row or region registry; or
+- an implicit `storage_engine_link` service.
+
+FlatSQL remains an independently signed and instantiated WASM node. A flow
+bundle may carry its exact artifact bytes, but static flow compilation must not
+fold FlatSQL guest code into a consuming module or erase the node boundary.
+Its identity, version, manifest, and artifact hash remain independently
+verifiable and pluggable.
+
+## Durable State
+
+Durable FlatSQL records remain canonical size-prefixed FlatBuffer bytes.
+Aligned-binary records are transient views and cannot be the only persisted
+form.
+
+The FlatSQL node may request an opaque persistence namespace from the host. The
+generic byte adapter may expose operations equivalent to:
+
+- read a named blob;
+- append bytes;
+- atomically replace a blob;
+- list opaque keys within the module's namespace;
+- sync; and
+- delete an opaque key when capability policy permits it.
+
+The adapter must not expose SQL, table names, row IDs, schema IDs, query
+operators, indexes, application types, or compaction policy. Those remain
+inside the node. Browser and WasmEdge adapters must preserve the same byte and
+atomicity contract even if their native backing stores differ.
+
+On restart, a fresh FlatSQL WASM instance reloads its opaque snapshot/WAL bytes
+and must reproduce the same query-visible state. Persist/reload parity is a
+cross-host conformance requirement.
 
 ## Browser and WasmEdge
 
-The same transport/storage model should be used in both:
+The exact same signed FlatSQL artifact and composed flow artifact run in both
+hosts.
 
-- browser: host-side stream ingest + host-owned rows/regions
-- WasmEdge: host-side stream ingest + host-owned rows/regions
+The browser host may map generic persistence to IndexedDB or another approved
+opaque byte store, shared arenas to `SharedArrayBuffer`, networking to `fetch`
+or browser transports, and thread spawn to workers.
 
-Use module invocation for:
+The WasmEdge host may map those same contracts to filesystem/object storage,
+native shared memory, approved network adapters, and canonical
+`wasi.thread-spawn` support.
 
-- compute batches
-- typed transformation steps
-- stateful direct-surface module sessions
+These are equivalent adapters, not alternate database implementations. A
+capability absent from either target causes compile/load negotiation to fail;
+it must not cause a host-specific module binary or host-owned substitute.
 
-Use host-side stream ingest for:
+## Streaming Helper Shape
 
-- large continuous feeds
-- catalog replay
-- ingestion into host-owned FlatSQL-backed stores
-- any workload that should not be forced through one contiguous invoke buffer
+`createModuleFlatBufferStreamPump(...)` is the canonical outer-stream adapter
+for a resident node. It:
 
-The new helper for this outer transport path is
-`createFlatBufferStreamIngestor(...)`, exported from
-`space-data-module-sdk/runtime-host`.
+- accepts size-prefixed canonical FlatBuffer chunks;
+- decodes framing incrementally without decoding application records;
+- emits small `$PIV` request batches into the live module;
+- preserves stream sequence and end-of-stream state through `TAB.FRAME_ID`;
+- never routes payloads through JSON; and
+- allows the flow runtime to negotiate aligned routing after a frame is inside
+  a compatible shared arena.
 
-## Streaming Into A Module-Owned FlatSQL Engine
-
-If the goal is not a host-owned durable store, but a stateful SDN module that
-imports `flatsql` internally and owns its own in-memory query state, use a
-persistent direct-surface module instance plus chunked binary invokes.
-
-Rules:
-
-- do not change `flatsql` itself
-- import `flatsql` inside the SDN module implementation
-- keep the module instance resident across invokes
-- feed it many small FlatBuffer frames, not one giant invoke envelope
-- use command surface only for stateless one-shot work; use direct surface for
-  resident FlatSQL state
-
-The SDK helper for this path is `createModuleFlatBufferStreamPump(...)`,
-exported from `space-data-module-sdk/testing` and the browser/root package
-surfaces.
-
-That helper:
-
-- accepts the same outer size-prefixed FlatBuffer stream chunks
-- decodes frames incrementally
-- emits small SDS `$PIV` request batches into a live module instance
-- preserves `streamId`, `sequence`, and final `endOfStream`
-- never routes payloads through JSON
-
-Example:
+Conceptual use:
 
 ```js
-import {
-  createBrowserModuleHarness,
-  createModuleFlatBufferStreamPump,
-} from "space-data-module-sdk";
-
 const harness = await createBrowserModuleHarness({
-  wasmSource,
+  wasmSource: signedFlowBytes,
   surface: "direct",
 });
 
 const pump = createModuleFlatBufferStreamPump({
   harness,
-  methodId: "upsert_records",
+  methodId: "ingest",
   portId: "records",
   maxFramesPerInvoke: 64,
-  typeResolver(_payload, context) {
-    return {
-      acceptsAnyFlatbuffer: true,
-      fileIdentifier: context.rawFileIdentifier,
-    };
-  },
 });
 
 await pump.pushBytes(chunkA);
@@ -205,137 +233,53 @@ await pump.pushBytes(chunkB);
 await pump.finish();
 ```
 
-This is the right shape for OrbPro-style browser ingest when:
+The JavaScript shown here drives a generic invoke surface; it does not own
+FlatSQL state or query behavior.
 
-- the raw FlatBuffer payloads are the source of truth
-- the UI/runtime should not materialize JS record mirrors
-- a resident module should own FlatSQL/query state directly
+## Timer-Driven Maintenance
 
-It is still batch-oriented per invoke, but it removes the architectural
-anti-pattern of building one monolithic request envelope for a long-running
-stream.
-
-## Example Import Path
-
-```js
-import {
-  createFlatBufferStreamIngestor,
-  createRuntimeHost,
-} from "space-data-module-sdk/runtime-host";
-
-const host = createRuntimeHost();
-const ingestor = createFlatBufferStreamIngestor({
-  rows: host.rows,
-});
-
-ingestor.pushBytes(chunkA);
-ingestor.pushBytes(chunkB);
-ingestor.finish();
-
-const rows = host.rows.listRows("OMM");
-```
+Periodic FlatSQL maintenance is connected through a timer WASM node. The host
+provides a clock and generic wakeup only. Cron parsing, timezones, retry,
+misfire behavior, and the typed maintenance trigger remain inside WASM nodes so
+browser and WasmEdge execution is deterministic.
 
 ## Performance Guidance
 
-There are two distinct performance questions:
+Measure these paths separately:
 
-1. Outer transport ingest throughput
-2. Module invoke throughput
+1. outer canonical stream framing and ingestion;
+2. regular FlatBuffer inter-module routing;
+3. aligned-binary shared-arena routing;
+4. FlatSQL append/query work inside the WASM node; and
+5. snapshot/WAL persistence and reload through the opaque byte adapter.
 
-Do not mix them into one benchmark.
+Use bounded batches for all measurements. Recommended regular totals are 1,
+8, 32, and 128 MiB; local stress may use 256 MiB or more as a chunked total.
+Do not create one 1 GiB `$PIV` request.
 
-### Outer Transport Benchmark
+Report both throughput and peak memory. For aligned routing, also report the
+fallback rate and the reason for each fallback category. Browser and WasmEdge
+benchmarks must record the exact signed artifact hash.
 
-Use the runtime-host stream ingestor.
+## Required Conformance Tests
 
-Commands:
+The SDK and every flow that uses FlatSQL must cover:
 
-```bash
-npm run test:stream-ingest
-npm run benchmark:stream-1gib
-```
+- compiler rejection of regular-only and aligned-only ports;
+- compiler rejection of mismatched paired identities/layouts;
+- canonical-only routing;
+- compatible aligned routing;
+- mixed topology with canonical fallback;
+- bounds, alignment, ownership, mutability, and stale-frame failures;
+- byte-identical canonical outputs in browser and WasmEdge;
+- semantic equivalence of canonical and aligned executions;
+- FlatSQL ingest, query, snapshot, restart, and reload in both hosts; and
+- proof that host code contains no FlatSQL table/query/schema behavior.
 
-Optional tuning:
+## Legacy Surfaces
 
-- `SPACE_DATA_MODULE_SDK_STREAM_BENCH_BYTES`
-- `SPACE_DATA_MODULE_SDK_STREAM_BENCH_PAYLOAD_BYTES`
-- `SPACE_DATA_MODULE_SDK_STREAM_BENCH_CHUNK_BYTES`
-
-The 1 GiB benchmark is env-gated on purpose. It is a local stress path, not a
-default suite member.
-
-### Module Invoke Benchmark
-
-Benchmark direct invoke separately with many smaller requests and a tiny
-response. Treat the current invoke ABI as batch-oriented, not as a raw stream
-transport.
-
-Recommended total sizes:
-
-- CI / regular local: `1 MiB`, `8 MiB`, `32 MiB`, `128 MiB`
-- local stress: `256 MiB` or higher in chunked totals
-
-Avoid a single 1 GiB request envelope on the current codepath.
-
-For the resident module-ingest shape, use:
-
-```bash
-npm run test:module-stream
-npm run benchmark:module-stream-1gib
-```
-
-That benchmark exercises the chunked module stream-pump path, not a single huge
-invoke buffer.
-
-## Current Non-Canonical Example
-
-[`examples/flatsql-store-local`](../examples/flatsql-store-local) is still
-useful as an adapter example, but it is not the canonical durable identity
-model. It exposes a module-owned mutable logical database. The canonical model
-for cross-host durability is host-owned rows plus host-owned runtime regions.
-
-## Body-Reference Delivery (`"deliver":"ref"`)
-
-Loop C.5c adds an OPTIONAL near-zero-copy egress mode for capability
-hostcalls whose result is an aligned stream that the module passes through
-VERBATIM to an HTTP response body (the retrieval flow's flatbuffer branch).
-The election is always the GUEST's; hosts never invent it.
-
-1. The module adds `"deliver":"ref"` to the hostcall payload
-   (`storage.flatsql_query_stream` / `storage.flatsql_epoch_stream`).
-2. A ref-capable host keeps the materialized bytes in ITS memory, registers
-   them on the calling instance's hostcall-bridge body-ref registry, and
-   answers with NO binary segment:
-
-   ```json
-   {"ok":true,"result":{"rows":N,"columns":M,
-     "ref":{"token":T,"size":S,"frames":F,"fnv1a64":"<16 hex>"}}}
-   ```
-
-   - `token` — opaque, single-use, scoped to this module instance's bridge
-     and the current exchange.
-   - `size` — byte length of the referenced stream.
-   - `frames` — size-prefixed frame count, skipping zero-length prefixes
-     (the `x-sdn-record-count` rule); omitted when the framing is malformed.
-   - `fnv1a64` — word-folded FNV-1a 64 content hash (`fnv1a64Hex` in
-     `space-data-module-sdk/http` is the reference implementation; it is
-     bit-identical to foundation/decision-gate's in-wasm hasher, so
-     reference-mode entity tags equal hashed-stream entity tags).
-
-   A host that does not understand `deliver` simply returns the byte
-   segment as always; modules MUST fall back to verbatim byte passthrough.
-3. The module forwards the reference in-band as a small JSON descriptor
-   frame `{"$sdnbodyref":1,"token":T,"size":S,"frames":F,"fnv1a64":"…"}`
-   (an aligned stream can never collide: it starts with a `u32le` size
-   prefix, not `{`).
-4. `foundation/http-respond` recognizes the descriptor on its body port and
-   emits `$HTR` with `BODY_REF_TOKEN`/`BODY_REF_SIZE` set and NO inline
-   body (schema `HttpResponseAbi.fbs`).
-5. The host egress substitutes the byte buffer registered under the token
-   (Go: `flowrt.htrPipe` + `modulert.HostBridge.TakeBodyRef`; JS:
-   `createBodyRefRegistry` from `space-data-module-sdk/http`). Tokens are
-   single-use; hosts drop unconsumed references at end-of-exchange (304 and
-   error paths never consume theirs).
-
-The stream bytes therefore never enter the flow's linear memory: the only
-byte movement left on a warm request is the host's socket write.
+`createFlatSqlRuntimeStore()`, host-owned row/region stores,
+`storage_engine_link`, and host-side FlatSQL query capabilities are migration
+surfaces. They do not define the target architecture and must not be used by
+new flow designs. The local FlatSQL store example is useful only as historical
+test coverage until it is replaced by a signed FlatSQL WASM-node example.

@@ -6,12 +6,15 @@
 // NEW OS thread that instantiates the SAME module over the SAME shared memory
 // and calls `wasi_thread_start(tid, startArg)`. This module provides that host
 // in BOTH environments:
-//   - Node: a `node:worker_threads` Worker (src/host/wasiThreadWorker.mjs).
+//   - Node: a `node:worker_threads` Worker (src/host/wasiThreadWorker.mjs),
+//     when that worker can satisfy every imported guest ABI.
 //   - Browser: a classic Blob-URL Worker (inlined below).
 // Thread join/exit synchronization is done by the guest over shared-memory
 // atomics (memory.atomic.wait/notify); the host only needs to start the thread.
 //
 // See docs/isomorphic-pthreads.md and docs/browser-wasmedge-isomorphic.md.
+
+import { DEFAULT_HOSTCALL_IMPORT_MODULE } from "./abi.js";
 
 const IS_NODE =
   typeof process !== "undefined" &&
@@ -86,9 +89,21 @@ function browserBlobUrl() {
  * @param {Object} options
  * @param {WebAssembly.Module} options.wasmModule compiled module the workers re-instantiate.
  * @param {WebAssembly.Memory} options.memory shared imported memory.
+ * Modules with guest hostcall imports decline spawning until a worker-safe
+ * hostcall bridge is available; their pthread_create fallback runs inline.
+ *
  * @returns {Promise<{ threadSpawn: Function, activeThreadCount: () => number, spawnCount: () => number, terminateAll: () => Promise<void> }>}
  */
 export async function createWasiThreadSpawn({ wasmModule, memory }) {
+  // The default thread workers only install WASI, shared env.memory, and a
+  // declining nested thread-spawn import. They cannot instantiate a module
+  // that also imports the synchronous guest hostcall ABI. Decline the spawn so
+  // pthread_create returns EAGAIN and the guest's sequential fallback runs.
+  // A future worker-safe hostcall bridge must be wired into the worker before
+  // this gate may allow those modules to spawn.
+  const workerNeedsHostcallBridge = WebAssembly.Module.imports(wasmModule).some(
+    (entry) => entry.module === DEFAULT_HOSTCALL_IMPORT_MODULE,
+  );
   const workers = new Set();
   const osThreadIds = new Set();
   let nextTid = 0;
@@ -103,6 +118,9 @@ export async function createWasiThreadSpawn({ wasmModule, memory }) {
   }
 
   const threadSpawn = (startArg) => {
+    if (workerNeedsHostcallBridge) {
+      return -1;
+    }
     const tid = (nextTid += 1);
     try {
       if (IS_NODE) {

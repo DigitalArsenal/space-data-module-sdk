@@ -1,10 +1,10 @@
 {
   "bundleSectionName": "rec.mbl",
-  "baseModuleSha256Hex": "be593b932c5a218dbba45a8b810820e78e3e1cef7434c9f74462037d178e740f",
-  "bundleSha256Hex": "c93e8fe3823bbe83f34a767ad28534b314a7091313bd66d24fd4076503899a03",
-  "bundledModuleSha256Hex": "643db4d162d018b8cc1e550b7923646a1b3fcc2801245eadec2b29b1cb1554d8",
-  "canonicalModuleHashHex": "82d780d04076a85930a24e06a8f6d7ab05d93e12161e808ba7370c96ee7e1c5c",
-  "manifestHashHex": "a40a131f521645aed26995aacd73cafde0706a82997684d14ee66f4b6b7bedf2",
+  "baseModuleSha256Hex": "948ea23484f4b2870c431152a4e447e24292a1c793e81b58804d4f4abea29afd",
+  "bundleSha256Hex": "0a92c6e13218d08ba591d92e07e00c877e4ca3f8351fb2bd2ca52b6ec5fe9259",
+  "bundledModuleSha256Hex": "b15471fb7bd7b1958b9583fc64caef55f328345bb044fbd7030a7e97827a191e",
+  "canonicalModuleHashHex": "c37828f406bbc12ea5d42b086c01a3ee50074aea787a8760a9539bc419f01b96",
+  "manifestHashHex": "8d962b530326167a83fe5ac2a69d7e2ad303e25b18bc8b46b1b4ef5e36045e43",
   "manifestPluginId": "com.digitalarsenal.examples.single-file-vector",
   "entryIds": [
     "manifest",
@@ -19,8 +19,8 @@
       "role": "manifest",
       "payloadEncoding": "flatbuffer",
       "sectionName": "sds.manifest",
-      "payloadLength": 760,
-      "payloadSha256Hex": "a40a131f521645aed26995aacd73cafde0706a82997684d14ee66f4b6b7bedf2",
+      "payloadLength": 1196,
+      "payloadSha256Hex": "8d962b530326167a83fe5ac2a69d7e2ad303e25b18bc8b46b1b4ef5e36045e43",
       "typeRef": {
         "schemaName": "PLG.fbs",
         "fileIdentifier": "$PLG"

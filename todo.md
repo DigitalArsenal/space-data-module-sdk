@@ -15,11 +15,16 @@ with the active architecture.
 ## Runtime Host
 
 - [ ] Add a canonical runtime-host package/export surface
-- [ ] Add append-only FlatSQL row services addressed by `($SCHEMA_FILE_ID, rowId)`
-- [ ] Add host-managed runtime regions addressed by `(regionId, recordIndex)`
+- [ ] Reduce persistence to an opaque binary namespace with browser/WasmEdge
+  atomicity parity
+- [ ] Add bounds-checked shared arenas and canonical `PIV`/`TAB` descriptor
+  routing without application-schema interpretation
 - [ ] Add dynamic module install/load/unload/invoke
 - [ ] Add browser, server, and WasmEdge host adapters over the same model
 - [ ] Keep raw pointers internal-only and out of durable public contracts
+- [ ] Package FlatSQL and timer/cron behavior as signed, pluggable WASM nodes
+- [ ] Reject any module ABI port that lacks paired canonical FlatBuffer and
+  aligned-binary representations for the same SDS identity
 
 ## WasmEdge
 
@@ -29,15 +34,18 @@ with the active architecture.
 
 ## OrbPro
 
-- [ ] Make the entity model a host-side view over FlatSQL-backed standards rows
+- [ ] Make the entity model consume typed query results from the FlatSQL WASM
+  node without re-owning database semantics
 - [ ] Preserve the existing fast shared-buffer WasmEngine path
-- [ ] Route SGP4 and HPOP runtime state through host-managed aligned-binary regions
+- [ ] Route SGP4 and HPOP runtime state through validated flow arenas with
+  canonical FlatBuffer fallback
 - [ ] Keep conjunction consuming generic propagator outputs only
 
 ## Hosted Runtime Tooling
 
 - [ ] Re-scope hosted runtime docs and code so they clearly depend on the SDK runtime host
-- [ ] Keep graph compilation, editor runtime, deployment planning, and flow packaging there
+- [ ] Keep editor tooling and deployment planning there while graph topology and
+  orchestration semantics remain in signed WASM flow artifacts
 - [ ] Keep optional `emception` compile support there or re-export it cleanly from the SDK repo
 - [ ] Stop describing hosted runtime tooling as the owner of a separate runtime model
 

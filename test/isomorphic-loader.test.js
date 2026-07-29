@@ -23,13 +23,27 @@ const echoProcessFixturePath = path.join(
   "echo-plugin-server.mjs",
 );
 
+const TEST_FRAME_IDENTITY = Object.freeze({
+  schemaName: "CAT.fbs",
+  fileIdentifier: "$CAT",
+  rootTypeName: "CAT",
+});
+
 function createPort(portId, required = true) {
   return {
     portId,
     acceptedTypeSets: [
       {
-        setId: `${portId}-any`,
-        allowedTypes: [{ acceptsAnyFlatbuffer: true }],
+        setId: `${portId}-test-frame`,
+        allowedTypes: [
+          { ...TEST_FRAME_IDENTITY, wireFormat: "flatbuffer" },
+          {
+            ...TEST_FRAME_IDENTITY,
+            wireFormat: "aligned-binary",
+            byteLength: 64,
+            requiredAlignment: 8,
+          },
+        ],
       },
     ],
     minStreams: required ? 1 : 0,

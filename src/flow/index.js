@@ -2,6 +2,7 @@
 // pure-JS FlowProgram interpreter, the flow/StreamInvoke/PMAN codecs, and the
 // dependency stream bridge. normalize.js and vendor/ are internal.
 export { createFlowRuntimeHost } from "./flowRuntimeHost.js";
+export { createIsomorphicFlowRuntimeHost } from "./isomorphicFlowHost.js";
 export { FlowRuntime } from "./jsFlowRuntime.js";
 export {
   decodeFlowProgram,
@@ -14,6 +15,16 @@ export {
   encodeStreamInvokeResponse,
 } from "./flowCodec.js";
 export { createDependencyStreamBridge } from "./dependencyStreamBridge.js";
+export {
+  FLATSQL_LINKED_STORE_SECTION_NAME,
+  assertFlatsqlLinkedStoreDescriptorForWasm,
+  encodeFlatsqlLinkedStoreDescriptor,
+  hashFlatsqlLinkedStoreDescriptor,
+  listFlatsqlPersistenceImports,
+  parseFlatsqlLinkedStoreDescriptor,
+  readFlatsqlLinkedStoreDescriptor,
+  validateFlatsqlLinkedStoreDescriptor,
+} from "./linkedStoreDescriptor.js";
 export {
   FLATSQL_LINK_SHIM_WASM,
   FLATSQL_ENGINE_IMPORT_MODULE,

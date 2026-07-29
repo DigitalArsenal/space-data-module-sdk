@@ -10,6 +10,15 @@ artifact.
 - Read this directory when you need to know why a module was rejected.
 - Prefer fixing your module manifest or build output before changing policy here.
 
+## Required Isomorphic Checks
+
+- Reject any input or output port that does not declare both canonical
+  FlatBuffer and aligned-binary representations for the same SDS identity.
+- Reject a flow that requests host-owned FlatSQL/database semantics, host cron
+  policy, schema-specific host routing, or different browser/WasmEdge binaries.
+- Require signed FlatSQL and timer behavior to appear as explicit WASM node
+  dependencies when a flow uses those features.
+
 ## Note
 
 Only edit this directory when you are intentionally changing the compliance

@@ -24,6 +24,22 @@ import {
   extractPublicationRecordCollection,
 } from "../src/transport/records.js";
 
+function createDualTypeSet(setId, schemaName, fileIdentifier, rootTypeName) {
+  const identity = { schemaName, fileIdentifier, rootTypeName };
+  return {
+    setId,
+    allowedTypes: [
+      { ...identity, wireFormat: "flatbuffer" },
+      {
+        ...identity,
+        wireFormat: "aligned-binary",
+        byteLength: 64,
+        requiredAlignment: 8,
+      },
+    ],
+  };
+}
+
 function createTestManifest() {
   return {
     pluginId: "com.digitalarsenal.examples.bundle-test",
@@ -40,15 +56,7 @@ function createTestManifest() {
           {
             portId: "request",
             acceptedTypeSets: [
-              {
-                setId: "omm",
-                allowedTypes: [
-                  {
-                    schemaName: "OMM.fbs",
-                    fileIdentifier: "$OMM",
-                  },
-                ],
-              },
+              createDualTypeSet("omm", "OMM.fbs", "$OMM", "OMM"),
             ],
             minStreams: 1,
             maxStreams: 1,
@@ -59,15 +67,7 @@ function createTestManifest() {
           {
             portId: "state",
             acceptedTypeSets: [
-              {
-                setId: "cat",
-                allowedTypes: [
-                  {
-                    schemaName: "CAT.fbs",
-                    fileIdentifier: "$CAT",
-                  },
-                ],
-              },
+              createDualTypeSet("cat", "CAT.fbs", "$CAT", "CAT"),
             ],
             minStreams: 1,
             maxStreams: 1,

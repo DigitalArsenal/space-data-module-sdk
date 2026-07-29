@@ -1,5 +1,15 @@
 # Isomorphic SDN Runtime Plan
 
+> **Superseded architecture — 2026-07-21:** Host-owned FlatSQL rows, query
+> semantics, and runtime regions described below are not the target model.
+> Current implementations must follow
+> [`browser-wasmedge-isomorphic.md`](./browser-wasmedge-isomorphic.md) and
+> [`flatsql-streaming-standard.md`](./flatsql-streaming-standard.md): FlatSQL is
+> a pluggable WASM flow node, hosts provide only generic opaque persistence and
+> arena/wakeup adapters, and every ABI port supports paired canonical
+> FlatBuffer and aligned-binary representations. This file remains historical
+> planning context only.
+
 ## Goal
 
 Run the same signed Space Data modules across browser, server, OrbPro, and

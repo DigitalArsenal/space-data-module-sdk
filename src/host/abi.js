@@ -6,6 +6,7 @@ import {
 } from "./hostcallWire.js";
 
 const textDecoder = new TextDecoder();
+const CAPABILITY_OPERATION_UNHANDLED = Symbol("capability-operation-unhandled");
 
 export const DEFAULT_HOSTCALL_IMPORT_MODULE = "space_data_module_host";
 export const HOSTCALL_STATUS_OK = 0;
@@ -191,6 +192,29 @@ function assertSyncHostcallResult(value, operation) {
   return value;
 }
 
+function dispatchHostCapabilityOperationSync(host, operation, params = null) {
+  const normalized = normalizeCapabilityOperation(operation);
+  if (!normalized) {
+    return CAPABILITY_OPERATION_UNHANDLED;
+  }
+
+  const adapter = getHostCapabilityAdapter(host, normalized.capabilityId);
+  if (!adapter || typeof adapter !== "object") {
+    return CAPABILITY_OPERATION_UNHANDLED;
+  }
+  let result;
+  if (typeof adapter[normalized.methodId] === "function") {
+    result = adapter[normalized.methodId](params);
+  } else if (typeof adapter.invoke === "function") {
+    result = adapter.invoke(normalized.methodId, params);
+  } else {
+    throw new Error(
+      `Host capability "${normalized.capabilityId}" does not implement "${normalized.methodId}" or invoke().`,
+    );
+  }
+  return assertSyncHostcallResult(result, operation);
+}
+
 export function dispatchHostSyncOperation(host, operation, params = null) {
   const normalized = assertNonEmptyString(operation, "Hostcall operation");
   switch (normalized) {
@@ -298,10 +322,19 @@ export function dispatchHostSyncOperation(host, operation, params = null) {
         ),
         normalized,
       );
-    default:
+    default: {
+      const capabilityResult = dispatchHostCapabilityOperationSync(
+        host,
+        normalized,
+        params,
+      );
+      if (capabilityResult !== CAPABILITY_OPERATION_UNHANDLED) {
+        return capabilityResult;
+      }
       throw new Error(
         `Operation "${normalized}" is not available in the synchronous hostcall ABI.`,
       );
+    }
   }
 }
 

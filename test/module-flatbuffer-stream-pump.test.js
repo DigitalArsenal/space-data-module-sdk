@@ -10,13 +10,27 @@ import {
   encodePluginInvokeRequest,
 } from "../src/index.js";
 
+const TEST_FRAME_IDENTITY = Object.freeze({
+  schemaName: "CAT.fbs",
+  fileIdentifier: "$CAT",
+  rootTypeName: "CAT",
+});
+
 function createPort(portId, required = true) {
   return {
     portId,
     acceptedTypeSets: [
       {
-        setId: `${portId}-any`,
-        allowedTypes: [{ acceptsAnyFlatbuffer: true }],
+        setId: `${portId}-test-frame`,
+        allowedTypes: [
+          { ...TEST_FRAME_IDENTITY, wireFormat: "flatbuffer" },
+          {
+            ...TEST_FRAME_IDENTITY,
+            wireFormat: "aligned-binary",
+            byteLength: 64,
+            requiredAlignment: 8,
+          },
+        ],
       },
     ],
     minStreams: required ? 1 : 0,
@@ -87,8 +101,8 @@ int ingest_records(void) {
 
   plugin_push_output(
     "stats",
-    "StreamStats.fbs",
-    "STAT",
+    "CAT.fbs",
+    "$CAT",
     (const uint8_t *)stats,
     (uint32_t)written
   );
@@ -237,6 +251,9 @@ test("module flatbuffer stream pump can feed a persistent browser direct-surface
     methodId: "ingest_records",
     portId: "records",
     maxFramesPerInvoke: 2,
+    typeResolver() {
+      return { ...TEST_FRAME_IDENTITY, wireFormat: "flatbuffer" };
+    },
     async onResponse(response) {
       responses.push(response);
     },

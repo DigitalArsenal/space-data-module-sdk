@@ -21,8 +21,9 @@ Nearest-file wins: read this file first, then follow the most specific child
   handling.
 - `src/host/AGENTS.md`: Node host, browser shims, the legacy sync `space_data_module_host`
   subset, async host adapters, and isomorphic loaders.
-- `src/runtime-host/AGENTS.md`: FlatSQL-backed runtime-host storage, row/region
-  identity, and binary FlatBuffer ingest.
+- `src/runtime-host/AGENTS.md`: generic opaque persistence, arena/descriptor
+  routing, and binary FlatBuffer transport adapters. FlatSQL semantics do not
+  live in the host.
 - `src/testing/AGENTS.md`: harnesses, process invoke clients, browser harness,
   and module stream pumps.
 - `test/AGENTS.md`: test matrix and env-gated suites.
@@ -57,8 +58,9 @@ Use this repo when you need to:
   examples, and the CLI.
 - Only change SDK internals when you are explicitly changing the standard for
   all module authors.
-- Flow composition, runtime orchestration, flow launch plans, or workspace
-  startup belong in host runtime repos such as OrbPro and Space Data Network.
+- Flow graphs and orchestration semantics belong in signed WASM flow artifacts.
+  Host runtime repos such as OrbPro and Space Data Network own only generic
+  artifact installation, capability enforcement, launch, and workspace startup.
 - Application behavior, scene integration, UI flows, and standards ingestion in
   OrbPro belong in `OrbPro`, even when that work consumes helpers from this
   repo.
@@ -77,6 +79,13 @@ Every compliant module produced here should satisfy all of the following:
 - The compiled artifact passes `validatePluginArtifact(...)`.
 - The module exports the canonical manifest accessor symbols.
 - Declared capability IDs come from this repo's vocabulary.
+- The same signed isomorphic artifact bytes load unchanged in the browser/JS
+  harness and WasmEdge. Host-specific replacement binaries are not compliant.
+- Every input and output accepted type set declares both the canonical SDS
+  FlatBuffer representation and the aligned-binary representation for the same
+  schema identity. The compiler must reject an absent or incompatible pair.
+- FlatSQL, timer/cron policy, and every other flow-node behavior execute as
+  signed WASM modules. They are not host-language services.
 - Single-file delivery appends one `REC` trailer carrying `MBL` and any
   publication metadata after the wasm payload.
 - Same-file signing or encrypted binary delivery appends an SDS `REC` trailer
@@ -112,10 +121,12 @@ Every compliant module produced here should satisfy all of the following:
 - The canonical streaming path is binary. Do not introduce JSON or base64 into
   the FlatBuffer ingest path.
 - Use size-prefixed FlatBuffer frames for stream transport.
-- Use host-owned ingest via `src/runtime-host` when the host owns durable
-  storage.
+- Route durable ingest through the pluggable FlatSQL WASM node. Hosts may expose
+  only opaque binary persistence and shared-arena primitives.
 - Use resident-module streaming via `src/testing/moduleFlatbufferStreamPump.js`
-  when a module owns the state machine or embeds FlatSQL internally.
+  to feed the FlatSQL node or another stateful WASM node.
+- Durable records remain canonical FlatBuffer bytes. Aligned-binary frames are
+  transient routing views selected through `TAB.WIRE_FORMAT`.
 - Do not benchmark 1 GiB by constructing one giant invoke envelope. Benchmark
   chunked stream ingest instead.
 
@@ -160,7 +171,9 @@ change is correct:
 - `src/bundle`: REC trailer encoding/parsing, MBL bundle metadata, and wasm custom sections.
 - `src/host`: Node host, browser shims, the legacy sync `space_data_module_host` subset,
   async host adapters, and isomorphic loaders.
-- `src/runtime-host`: FlatSQL-backed row/region storage and stream ingest.
+- `src/runtime-host`: generic opaque persistence, arenas, descriptor routing,
+  registry services, and stream ingest adapters used equally by browser and
+  WasmEdge hosts; it must not own FlatSQL semantics.
 - `src/testing`: browser harnesses, process invoke clients, and streaming pumps.
 - `src/auth`, `src/transport`, `src/deployment`: signing, encryption, and
   deployment protection metadata.

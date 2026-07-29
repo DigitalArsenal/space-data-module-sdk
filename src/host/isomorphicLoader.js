@@ -231,6 +231,11 @@ export async function loadModule(options = {}) {
           options.host ?? null,
         );
       }
+      if (inspection.profile === "unknown") {
+        throw new Error(
+          "Unsupported WASM artifact profile: no recognized command or module-host ABI exports.",
+        );
+      }
     }
 
     return attachHostDispatch(

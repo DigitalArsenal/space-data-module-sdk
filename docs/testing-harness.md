@@ -126,13 +126,11 @@ The generator does two things:
    - sync hostcall
    - async host API
 
-When a port advertises multiple payload wire formats, pass
-`preferredWireFormat` to select which declared type ref the generated smoke
-cases should use. This is useful for contracts that accept regular FlatBuffer
-inputs but also expose aligned-binary ports or dual-format test fixtures.
-Aligned-binary entries are expected to ship with a regular FlatBuffer fallback
-for the same schema in the same accepted type set, and the harness will choose
-between those declared type refs rather than inventing one.
+Every port advertises both canonical FlatBuffer and aligned-binary payload wire
+formats. Pass `preferredWireFormat` to select which declared type ref the
+generated smoke cases should use. The paired entries carry the same schema
+identity in the same accepted type set, and the harness chooses between those
+declared type refs rather than inventing one.
 
 ## Flows
 
@@ -145,7 +143,8 @@ Host runtime packages may still compile or bundle flows for deployment, but the 
 contract in this repo is now the canonical host surface for:
 
 - installing multiple modules into one host
-- wiring host-owned row and region services
+- wiring generic opaque persistence and shared-arena/descriptor services
+- installing FlatSQL and timer behavior as WASM nodes
 - exercising the same control plane in process mode and WasmEdge mode
 
 ## Runtime Matrix
@@ -192,7 +191,8 @@ execution model. The harness supports two execution profiles:
 2. Runtime-host profile:
    - multiple installed modules in one host
    - explicit module install/list/unload/invoke controls
-   - host-owned row services and aligned-binary region services
+   - generic opaque persistence and shared-arena/descriptor services
+   - FlatSQL and other stateful behavior supplied by installed WASM nodes
 
 Process mode can emulate the runtime host with a normal Node child process. For
 WasmEdge, the runner can start in standalone host mode with:
@@ -315,6 +315,10 @@ WASM guests today:
 - `clock`
 - `schedule_cron`
 - `filesystem.resolvePath`
+
+`schedule_cron` is retained only as compatibility coverage for the existing
+sync bridge. New isomorphic flows test cron policy through a timer WASM node and
+use only `clock` plus a generic wakeup adapter from the host.
 
 These remain async host API capabilities today from a guest execution
 perspective:

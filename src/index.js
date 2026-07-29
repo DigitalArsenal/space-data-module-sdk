@@ -13,6 +13,7 @@ export * from "./runtime-host/index.js";
 export * from "./invoke/index.js";
 export * from "./testing/index.js";
 export * from "./deployment/index.js";
+export * from "./app/index.js";
 export {
   DefaultInvokeExports,
   DefaultManifestExports,

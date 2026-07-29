@@ -14,8 +14,9 @@ the SDK source, not a prompt to edit SDK internals by default.
 - `src/bundle`: REC+MBL single-file packaging, wasm section handling, and vector compatibility.
 - `src/host`: Node host, browser shims, `space_data_module_host`, WasmEdge runners, and
   isomorphic loaders.
-- `src/runtime-host`: FlatSQL-backed runtime host, row/region identity, and
-  binary stream ingest.
+- `src/runtime-host`: generic opaque persistence, shared-arena/descriptor
+  routing, registry services, and binary stream ingest. FlatSQL itself is a
+  pluggable WASM node.
 - `src/testing`: harnesses, browser module loading, process invoke clients, and
   module-owned FlatBuffer stream pumps.
 - `src/auth`, `src/transport`, `src/deployment`: signing, encryption, REC/PNM/

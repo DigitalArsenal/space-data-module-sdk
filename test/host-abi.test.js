@@ -106,6 +106,27 @@ int guest_response_len(void) {
 }
 `;
 
+const TEST_FRAME_IDENTITY = Object.freeze({
+  schemaName: "CAT.fbs",
+  fileIdentifier: "$CAT",
+  rootTypeName: "CAT",
+});
+
+function createTestTypeSet(setId) {
+  return {
+    setId,
+    allowedTypes: [
+      { ...TEST_FRAME_IDENTITY, wireFormat: "flatbuffer" },
+      {
+        ...TEST_FRAME_IDENTITY,
+        wireFormat: "aligned-binary",
+        byteLength: 64,
+        requiredAlignment: 8,
+      },
+    ],
+  };
+}
+
 function createAbiMethod(methodId) {
   return {
     methodId,
@@ -114,10 +135,7 @@ function createAbiMethod(methodId) {
       {
         portId: "request",
         acceptedTypeSets: [
-          {
-            setId: "any-input",
-            allowedTypes: [{ acceptsAnyFlatbuffer: true }],
-          },
+          createTestTypeSet("test-input"),
         ],
         minStreams: 1,
         maxStreams: 1,
@@ -128,10 +146,7 @@ function createAbiMethod(methodId) {
       {
         portId: "response",
         acceptedTypeSets: [
-          {
-            setId: "any-output",
-            allowedTypes: [{ acceptsAnyFlatbuffer: true }],
-          },
+          createTestTypeSet("test-output"),
         ],
         minStreams: 0,
         maxStreams: 1,
@@ -245,6 +260,64 @@ test("sync hostcall dispatcher rejects async-only operations", () => {
 
   assert.throws(
     () => dispatch("timers.delay", { ms: 1 }),
+    /not available in the synchronous hostcall ABI/,
+  );
+});
+
+test("sync host dispatcher routes generic synchronous capability adapters", () => {
+  const calls = [];
+  const host = createRuntimeHost({
+    capabilities: {
+      timers: {
+        arm(params) {
+          calls.push(["arm", params]);
+          return { armed: params.token };
+        },
+      },
+      opaque_state: {
+        invoke(methodId, params) {
+          calls.push([methodId, params]);
+          return methodId === "load" ? { bytes: new Uint8Array([1, 2, 3]) } : undefined;
+        },
+      },
+    },
+  });
+  const dispatch = createNodeHostSyncDispatcher(host);
+
+  assert.deepEqual(
+    dispatch("timers.arm", { token: "hourly", at_unix_ms: 1234 }),
+    { armed: "hourly" },
+  );
+  assert.deepEqual(dispatch("opaque_state.load", { key: "snapshot" }), {
+    bytes: new Uint8Array([1, 2, 3]),
+  });
+  assert.equal(
+    dispatch("opaque_state.store", {
+      key: "snapshot",
+      bytes: new Uint8Array([4, 5, 6]),
+    }),
+    undefined,
+  );
+  assert.deepEqual(calls, [
+    ["arm", { token: "hourly", at_unix_ms: 1234 }],
+    ["load", { key: "snapshot" }],
+    ["store", { key: "snapshot", bytes: new Uint8Array([4, 5, 6]) }],
+  ]);
+});
+
+test("sync generic capability dispatch rejects Promise results", () => {
+  const host = createRuntimeHost({
+    capabilities: {
+      timers: {
+        async arm() {
+          return { armed: true };
+        },
+      },
+    },
+  });
+
+  assert.throws(
+    () => createNodeHostSyncDispatcher(host)("timers.arm", { token: "hourly" }),
     /not available in the synchronous hostcall ABI/,
   );
 });

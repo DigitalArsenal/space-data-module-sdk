@@ -10,17 +10,32 @@ import {
   ModuleThreadModel,
 } from "../src/index.js";
 import { createBrowserHost } from "../src/browser.js";
+import { createBrowserWasiShim } from "../src/host/wasiShim.js";
 import { createBrowserModuleHarness } from "../src/testing/browserModuleHarness.js";
 
 const execFile = promisify(execFileCallback);
+
+const TEST_FRAME_IDENTITY = Object.freeze({
+  schemaName: "CAT.fbs",
+  fileIdentifier: "$CAT",
+  rootTypeName: "CAT",
+});
 
 function createPort(portId, required = true) {
   return {
     portId,
     acceptedTypeSets: [
       {
-        setId: `${portId}-any`,
-        allowedTypes: [{ acceptsAnyFlatbuffer: true }],
+        setId: `${portId}-test-frame`,
+        allowedTypes: [
+          { ...TEST_FRAME_IDENTITY, wireFormat: "flatbuffer" },
+          {
+            ...TEST_FRAME_IDENTITY,
+            wireFormat: "aligned-binary",
+            byteLength: 64,
+            requiredAlignment: 8,
+          },
+        ],
       },
     ],
     minStreams: required ? 1 : 0,
@@ -87,6 +102,14 @@ async function commandAvailable(command) {
   }
 }
 
+test("browser WASI shim fails closed for modules probing preopened directories", () => {
+  const wasi = createBrowserWasiShim().imports.wasi_snapshot_preview1;
+  assert.equal(typeof wasi.fd_prestat_get, "function");
+  assert.equal(typeof wasi.fd_prestat_dir_name, "function");
+  assert.equal(wasi.fd_prestat_get(3, 0), 8);
+  assert.equal(wasi.fd_prestat_dir_name(3, 0, 0), 8);
+});
+
 test("browser+wasmedge runtime targets default to a shared single-thread artifact", async (t) => {
   const compilation = await compileModuleFromSource({
     manifest: createInvokeManifest(),
@@ -134,8 +157,8 @@ test("browser harness executes command-surface invoke envelopes for the shared a
       {
         portId: "request",
         typeRef: {
-          schemaName: "Blob.fbs",
-          fileIdentifier: "BLOB",
+          ...TEST_FRAME_IDENTITY,
+          wireFormat: "flatbuffer",
         },
         payload: new TextEncoder().encode("hello from browser"),
       },
