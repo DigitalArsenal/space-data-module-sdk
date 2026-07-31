@@ -19,6 +19,13 @@ jobs:
       # mid-stream — which is exactly how "the runner died" was misread as
       # "these seven tests failed" off a truncated TAP stream. Both lanes report.
       fail-fast: false
+      # One lane at a time. Across every two-lane run measured on this repo,
+      # EXACTLY ONE of the two concurrently-scheduled runners was torn down
+      # mid-suite with "the runner has received a shutdown signal" — on a VM
+      # with 12 GB of 16 GB free, zero swap, 44% disk and 42% CPU idle, so
+      # nothing the job did caused it. The surviving lane always finished.
+      # Serializing costs wall time and buys a gate that reports.
+      max-parallel: 1
       matrix:
         node-version: [20, 22]
     steps:
