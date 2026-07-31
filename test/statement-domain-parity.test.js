@@ -52,7 +52,7 @@ const VECTORS_PATH = path.join(
 
 // Pinned in the node's Go suite too. See this file's header.
 const VECTORS_SHA256 =
-  "00432b9115f49f6f15cf7e6bd0296f2f9eca0428d7ccdd98036b32469698000d";
+  "72124d7710658858ca747c90593e7d0c23fb63560cb7b2cd3fe607d542d83c58";
 
 function hexToBytes(hex) {
   const out = new Uint8Array(hex.length / 2);
@@ -180,6 +180,20 @@ for (const vector of vectors.artifacts) {
         result.contentHashHex,
         vector.expect.contentHashHex,
         `${vector.name}: portable content hash differs from the node's`,
+      );
+      // WHAT the signature covered, not merely that it passed. Agreeing on the
+      // verdict while disagreeing on the basis is precisely how sdn-server
+      // reported hash_mismatch for a bundle-scope artifact this verifier and
+      // the kubo twin both accepted.
+      assert.equal(
+        result.signatureScope ?? "",
+        vector.expect.signatureScope,
+        `${vector.name}: signature scope differs from the node's`,
+      );
+      assert.equal(
+        result.signedHashHex ?? "",
+        vector.expect.signedHashHex,
+        `${vector.name}: signed digest differs from the node's`,
       );
       return;
     }

@@ -20,6 +20,7 @@ import {
 } from "../src/compiler/pthreadArtifactGuard.js";
 import { resolveWasiThreadsToolchain } from "../src/compiler/wasiThreadsToolchain.js";
 import {
+  __testables,
   buildFlowModuleManifest,
   checkFlowProgram,
   compileFlowProgram,
@@ -32,7 +33,10 @@ import {
   decodePluginManifest,
   encodePluginManifest,
 } from "../src/manifest/index.js";
-import { signModuleArtifact } from "../src/bundle/signing.js";
+import {
+  signModuleArtifact,
+  verifyModuleArtifact,
+} from "../src/bundle/signing.js";
 
 const execFileAsync = promisify(execFile);
 const CLI_PATH = fileURLToPath(new URL("../bin/space-data-module.js", import.meta.url));
@@ -2658,4 +2662,125 @@ test("the real data-retrieval api block shape passes validation", () => {
     ],
   });
   assert.equal(check.ok, true, JSON.stringify(check.issues));
+});
+
+// ---------------------------------------------------------------------------
+// WHICH SIGNATURES THE FLOW LANE ADMITS
+//
+// Driven by the SHARED statement-domain vectors — the same file the node's two
+// Go verifiers read, byte for byte. Until 2026-07-30 this gate demanded
+// signatureScope === "bundle" and therefore threw out EVERY artifact the node's
+// signing endpoint can produce, one line after verifying it, blaming the
+// signature rather than the policy (graph/tasks/sdk-flow-compiler-refuses-node-signed.md).
+//
+// `flowNodeAdmissible` in the vector file is the pinned answer for each
+// artifact, so the flow lane cannot drift away from the three verifiers
+// silently: a bundle-scope signature is admissible, a module signature under
+// SDN-MODULE-PUBLICATION-V1 is admissible, and a bare-digest module signature
+// is verified but NOT admissible for composition.
+// ---------------------------------------------------------------------------
+
+const STATEMENT_DOMAIN_VECTORS = JSON.parse(
+  await readFile(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "support",
+      "statement-domain-vectors.json",
+    ),
+    "utf8",
+  ),
+);
+
+function vectorHexToBytes(hex) {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+async function flowLaneAdmits(vector) {
+  const artifactBytes = vectorHexToBytes(vector.sdkArtifactHex);
+  const dependency = {
+    ...producerDependency,
+    guestLink: null,
+    artifactBytes,
+    publisherRecord: {
+      algorithm: "ed25519",
+      keyId: "janus-vector-key",
+      // The flow lane's trust set IS the node's publisher record, so the
+      // vector's own trustedPublicKeysHex has to drive it. A vector that
+      // trusts nobody must reach this gate trusting nobody — otherwise the
+      // "untrusted signer" vectors would be silently re-trusted here and would
+      // prove the opposite of what they were written to prove.
+      publicKeyHex:
+        vector.trustedPublicKeysHex[0] ??
+        "00000000000000000000000000000000000000000000000000000000000000ff",
+      developmentOnly: false,
+    },
+  };
+  const flow = singleNodeFlow(dependency, {
+    dispatchModel: "isomorphic",
+    artifact: {
+      path: "nodes/vector/module.wasm",
+      sha256: createHash("sha256").update(artifactBytes).digest("hex"),
+      publisher: "nodes/vector/publisher.json",
+    },
+  });
+  const dependencies = dependencyMap(dependency);
+  const check = checkFlowProgram({ flow, dependencies });
+  try {
+    await __testables.verifyIsomorphicNodeArtifacts({
+      flow,
+      check,
+      dependencies,
+    });
+    return { admitted: true, message: "" };
+  } catch (error) {
+    return { admitted: false, message: String(error?.message ?? error) };
+  }
+}
+
+for (const vector of STATEMENT_DOMAIN_VECTORS.artifacts) {
+  test(`flow lane admissibility: ${vector.name}`, async () => {
+    const expected = vector.expect.flowNodeAdmissible === true;
+    const outcome = await flowLaneAdmits(vector);
+    assert.equal(
+      outcome.admitted,
+      expected,
+      expected
+        ? `${vector.name} must compile as an isomorphic flow node — ${vector.why} (rejected with: ${outcome.message})`
+        : `${vector.name} must NOT be admitted for composition — ${vector.why}`,
+    );
+  });
+}
+
+test("a bare-digest module signature verifies but is refused for composition", async () => {
+  // Minted here rather than looked up: the shared vector set carries no
+  // verified bare-digest artifact today, and the contract must be tested, not
+  // asserted about a fixture that might stop existing.
+  const portable = Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+  const legacySigned = await signModuleArtifact(portable, {
+    privateKeySeedHex: "44".repeat(32),
+    keyId: "legacy-bare-digest",
+    signatureScope: "module",
+  });
+  assert.equal(legacySigned.signature.statementDomain, undefined);
+
+  const verified = await verifyModuleArtifact(legacySigned.wasmBytes, {
+    trustedPublicKeys: [legacySigned.signature.publicKeyHex],
+    requireSignature: true,
+  });
+  assert.equal(verified.verified, true, "the legacy form must still VERIFY");
+  assert.equal(verified.signatureScope, "module");
+  assert.equal(verified.statementDomain, null);
+
+  const outcome = await flowLaneAdmits({
+    name: "legacy-bare-digest",
+    why: "no domain separation: a signature minted over another protocol's digest could be replayed into a lane that compiles what it admits",
+    sdkArtifactHex: Buffer.from(legacySigned.wasmBytes).toString("hex"),
+    trustedPublicKeysHex: [legacySigned.signature.publicKeyHex],
+  });
+  assert.equal(outcome.admitted, false, "verified is not the same as admissible");
+  assert.match(outcome.message, /SDN-MODULE-PUBLICATION-V1/);
 });

@@ -68,6 +68,7 @@ import {
 import { appendWasmCustomSection } from "../bundle/wasm.js";
 import { SDS_MANIFEST_SECTION_NAME } from "../bundle/constants.js";
 import { verifyModuleArtifact } from "../bundle/signing.js";
+import { DOMAIN_MODULE_PUBLICATION_V1 } from "../bundle/sigdomain.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { bytesToHex } from "../utils/encoding.js";
 import { encodeFlowProgram } from "./flowCodec.js";
@@ -285,9 +286,49 @@ async function verifyIsomorphicNodeArtifacts({
       trustedPublicKeys: [publisher.publicKeyHex],
       requireSignature: true,
     });
-    if (!verification.verified || verification.signatureScope !== "bundle") {
+    // WHAT THE FLOW LANE REQUIRES OF A SIGNATURE, and why it is two forms.
+    //
+    // Composition inlines somebody else's object code into a binary this
+    // process then ships. The signature has to bind, at minimum, everything
+    // that ends up compiled in. Two signatures do that, and they are NOT the
+    // same statement:
+    //
+    //   - BUNDLE scope — binds the whole MBL: the canonical module hash, the
+    //     manifest hash, and every non-signature member around it. The widest
+    //     commitment available, and the only one that covers the surrounding
+    //     bundle metadata.
+    //
+    //   - MODULE scope UNDER THE MODULE-PUBLICATION DOMAIN — the node's own
+    //     signing endpoint (sdn-server/internal/modulesign) issues
+    //     `SDN-MODULE-PUBLICATION-V1 || 0x00 || sha256(portable)`. That covers
+    //     the ENTIRE trailer-stripped payload — the code, the embedded
+    //     manifest section, every sds.* section — which is strictly more of the
+    //     compiled artifact than the canonical hash inside a bundle signature
+    //     binds (the canonical hash strips sds.* before hashing). It does not
+    //     bind the trailer metadata around it; the flow document's own
+    //     artifact.sha256 check above already pinned the exact file bytes, so
+    //     nothing the compiler consumes is left unbound.
+    //
+    // A BARE-DIGEST module signature (statementDomain absent, the pre-domain
+    // SDK form) is still refused here: no domain separation means a signature
+    // minted over some other protocol's digest can be replayed into this lane,
+    // and this lane compiles what it admits.
+    //
+    // Refusing module scope outright — which this did until 2026-07-30 — meant
+    // the flow compiler rejected EVERY artifact the node is able to sign, one
+    // line after verifying it, with a message that blamed the signature rather
+    // than the policy. See graph/tasks/sdk-flow-compiler-refuses-node-signed.md.
+    const domainSeparatedModuleScope =
+      verification.signatureScope === "module" &&
+      verification.statementDomain === DOMAIN_MODULE_PUBLICATION_V1;
+    if (
+      !verification.verified ||
+      (verification.signatureScope !== "bundle" && !domainSeparatedModuleScope)
+    ) {
       throw new Error(
-        `Isomorphic node "${checkedNode.nodeId}" artifact signature is not a verified whole-bundle signature.`,
+        `Isomorphic node "${checkedNode.nodeId}" artifact signature is not a verified ` +
+          `whole-bundle signature, nor a module signature under the ` +
+          `${DOMAIN_MODULE_PUBLICATION_V1} statement domain.`,
       );
     }
     verifiedByPluginId.set(checkedNode.pluginId, {
@@ -2823,4 +2864,11 @@ export async function compileFlowProgram({
 }
 
 // Internals exposed for regression tests only (see test/flow-wildcard-edge-contract.test.js).
-export const __testables = { resolveEdgeTypeContract, signedFlowEdgeContract };
+export const __testables = {
+  resolveEdgeTypeContract,
+  signedFlowEdgeContract,
+  // Exposed so the admissible-signature contract can be tested against the
+  // SHARED statement-domain vectors directly, instead of inferring it from a
+  // full compile that fails for a dozen later reasons.
+  verifyIsomorphicNodeArtifacts,
+};

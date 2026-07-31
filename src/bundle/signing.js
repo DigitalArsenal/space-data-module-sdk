@@ -82,17 +82,55 @@ function findSignatureEntry(bundle) {
   return null;
 }
 
+// The exact key spellings the SDK writer emits. Go's encoding/json matches
+// field names CASE-INSENSITIVELY and JavaScript's property access does not, so
+// a trailer spelling "StatementDomain" populates the node's struct and is
+// invisible here — the node would take the domain path and verify while this
+// verifier fell to the legacy path and refused. Same artifact, opposite
+// verdicts. Both sides therefore refuse a case variant of a known key outright.
+// Keys that are not a variant of anything known stay tolerated on both sides:
+// this closes a divergence, it is not a new schema.
+const SIGNATURE_PAYLOAD_KEYS = Object.freeze([
+  "algorithm",
+  "keyId",
+  "publicKeyHex",
+  "signatureHex",
+  "signedHashHex",
+  "signedHashAlgorithm",
+  "statementDomain",
+]);
+
 function decodeSignaturePayload(entry) {
+  let parsed;
   try {
     const payload = entry.payload ?? [];
     const text = new TextDecoder().decode(new Uint8Array(payload));
-    return JSON.parse(text);
+    parsed = JSON.parse(text);
   } catch {
     throw new ModuleSignatureError(
       "invalid_signature_payload",
       "module signature entry payload is not valid JSON",
     );
   }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new ModuleSignatureError(
+      "invalid_signature_payload",
+      "module signature entry payload is not a JSON object",
+    );
+  }
+  for (const key of Object.keys(parsed)) {
+    if (SIGNATURE_PAYLOAD_KEYS.includes(key)) continue;
+    const variant = SIGNATURE_PAYLOAD_KEYS.find(
+      (known) => known.toLowerCase() === key.toLowerCase(),
+    );
+    if (variant) {
+      throw new ModuleSignatureError(
+        "invalid_signature_payload",
+        `module signature entry payload spells "${key}"; the wire form is the module SDK's camelCase JSON and the correct spelling is "${variant}"`,
+      );
+    }
+  }
+  return parsed;
 }
 
 function equalBytes(left, right) {
@@ -521,6 +559,26 @@ export async function verifyModuleArtifact(bytes, options = {}) {
   // such whether or not the signer happens to be trusted. (The shared vector
   // `foreign-registered-domain-untrusted-signer` pins exactly this ordering.)
   const declaredStatementDomain = trimGoWhitespace(payload.statementDomain);
+  // AN ARTIFACT DECLARES EXACTLY ONE BASIS. A statement domain says the
+  // signature covers domain||0x00||sha256(portable); the bundle hash algorithm
+  // says it covers the canonical whole-bundle statement. Different preimages,
+  // so an artifact claiming both has not said what its signature covers.
+  // Resolving it either way silently discards the other claim — the node twins
+  // resolved it bundle-first, which would have dropped the domain check and
+  // with it the cross-domain replay guard. All three verifiers refuse instead
+  // (sdn-server + kubo: reason "ambiguous_signature_scope").
+  if (
+    declaredStatementDomain !== "" &&
+    trimGoWhitespace(payload.signedHashAlgorithm) ===
+      BUNDLE_SIGNATURE_HASH_ALGORITHM
+  ) {
+    const error = new ModuleSignatureError(
+      "ambiguous_signature_scope",
+      `module signature declares statement domain ${JSON.stringify(declaredStatementDomain)} AND hash algorithm ${JSON.stringify(BUNDLE_SIGNATURE_HASH_ALGORITHM)}; these are different preimages and an artifact must declare exactly one`,
+    );
+    error.statementDomain = declaredStatementDomain;
+    throw error;
+  }
   if (declaredStatementDomain !== "") {
     const portableBytes = new Uint8Array(protectedArtifact.payloadBytes);
     const contentHashBytes = await sha256Bytes(portableBytes);
