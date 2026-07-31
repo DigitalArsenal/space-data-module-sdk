@@ -138,15 +138,34 @@ change is correct:
   - `npm test`
   - `npm run check:compliance`
 
-`npm test` runs `node --test --test-concurrency=2`, and the bound is load
-bearing, not a style choice. A compile-heavy test file holds a vendored
-emception (a full LLVM compiled to wasm) resident at ~1.5 GB RSS; at the default
-concurrency (one worker per CPU) the compile-heavy files land together and take
-the whole runner down. On a GitHub hosted runner that surfaced as
-`The runner has received a shutdown signal` roughly five minutes in, with the
-suite two thirds run and no OOM printed anywhere — a job that fails without ever
-reporting a verdict, which also means the tag-triggered publish gate could never
-pass. Do not raise the bound without measuring peak RSS across the whole run.
+`npm test` runs `node --test --test-concurrency=2`. Read this before touching
+it, because the obvious reading of that bound is WRONG and was mine:
+
+`npm test` has never COMPLETED on a GitHub hosted runner. Every run so far ends
+`##[error]The runner has received a shutdown signal`, partway through, with no
+error of any kind in the log and the remaining files never executed — so a red
+CI job here may mean "some tests failed" or may mean "the verdict was never
+reached", and the two look nothing alike. Check for that line before believing
+a failure list.
+
+What is MEASURED, so nobody re-derives it:
+
+- The death is DETERMINISTIC, not an infra flake: two runs of the same commit
+  (30595826717 and its rerun) both stopped immediately after the same test,
+  `direct invoke ABI rejects unsupported declared input frame types`, at 5m33s
+  and 5m53s of `npm test`.
+- It is NOT memory. A vendored emception (a full LLVM compiled to wasm) plateaus
+  at 1.62 GB RSS per process and does NOT grow across repeated compiles (8
+  sequential compiles in one process: 1.52 → 1.62 GB), so at this bound the peak
+  is ~3.3 GB on a 16 GB public-repo runner.
+- The bound is therefore NOT the cure. It moved the stopping point (test 301 at
+  the default concurrency, test 336 at 2) without changing the outcome. It is
+  kept because a 4-vCPU runner has no business running one wasm-LLVM per core,
+  and it is honest about being a mitigation, not a fix.
+
+Tracked as `sdk-ci-runner-shutdown-mid-suite`. Until that is closed, CI cannot
+prove the suite green and the tag-triggered publish gate — which runs the same
+`npm test` — cannot pass.
 - If you changed manifest rules, compliance, compiler behavior, or standards
   validation:
   - `node --test test/module-sdk.test.js test/compliance.test.js`
