@@ -112,6 +112,42 @@ that is passed to the runtime.
 In practice this is the record a host inspects to determine what artifact was
 published and which signer attested to it.
 
+### MBL `signature` entry — domain separation (`statementDomain`)
+
+The detached Ed25519 signature carried as the MBL bundle's `signature`-role
+entry has two forms, and the ARTIFACT chooses which one applies — never the
+verifier, never a policy:
+
+| `statementDomain`            | signature covers                                    |
+| ---------------------------- | --------------------------------------------------- |
+| `SDN-MODULE-PUBLICATION-V1`  | `"SDN-MODULE-PUBLICATION-V1" \|\| 0x00 \|\| sha256(portable)` |
+| absent                       | the bare canonical module (or bundle) digest — legacy |
+
+`portable` is the trailer-stripped payload: the exact bytes the runtime
+instantiates and the node's capability policy identifies by content hash.
+
+The domain prefix exists because the node's publisher key is the NODE key, and
+that one bonded key signs several unrelated kinds of statement (dataset
+publications, module artifacts, and — reserved — update manifests). If every
+statement were a bare SHA-256 digest, a caller who could reach the node's
+signing endpoint could submit the bytes of one kind of document and staple the
+returned signature onto another. An ASCII domain label, a `NUL` that cannot
+occur inside the label, and a fixed-width 32-byte tail put each statement kind
+in a disjoint message space with no length ambiguity anywhere in the preimage.
+
+The domain registry is **closed**: a verifier refuses any label that is not
+registered, and a module verifier additionally refuses any registered label
+other than `SDN-MODULE-PUBLICATION-V1` — so a signature minted for a signed
+update can never be replayed into a module trailer. Adding a domain is a
+reviewed change in every implementation at once
+(`src/bundle/sigdomain.js` here; `internal/sigdomain` and its kubo twin in the
+node), never a request parameter.
+
+Legacy artifacts that predate the field keep verifying unchanged. The forms,
+the preimage bytes and every refusal reason are pinned as shared cross-language
+vectors in `test/support/statement-domain-vectors.json`, byte-identical to the
+node's copies, and asserted by the JS suite and both Go suites.
+
 ### `ENC` encrypted-delivery extension
 
 `ENC` carries the decryption parameters for a transport-protected module:

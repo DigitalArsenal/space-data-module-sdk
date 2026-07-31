@@ -14,6 +14,10 @@ import {
   ed25519Verify,
 } from "../utils/wasmCrypto.js";
 import { sha256Bytes } from "../utils/crypto.js";
+import {
+  DOMAIN_MODULE_PUBLICATION_V1,
+  statement as buildSignatureStatement,
+} from "./sigdomain.js";
 import { ModuleBundleEntryRole } from "spacedatastandards.org/lib/js/MBL/main.js";
 
 export const MODULE_SIGNATURE_ALGORITHM = "ed25519";
@@ -94,6 +98,20 @@ function equalBytes(left, right) {
   const a = new Uint8Array(left ?? []);
   const b = new Uint8Array(right ?? []);
   return a.length === b.length && a.every((byte, index) => byte === b[index]);
+}
+
+/**
+ * The canonical module hash, or null if this artifact's wasm cannot be walked.
+ * Used ONLY to populate a reporting field on the node-signed path, where the
+ * node itself never parses the wasm: a module whose sections this SDK cannot
+ * walk must not become an artifact the node admits and the SDK refuses.
+ */
+async function bestEffortCanonicalModuleHashHex(payloadBytes) {
+  try {
+    return (await computeCanonicalModuleHash(payloadBytes)).hashHex;
+  } catch {
+    return null;
+  }
 }
 
 const bundleStatementTextEncoder = new TextEncoder();
@@ -385,17 +403,48 @@ export async function signModuleArtifact(bytes, options = {}) {
 /**
  * Verify a module artifact's embedded Ed25519 signature before loading.
  *
- * Verification recomputes the canonical wasm hash, requires it to match both
- * the bundle's recorded canonicalModuleHash and the signed digest, requires
- * the signing key to be in `trustedPublicKeys`, and checks the Ed25519
- * signature. A present-but-invalid signature always throws. A missing
- * signature throws only when `requireSignature` is true.
+ * TWO SIGNED FORMS, and the artifact chooses — not the caller, not a policy:
+ *
+ *  - `statementDomain` PRESENT — the NODE-SIGNED form issued by the node's
+ *    content-bound signing endpoint. The signature covers the domain-separated
+ *    statement `domain || 0x00 || sha256(portable)` (see ./sigdomain.js), where
+ *    `portable` is the trailer-stripped payload — the exact bytes the runtime
+ *    instantiates and the node's capability policy identifies by content hash.
+ *    The domain must be EXACTLY {@link DOMAIN_MODULE_PUBLICATION_V1}: not
+ *    merely "registered". A registered-but-different domain (the reserved
+ *    update-manifest domain, say) is REFUSED, which is what stops a signature
+ *    minted for a signed update from being stapled into a module trailer.
+ *
+ *  - `statementDomain` ABSENT — the legacy SDK-signed form: a signature over
+ *    the bare canonical module (or bundle) digest. Verification is byte-identical
+ *    to what it has always been, so every artifact already published keeps
+ *    verifying.
+ *
+ * THIS MIRRORS THE NODE EXACTLY, deliberately and to the reason code, because
+ * the same artifact is verified by the Go loaders
+ * (`sdn-server/internal/modulert/publication_signature.go` and its kubo twin)
+ * and by this function in the browser and under Node/WasmEdge. An artifact that
+ * verifies on the node and is refused here is a cross-runtime defect, not a
+ * platform difference — so the checks below run in the node's ORDER (what the
+ * signature covers is resolved before who signed it) and the shared vector file
+ * `test/support/statement-domain-vectors.json` pins both sides against the same
+ * bytes and the same refusal reasons.
+ *
+ * Note the deliberate omissions on the node-signed path: `signedHashAlgorithm`
+ * is not consulted and the bundle's recorded `canonicalModuleHash` is not
+ * gated on, because the node consults neither. The domain itself defines the
+ * hash basis (portable-payload SHA-256), and that basis binds the entire
+ * instantiated payload — a strictly stronger commitment than the canonical
+ * hash, which strips `sds.*` custom sections before hashing.
+ *
+ * A present-but-invalid signature always throws. A missing signature throws
+ * only when `requireSignature` is true.
  *
  * @param {Uint8Array|ArrayBuffer} bytes - module artifact bytes
  * @param {Object} options
  * @param {string[]|string} [options.trustedPublicKeys] - allowed signer public keys (hex)
  * @param {boolean} [options.requireSignature=false]
- * @returns {Promise<{verified: boolean, signed: boolean, keyId?: string|null, publicKeyHex?: string, canonicalModuleHashHex?: string, reason?: string}>}
+ * @returns {Promise<{verified: boolean, signed: boolean, keyId?: string|null, publicKeyHex?: string, canonicalModuleHashHex?: string, contentHashHex?: string, statementDomain?: string, reason?: string}>}
  */
 export async function verifyModuleArtifact(bytes, options = {}) {
   const requireSignature = options.requireSignature === true;
@@ -444,13 +493,93 @@ export async function verifyModuleArtifact(bytes, options = {}) {
   }
 
   const trusted = normalizeTrustedPublicKeys(options.trustedPublicKeys);
-  if (!trusted.includes(publicKeyHex)) {
-    throw new ModuleSignatureError(
-      "untrusted_signer",
-      "module signer public key is not in the trusted signer set",
+  // resolvedStatementDomain is carried onto the thrown error so a refusal
+  // reports the same (reason, domain) pair the node's ModuleSignatureStatus
+  // does — including for untrusted_signer, where the domain was already
+  // resolved before trust was asked.
+  const requireTrustedSigner = (resolvedStatementDomain) => {
+    if (!trusted.includes(publicKeyHex)) {
+      const error = new ModuleSignatureError(
+        "untrusted_signer",
+        "module signer public key is not in the trusted signer set",
+      );
+      if (resolvedStatementDomain) {
+        error.statementDomain = resolvedStatementDomain;
+      }
+      throw error;
+    }
+  };
+
+  // ---- node-signed form: domain-separated statement over the portable hash --
+  //
+  // Resolved BEFORE the trusted-signer check, mirroring the node: a wrong
+  // statement domain is a property of the ARTIFACT and must be reported as
+  // such whether or not the signer happens to be trusted. (The shared vector
+  // `foreign-registered-domain-untrusted-signer` pins exactly this ordering.)
+  const declaredStatementDomain = String(payload.statementDomain ?? "").trim();
+  if (declaredStatementDomain !== "") {
+    const portableBytes = new Uint8Array(protectedArtifact.payloadBytes);
+    const contentHashBytes = await sha256Bytes(portableBytes);
+    const contentHashHex = bytesToHex(contentHashBytes);
+
+    const declaredHashHex = String(payload.signedHashHex ?? "")
+      .trim()
+      .toLowerCase();
+    if (declaredHashHex !== "" && declaredHashHex !== contentHashHex) {
+      throw new ModuleSignatureError(
+        "hash_mismatch",
+        `module signature covers content hash ${declaredHashHex}, portable artifact hashes to ${contentHashHex}`,
+      );
+    }
+
+    if (declaredStatementDomain !== DOMAIN_MODULE_PUBLICATION_V1) {
+      const error = new ModuleSignatureError(
+        "unsupported_statement_domain",
+        `module signature declares statement domain ${JSON.stringify(declaredStatementDomain)}; a module artifact must be signed under ${JSON.stringify(DOMAIN_MODULE_PUBLICATION_V1)}`,
+      );
+      error.statementDomain = declaredStatementDomain;
+      throw error;
+    }
+
+    const statementBytes = buildSignatureStatement(
+      DOMAIN_MODULE_PUBLICATION_V1,
+      contentHashBytes,
     );
+
+    requireTrustedSigner(DOMAIN_MODULE_PUBLICATION_V1);
+
+    const validStatement = await ed25519Verify(
+      statementBytes,
+      signatureBytes,
+      publicKeyBytes,
+    );
+    if (!validStatement) {
+      const error = new ModuleSignatureError(
+        "invalid_signature",
+        "module publication signature verification failed",
+      );
+      error.statementDomain = DOMAIN_MODULE_PUBLICATION_V1;
+      throw error;
+    }
+
+    return {
+      verified: true,
+      signed: true,
+      keyId: payload.keyId ?? null,
+      publicKeyHex,
+      statementDomain: DOMAIN_MODULE_PUBLICATION_V1,
+      contentHashHex,
+      // Reported for continuity with the legacy result shape (the CLI prints
+      // it); NOT gated on, because the node does not gate on it either.
+      canonicalModuleHashHex: await bestEffortCanonicalModuleHashHex(
+        protectedArtifact.payloadBytes,
+      ),
+      signatureScope: "module",
+      signedHashHex: contentHashHex,
+    };
   }
 
+  // ---- legacy form: bare canonical module (or bundle) digest ---------------
   const canonical = await computeCanonicalModuleHash(protectedArtifact.payloadBytes);
   const recordedHash = new Uint8Array(
     protectedArtifact.mbl.canonicalModuleHash ?? [],
@@ -494,6 +623,10 @@ export async function verifyModuleArtifact(bytes, options = {}) {
     );
   }
 
+  // Trust is asked LAST here too, for the same reason as above and so the two
+  // forms cannot report different reasons for the same defect.
+  requireTrustedSigner();
+
   const valid = await ed25519Verify(
     signedHashBytes,
     signatureBytes,
@@ -510,6 +643,12 @@ export async function verifyModuleArtifact(bytes, options = {}) {
     signed: true,
     keyId: payload.keyId ?? null,
     publicKeyHex,
+    // Null, not absent: the legacy form is a POSITIVE statement that this
+    // artifact predates domain separation, which a caller may want to log.
+    statementDomain: null,
+    contentHashHex: bytesToHex(
+      await sha256Bytes(new Uint8Array(protectedArtifact.payloadBytes)),
+    ),
     canonicalModuleHashHex: canonical.hashHex,
     signatureScope,
     signedHashHex,
