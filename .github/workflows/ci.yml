@@ -14,6 +14,11 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      # A matrix lane is EVIDENCE, not a race. With fail-fast the first lane to
+      # die cancels its healthy sibling, and the cancelled lane's log stops
+      # mid-stream — which is exactly how "the runner died" was misread as
+      # "these seven tests failed" off a truncated TAP stream. Both lanes report.
+      fail-fast: false
       matrix:
         node-version: [20, 22]
     steps:
@@ -39,5 +44,33 @@ jobs:
           ./emsdk install "$EMSDK_VERSION"
           ./emsdk activate "$EMSDK_VERSION"
       - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm ci
-      - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm test
+      - name: npm test (with runner resource sampler)
+        run: |
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          # The runner has been dying mid-suite with "received a shutdown
+          # signal" and no failing test. That is a VM-level event, so sample
+          # VM-level state straight into the step log (the only channel that
+          # survives the runner's death: post-steps and artifacts do not run).
+          (
+            while true; do
+              printf 'RSAMPLE %s mem_total=%s mem_used=%s mem_free=%s buff_cache=%s mem_avail=%s swap_used=%s disk_used=%s disk_avail=%s disk_pct=%s tmp_used=%s procs=%s rss_sum_mb=%s top=[%s]\n' \
+                "$(date -u +%H:%M:%S)" \
+                $(free -m | awk '/^Mem:/{print $2, $3, $4, $6, $7}') \
+                "$(free -m | awk '/^Swap:/{print $3}')" \
+                $(df -m / | awk 'NR==2{print $3, $4, $5}') \
+                "$(du -sm /tmp 2>/dev/null | awk '{print $1}')" \
+                "$(ps -e --no-headers | wc -l)" \
+                "$(ps -eo rss --no-headers | awk '{s+=$1} END {printf "%d", s/1024}')" \
+                "$(ps -eo rss,comm --no-headers --sort=-rss | head -4 | awk '{printf "%s=%dMB ", $2, $1/1024}')"
+              sleep 5
+            done
+          ) &
+          SAMPLER_PID=$!
+          set +e
+          npm test
+          TEST_STATUS=$?
+          set -e
+          kill "$SAMPLER_PID" 2>/dev/null || true
+          echo "RSAMPLE-END npm test exited with $TEST_STATUS"
+          exit "$TEST_STATUS"
       - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm run check:compliance
