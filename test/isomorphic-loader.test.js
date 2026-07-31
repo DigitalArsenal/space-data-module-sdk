@@ -116,6 +116,8 @@ test("inspectModule reports the standalone profile for shared browser/WasmEdge a
     manifest: createInvokeManifest(),
     sourceCode: createEchoSource(),
     language: "c",
+    // Declared, not inferred — see browser-harness.test.js for the contract.
+    threadModel: ModuleThreadModel.SINGLE_THREAD,
   });
   t.after(async () => {
     await cleanupCompilation(compilation);

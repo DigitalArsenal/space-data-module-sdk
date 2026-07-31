@@ -137,6 +137,16 @@ change is correct:
 - Always run:
   - `npm test`
   - `npm run check:compliance`
+
+`npm test` runs `node --test --test-concurrency=2`, and the bound is load
+bearing, not a style choice. A compile-heavy test file holds a vendored
+emception (a full LLVM compiled to wasm) resident at ~1.5 GB RSS; at the default
+concurrency (one worker per CPU) the compile-heavy files land together and take
+the whole runner down. On a GitHub hosted runner that surfaced as
+`The runner has received a shutdown signal` roughly five minutes in, with the
+suite two thirds run and no OOM printed anywhere — a job that fails without ever
+reporting a verdict, which also means the tag-triggered publish gate could never
+pass. Do not raise the bound without measuring peak RSS across the whole run.
 - If you changed manifest rules, compliance, compiler behavior, or standards
   validation:
   - `node --test test/module-sdk.test.js test/compliance.test.js`

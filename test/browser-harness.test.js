@@ -110,11 +110,36 @@ test("browser WASI shim fails closed for modules probing preopened directories",
   assert.equal(wasi.fd_prestat_dir_name(3, 0, 0), 8);
 });
 
-test("browser+wasmedge runtime targets default to a shared single-thread artifact", async (t) => {
+// The thread model is DECLARED, never deduced from a deployment fact. These two
+// assertions are the whole inference contract as it stands after
+// 0bd7688 (wasi-sequential model, guardian C1-C4):
+//
+//   - runtimeTargets ["browser"] refuses to infer anything at all, because
+//     targeting a browser says nothing about whether the guest threads and must
+//     never select the Emscripten toolchain;
+//   - an explicitly declared model is honoured verbatim, and a declared
+//     single-thread build is still the shared browser/WasmEdge artifact it has
+//     always been (one wasi_snapshot_preview1 import surface, no env.* pthread
+//     mailbox).
+//
+// This test previously asserted that ["browser","wasmedge"] DEFAULTED to
+// single-thread. That default is gone by design, and a stale assertion about a
+// removed default is not a contract — so it now states the contract that exists.
+test("runtimeTargets never infer a thread model, and a declared single-thread build stays the shared artifact", async (t) => {
+  await assert.rejects(
+    compileModuleFromSource({
+      manifest: createInvokeManifest({ runtimeTargets: ["browser"] }),
+      sourceCode: createEchoSource(),
+      language: "c",
+    }),
+    /Cannot infer a thread model from runtimeTargets \[browser\]/,
+  );
+
   const compilation = await compileModuleFromSource({
     manifest: createInvokeManifest(),
     sourceCode: createEchoSource(),
     language: "c",
+    threadModel: ModuleThreadModel.SINGLE_THREAD,
   });
   t.after(async () => {
     await cleanupCompilation(compilation);
@@ -138,6 +163,9 @@ test("browser harness executes command-surface invoke envelopes for the shared a
     manifest,
     sourceCode: createEchoSource(),
     language: "c",
+    // Declared, not inferred: this test is about the browser harness, not about
+    // toolchain selection, so it must not move when the inference rules do.
+    threadModel: ModuleThreadModel.SINGLE_THREAD,
   });
   t.after(async () => {
     await cleanupCompilation(compilation);

@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  # Bump deliberately, in the same commit as any change that depends on it.
+  EMSDK_VERSION: "6.0.5"
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -22,12 +26,18 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
-      - name: Install latest emsdk
+      # PINNED, never "latest". This repo enforces a pinned compile contract
+      # (clang wasm32-wasip1-threads for the isomorphic artifact, a vendored
+      # sdn-emception for the single-thread artifact) and validates emitted
+      # wasm against it. A floating toolchain under a pinned guard means the
+      # gate can change verdict with no commit — the toolchain is part of the
+      # contract, so it is pinned here and bumped deliberately.
+      - name: Install pinned emsdk
         run: |
           git clone https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
           cd "$RUNNER_TEMP/emsdk"
-          ./emsdk install latest
-          ./emsdk activate latest
+          ./emsdk install "$EMSDK_VERSION"
+          ./emsdk activate "$EMSDK_VERSION"
       - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm ci
       - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm test
       - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm run check:compliance

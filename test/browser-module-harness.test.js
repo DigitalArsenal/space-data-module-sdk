@@ -6,6 +6,7 @@ import {
   cleanupCompilation,
   compileModuleFromSource,
   encodePluginInvokeResponse,
+  ModuleThreadModel,
 } from "../src/index.js";
 import {
   createBrowserModuleHarness,
@@ -324,6 +325,8 @@ test("browser module harness exposes awaited host dispatch alongside module invo
     manifest: createManifest(),
     sourceCode: createEchoSource(),
     language: "c",
+    // Declared, not inferred — see browser-harness.test.js for the contract.
+    threadModel: ModuleThreadModel.SINGLE_THREAD,
   });
   t.after(async () => {
     await cleanupCompilation(compilation);
@@ -480,6 +483,8 @@ test("browser module harness external arena direct invoke rejects non-shared mod
     }),
     sourceCode: createPointerCheckingSource(),
     language: "c",
+    // Declared, not inferred — see browser-harness.test.js for the contract.
+    threadModel: ModuleThreadModel.SINGLE_THREAD,
   });
   t.after(async () => {
     await cleanupCompilation(compilation);

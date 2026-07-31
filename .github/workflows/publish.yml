@@ -9,6 +9,11 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  # MUST match .github/workflows/ci.yml — the tag gate and the merge gate have
+  # to be the same gate, or a tag can publish something CI never proved.
+  EMSDK_VERSION: "6.0.5"
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -23,12 +28,12 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - name: Install latest emsdk
+      - name: Install pinned emsdk
         run: |
           git clone https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
           cd "$RUNNER_TEMP/emsdk"
-          ./emsdk install latest
-          ./emsdk activate latest
+          ./emsdk install "$EMSDK_VERSION"
+          ./emsdk activate "$EMSDK_VERSION"
       - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm ci
       - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm test
       - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm run check:compliance

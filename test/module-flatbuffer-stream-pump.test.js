@@ -8,6 +8,7 @@ import {
   createBrowserModuleHarness,
   createModuleFlatBufferStreamPump,
   encodePluginInvokeRequest,
+  ModuleThreadModel,
 } from "../src/index.js";
 
 const TEST_FRAME_IDENTITY = Object.freeze({
@@ -222,6 +223,8 @@ test("module flatbuffer stream pump can feed a persistent browser direct-surface
     manifest: createStreamingManifest(),
     sourceCode: createStreamingSource(),
     language: "c",
+    // Declared, not inferred — see browser-harness.test.js for the contract.
+    threadModel: ModuleThreadModel.SINGLE_THREAD,
   });
   t.after(async () => {
     await cleanupCompilation(compilation);
