@@ -17,6 +17,7 @@ import { sha256Bytes } from "../utils/crypto.js";
 import {
   DOMAIN_MODULE_PUBLICATION_V1,
   statement as buildSignatureStatement,
+  trimGoWhitespace,
 } from "./sigdomain.js";
 import { ModuleBundleEntryRole } from "spacedatastandards.org/lib/js/MBL/main.js";
 
@@ -464,7 +465,10 @@ export async function verifyModuleArtifact(bytes, options = {}) {
   }
 
   const payload = decodeSignaturePayload(signatureEntry);
-  if (payload.algorithm !== MODULE_SIGNATURE_ALGORITHM) {
+  // Trimmed and case-folded, because the node is: `strings.EqualFold(
+  // strings.TrimSpace(payload.Algorithm), "ed25519")`. An exact match here
+  // would refuse an "ED25519" the node admits.
+  if (trimGoWhitespace(payload.algorithm).toLowerCase() !== MODULE_SIGNATURE_ALGORITHM) {
     throw new ModuleSignatureError(
       "unsupported_algorithm",
       `unsupported module signature algorithm: ${payload.algorithm}`,
@@ -516,15 +520,13 @@ export async function verifyModuleArtifact(bytes, options = {}) {
   // statement domain is a property of the ARTIFACT and must be reported as
   // such whether or not the signer happens to be trusted. (The shared vector
   // `foreign-registered-domain-untrusted-signer` pins exactly this ordering.)
-  const declaredStatementDomain = String(payload.statementDomain ?? "").trim();
+  const declaredStatementDomain = trimGoWhitespace(payload.statementDomain);
   if (declaredStatementDomain !== "") {
     const portableBytes = new Uint8Array(protectedArtifact.payloadBytes);
     const contentHashBytes = await sha256Bytes(portableBytes);
     const contentHashHex = bytesToHex(contentHashBytes);
 
-    const declaredHashHex = String(payload.signedHashHex ?? "")
-      .trim()
-      .toLowerCase();
+    const declaredHashHex = trimGoWhitespace(payload.signedHashHex).toLowerCase();
     if (declaredHashHex !== "" && declaredHashHex !== contentHashHex) {
       throw new ModuleSignatureError(
         "hash_mismatch",

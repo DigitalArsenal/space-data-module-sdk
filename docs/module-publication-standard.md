@@ -143,6 +143,12 @@ reviewed change in every implementation at once
 (`src/bundle/sigdomain.js` here; `internal/sigdomain` and its kubo twin in the
 node), never a request parameter.
 
+`statementDomain` and `algorithm` are compared after trimming **Go's**
+whitespace set (`unicode.IsSpace` / Unicode `White_Space`), which is not
+JavaScript's: Go trims U+0085 NEL and JS does not, JS trims U+FEFF BOM and Go
+does not. Either mismatch is a "loads on the node, dies in the browser" split,
+so both are pinned by vectors rather than left to each language's default.
+
 Legacy artifacts that predate the field keep verifying unchanged. The forms,
 the preimage bytes and every refusal reason are pinned as shared cross-language
 vectors in `test/support/statement-domain-vectors.json`, byte-identical to the

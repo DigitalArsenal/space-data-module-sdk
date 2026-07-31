@@ -80,6 +80,37 @@ const REGISTRY = new Map([
 
 const domainTextEncoder = new TextEncoder();
 
+// Go's `strings.TrimSpace` trims `unicode.IsSpace`, which is the Unicode
+// White_Space property. JavaScript's `String.prototype.trim` trims a DIFFERENT
+// set: it adds U+FEFF (ZWNBSP/BOM) and omits U+0085 (NEL). Those two characters
+// are the entire difference, and each one is a cross-runtime split:
+//
+//   " DOMAIN" -> Go trims, JS does not -> node ACCEPTS, browser REFUSES
+//   "﻿DOMAIN"  -> JS trims, Go does not -> browser ACCEPTS, node REFUSES
+//
+// Neither is forgeable (the statement and the trusted-signer check still bind)
+// and no producer emits one — which is exactly why it would have sat there
+// unnoticed until some proxy or editor introduced a BOM. So the wire-facing
+// trim is Go's set, spelled out, not JS's default.
+const GO_WHITE_SPACE =
+  "\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000";
+const GO_TRIM_PATTERN = new RegExp(
+  `^[${GO_WHITE_SPACE}]+|[${GO_WHITE_SPACE}]+$`,
+  "g",
+);
+
+/**
+ * Trim exactly what Go's `strings.TrimSpace` trims — no more, no less. Use this
+ * on every field of a signature entry that the node also trims, so the two
+ * implementations accept the same set of strings.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function trimGoWhitespace(value) {
+  return String(value ?? "").replace(GO_TRIM_PATTERN, "");
+}
+
 export class SignatureDomainError extends Error {
   constructor(code, message) {
     super(message);
