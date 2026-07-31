@@ -1834,21 +1834,24 @@ test("default standards dependency exposes the current SCV coverage result contr
     .map((line) => line.match(/^([A-Z0-9_]+)\s*:/)?.[1] ?? null)
     .filter(Boolean)
     .sort();
+  // Transcribed from the PINNED SDS IDL (schema/SCV/main.fbs, SCV 1.101.5), not
+  // from intent. The four per-axis members this list used to carry —
+  // CELL_STATS, INTERVALS, LATITUDE_BANDS, TIME_SERIES — were consolidated into
+  // the single TARGET_RESULTS vector; none of them exist in any shipped SCV.
+  // This assertion is the drift guard for that table, so it must equal the
+  // dependency exactly: when SCV changes, this list moves WITH the pin bump.
   assert.deepEqual(actualFields, [
     "AGGREGATE_STATISTICS",
-    "CELL_STATS",
     "CONTRIBUTIONS",
     "GEOMETRY",
     "HISTOGRAMS",
-    "INTERVALS",
     "JOB_ID",
-    "LATITUDE_BANDS",
     "MESSAGE",
     "RASTER_PRODUCTS",
     "STATUS",
     "TARGET_BODY",
+    "TARGET_RESULTS",
     "TIME_GRID",
-    "TIME_SERIES",
     "TOTAL_SENSORS",
     "TOTAL_WINDOWS",
     "TRACE_ID",
