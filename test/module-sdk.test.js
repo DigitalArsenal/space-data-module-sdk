@@ -1811,7 +1811,16 @@ test("default standards dependency exposes the current SCV coverage result contr
   const catalog = await loadStandardsCatalog();
   const scv = catalog.find((entry) => entry.schemaCode === "SCV");
   assert.ok(scv, "SCV must be present in the installed SDS catalog");
-  assert.match(scv.version, /^1\.101\.[6-9]\d*$/);
+  // A FLOOR, not a window. The old /^1\.101\.[6-9]\d*$/ demanded an SCV that has
+  // never existed: SDS versioned 1.101.2 -> .3 -> .4 -> .5 with each feature
+  // commit, and 1.101.5 already carries every field asserted below. A regex that
+  // encodes an unreleased version fails against a correct dependency and cannot
+  // pass a patch bump either, so state the contract as what the features need.
+  const [maj, min, pat] = scv.version.split(".").map(Number);
+  assert.ok(
+    maj === 1 && min === 101 && pat >= 5,
+    `SCV must be >= 1.101.5 on the 1.101 line; installed ${scv.version}`,
+  );
   assert.match(scv.idl, /\bSENSOR_LOCAL\b/);
   assert.match(scv.idl, /\btable SCVAggregateStatistics\b/);
   assert.match(scv.idl, /\bAGGREGATE_STATISTICS:SCVAggregateStatistics\b/);

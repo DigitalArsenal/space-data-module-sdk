@@ -57,13 +57,23 @@ test("a direct harness declines hostcall-importing pthreads without an owning br
   const originalInstantiate = WebAssembly.instantiate;
   let instantiateCount = 0;
   let hostcallCount = 0;
+  // Count instantiations OF THE GUEST, not every instantiation in the process.
+  // WebAssembly.instantiate is global and Node instantiates its own wasm on it:
+  // undici brings up the llhttp parser lazily (`lazyllhttp`), and on Node 20/22
+  // that lands inside this mock's window, so an unfiltered counter reported 2
+  // and blamed the SDK for the runtime's HTTP stack. Compiling the guest here
+  // gives an identity to match on — and passing a Module rather than bytes is
+  // the hygiene rule anyway: compile once, hand the Module across.
+  const guestModule = await WebAssembly.compile(THREADED_HOSTCALL_MODULE_BYTES);
   t.mock.method(WebAssembly, "instantiate", function (...args) {
-    instantiateCount += 1;
+    if (args[0] === guestModule) {
+      instantiateCount += 1;
+    }
     return Reflect.apply(originalInstantiate, this, args);
   });
 
 	const harness = await createBrowserModuleHarness({
-		wasmSource: THREADED_HOSTCALL_MODULE_BYTES,
+		wasmSource: guestModule,
 		initialMemoryBytes: 65_536,
 		maximumMemoryBytes: 65_536,
 		hostcallDispatch() {
