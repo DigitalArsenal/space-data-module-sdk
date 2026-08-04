@@ -596,11 +596,35 @@ static int32_t route_output(uint32_t from_node, const FlowOutputFrameView &out) 
       }
       continue;
     }
-    if (edge.aligned_eligible == 0 || edge.aligned_byte_length == 0 ||
-        edge.aligned_required_alignment == 0 ||
+    // NO ALIGNED ROUTE ON A TYPED EDGE IS NOT A REJECTION.
+    //
+    // The comment further down already states the rule for the opaque route:
+    // "Producers that stamp ALIGNED_BINARY to mean 'raw bytes' are normalized
+    // here rather than silently rejected at the consumer's port." Nearly every
+    // shipped foundation node does exactly that (plugin_push_output_ex with
+    // PLUGIN_PAYLOAD_WIRE_FORMAT_ALIGNED_BINARY is the ONLY way to emit
+    // variable-length bytes). A TYPED edge that offers no aligned route still
+    // offers the canonical one, so the same normalization applies — otherwise
+    // an $HTR response frame stamped aligned-binary is dropped here, the flow
+    // emits nothing, and the node answers 502 "flow produced no HTTP response"
+    // while the JS host, which normalizes, serves the same artifact correctly.
+    // That divergence is the defect; matching the two runtimes is the fix.
+    if (edge.aligned_eligible == 0) {
+      if (edge.canonical_fallback_available == 0) {
+        g_routing_state.rejected_frames++;
+        return -26;
+      }
+      continue;
+    }
+    // aligned_byte_length == 0 declares a VARIABLE-LENGTH aligned stream: the
+    // payload must sit on the declared alignment, but there is no fixed stride
+    // to check its size against. A declared stride is still enforced exactly.
+    const bool edge_fixed_stride = edge.aligned_byte_length != 0;
+    if (edge.aligned_required_alignment == 0 ||
         !flow_is_power_of_two(edge.aligned_required_alignment) ||
-        out.length != edge.aligned_byte_length ||
-        (out.byte_length != 0 && out.byte_length != edge.aligned_byte_length) ||
+        (edge_fixed_stride && out.length != edge.aligned_byte_length) ||
+        (edge_fixed_stride && out.byte_length != 0 &&
+         out.byte_length != edge.aligned_byte_length) ||
         (out.fixed_string_length != 0 &&
          out.fixed_string_length != edge.aligned_fixed_string_length) ||
         (out.required_alignment != 0 &&
@@ -629,7 +653,12 @@ static int32_t route_output(uint32_t from_node, const FlowOutputFrameView &out) 
     // An opaque edge has no aligned layout to inherit (the compiler forces
     // alignedEligible=false, so its layout scalars are all zero). Byte frames
     // carry alignment 1 and make no layout claim.
-    const bool byte_route = edge.opaque != 0;
+    // A byte route is either an OPAQUE edge or a typed edge that offers no
+    // aligned route: in both cases the edge carries no aligned layout for the
+    // frame to inherit, so the payload travels as untyped bytes at alignment 1.
+    const bool byte_route =
+        edge.opaque != 0 ||
+        (out.wire_format == kFlowAlignedBinary && edge.aligned_eligible == 0);
     // `aligned-binary` is a claim about a FIXED SDS layout — byte length,
     // fixed-string length, required alignment. An opaque payload has none of
     // those, so the claim cannot be carried across the edge: the frame is
@@ -643,7 +672,11 @@ static int32_t route_output(uint32_t from_node, const FlowOutputFrameView &out) 
     frame.mutability = kFlowImmutable;
     if (!byte_route && out.wire_format == kFlowAlignedBinary) {
       frame.alignment = edge.aligned_required_alignment;
-      frame.byte_length = edge.aligned_byte_length;
+      // A variable-length aligned stream (edge stride 0) carries the frame's
+      // own size; a fixed-stride edge carries the declared stride.
+      frame.byte_length = edge.aligned_byte_length != 0
+                              ? edge.aligned_byte_length
+                              : out.length;
       frame.fixed_string_length = edge.aligned_fixed_string_length;
       frame.required_alignment = edge.aligned_required_alignment;
     } else {

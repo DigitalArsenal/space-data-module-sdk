@@ -569,9 +569,37 @@ static const PortRequirement *FindInputPort(const MethodDescriptor *method, cons
   return nullptr;
 }
 
+// A WILDCARD PORT IS BLIND TO FRAMING, NOT ONLY TO IDENTITY.
+//
+// acceptsAnyFlatbuffer declares application-blindness: the port cannot name
+// one SDS identity because its payloads are defined by a host op, a foreign
+// wire format, or an intra-flow control frame. Restricting it to the FLATBUFFER
+// wire format made the SDK refuse frames its own convenience API produces:
+// plugin_push_output_ex(..., PLUGIN_PAYLOAD_WIRE_FORMAT_ALIGNED_BINARY, ...)
+// is the only way to emit variable-length raw bytes (JSON control frames,
+// opaque byte routes), and every such frame was rejected as
+// "does not match a declared type on port". The flow compiler already routes a
+// wildcard edge as an OPAQUE byte route — that route IS aligned-binary bytes.
+//
+// An aligned-binary frame on a wildcard port still has to be self-consistent:
+// alignment must be declared (>= 1). There is nothing else to check it against,
+// because a wildcard declares no layout of its own.
+static bool WildcardAcceptsWireFormat(uint32_t wire_format, uint16_t required_alignment) {
+  if (wire_format == static_cast<uint32_t>(kPayloadWireFormatFlatbuffer)) {
+    return true;
+  }
+  if (wire_format == static_cast<uint32_t>(kPayloadWireFormatAlignedBinary)) {
+    return required_alignment > 0u;
+  }
+  return false;
+}
+
 static bool InputTypeMatches(const AcceptedTypeRef &accepted, const InputFrameOwned &frame) {
   if (accepted.accepts_any_flatbuffer) {
-    return frame.view.wire_format == static_cast<uint32_t>(kPayloadWireFormatFlatbuffer);
+    return WildcardAcceptsWireFormat(
+      frame.view.wire_format,
+      frame.view.required_alignment
+    );
   }
   if (accepted.has_wire_format && frame.view.wire_format != accepted.wire_format) {
     return false;
@@ -594,19 +622,30 @@ static bool InputTypeMatches(const AcceptedTypeRef &accepted, const InputFrameOw
   }
   if (
     frame.view.fixed_string_length != accepted.fixed_string_length ||
-    frame.view.byte_length != accepted.byte_length ||
     frame.view.required_alignment != accepted.required_alignment
   ) {
     return false;
   }
+  // A variable-length aligned stream (accepted.byte_length == 0) carries the
+  // frame's own size in byte_length, so an equality test would refuse every
+  // frame it accepts. The size contract is applied below, where the two shapes
+  // are distinguished.
+  if (accepted.byte_length != 0u && frame.view.byte_length != accepted.byte_length) {
+    return false;
+  }
   if (frame.view.wire_format == static_cast<uint32_t>(kPayloadWireFormatAlignedBinary)) {
+    // byte_length == 0 declares a VARIABLE-LENGTH aligned stream (see the
+    // byteLength note in src/compliance/pluginCompliance.js): the frame must
+    // still be placed on the declared alignment, but there is no stride to
+    // check its size against. A declared stride is still enforced exactly.
     if (
-      accepted.byte_length == 0u ||
-      frame.view.size != accepted.byte_length ||
       accepted.required_alignment == 0u ||
       !IsPowerOfTwo(frame.view.alignment) ||
       frame.view.alignment < accepted.required_alignment
     ) {
+      return false;
+    }
+    if (accepted.byte_length != 0u && frame.view.size != accepted.byte_length) {
       return false;
     }
   }
@@ -670,7 +709,8 @@ static bool OutputTypeMatches(
   uint32_t payload_length
 ) {
   if (accepted.accepts_any_flatbuffer) {
-    return wire_format == static_cast<uint32_t>(kPayloadWireFormatFlatbuffer);
+    // Mirror of InputTypeMatches — see WildcardAcceptsWireFormat.
+    return WildcardAcceptsWireFormat(wire_format, required_alignment);
   }
   if (
     !schema_name || !schema_name[0] ||
@@ -688,13 +728,20 @@ static bool OutputTypeMatches(
     return false;
   }
   if (wire_format == static_cast<uint32_t>(kPayloadWireFormatAlignedBinary)) {
-    return
-      fixed_string_length == accepted.fixed_string_length &&
-      byte_length == accepted.byte_length &&
-      required_alignment == accepted.required_alignment &&
-      accepted.byte_length > 0u &&
-      payload_length == accepted.byte_length &&
-      accepted.required_alignment > 0u;
+    if (
+      fixed_string_length != accepted.fixed_string_length ||
+      required_alignment != accepted.required_alignment ||
+      accepted.required_alignment == 0u
+    ) {
+      return false;
+    }
+    // accepted.byte_length == 0: VARIABLE-LENGTH aligned stream — any payload
+    // size, placed on the declared alignment. Otherwise a fixed stride, which
+    // both the declared byte_length and the payload must match exactly.
+    if (accepted.byte_length == 0u) {
+      return true;
+    }
+    return byte_length == accepted.byte_length && payload_length == accepted.byte_length;
   }
   return fixed_string_length == 0u && byte_length == 0u && required_alignment == 0u;
 }
@@ -1538,39 +1585,52 @@ extern "C" int32_t plugin_push_output_typed(
 
   OutputFrameOwned frame{};
   frame.port_id = ReadCString(port_id);
-  frame.schema_name = accepted_type
-    ? ReadCString(accepted_type->schema_name)
+  // A MATCHED WILDCARD IS NOT A TYPE DESCRIPTION.
+  //
+  // The manifest is authoritative over a frame's identity and layout only when
+  // the matched entry actually DESCRIBES one. An acceptsAnyFlatbuffer entry
+  // describes nothing: no schema name, no root type, no byteLength, no
+  // alignment. Copying it over the caller's values stamped every wildcard frame
+  // with byteLength 0 / requiredAlignment 0 and then, for an aligned-binary
+  // payload, re-declared its wire format as flatbuffer — producing a TAB
+  // descriptor the SDK's own decoder rejects ("aligned type requiredAlignment
+  // must be a positive power of two"). A wildcard match overrides nothing; the
+  // frame keeps what the guest declared.
+  const AcceptedTypeRef *typed_match =
+    (accepted_type && !accepted_type->accepts_any_flatbuffer) ? accepted_type : nullptr;
+  frame.schema_name = typed_match
+    ? ReadCString(typed_match->schema_name)
     : ReadCString(schema_name);
-  frame.file_identifier = accepted_type
-    ? ReadCString(accepted_type->file_identifier)
+  frame.file_identifier = typed_match
+    ? ReadCString(typed_match->file_identifier)
     : ReadCString(file_identifier);
-  frame.root_type_name = accepted_type
-    ? ReadCString(accepted_type->root_type_name)
+  frame.root_type_name = typed_match
+    ? ReadCString(typed_match->root_type_name)
     : ReadCString(root_type_name);
-  frame.schema_version = accepted_type
-    ? ReadCString(accepted_type->schema_version)
+  frame.schema_version = typed_match
+    ? ReadCString(typed_match->schema_version)
     : std::string{};
-  if (accepted_type && accepted_type->schema_hash && accepted_type->schema_hash_length > 0u) {
+  if (typed_match && typed_match->schema_hash && typed_match->schema_hash_length > 0u) {
     frame.schema_hash.assign(
-      accepted_type->schema_hash,
-      accepted_type->schema_hash + accepted_type->schema_hash_length
+      typed_match->schema_hash,
+      typed_match->schema_hash + typed_match->schema_hash_length
     );
   }
-  frame.wire_format = accepted_type && accepted_type->has_wire_format
-    ? accepted_type->wire_format
+  frame.wire_format = typed_match && typed_match->has_wire_format
+    ? typed_match->wire_format
     : wire_format;
   const bool aligned_binary =
     frame.wire_format == static_cast<uint32_t>(kPayloadWireFormatAlignedBinary);
   frame.fixed_string_length = aligned_binary
-    ? (accepted_type ? accepted_type->fixed_string_length : fixed_string_length)
+    ? (typed_match ? typed_match->fixed_string_length : fixed_string_length)
     : 0u;
   frame.byte_length = aligned_binary
-    ? (accepted_type
-        ? accepted_type->byte_length
+    ? (typed_match
+        ? typed_match->byte_length
         : (byte_length > 0u ? byte_length : payload_length))
     : 0u;
   frame.required_alignment = aligned_binary
-    ? (accepted_type ? accepted_type->required_alignment : required_alignment)
+    ? (typed_match ? typed_match->required_alignment : required_alignment)
     : 0u;
   frame.alignment = aligned_binary && frame.required_alignment > 0
     ? frame.required_alignment

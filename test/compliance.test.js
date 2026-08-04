@@ -469,19 +469,24 @@ test("aligned-binary type requires rootTypeName", () => {
   );
 });
 
-test("aligned-binary type requires positive byteLength for its fixed inline layout", () => {
-  const missing = createValidManifest();
-  missing.methods[0].inputPorts[0].acceptedTypeSets[0] = createDualFormatTypeSet({
+// CONTRACT CHANGE (Janus, 2026-08-04). byteLength declares a FIXED RECORD
+// STRIDE and is OPTIONAL: "aligned-binary" carries two shapes, and only one of
+// them has a stride. A variable-length aligned stream — a size-prefixed
+// FlatBuffer segment, a JSON control frame, an opaque byte route — declares the
+// alignment it must start on and nothing else. Requiring the stride made that
+// shape inexpressible while 149 declarations across the shipped module fleet
+// used exactly it, so every flow containing one failed `flow check` on
+// "byteLength must be an integer". A DECLARED stride is still range-checked.
+test("aligned-binary byteLength is optional (variable-length aligned stream) but range-checked when present", () => {
+  const omitted = createValidManifest();
+  omitted.methods[0].inputPorts[0].acceptedTypeSets[0] = createDualFormatTypeSet({
     byteLength: undefined,
   });
-  const missingReport = validatePluginManifest(missing);
-  assert.equal(missingReport.ok, false);
-  assert.ok(
-    missingReport.errors.some(
-      (e) =>
-        e.code === "invalid-integer" &&
-        e.location?.endsWith(".byteLength"),
-    ),
+  const omittedReport = validatePluginManifest(omitted);
+  assert.deepEqual(
+    omittedReport.errors.filter((e) => String(e.location ?? "").endsWith(".byteLength")),
+    [],
+    JSON.stringify(omittedReport.issues),
   );
 
   const zero = createValidManifest();
@@ -492,10 +497,9 @@ test("aligned-binary type requires positive byteLength for its fixed inline layo
   assert.equal(zeroReport.ok, false);
   assert.ok(
     zeroReport.errors.some(
-      (e) =>
-        e.code === "integer-range" &&
-        e.location?.endsWith(".byteLength"),
+      (e) => e.code === "integer-range" && e.location?.endsWith(".byteLength"),
     ),
+    "0 is not a stride: declaring it is a defect, omitting it is a shape",
   );
 });
 
@@ -708,7 +712,7 @@ test("a canonical-only port is legal, and says so as a warning", async (t) => {
 // layout" without the size is the declaration that produced the fleet-wide
 // failure, and it stays an error: the router would have nothing to check the
 // frame length against.
-test("an aligned peer declared WITHOUT its byteLength is still refused", () => {
+test("an aligned peer declared WITHOUT its byteLength is a variable-length stream, not an error", () => {
   const manifest = createDualPortManifest();
   const typeSet = manifest.methods[0].inputPorts[0].acceptedTypeSets[0];
   for (const typeRef of typeSet.allowedTypes) {
@@ -717,9 +721,9 @@ test("an aligned peer declared WITHOUT its byteLength is still refused", () => {
 
   const report = validatePluginManifest(manifest);
 
-  assert.equal(report.ok, false);
-  assert.ok(
-    report.errors.some((issue) => String(issue.location ?? "").endsWith(".byteLength")),
+  assert.deepEqual(
+    report.errors.filter((issue) => String(issue.location ?? "").endsWith(".byteLength")),
+    [],
     JSON.stringify(report.issues),
   );
 });

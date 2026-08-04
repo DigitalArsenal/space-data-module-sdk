@@ -9,9 +9,11 @@ import {
   PluginFamily,
   PluginManifestT,
 } from "../generated/orbpro/manifest.js";
-import { PayloadWireFormat } from "../generated/orbpro/stream.js";
 import { decodeFlowProgram, decodePluginManifestPman } from "./flowCodec.js";
-import { normalizePayloadSchemaHash } from "../manifest/typeRefs.js";
+import {
+  normalizePayloadSchemaHash,
+  normalizePayloadWireFormatName,
+} from "../manifest/typeRefs.js";
 
 function enumSymbol(enumType, value, fallback = null) {
   if (typeof value === "number" && enumType[value]) {
@@ -42,12 +44,26 @@ function toPlainTypeRef(typeRef) {
       typeRef?.schemaVersion ?? typeRef?.SCHEMA_VERSION ?? null,
     schemaHash,
     acceptsAnyFlatbuffer: typeRef?.acceptsAnyFlatbuffer === true,
+    // WIRE FORMAT IS A DECLARATION, NEVER A DEFAULT-BY-ACCIDENT.
+    //
+    // This used to read `typeRef?.wireFormat === PayloadWireFormat.AlignedBinary`.
+    // The generated enum member is `ALIGNED_BINARY`; `AlignedBinary` does not
+    // exist, so that expression was `undefined === undefined` — TRUE — for every
+    // type ref that omitted `wireFormat`. The result: every CANONICAL FlatBuffer
+    // port type in every manifest normalized to "aligned-binary", so
+    // concreteTypesByWireFormat(types, "flatbuffer") found ZERO canonical types
+    // on both sides of an edge and resolveEdgeTypeContract fell through to its
+    // null return — reported as the self-contradictory
+    // "CAQ.fbs/$CAQ does not satisfy CAQ.fbs/$CAQ". Five shipped flow bundles
+    // could not be recompiled from main.
+    //
+    // The single canonical parser lives in ../manifest/typeRefs.js and already
+    // handles both the numeric FlatBuffer enum (1) and the string spellings;
+    // absent/empty means the default, "flatbuffer".
     wireFormat:
-      typeRef?.wireFormat === PayloadWireFormat.AlignedBinary
-        ? "aligned-binary"
-        : typeRef?.wireFormat === "aligned-binary"
-          ? "aligned-binary"
-          : "flatbuffer",
+      normalizePayloadWireFormatName(
+        typeRef?.wireFormat ?? typeRef?.wire_format ?? typeRef?.WIRE_FORMAT,
+      ) ?? "flatbuffer",
     rootTypeName:
       typeRef?.rootTypeName ?? typeRef?.rootType ?? typeRef?.ROOT_TYPE ?? null,
     fixedStringLength: Number(typeRef?.fixedStringLength ?? 0),

@@ -626,7 +626,25 @@ function validateAllowedType(type, issues, location) {
       "Allowed type fixedStringLength",
       { min: 0, max: 0xffff },
     );
-    validateIntegerField(
+    // byteLength DECLARES A FIXED RECORD STRIDE. It is optional, because
+    // "aligned-binary" carries two distinct shapes and only one of them has a
+    // stride:
+    //
+    //   fixed record  — byteLength = N: every frame is exactly N bytes, so the
+    //                   shared arena can be indexed by stride and the frame size
+    //                   is checked against it.
+    //   aligned stream — byteLength absent: a variable-length run of bytes that
+    //                   must START on requiredAlignment (a size-prefixed
+    //                   FlatBuffer segment, a JSON control frame, an opaque byte
+    //                   route). There is no stride to declare and inventing one
+    //                   would be a false claim.
+    //
+    // Requiring it made the second shape inexpressible while 149 declarations
+    // across the shipped module fleet used exactly that shape — every flow that
+    // contained one failed `flow check` with "byteLength must be an integer".
+    // requiredAlignment stays MANDATORY: it is the property that makes the
+    // frame placeable in the arena at all.
+    validateOptionalIntegerField(
       issues,
       type.byteLength,
       `${location}.byteLength`,

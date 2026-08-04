@@ -239,8 +239,18 @@ export function payloadTypeRefsMatch(expectedTypeRef = {}, actualTypeRef = {}) {
   const expectedWireFormat = getPayloadTypeWireFormat(expected);
   const actualWireFormat = getPayloadTypeWireFormat(actual);
 
+  // A wildcard is blind to FRAMING as well as identity — the JS host and the
+  // in-wasm glue must answer this question identically or the same frame is
+  // admitted in one runtime and refused in the other. Mirror of
+  // WildcardAcceptsWireFormat in src/compiler/invokeGlue.js.
   if (expected.acceptsAnyFlatbuffer === true) {
-    return actualWireFormat === "flatbuffer";
+    if (actualWireFormat === "flatbuffer") {
+      return true;
+    }
+    return (
+      actualWireFormat === "aligned-binary" &&
+      Number(actual.requiredAlignment ?? 0) > 0
+    );
   }
   if (expectedWireFormat !== actualWireFormat) {
     return false;

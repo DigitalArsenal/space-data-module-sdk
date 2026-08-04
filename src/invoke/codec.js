@@ -860,9 +860,16 @@ function validateDecodedFrameContract(frame) {
         "SDS PIV/TAB aligned type requiredAlignment must be a positive power of two.",
       );
     }
-    if (typeRef.byteLength <= 0 || frame.size !== typeRef.byteLength) {
+    // byteLength 0/absent = VARIABLE-LENGTH aligned stream: the frame is placed
+    // on requiredAlignment (checked above) and carries no stride to match. A
+    // declared stride is still enforced exactly. Mirrors OutputTypeMatches in
+    // src/compiler/invokeGlue.js — the JS host and the in-wasm glue must admit
+    // exactly the same frames or the same artifact behaves differently in the
+    // browser and under WasmEdge.
+    const declaredByteLength = Number(typeRef.byteLength ?? 0);
+    if (declaredByteLength > 0 && frame.size !== declaredByteLength) {
       throw new RangeError(
-        `SDS PIV/TAB aligned payload size ${frame.size} does not match declared byteLength ${typeRef.byteLength}.`,
+        `SDS PIV/TAB aligned payload size ${frame.size} does not match declared byteLength ${declaredByteLength}.`,
       );
     }
   }

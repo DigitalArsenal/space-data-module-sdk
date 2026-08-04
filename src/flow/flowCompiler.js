@@ -624,14 +624,28 @@ function resolveEdgeTypeContract(fromTypes, toTypes) {
     const consumerAligned = toAligned.find((candidate) =>
       payloadSchemaIdentitiesEqual(consumerCanonical, candidate),
     );
-    if (!producerAligned || !consumerAligned) {
-      return {
-        errorCode: "edge-missing-representation-pair",
-        errorMessage:
-          "The edge's canonical SDS identity is not paired with an aligned-binary representation on both ports.",
-      };
-    }
-    if (!alignedPayloadLayoutsCompatible(producerAligned, consumerAligned)) {
+    // THE ALIGNED PEER IS AN OPTIMISATION, NOT A PRECONDITION.
+    //
+    // This used to hard-error (`edge-missing-representation-pair`) whenever
+    // either port lacked an aligned-binary peer for the shared canonical
+    // identity — which made a plain canonical FlatBuffer edge ILLEGAL. It
+    // contradicted the compliance layer, which emits `no-aligned-peer` as a
+    // WARNING and says in as many words that having no peer "is correct for a
+    // variable-length record" and that the peer should be declared "only if the
+    // record has a FIXED aligned layout". A variable-length $CAQ query frame has
+    // no fixed layout and can never declare one, so under the old rule
+    // data-retrieval could not be compiled at all.
+    //
+    // The aligned representation only exists to offer the shared-arena zero-copy
+    // route. When BOTH ports declare it, the edge advertises it (and the layouts
+    // must then agree — that check is still fatal). When either side does not,
+    // the mutually available representation is the canonical FlatBuffer, which
+    // is exactly the "canonical fallback" the sibling diagnostics name.
+    const alignedPair = Boolean(producerAligned && consumerAligned);
+    if (
+      alignedPair &&
+      !alignedPayloadLayoutsCompatible(producerAligned, consumerAligned)
+    ) {
       return {
         errorCode: "edge-aligned-layout-mismatch",
         errorMessage:
@@ -646,12 +660,16 @@ function resolveEdgeTypeContract(fromTypes, toTypes) {
       schemaVersion: producerCanonical.schemaVersion ?? null,
       schemaHash: producerCanonical.schemaHash ?? null,
       rootTypeName: producerCanonical.rootTypeName ?? null,
-      compatibleWireFormats: ["flatbuffer", "aligned-binary"],
+      compatibleWireFormats: alignedPair
+        ? ["flatbuffer", "aligned-binary"]
+        : ["flatbuffer"],
       canonical: {
         producer: producerCanonical,
         consumer: consumerCanonical,
       },
-      aligned: { producer: producerAligned, consumer: consumerAligned },
+      aligned: alignedPair
+        ? { producer: producerAligned, consumer: consumerAligned }
+        : null,
     };
   }
   return null;
@@ -2163,14 +2181,22 @@ export function generateFlowTables({ flow, check, dependencies }) {
       canonicalTypes.length === 0 &&
       alignedTypes.length === 0 &&
       targetTypes.some((type) => type?.acceptsAnyFlatbuffer === true);
-    if (!wildcardTarget && (canonicalTypes.length !== 1 || alignedTypes.length !== 1)) {
+    // The aligned peer is OPTIONAL here for the same reason it is optional on
+    // an edge (see resolveEdgeTypeContract): it offers the shared-arena
+    // zero-copy route, it is not what makes the frame legal. Demanding one made
+    // every HTTP-served flow uncompilable — the $HTQ HttpRequest envelope is a
+    // variable-length record and declares no aligned peer, so `flow check`
+    // passed and `flow compile` threw on node-status, node-activity,
+    // public-query and data-retrieval alike. `alignedEligible` below already
+    // carries "there is no aligned route on this binding" to the descriptor.
+    if (!wildcardTarget && (canonicalTypes.length !== 1 || alignedTypes.length > 1)) {
       throw new Error(
         `Validated trigger binding ${index} (${binding.targetNodeId}.${binding.targetPortId}) ` +
-          "must resolve to exactly one paired canonical and aligned-binary SDS type.",
+          "must resolve to exactly one canonical SDS type, with at most one aligned-binary peer.",
       );
     }
     const canonical = wildcardTarget ? null : canonicalTypes[0];
-    const aligned = wildcardTarget ? null : alignedTypes[0];
+    const aligned = wildcardTarget ? null : (alignedTypes[0] ?? null);
     const byteLength = edgeLayoutScalar(aligned?.byteLength, "trigger aligned byteLength");
     const fixedStringLength = edgeLayoutScalar(
       aligned?.fixedStringLength,
