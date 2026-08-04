@@ -585,6 +585,45 @@ Manifests can also declare coarse runtime targets for planning and compliance:
 
 `node` `browser` `wasi` `wasmedge` `server` `desktop` `edge`
 
+## Credential Lanes (`secrets:<lane>`)
+
+A module that needs an operator's third-party credential — a Space-Track login,
+a data-provider API password, an account at any service the operator uses —
+reads it at runtime from the node's encrypted credential keystore instead of
+carrying it in the manifest, the flow, or a record.
+
+Lane ids are **operator-defined** (lowercase `[a-z0-9_-]{2,64}`). A few are
+well-known (`spacetrack`, `edc_cpf`, `myintelsat`) because the node ships a
+verifier for them, but an operator may create a lane for any service; take the
+lane id as module configuration, not as a compile-time constant.
+
+Reading a lane requires the capability `secrets:<lane>` **and** an operator
+approval recorded against your module's exact content hash. Approval is per
+lane: `secrets:spacetrack` conveys nothing about any other lane, and the host
+re-checks the exact lane on every call. Without an approval the module is denied
+at load. There is no list or export operation — a guest can never enumerate the
+keystore.
+
+The guest helper is [`src/host/cpp/secretsClient.hpp`](./src/host/cpp/secretsClient.hpp):
+
+```cpp
+#include "sdm_hostcall_wire.hpp"   // must be included first
+#include "secretsClient.hpp"
+
+sdm_secrets::Credential cred;
+if (!sdm_secrets::secrets_get(lane, &cred)) {
+  log_error("provider credential unavailable");   // the CONDITION, never the contents
+  return false;
+}
+const bool ok = provider_login(cred.username, cred.secret);
+sdm_secrets::wipe(&cred);   // on every path, including failures
+```
+
+The credential arrives as plaintext: never log it, never persist it, never
+forward it anywhere but the provider it belongs to, and wipe it as soon as the
+call is done. Full contract, wire shapes, and failure modes:
+[`docs/secrets-capability.md`](./docs/secrets-capability.md).
+
 ## Environment Notes
 
 | Surface | Node.js | Browser |
