@@ -52,16 +52,16 @@
                 {
                   "schemaName": "GRV.fbs",
                   "fileIdentifier": "$GRV",
-                  "schemaVersion": "0.0.4",
-                  "schemaHash": "2f8585994747b20a6f52a3a5875be763dbfa12de9de6b5979e305296081f1033",
+                  "schemaVersion": "0.0.5",
+                  "schemaHash": "36dac7b1868da8150d27dc396d3823746c1f58721bb0c879dae101e6730f0bef",
                   "rootTypeName": "GRV",
                   "wireFormat": "flatbuffer"
                 },
                 {
                   "schemaName": "GRV.fbs",
                   "fileIdentifier": "$GRV",
-                  "schemaVersion": "0.0.4",
-                  "schemaHash": "2f8585994747b20a6f52a3a5875be763dbfa12de9de6b5979e305296081f1033",
+                  "schemaVersion": "0.0.5",
+                  "schemaHash": "36dac7b1868da8150d27dc396d3823746c1f58721bb0c879dae101e6730f0bef",
                   "rootTypeName": "GRV",
                   "wireFormat": "aligned-binary",
                   "byteLength": 72,
