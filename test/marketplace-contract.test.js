@@ -52,6 +52,7 @@ import {
   validateLicensingGrant,
   verifyLicensingGrantProviderSignature,
 } from "../src/index.js";
+import { x25519SharedSecret } from "../src/utils/wasmCrypto.js";
 
 const textEncoder = new TextEncoder();
 
@@ -705,6 +706,35 @@ test("marketplace content protection encrypts once and wraps one generated conte
   );
   assert.equal(unwrappedKeys[0].length, 32);
   assert.deepEqual(unwrappedKeys[1], unwrappedKeys[0]);
+
+  // SAW-M3: a wallet-shaped keyAgreement provider resolves the same shared
+  // secret as the raw-scalar path, without recipientPrivateKey ever passing
+  // through decryptMarketplaceContentKeyWrap.
+  const seen = [];
+  const keyAgreement = async ({ ephemeralPublicKey, context, keyExchange }) => {
+    seen.push({ context, keyExchange });
+    return x25519SharedSecret(alphaKeyPair.privateKey, ephemeralPublicKey);
+  };
+  const viaKeyAgreement = await decryptMarketplaceContentKeyWrap({
+    wrap: result.wrappedKeys[0],
+    keyAgreement,
+  });
+  assert.deepEqual(viaKeyAgreement, unwrappedKeys[0]);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].keyExchange, "X25519");
+  assert.equal(
+    seen[0].context,
+    `marketplace-content-key:${result.wrappedKeys[0].providerId}:${result.wrappedKeys[0].contentKeyId}:${result.wrappedKeys[0].recipientKeyId}`,
+  );
+
+  await assert.rejects(
+    decryptMarketplaceContentKeyWrap({
+      wrap: result.wrappedKeys[0],
+      recipientPrivateKey: alphaKeyPair.privateKey,
+      keyAgreement,
+    }),
+    /accepts either recipientPrivateKey or keyAgreement, not both/,
+  );
 });
 
 function roundTripFieldStreamPolicy(policy) {

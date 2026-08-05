@@ -13,6 +13,7 @@ import {
   extractPublicationRecordCollection,
 } from "../src/transport/records.js";
 import { base64ToBytes } from "../src/utils/encoding.js";
+import { x25519SharedSecret } from "../src/utils/wasmCrypto.js";
 
 const PLAINTEXT = new TextEncoder().encode(
   "authenticated module delivery payload",
@@ -61,6 +62,55 @@ test("ENC delivery emits AES-256-GCM records and round-trips", async () => {
     recipientPrivateKey: recipient.privateKey,
   });
   assert.deepEqual(Array.from(viaEnvelope), Array.from(PLAINTEXT));
+});
+
+test("decryptProtectedBytes accepts a keyAgreement provider instead of the raw scalar", async () => {
+  const { recipient, envelope } = await createEncryptedFixture();
+  const protectedBytes = base64ToBytes(envelope.protectedBlobBase64);
+
+  const seen = [];
+  // Simulates a wallet: the scalar (recipient.privateKey) never crosses into
+  // pki.js — only the resolved shared secret does.
+  const keyAgreement = async ({ ephemeralPublicKey, context, keyExchange }) => {
+    seen.push({ ephemeralPublicKey, context, keyExchange });
+    return x25519SharedSecret(recipient.privateKey, ephemeralPublicKey);
+  };
+
+  const viaKeyAgreement = await decryptProtectedBytes({
+    protectedBytes,
+    keyAgreement,
+  });
+  assert.deepEqual(Array.from(viaKeyAgreement), Array.from(PLAINTEXT));
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].keyExchange, "X25519");
+  assert.equal(seen[0].context, "space-data-module-sdk/package");
+});
+
+test("decryptProtectedBytes refuses recipientPrivateKey and keyAgreement together", async () => {
+  const { recipient, envelope } = await createEncryptedFixture();
+  const protectedBytes = base64ToBytes(envelope.protectedBlobBase64);
+
+  await assert.rejects(
+    decryptProtectedBytes({
+      protectedBytes,
+      recipientPrivateKey: recipient.privateKey,
+      keyAgreement: async () => new Uint8Array(32),
+    }),
+    /accepts either recipientPrivateKey or keyAgreement, not both/,
+  );
+});
+
+test("decryptProtectedBytes rejects a keyAgreement provider that resolves the wrong length", async () => {
+  const { envelope } = await createEncryptedFixture();
+  const protectedBytes = base64ToBytes(envelope.protectedBlobBase64);
+
+  await assert.rejects(
+    decryptProtectedBytes({
+      protectedBytes,
+      keyAgreement: async () => new Uint8Array(16),
+    }),
+    /must resolve a 32-byte shared secret/,
+  );
 });
 
 test("tampered ENC ciphertext fails authentication", async () => {

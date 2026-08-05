@@ -80,6 +80,45 @@ async function deriveAesKey(sharedSecret, salt, context) {
   );
 }
 
+// SAW-M3: the recipient's raw private scalar never has to enter this module.
+// A caller (e.g. a browser session backed by hd-wallet-wasm) may supply a
+// `keyAgreement` provider that performs step 1 (the X25519 ECDH, the ONLY
+// step that needs the scalar) behind its own custody boundary and resolves
+// the 32-byte shared secret. Steps 2-3 (HKDF derive, AES-GCM) stay here —
+// public math, curve-agnostic, not duplicated into the wallet.
+function keyExchangeFromAlgorithm(algorithm) {
+  if (typeof algorithm !== "string" || !algorithm.length) {
+    return "X25519";
+  }
+  return algorithm.split("-")[0] || "X25519";
+}
+
+async function resolveSharedSecret(
+  label,
+  { recipientPrivateKey, keyAgreement, ephemeralPublicKey, context, keyExchange },
+) {
+  if (recipientPrivateKey && keyAgreement) {
+    throw new Error(
+      `${label} accepts either recipientPrivateKey or keyAgreement, not both.`,
+    );
+  }
+  if (keyAgreement) {
+    const sharedSecret = toUint8Array(
+      await keyAgreement({ ephemeralPublicKey, context, keyExchange }),
+    );
+    if (sharedSecret.length !== 32) {
+      throw new Error(
+        `${label} keyAgreement provider must resolve a 32-byte shared secret.`,
+      );
+    }
+    return sharedSecret;
+  }
+  if (!recipientPrivateKey) {
+    throw new Error(`${label} requires recipientPrivateKey or keyAgreement.`);
+  }
+  return deriveSharedSecret(recipientPrivateKey, ephemeralPublicKey);
+}
+
 function normalizeOptionalBytes(value) {
   if (value === null || value === undefined) {
     return new Uint8Array(0);
@@ -308,15 +347,22 @@ export async function protectMarketplaceContent({
 export async function decryptMarketplaceContentKeyWrap({
   wrap,
   recipientPrivateKey,
+  keyAgreement,
 } = {}) {
   if (!wrap) {
     throw new Error("decryptMarketplaceContentKeyWrap requires wrap.");
   }
-  const sharedSecret = await deriveSharedSecret(
-    recipientPrivateKey,
-    wrap.providerEphemeralPublicKey,
-  );
   const wrapContext = `marketplace-content-key:${wrap.providerId}:${wrap.contentKeyId}:${wrap.recipientKeyId}`;
+  const sharedSecret = await resolveSharedSecret(
+    "decryptMarketplaceContentKeyWrap",
+    {
+      recipientPrivateKey,
+      keyAgreement,
+      ephemeralPublicKey: wrap.providerEphemeralPublicKey,
+      context: wrapContext,
+      keyExchange: keyExchangeFromAlgorithm(wrap.algorithm),
+    },
+  );
   const wrapKey = await deriveAesKey(sharedSecret, new Uint8Array(0), wrapContext);
   const keyMaterial = await aesGcmDecrypt(
     wrapKey,
@@ -364,16 +410,20 @@ async function encryptBytesLegacy({
 export async function decryptProtectedBytes({
   protectedBytes,
   recipientPrivateKey,
+  keyAgreement,
 } = {}) {
   const parsed = extractPublicationRecordCollection(protectedBytes);
   if (!parsed?.enc) {
     return toUint8Array(protectedBytes);
   }
   assertGcmEncRecord(parsed.enc);
-  const sharedSecret = await deriveSharedSecret(
+  const sharedSecret = await resolveSharedSecret("decryptProtectedBytes", {
     recipientPrivateKey,
-    parsed.enc.ephemeralPublicKey,
-  );
+    keyAgreement,
+    ephemeralPublicKey: parsed.enc.ephemeralPublicKey,
+    context: parsed.enc.context ?? "",
+    keyExchange: parsed.enc.keyExchange,
+  });
   const aesKey = await deriveAesKey(
     sharedSecret,
     new Uint8Array(0),

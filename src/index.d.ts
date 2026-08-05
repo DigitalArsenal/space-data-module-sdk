@@ -855,9 +855,16 @@ export function protectMarketplaceContent(options: {
   wrapNonce?: Uint8Array | ArrayBuffer | ArrayBufferView | number[] | null;
 }): Promise<MarketplaceProtectedContent>;
 
+export type KeyAgreementProvider = (params: {
+  ephemeralPublicKey: Uint8Array;
+  context: string;
+  keyExchange: string;
+}) => Promise<Uint8Array>;
+
 export function decryptMarketplaceContentKeyWrap(options: {
   wrap: MarketplaceContentKeyWrap;
-  recipientPrivateKey: Uint8Array | ArrayBuffer | ArrayBufferView | number[] | string;
+  recipientPrivateKey?: Uint8Array | ArrayBuffer | ArrayBufferView | number[] | string;
+  keyAgreement?: KeyAgreementProvider;
 }): Promise<Uint8Array>;
 
 export function encryptBytesForRecipient(options: {
@@ -872,7 +879,8 @@ export function encryptBytesForRecipient(options: {
 
 export function decryptProtectedBytes(options: {
   protectedBytes: Uint8Array | ArrayBuffer;
-  recipientPrivateKey: Uint8Array | string;
+  recipientPrivateKey?: Uint8Array | string;
+  keyAgreement?: KeyAgreementProvider;
 }): Promise<Uint8Array>;
 
 export function decryptBytesFromEnvelope(options: {
