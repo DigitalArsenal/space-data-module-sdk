@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { Buffer } from "node:buffer";
-import { once } from "node:events";
 import path from "node:path";
 import process from "node:process";
 
@@ -140,6 +139,12 @@ async function createLengthPrefixedProcessClient(options = {}) {
   let closed = false;
   let closeError = null;
   let expectedShutdown = false;
+  let resolveSpawn;
+  let rejectSpawn;
+  const spawnPromise = new Promise((resolve, reject) => {
+    resolveSpawn = resolve;
+    rejectSpawn = reject;
+  });
 
   function rejectPending(error) {
     while (pending.length > 0) {
@@ -166,6 +171,7 @@ async function createLengthPrefixedProcessClient(options = {}) {
   child.stderr.on("data", (chunk) => {
     stderrChunks.push(Buffer.from(chunk));
   });
+  child.once("spawn", resolveSpawn);
   child.on("error", (error) => {
     closeError = formatProcessFailure(
       "Failed to launch plugin invoke process.",
@@ -173,29 +179,31 @@ async function createLengthPrefixedProcessClient(options = {}) {
       error,
     );
     rejectPending(closeError);
+    rejectSpawn(closeError);
   });
 
-  const closePromise = once(child, "close").then(([code, signal]) => {
-    closed = true;
-    if (!expectedShutdown && (code !== 0 || signal !== null)) {
-      closeError = formatProcessFailure(
-        `Plugin invoke process exited unexpectedly with ${
-          signal ? `signal ${signal}` : `code ${code}`
-        }.`,
-        stderrChunks,
-      );
-      rejectPending(closeError);
-      throw closeError;
-    }
-    if (!expectedShutdown && code !== 0) {
-      closeError = formatProcessFailure(
-        `Plugin invoke process exited with code ${code}.`,
-        stderrChunks,
-      );
-      rejectPending(closeError);
-      throw closeError;
-    }
+  const closePromise = new Promise((resolve) => {
+    child.once("close", (code, signal) => {
+      closed = true;
+      if (!expectedShutdown && (code !== 0 || signal !== null)) {
+        closeError = formatProcessFailure(
+          `Plugin invoke process exited unexpectedly with ${
+            signal ? `signal ${signal}` : `code ${code}`
+          }.`,
+          stderrChunks,
+        );
+        rejectPending(closeError);
+      }
+      resolve();
+    });
   });
+
+  // Do not hand callers a client whose child never launched. In particular,
+  // spawn(2) failures such as a missing WasmEdge binary emit `error` without
+  // keeping the event loop alive; returning before that event left loadModule()
+  // awaiting teardown forever and the Node test runner exited with a pending
+  // Promise instead of a TAP verdict.
+  await spawnPromise;
 
   async function invokeRaw(requestBytes) {
     if (closeError) {

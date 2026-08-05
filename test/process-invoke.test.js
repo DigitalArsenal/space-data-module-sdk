@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -208,6 +209,18 @@ test("createPluginInvokeProcessClient exchanges length-prefixed invoke envelopes
   } finally {
     await client.destroy();
   }
+});
+
+test("createPluginInvokeProcessClient rejects when the child cannot launch", async () => {
+  await assert.rejects(
+    createPluginInvokeProcessClient({
+      command: path.join(
+        tmpdir(),
+        `space-data-module-sdk-missing-runtime-${process.pid}`,
+      ),
+    }),
+    /Failed to launch plugin invoke process/,
+  );
 });
 
 test("resolveWasmEdgePluginLaunchPlan uses the bare WasmEdge CLI by default", () => {
