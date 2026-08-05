@@ -9,6 +9,14 @@ on:
 env:
   # Bump deliberately, in the same commit as any change that depends on it.
   EMSDK_VERSION: "6.0.5"
+  # MUST match .github/workflows/publish.yml — the merge gate and the tag gate
+  # have to see the same isomorphic-pthreads toolchain, or a guardrail can
+  # change verdict between the two with no commit. This is the wasi-threads
+  # (wasm32-wasip1-threads) compiler + sysroot that emsdk cannot provide (see
+  # docs/isomorphic-pthreads.md) — without it, resolveWasiThreadsToolchain()
+  # throws and every suite gated by wasiThreadsAvailable() silently SKIPS.
+  WASI_SDK_VERSION: "33"
+  WASI_SDK_SHA256: "0ba8b5bfaeb2adf3f29bab5841d76cf5318ab8e1642ea195f88baba1abd47bce"
 
 jobs:
   test:
@@ -50,6 +58,21 @@ jobs:
           cd "$RUNNER_TEMP/emsdk"
           ./emsdk install "$EMSDK_VERSION"
           ./emsdk activate "$EMSDK_VERSION"
+      - name: Install pinned wasi-sdk
+        # Self-contained release: clang/clang++, its own resource-dir
+        # (compiler-rt builtins), and a sysroot that already carries
+        # lib/wasm32-wasip1-threads/libc.a. No separate resource-dir wiring —
+        # wasi-sdk's clang locates its own, so SDN_WASI_RESOURCE_DIR stays unset.
+        run: |
+          curl -sSL -o "$RUNNER_TEMP/wasi-sdk.tar.gz" \
+            "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux.tar.gz"
+          echo "${WASI_SDK_SHA256}  $RUNNER_TEMP/wasi-sdk.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/wasi-sdk"
+          tar xzf "$RUNNER_TEMP/wasi-sdk.tar.gz" -C "$RUNNER_TEMP/wasi-sdk" --strip-components=1
+          echo "$RUNNER_TEMP/wasi-sdk/bin" >> "$GITHUB_PATH"
+          echo "SDN_WASI_CLANG=$RUNNER_TEMP/wasi-sdk/bin/wasm32-wasi-clang" >> "$GITHUB_ENV"
+          echo "SDN_WASI_CLANGXX=$RUNNER_TEMP/wasi-sdk/bin/wasm32-wasi-clang++" >> "$GITHUB_ENV"
+          echo "SDN_WASI_SYSROOT=$RUNNER_TEMP/wasi-sdk/share/wasi-sysroot" >> "$GITHUB_ENV"
       - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm ci
       - name: Test shard ${{ matrix.shard }} on Node ${{ matrix.node-version }}
         run: |

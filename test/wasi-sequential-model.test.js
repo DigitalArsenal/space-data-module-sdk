@@ -17,11 +17,14 @@ import {
 } from "../src/compiler/index.js";
 import { resolveWasiThreadsToolchain } from "../src/compiler/wasiThreadsToolchain.js";
 
-const STANDARDS_ROOT = new URL(
-  "../../../main-packages/spacedatastandards.org/",
-  import.meta.url,
-).pathname;
-process.env.SPACE_DATA_STANDARDS_ROOT ??= STANDARDS_ROOT;
+// Deliberately NOT overriding SPACE_DATA_STANDARDS_ROOT here: a prior version
+// pointed it at a monorepo-sibling checkout
+// (../../../main-packages/spacedatastandards.org), which only exists in one
+// developer's local layout and never in the standalone CI checkout of this
+// repo (hard-no-unreleased-deps-gate's exact failure mode, in test form).
+// Falling through to the SDK's own default — the pinned npm dependency
+// resolved via require.resolve("spacedatastandards.org") — validates against
+// the SAME released package every other caller uses, locally and in CI alike.
 
 function toolchainAvailable() {
   try {
