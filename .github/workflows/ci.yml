@@ -19,15 +19,15 @@ jobs:
       # mid-stream — which is exactly how "the runner died" was misread as
       # "these seven tests failed" off a truncated TAP stream. Both lanes report.
       fail-fast: false
-      # One lane at a time. Across every two-lane run measured on this repo,
-      # EXACTLY ONE of the two concurrently-scheduled runners was torn down
-      # mid-suite with "the runner has received a shutdown signal" — on a VM
-      # with 12 GB of 16 GB free, zero swap, 44% disk and 42% CPU idle, so
-      # nothing the job did caused it. The surviving lane always finished.
-      # Serializing costs wall time and buys a gate that reports.
-      max-parallel: 1
       matrix:
         node-version: [20, 22]
+        # Node 20 hosted runners repeatedly disappear in the compile-heavy
+        # direct-invoke cluster after roughly five minutes of one monolithic
+        # test process. The VM remains healthy (12 GB available, zero swap,
+        # 42% idle CPU), and serializing node versions did not change it. Keep
+        # every supported-version gate, but give each deterministic quarter of
+        # the suite its own runner and its own complete TAP verdict.
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -51,5 +51,27 @@ jobs:
           ./emsdk install "$EMSDK_VERSION"
           ./emsdk activate "$EMSDK_VERSION"
       - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm ci
-      - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm test
-      - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm run check:compliance
+      - name: Test shard ${{ matrix.shard }} on Node ${{ matrix.node-version }}
+        run: |
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          file_index=0
+          selected=0
+          for test_file in test/*.test.js; do
+            if (( file_index % 4 == ${{ matrix.shard }} )); then
+              echo "Running $test_file"
+              node --test "$test_file"
+              selected=$((selected + 1))
+            fi
+            file_index=$((file_index + 1))
+          done
+          test "$selected" -gt 0
+
+  compliance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run check:compliance
