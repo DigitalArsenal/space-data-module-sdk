@@ -582,31 +582,58 @@ test("embedded manifest source stays a raw byte buffer for c and c++ modules", (
   assert.equal(source.includes("FlatBufferBuilder"), false);
 });
 
-// An aligned peer that CLAIMS a fixed layout without stating its size is
-// refused before the toolchain runs: byteLength is the exact frame length the
-// router checks, so a missing one is an unenforceable claim. (A port with NO
-// aligned peer at all is legal — see the compliance suite; the peer is the
-// shared-arena optimization, and variable-length records have no fixed size to
-// declare.)
-test("source compiler rejects an aligned peer with no byteLength before toolchain execution", async () => {
-  const manifest = createTestManifest();
-  for (const typeRef of manifest.methods[0].outputPorts[0].acceptedTypeSets[0]
-    .allowedTypes) {
-    if (typeRef.wireFormat === "aligned-binary") delete typeRef.byteLength;
-  }
+// byteLength is an optional fixed-record stride. Omitting it declares a
+// variable-length aligned stream; declaring an invalid stride is still an
+// error, and requiredAlignment remains mandatory for every aligned stream.
+test("source compiler applies aligned-stream layout metadata rules", async (t) => {
+  const sourceCode = "int propagate(void) { return 7; }\n";
 
-  await assert.rejects(
-    () =>
-      compileModuleFromSource({
-        manifest,
-        sourceCode: "int propagate(void) { return 7; }\n",
-        language: "c",
-      }),
-    (error) =>
-      error?.report?.errors?.some((issue) =>
-        String(issue.location ?? "").endsWith(".byteLength"),
-      ) === true,
-  );
+  await t.test("accepts an omitted byteLength as a variable-length stream", async () => {
+    const manifest = createTestManifest();
+    for (const typeRef of manifest.methods[0].outputPorts[0].acceptedTypeSets[0]
+      .allowedTypes) {
+      if (typeRef.wireFormat === "aligned-binary") delete typeRef.byteLength;
+    }
+
+    const result = await compileModuleFromSource({
+      manifest,
+      sourceCode,
+      language: "c",
+    });
+    assert.ok(result.wasmBytes.byteLength > 0);
+  });
+
+  await t.test("rejects an invalid declared byteLength before toolchain execution", async () => {
+    const manifest = createTestManifest();
+    for (const typeRef of manifest.methods[0].outputPorts[0].acceptedTypeSets[0]
+      .allowedTypes) {
+      if (typeRef.wireFormat === "aligned-binary") typeRef.byteLength = 0;
+    }
+
+    await assert.rejects(
+      () => compileModuleFromSource({ manifest, sourceCode, language: "c" }),
+      (error) =>
+        error?.report?.errors?.some((issue) =>
+          String(issue.location ?? "").endsWith(".byteLength"),
+        ) === true,
+    );
+  });
+
+  await t.test("rejects an omitted requiredAlignment before toolchain execution", async () => {
+    const manifest = createTestManifest();
+    for (const typeRef of manifest.methods[0].outputPorts[0].acceptedTypeSets[0]
+      .allowedTypes) {
+      if (typeRef.wireFormat === "aligned-binary") delete typeRef.requiredAlignment;
+    }
+
+    await assert.rejects(
+      () => compileModuleFromSource({ manifest, sourceCode, language: "c" }),
+      (error) =>
+        error?.report?.errors?.some((issue) =>
+          String(issue.location ?? "").endsWith(".requiredAlignment"),
+        ) === true,
+    );
+  });
 });
 
 test("source compiler rejects a paired non-SDS port before toolchain execution", async () => {
