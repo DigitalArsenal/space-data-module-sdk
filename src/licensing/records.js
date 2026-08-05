@@ -54,6 +54,12 @@ export function encodeLicensingChallengeRequest(options) {
       "requesterEphemeralPublicKey",
     ),
   );
+  const requesterEpmOffset = options.requesterEpm
+    ? LCH.createRequesterEpmVector(
+        builder,
+        cloneRequiredBytes(options.requesterEpm, "requesterEpm"),
+      )
+    : 0;
   const requesterDomainOffset = builder.createString(
     normalizeRequiredString(options.requesterDomain, "requesterDomain"),
   );
@@ -79,7 +85,7 @@ export function encodeLicensingChallengeRequest(options) {
     providerPeerIdOffset,
     0,
     0,
-    0,
+    requesterEpmOffset,
   );
   LCH.finishLCHBuffer(builder, root);
   return builder.asUint8Array();
@@ -135,6 +141,7 @@ export function decodeLicensingChallengeMessage(bytes) {
     requesterEphemeralPublicKey: cloneOptionalBytes(
       message.requesterEphemeralPubkeyArray(),
     ),
+    requesterEpm: cloneOptionalBytes(message.requesterEpmArray()),
     requestedDomain: trimOptional(message.REQUESTED_DOMAIN()),
     requestedTimeoutMs: numberFromUint64(
       message.REQUESTED_TIMEOUT_MS(),

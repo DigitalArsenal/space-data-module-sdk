@@ -38,6 +38,7 @@ test("SDK challenge request bytes match the canonical sdn-js LCH builder layout"
     requesterXpub: "xpub-requester",
     requesterSigningPublicKey: new Uint8Array(32).fill(6),
     requesterEphemeralPublicKey: new Uint8Array(32).fill(8),
+    requesterEpm: new Uint8Array([36, 69, 80, 77, 1, 2, 3]),
     requesterDomain: "app.example.com",
     requestedTimeoutMs: 300_000,
     requestedAtMs: 1_700_000_000_000,
@@ -119,6 +120,7 @@ function encodeCanonicalChallengeRequest(options) {
     builder,
     options.requesterEphemeralPublicKey,
   );
+  const requesterEpmOffset = LCH.createRequesterEpmVector(builder, options.requesterEpm);
   const requesterDomainOffset = builder.createString(options.requesterDomain);
   const providerPeerIdOffset = builder.createString(options.providerPeerId);
   LCH.startLCH(builder);
@@ -135,6 +137,7 @@ function encodeCanonicalChallengeRequest(options) {
   LCH.addRequestedTimeoutMs(builder, BigInt(options.requestedTimeoutMs));
   LCH.addRequestedAt(builder, BigInt(options.requestedAtMs));
   LCH.addProviderPeerId(builder, providerPeerIdOffset);
+  LCH.addRequesterEpm(builder, requesterEpmOffset);
   const root = LCH.endLCH(builder);
   LCH.finishLCHBuffer(builder, root);
   return builder.asUint8Array();

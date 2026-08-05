@@ -42,6 +42,7 @@ test("licensing challenge requests encode and decode through SDS LCH", () => {
     requesterXpub: "xpub-requester",
     requesterSigningPublicKey: new Uint8Array(32).fill(6),
     requesterEphemeralPublicKey: new Uint8Array(32).fill(8),
+    requesterEpm: new Uint8Array([36, 69, 80, 77, 1, 2, 3]),
     requesterDomain: "app.example.com",
     requestedTimeoutMs: 300_000,
     requestedAtMs: 1_700_000_000_000,
@@ -67,6 +68,7 @@ test("licensing challenge requests encode and decode through SDS LCH", () => {
   assert.equal(decoded.providerPeerId, "provider-peer-id");
   assert.deepEqual(decoded.requesterSigningPublicKey, new Uint8Array(32).fill(6));
   assert.deepEqual(decoded.requesterEphemeralPublicKey, new Uint8Array(32).fill(8));
+  assert.deepEqual(decoded.requesterEpm, new Uint8Array([36, 69, 80, 77, 1, 2, 3]));
 });
 
 test("licensing challenge responses decode challenge nonce and provider details", () => {
