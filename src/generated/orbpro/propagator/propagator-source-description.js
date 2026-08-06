@@ -29,7 +29,7 @@ class PropagatorSourceDescription {
   }
   sourceKind() {
     const offset = this.bb.__offset(this.bb_pos, 6);
-    return offset ? this.bb.readUint8(this.bb_pos + offset) : PropagatorSourceKind.UNKNOWN;
+    return offset ? this.bb.readUint8(this.bb_pos + offset) : PropagatorSourceKind.NONE;
   }
   objectName(optionalEncoding) {
     const offset = this.bb.__offset(this.bb_pos, 8);
@@ -114,7 +114,7 @@ class PropagatorSourceDescription {
     builder.addFieldInt32(0, sourceHandle, 0);
   }
   static addSourceKind(builder, sourceKind) {
-    builder.addFieldInt8(1, sourceKind, PropagatorSourceKind.UNKNOWN);
+    builder.addFieldInt8(1, sourceKind, PropagatorSourceKind.NONE);
   }
   static addObjectName(builder, objectNameOffset) {
     builder.addFieldOffset(2, objectNameOffset, 0);

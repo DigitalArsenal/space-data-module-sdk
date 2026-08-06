@@ -32,7 +32,7 @@ sourceHandle():number {
 
 sourceKind():PropagatorSourceKind {
   const offset = this.bb!.__offset(this.bb_pos, 6);
-  return offset ? this.bb!.readUint8(this.bb_pos + offset) : PropagatorSourceKind.UNKNOWN;
+  return offset ? this.bb!.readUint8(this.bb_pos + offset) : PropagatorSourceKind.NONE;
 }
 
 objectName():string|null
@@ -145,7 +145,7 @@ static addSourceHandle(builder:flatbuffers.Builder, sourceHandle:number) {
 }
 
 static addSourceKind(builder:flatbuffers.Builder, sourceKind:PropagatorSourceKind) {
-  builder.addFieldInt8(1, sourceKind, PropagatorSourceKind.UNKNOWN);
+  builder.addFieldInt8(1, sourceKind, PropagatorSourceKind.NONE);
 }
 
 static addObjectName(builder:flatbuffers.Builder, objectNameOffset:flatbuffers.Offset) {

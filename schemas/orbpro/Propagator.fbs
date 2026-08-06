@@ -21,9 +21,25 @@ enum StateFlags : uint {
   HAS_COVARIANCE = 32
 }
 
+// Synced to the ratified SDS VCM.propagatorFamily vocabulary (schema/VCM/main.fbs)
+// so any provider self-identifying in PropagatorDescribeSourcesBatchResult uses
+// the SAME family codes SDS already carries — HPOP/Cowell-class numerical
+// integrators map to COWELL (no HPOP-specific code needed); new codes go
+// through Themis's SDS auto-ratification law, never invented here first.
 enum PropagatorSourceKind : ubyte {
-  UNKNOWN = 0,
-  SGP4 = 1
+  NONE = 0,
+  SEMI_ANALYTICAL = 1,
+  VINTI = 2,
+  SGP4 = 3,
+  COWELL = 4,
+  RK4 = 5,
+  NYX = 6,
+  GMAT = 7,
+  SPICE = 8,
+  SGP = 9,
+  SDP4 = 10,
+  SGP8 = 11,
+  SDP8 = 12
 }
 
 struct StateVector {
@@ -41,7 +57,7 @@ table PropagatorDescribeSourcesBatchRequest {
 
 table PropagatorSourceDescription {
   sourceHandle:uint = 0;
-  sourceKind:PropagatorSourceKind = UNKNOWN;
+  sourceKind:PropagatorSourceKind = NONE;
   objectName:string;
   objectId:string;
   noradCatId:uint = 0;

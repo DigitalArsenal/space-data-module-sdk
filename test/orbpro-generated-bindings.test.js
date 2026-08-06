@@ -14,8 +14,11 @@ import {
 } from "../src/generated/orbpro/query.js";
 import {
   PropagatorDescribeSourcesBatchRequest,
+  PropagatorDescribeSourcesBatchResult,
   PropagatorSampleTrajectoryStatesRequest,
   PropagatorSampleTrajectoryStatesResult,
+  PropagatorSourceDescription,
+  PropagatorSourceKind,
   ReferenceFrame,
   StateFlags,
   StateVector,
@@ -278,4 +281,117 @@ test("orbpro generated bindings expose the canonical runtime FlatBuffer contract
   assert.equal(sampleResult.states(0)?.epoch(), 2460000.5);
   assert.equal(sampleResult.states(0)?.referenceFrame(), ReferenceFrame.TEME);
   assert.equal(sampleResult.states(1)?.referenceFrame(), ReferenceFrame.J2000);
+});
+
+// PLUGGABLE-PROPAGATION LAW (sdk-propagator-source-kind-enum-sync): synced to
+// the ratified SDS VCM.propagatorFamily vocabulary so any provider —
+// including a numerical/Cowell-class integrator like HPOP, which has no
+// dedicated code and self-identifies as COWELL — can describe itself in a
+// PropagatorDescribeSourcesBatchResult.
+test("PropagatorSourceKind mirrors the ratified SDS VCM.propagatorFamily vocabulary", () => {
+  // Compiled TS numeric enums carry BOTH the name->value AND value->name
+  // mappings on the same object; only the named-key half is the actual
+  // vocabulary to compare against SDS.
+  const named = Object.fromEntries(
+    Object.entries(PropagatorSourceKind).filter(([key]) => Number.isNaN(Number(key))),
+  );
+  assert.deepEqual(named, {
+    NONE: 0,
+    SEMI_ANALYTICAL: 1,
+    VINTI: 2,
+    SGP4: 3,
+    COWELL: 4,
+    RK4: 5,
+    NYX: 6,
+    GMAT: 7,
+    SPICE: 8,
+    SGP: 9,
+    SDP4: 10,
+    SGP8: 11,
+    SDP8: 12,
+  });
+});
+
+test("PropagatorSourceDescription round-trips sourceKind, and NONE is the un-set default", () => {
+  const builder = new flatbuffers.Builder(256);
+  const objectName = builder.createString("ISS (ZARYA)");
+  const objectId = builder.createString("25544");
+  const offset = PropagatorSourceDescription.createPropagatorSourceDescription(
+    builder,
+    42,
+    PropagatorSourceKind.SGP4,
+    objectName,
+    objectId,
+    25544,
+    2460000.5,
+    15.5,
+    0.0007,
+    51.6,
+    120.0,
+    45.0,
+    10.0,
+    0,
+    builder.createString("U"),
+    999,
+    12345,
+    0.0001,
+    0,
+    0,
+    408,
+    420,
+  );
+  builder.finish(offset);
+  const description = PropagatorSourceDescription.getRootAsPropagatorSourceDescription(
+    new flatbuffers.ByteBuffer(builder.asUint8Array()),
+  );
+  assert.equal(description.sourceHandle(), 42);
+  assert.equal(description.sourceKind(), PropagatorSourceKind.SGP4);
+  assert.equal(description.objectName(), "ISS (ZARYA)");
+  assert.equal(description.objectId(), "25544");
+  assert.equal(description.noradCatId(), 25544);
+
+  // The un-set default is NONE (0), same ordinal SDS's propagatorFamily uses —
+  // never the old UNKNOWN spelling, which no longer exists on the enum.
+  const emptyBuilder = new flatbuffers.Builder(64);
+  PropagatorSourceDescription.startPropagatorSourceDescription(emptyBuilder);
+  const emptyOffset = PropagatorSourceDescription.endPropagatorSourceDescription(emptyBuilder);
+  emptyBuilder.finish(emptyOffset);
+  const empty = PropagatorSourceDescription.getRootAsPropagatorSourceDescription(
+    new flatbuffers.ByteBuffer(emptyBuilder.asUint8Array()),
+  );
+  assert.equal(empty.sourceKind(), PropagatorSourceKind.NONE);
+  assert.equal("UNKNOWN" in PropagatorSourceKind, false);
+});
+
+test("PropagatorDescribeSourcesBatchResult carries a mixed-family source batch (SGP4 alongside a Cowell-class HPOP provider)", () => {
+  const builder = new flatbuffers.Builder(512);
+  const sgp4Name = builder.createString("SGP4-SOURCE");
+  const sgp4Id = builder.createString("1");
+  const sgp4Offset = PropagatorSourceDescription.createPropagatorSourceDescription(
+    builder, 1, PropagatorSourceKind.SGP4, sgp4Name, sgp4Id,
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  );
+  const hpopName = builder.createString("HPOP-SOURCE");
+  const hpopId = builder.createString("2");
+  const hpopOffset = PropagatorSourceDescription.createPropagatorSourceDescription(
+    builder, 2, PropagatorSourceKind.COWELL, hpopName, hpopId,
+    2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  );
+  const sourcesVector = PropagatorDescribeSourcesBatchResult.createSourcesVector(builder, [
+    sgp4Offset,
+    hpopOffset,
+  ]);
+  const resultOffset = PropagatorDescribeSourcesBatchResult.createPropagatorDescribeSourcesBatchResult(
+    builder,
+    7,
+    sourcesVector,
+  );
+  builder.finish(resultOffset);
+  const result = PropagatorDescribeSourcesBatchResult.getRootAsPropagatorDescribeSourcesBatchResult(
+    new flatbuffers.ByteBuffer(builder.asUint8Array()),
+  );
+  assert.equal(result.catalogHandle(), 7);
+  assert.equal(result.sourcesLength(), 2);
+  assert.equal(result.sources(0)?.sourceKind(), PropagatorSourceKind.SGP4);
+  assert.equal(result.sources(1)?.sourceKind(), PropagatorSourceKind.COWELL);
 });
