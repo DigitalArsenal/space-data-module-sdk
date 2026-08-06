@@ -43,6 +43,70 @@ worker hooks, or the compile is rejected. That guardrail is documented in
 covers the portable `single-thread` loading profile; read the pthreads doc
 before shipping a threaded WasmEdge artifact.
 
+## Cross-Origin Isolation Is Required For Any wasi-threads/wasi-sequential Guest
+
+**Settled policy** (`module-sdk-target-forces-sab-coop-coep`, arbitrated
+2026-07-28, closed 2026-08-06): a host serving a module built through the
+`wasm32-wasip1-threads` toolchain — the `emscripten-pthreads` (real threading)
+model **or** the `wasi-sequential` model — to a browser MUST serve that page
+cross-origin isolated (`Cross-Origin-Opener-Policy: same-origin` +
+`Cross-Origin-Embedder-Policy: require-corp`, or the equivalent). There is no
+build-flag escape hatch:
+
+- `--target=wasm32-wasip1-threads` with **zero** feature flags still emits
+  `+atomics` — the triple implies atomics.
+- A driver-default link on that triple declares a **shared** memory (limits
+  flags `0x03`) with no `--shared-memory`/`--import-memory` on the link line.
+- `--no-shared-memory` is not a wasm-ld flag. Nothing in `compileModule.js`
+  can produce an unshared artifact on this triple. See the guardrail chain in
+  [`src/compiler/pthreadArtifactGuard.js`](/Users/tj/software/space-data-module-sdk/src/compiler/pthreadArtifactGuard.js)
+  (`assertSequentialArtifact`) and [`docs/isomorphic-pthreads.md`](./isomorphic-pthreads.md).
+
+This means an inherently-sequential guest (`wasi-sequential`, no real
+threading) still needs a shared-memory instantiation — same as a real threaded
+guest — because it shares the same compiled triple. The portable
+**`single-thread`** profile this document otherwise covers (Emscripten/
+emception, the `["browser"]` / `["browser","wasmedge"]` default: no shared
+memory, no atomics) is the one exception and needs **no** cross-origin
+isolation. Check which profile a guest actually uses — `runtimeTargets` alone
+does not tell you; an explicit `threadModel` does — before assuming either
+way.
+
+**How production achieves it today** (both patterns are live and
+`crossOriginIsolated`-verified, not hypothetical):
+
+1. **Native headers**, when the host directly fronts the origin (e.g. a
+   Caddy-fronted droplet): set `Cross-Origin-Opener-Policy: same-origin` and
+   `Cross-Origin-Embedder-Policy: require-corp` at the web server, which
+   survives a CDN in front of it.
+2. **A COI service worker**, when the host is a static CDN that cannot set
+   custom response headers (GitHub Pages is the concrete case: Pages sends no
+   COOP/COEP at all). The worker intercepts navigation/asset fetches and
+   re-serves them with the isolation headers injected, then the page does one
+   capped self-heal reload. Reference implementation:
+   `coi-serviceworker.js` + `coi-bootstrap.js` in the `spaceaware-ui`
+   (`sdn-js`) and OrbPro Pages surfaces — verified live via
+   `window.crossOriginIsolated === true` and `typeof SharedArrayBuffer !==
+   "undefined"` in a real browser, per `deployment/topology.json`. Do not
+   invent a second shim; port that one.
+
+Either path additionally constrains **every other subresource** the page
+loads to be CORP/CORS-clean under `require-corp` — third-party embeds, fonts,
+tiles, imagery all have to cooperate. This is exactly the surface the
+standing "node UIs load ZERO external-origin bytes" law removes as a concern
+for the surfaces that already follow it; a new module-serving surface that
+does NOT yet follow that law has to solve subresource compatibility
+separately, before COI, not after.
+
+**The guardrail, concretely**: verify `crossOriginIsolated`/`SharedArrayBuffer`
+with a real browser (`live-verify.mjs`-style, not a raw `curl -I` — a
+service-worker-injected header is invisible to a plain HTTP request) as part
+of standing up ANY new surface that serves a `wasi-threads`/`wasi-sequential`
+artifact, before assuming module instantiation works. A silent regression here
+fails as an instantiation error in the browser console, not a build error —
+there is currently no automated CI check for it; add one alongside the new
+surface's own verify tooling rather than assuming this document is enough.
+
 ## Canonical Module Repo Layout
 
 Module repos should publish the shared compiled artifact under a stable runtime
