@@ -160,6 +160,15 @@ function usesPthreadCompileFlags(options = {}) {
 const MIN_STACK_SIZE_BYTES = 64 * 1024;
 const MAX_STACK_SIZE_BYTES = 1024 * 1024 * 1024;
 
+// The wasi-sequential heap contract. 16 MiB initial matches what the previous
+// (Emscripten) sequential artifacts shipped with; the 2 GiB ceiling is the SAME
+// number PTHREAD_FINAL_LINK_FLAGS pins, so the two thread models differ in
+// their threading contract and NOTHING else. wasm-ld defaults the maximum to
+// the computed minimum when neither flag is given, which is what made a
+// sequential guest unable to grow its heap by a single page.
+const SEQUENTIAL_INITIAL_MEMORY_BYTES = 16 * 1024 * 1024;
+const SEQUENTIAL_MAX_MEMORY_BYTES = 2147483648;
+
 function resolveStackSize(stackSize) {
   if (stackSize === undefined || stackSize === null) {
     return null;
@@ -193,7 +202,21 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
   // refuses to instantiate it ("unknown import: env.memory"). Held to that
   // shape by assertSequentialArtifact.
   if (options.threadModel === ModuleThreadModel.WASI_SEQUENTIAL) {
-    const sequentialArgs = ["-O3", "-mbulk-memory"];
+    // A sequential guest still needs a HEAP. Without an explicit ceiling the
+    // sequential link emitted a memory whose maximum equalled its minimum (18
+    // pages for a status node), so the guest could not grow at all and
+    // plugin_alloc returned null for the first frame larger than ~1 MiB — while
+    // the SAME source on the pthreads profile got a 2 GiB-growable memory.
+    // Two thread models must differ in their THREADING contract only; a guest
+    // that cannot allocate is not "sequential", it is broken. Same ceiling as
+    // PTHREAD_FINAL_LINK_FLAGS' --max-memory, unshared and unimported so the
+    // browser needs no cross-origin isolation to load it.
+    const sequentialArgs = [
+      "-O3",
+      "-mbulk-memory",
+      `-Wl,--initial-memory=${SEQUENTIAL_INITIAL_MEMORY_BYTES}`,
+      `-Wl,--max-memory=${SEQUENTIAL_MAX_MEMORY_BYTES}`,
+    ];
     if (options.noEntry === true) {
       sequentialArgs.push("-mexec-model=reactor");
     }

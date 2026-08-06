@@ -365,3 +365,76 @@ test("atomics decoder does not false-positive on 0xFE immediates", async () => {
   assert.equal(analysis.usesAtomics, false);
   assert.equal(analysis.hasSharedMemory, false);
 });
+
+/** Own (non-imported) memory limits: {min, max|null, growable}. */
+function readDefinedMemoryLimits(wasmBytes) {
+  const parsed = parseWasmModuleSections(wasmBytes);
+  const section = parsed.sections.find((s) => s.id === 5);
+  if (!section) return null;
+  const bytes = parsed.bytes;
+  let cursor = section.payloadStart;
+  const count = decodeUnsignedLeb128(bytes, cursor);
+  if (count.value < 1) return null;
+  cursor = count.nextOffset;
+  const flags = bytes[cursor++];
+  const min = decodeUnsignedLeb128(bytes, cursor);
+  cursor = min.nextOffset;
+  let max = null;
+  if (flags & 0x01) {
+    const parsedMax = decodeUnsignedLeb128(bytes, cursor);
+    max = parsedMax.value;
+  }
+  return { flags, min: min.value, max, growable: max === null || max > min.value };
+}
+
+// REGRESSION GATE (2026-08-06): the wasi-sequential profile linked a memory
+// whose maximum equalled its minimum, so the guest could not grow its heap by a
+// single page and plugin_alloc returned null on the first frame larger than
+// ~1 MiB — while the SAME source on the pthreads profile got a 2 GiB-growable
+// memory. Two thread models may differ in their THREADING contract and nothing
+// else. This caught it in the Supplemental OMM status/publication/timer nodes.
+test("wasi-sequential compile emits an OWN, GROWABLE heap (not a fixed min==max memory)", async (t) => {
+  if (!wasiThreadsAvailable()) {
+    t.skip("wasi toolchain (wasm32-wasip1-threads) is not available.");
+    return;
+  }
+  const manifest = {
+    ...createTestManifest(),
+    sequentialJustification: {
+      kind: "pure-transform",
+      detail:
+        "Guardrail fixture: a pure transform with no collection to fan out and no worker pool to size; it exists only to assert the heap contract of the sequential link profile.",
+    },
+  };
+  const result = await compileModuleFromSource({
+    manifest,
+    sourceCode: "int propagate(void) { return 7; }\n",
+    language: "c",
+    threadModel: ModuleThreadModel.WASI_SEQUENTIAL,
+  });
+  assert.equal(result.threadModel, ModuleThreadModel.WASI_SEQUENTIAL);
+
+  // Sequential means UNSHARED and UNIMPORTED — the browser must not need
+  // cross-origin isolation to load it.
+  const analysis = analyzeWasmThreadFeatures(result.wasmBytes);
+  assert.equal(analysis.hasWasiThreadSpawnImport, false);
+  assert.equal(analysis.hasWasiThreadStartExport, false);
+  assert.equal(findImportedMemoryFlagsOffset(result.wasmBytes), -1);
+
+  const limits = readDefinedMemoryLimits(result.wasmBytes);
+  assert.ok(limits, "wasi-sequential artifact defines no memory of its own");
+  assert.equal(
+    limits.growable,
+    true,
+    `wasi-sequential heap is not growable (min=${limits.min} max=${limits.max} pages)`,
+  );
+  assert.equal(
+    limits.max,
+    2147483648 / 65536,
+    "wasi-sequential must share the pthreads profile's 2 GiB ceiling",
+  );
+  assert.ok(
+    limits.min >= 16 * 1024 * 1024 / 65536,
+    `wasi-sequential initial heap ${limits.min} pages is below the 16 MiB floor`,
+  );
+});
