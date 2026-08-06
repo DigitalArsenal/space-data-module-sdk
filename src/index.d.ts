@@ -1962,7 +1962,11 @@ export interface BrowserModuleHarness {
 }
 export function detectArtifactProfile(wasmModule: WebAssembly.Module): string;
 export function createBrowserModuleHarness(options?: {
-  wasmSource: Uint8Array | ArrayBuffer | string | WebAssembly.Module | unknown;
+  wasmSource: Uint8Array | ArrayBuffer | string | Response | WebAssembly.Module | unknown;
+  // `true` uses env/global-configured trust; an object sets it explicitly;
+  // `false` disables verification. Ignored for a precompiled WebAssembly.Module
+  // (unverifiable — pass bytes/URL/Response when verification is required).
+  verifySignature?: boolean | { trustedPublicKeys?: string[]; requireSignature?: boolean };
   host?: BrowserHost | RuntimeHost | Record<string, unknown>;
   hostOptions?: BrowserHostOptions;
   args?: string[];
@@ -1979,6 +1983,25 @@ export function createBrowserModuleHarness(options?: {
   allowRawInvoke?: boolean;
   initialMemoryBytes?: number;
   maximumMemoryBytes?: number;
+  // Upper bound on guest wasi-threads spawns; sizes the browser warm worker
+  // pool (defaults to hardware concurrency). No effect on a non-threaded guest.
+  maxThreads?: number;
+  // Request-isolated BroadcastChannel descriptor a nested pthread hostcall
+  // dispatches over; supplied by createWorkerModuleHarness for the in-worker
+  // harness instance, not something a top-level caller usually sets by hand.
+  threadHostcallChannel?: {
+    channelName: string;
+    token: string;
+    maxResponseBytes?: number;
+    timeoutMs?: number;
+  };
+  // Explicit successful cross-origin-isolation negotiation for wasi-threads
+  // guests; defaults to true. See docs/browser-wasmedge-isomorphic.md's
+  // cross-origin-isolation section for when this is required.
+  enableBrowserWasiThreads?: boolean;
+  // Capacity of the module-memory arena a direct-invoke request is written
+  // into (bytes). Defaults to 64 KiB.
+  directInvokeRequestArenaBytes?: number;
   logOutput?: boolean;
   hostcallDispatch?: (operation: string, params: unknown) => unknown;
 }): Promise<BrowserModuleHarness>;
@@ -1997,7 +2020,11 @@ export interface WorkerModuleHarness {
   destroy(): Promise<void>;
 }
 export function createWorkerModuleHarness(options: {
-  wasmSource: Uint8Array | ArrayBuffer;
+  // A precompiled WebAssembly.Module is preferred: it skips a redundant
+  // compile and is structured-cloned to the worker directly (no plaintext
+  // bytes cross the postMessage boundary at all). Uint8Array/ArrayBuffer is
+  // compiled once on the controlling thread before the worker is spawned.
+  wasmSource: WebAssembly.Module | Uint8Array | ArrayBuffer;
   host?: unknown;
   hostOptions?: BrowserHostOptions;
   dispatchHost?: (operation: string, params: unknown) => Promise<unknown>;

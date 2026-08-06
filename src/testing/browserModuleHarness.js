@@ -196,6 +196,37 @@ const DEFAULT_IMPORTED_MEMORY_MAXIMUM_BYTES = 2 * 1024 * 1024 * 1024;
 const DEFAULT_DIRECT_INVOKE_REQUEST_ARENA_BYTES = 64 * 1024;
 const SHARED_ARRAY_BUFFER_TAG = "[object SharedArrayBuffer]";
 
+/**
+ * Overwrite a plaintext wasm buffer in place. Best-effort by contract: a
+ * detached (transferred) buffer, a frozen typed array, or a runtime without
+ * writable views must not turn a successful module load into a thrown error.
+ *
+ * @param {Uint8Array|ArrayBuffer|ArrayBufferView|null|undefined} bytes
+ * @returns {number} bytes actually overwritten
+ */
+export function zeroWasmBytes(bytes) {
+  if (!bytes) {
+    return 0;
+  }
+  try {
+    const view =
+      bytes instanceof Uint8Array
+        ? bytes
+        : bytes instanceof ArrayBuffer
+          ? new Uint8Array(bytes)
+          : ArrayBuffer.isView(bytes)
+            ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+            : null;
+    if (!view || view.byteLength === 0) {
+      return 0;
+    }
+    view.fill(0);
+    return view.byteLength;
+  } catch {
+    return 0;
+  }
+}
+
 export function isSharedArrayBufferLike(value) {
   return (
     value !== null &&
@@ -408,6 +439,11 @@ async function instantiateBrowserModule(options = {}) {
 export async function createBrowserModuleHarness(options = {}) {
   let wasmSource = options.wasmSource;
   const signaturePolicy = resolveModuleSignaturePolicy(options);
+  // Bytes THIS function materializes itself (Response/URL fetch, or the
+  // ArrayBuffer/array copy taken for signature verification) — never a
+  // caller-owned buffer, which this function neither created nor may safely
+  // scrub. Zeroed below once the module is compiled.
+  let ownedArtifactBytes = null;
   if (signaturePolicy) {
     if (wasmSource instanceof WebAssembly.Module) {
       throw new ModuleSignatureError(
@@ -434,8 +470,20 @@ export async function createBrowserModuleHarness(options = {}) {
     }
     await verifyModuleArtifact(artifactBytes, signaturePolicy);
     wasmSource = artifactBytes;
+    ownedArtifactBytes = artifactBytes;
   }
   const wasmModule = await compileWasmModule(wasmSource);
+  // Plaintext hygiene (wasm-plaintext-memory-hygiene): nothing needs the
+  // source bytes past this point. Scrub whatever THIS function materialized
+  // itself, then drop every local/options reference to the source — a
+  // caller-supplied Uint8Array/ArrayBuffer must not outlive this call by
+  // being pinned via closure over `options` for the harness's entire
+  // lifetime (the returned harness closes over `options` for many other,
+  // unrelated fields).
+  zeroWasmBytes(ownedArtifactBytes);
+  ownedArtifactBytes = null;
+  wasmSource = null;
+  options.wasmSource = null;
   const moduleImports = WebAssembly.Module.imports(wasmModule);
   const needsHostBridge = moduleImports.some(
     (entry) => entry.module === DEFAULT_HOSTCALL_IMPORT_MODULE,

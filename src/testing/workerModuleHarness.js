@@ -75,17 +75,46 @@ async function spawnWorker(workerUrl) {
   };
 }
 
-function toBytes(source, label) {
-  if (source instanceof Uint8Array) return new Uint8Array(source);
-  if (source instanceof ArrayBuffer) return new Uint8Array(source.slice(0));
+/**
+ * Compile `source` to a `WebAssembly.Module` on THIS (controlling) thread
+ * before ever touching a worker.
+ *
+ * Plaintext-hygiene contract (mirrors OrbPro's `wasmModuleHygiene.js`,
+ * `wasm-plaintext-memory-hygiene`): a compiled `WebAssembly.Module` is
+ * structured-cloneable to a Worker (browser) or `node:worker_threads`
+ * (Node) — proven by `createWasiThreadSpawn` in `src/host/wasiThreadHost.js`,
+ * which hands the same compiled module to every pooled worker in both
+ * lanes. Shipping the MODULE instead of raw bytes means there is no second
+ * plaintext copy alive in the worker, and no re-compile once it arrives —
+ * `createBrowserModuleHarness`'s own `compileWasmModule` already accepts a
+ * `WebAssembly.Module` directly and returns it unchanged.
+ *
+ * `source` is never retained past this call and never zeroed here: a
+ * caller-supplied `Uint8Array`/`ArrayBuffer` is not this harness's buffer to
+ * mutate (compile does not retain a reference to it either — the caller is
+ * free to reuse or scrub it immediately after this resolves).
+ *
+ * @param {WebAssembly.Module|Uint8Array|ArrayBuffer} source
+ * @param {string} label diagnostic label
+ * @returns {Promise<WebAssembly.Module>}
+ */
+async function toWasmModule(source, label) {
+  if (source instanceof WebAssembly.Module) {
+    return source;
+  }
+  if (source instanceof Uint8Array || source instanceof ArrayBuffer) {
+    return WebAssembly.compile(source);
+  }
   throw new TypeError(
-    `${label} must be a Uint8Array or ArrayBuffer (the worker harness ships bytes to the worker).`,
+    `${label} must be a WebAssembly.Module, Uint8Array, or ArrayBuffer.`,
   );
 }
 
 /**
  * @param {object} options
- * @param {Uint8Array|ArrayBuffer} options.wasmSource module bytes
+ * @param {WebAssembly.Module|Uint8Array|ArrayBuffer} options.wasmSource module
+ *   bytes OR an already-compiled module (preferred — skips a redundant
+ *   compile and avoids ever materializing plaintext bytes in this harness)
  * @param {object} [options.host] host servicing guest hostcalls (default createBrowserHost(hostOptions))
  * @param {object} [options.hostOptions] options for the default host
  * @param {(operation: string, params: any) => Promise<any>} [options.dispatchHost] dispatch override
@@ -96,7 +125,7 @@ function toBytes(source, label) {
  *   createBrowserModuleHarness (surface, args, env, allowRawInvoke, logOutput, ...)
  */
 export async function createWorkerModuleHarness(options = {}) {
-  const wasmBytes = toBytes(options.wasmSource, "wasmSource");
+  const wasmModule = await toWasmModule(options.wasmSource, "wasmSource");
   const host = options.host ?? createBrowserHost(options.hostOptions);
   const dispatch = options.dispatchHost ?? createAsyncHostDispatcher(host);
   const buffer = createSabHostcallBuffer({
@@ -150,7 +179,7 @@ export async function createWorkerModuleHarness(options = {}) {
       case "worker-online":
         port.post({
           type: "init",
-          wasmBytes,
+          wasmModule,
           buffer,
           hostcallTimeoutMs: options.hostcallTimeoutMs,
           harnessOptions: {

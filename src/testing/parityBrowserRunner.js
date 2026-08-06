@@ -81,8 +81,15 @@ export async function runParityPlanInBrowser({ baseUrl = "" } = {}) {
       let stderr = new Uint8Array(0);
       let harness = null;
       try {
+        // Plaintext hygiene: no per-case copy. createBrowserModuleHarness
+        // compiles directly from a caller-supplied buffer without copying it
+        // (and never mutates/zeroes a buffer it does not own — see
+        // browserModuleHarness.js's zeroWasmBytes/ownedArtifactBytes
+        // contract), so the one fetched `moduleBytes` is safe to reuse
+        // as-is across every case/thread-count iteration. A `.slice()` here
+        // would only add a fresh, unzeroed plaintext copy per run.
         harness = await createBrowserModuleHarness({
-          wasmSource: moduleBytes.slice(),
+          wasmSource: moduleBytes,
           surface: "command",
           args: planCase.args,
           env: {

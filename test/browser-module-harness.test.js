@@ -12,7 +12,9 @@ import {
   createBrowserModuleHarness,
   detectArtifactProfile,
   isSharedArrayBufferLike,
+  zeroWasmBytes,
 } from "../src/testing/browserModuleHarness.js";
+import { signModuleArtifact } from "../src/bundle/signing.js";
 
 const ALIGNED_ATM_TYPE_REF = Object.freeze({
   schemaName: "ATM.fbs",
@@ -982,4 +984,69 @@ test("browser module harness stubs Emscripten shared-memory runtime imports", as
     harness.instance.exports.call_shared_memory_runtime_imports(),
     7,
   );
+});
+
+// ---------------------------------------------------------------------------
+// Plaintext-memory hygiene (module-sdk-plaintext-worker-harness).
+// ---------------------------------------------------------------------------
+
+test("zeroWasmBytes overwrites a plaintext buffer in place and is a no-op on nullish/detached input", () => {
+  const bytes = Uint8Array.from([1, 2, 3, 4, 5]);
+  assert.equal(zeroWasmBytes(bytes), 5);
+  assert.deepEqual(Array.from(bytes), [0, 0, 0, 0, 0]);
+
+  const buffer = new ArrayBuffer(4);
+  new Uint8Array(buffer).set([9, 9, 9, 9]);
+  assert.equal(zeroWasmBytes(buffer), 4);
+  assert.deepEqual(Array.from(new Uint8Array(buffer)), [0, 0, 0, 0]);
+
+  const backing = new ArrayBuffer(8);
+  const view = new Uint8Array(backing, 2, 4).fill(7);
+  assert.equal(zeroWasmBytes(view), 4);
+  assert.deepEqual(Array.from(new Uint8Array(backing)), [0, 0, 0, 0, 0, 0, 0, 0]);
+
+  assert.equal(zeroWasmBytes(null), 0);
+  assert.equal(zeroWasmBytes(undefined), 0);
+  assert.equal(zeroWasmBytes(new Uint8Array(0)), 0);
+});
+
+test("createBrowserModuleHarness drops its options.wasmSource reference once compiled, and zeroes self-materialized signature-verification bytes", async (t) => {
+  const compilation = await compileModuleFromSource({
+    manifest: createManifest(),
+    sourceCode: createEchoSource(),
+    language: "c",
+    threadModel: ModuleThreadModel.SINGLE_THREAD,
+  });
+  t.after(async () => {
+    await cleanupCompilation(compilation);
+  });
+
+  // Plain-bytes path: no signature policy, so compileWasmModule never makes
+  // its own copy — only the reference has to be dropped.
+  const plainOptions = { wasmSource: compilation.wasmBytes };
+  const plainHarness = await createBrowserModuleHarness(plainOptions);
+  t.after(() => plainHarness.destroy());
+  assert.equal(plainOptions.wasmSource, null);
+  // The caller's OWN array (not ours) must never be touched.
+  assert.equal(compilation.wasmBytes.length > 0, true);
+  assert.notDeepEqual(Array.from(compilation.wasmBytes.slice(0, 8)), [0, 0, 0, 0, 0, 0, 0, 0]);
+
+  // Signature-verification path: the harness fetches/copies its OWN bytes
+  // (here via a Response) ahead of compiling, and that self-materialized
+  // copy must be scrubbed after compile — the caller's original
+  // compilation.wasmBytes above is a different, untouched buffer either way.
+  const signed = await signModuleArtifact(compilation.wasmBytes, {
+    privateKeySeedHex: "33".repeat(32),
+  });
+  const verifiedOptions = {
+    wasmSource: new Response(signed.wasmBytes),
+    verifySignature: {
+      trustedPublicKeys: [signed.signature.publicKeyHex],
+      requireSignature: true,
+    },
+  };
+  const verifiedHarness = await createBrowserModuleHarness(verifiedOptions);
+  t.after(() => verifiedHarness.destroy());
+  assert.equal(verifiedOptions.wasmSource, null);
+  assert.equal(verifiedHarness.runtime.profile, "standalone");
 });

@@ -202,7 +202,13 @@ export async function createFlowRuntimeHost(options = {}) {
     const bytes = stripPublicationTrailer(
       source instanceof Uint8Array ? source : new Uint8Array(source),
     );
-    wasmModule = await WebAssembly.compile(bytes.slice().buffer);
+    // Plaintext hygiene: `bytes` is a VIEW over the caller's own buffer
+    // (stripPublicationTrailer only ever narrows via subarray(), never
+    // copies), so it is never this function's buffer to zero — and
+    // WebAssembly.compile accepts a BufferSource view directly, so a
+    // defensive `.slice().buffer` copy here would only add an extra
+    // plaintext buffer that nothing zeroes. Compile from the view; no copy.
+    wasmModule = await WebAssembly.compile(bytes);
   }
 
   const wasi = createBrowserWasiShim({

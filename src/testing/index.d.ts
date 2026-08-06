@@ -439,9 +439,11 @@ export function resolveModuleHarnessLaunchPlan(options: {
 export function detectArtifactProfile(wasmModule: WebAssembly.Module): string;
 
 export function createBrowserModuleHarness(options?: {
-  wasmSource: Uint8Array | ArrayBuffer | string | WebAssembly.Module | unknown;
+  wasmSource: Uint8Array | ArrayBuffer | string | Response | WebAssembly.Module | unknown;
+  verifySignature?: boolean | { trustedPublicKeys?: string[]; requireSignature?: boolean };
   host?: unknown;
   hostOptions?: unknown;
+  hostcallDispatch?: (operation: string, params: unknown) => unknown;
   args?: string[];
   env?: Record<string, string>;
   manifest?: Record<string, unknown>;
@@ -456,6 +458,15 @@ export function createBrowserModuleHarness(options?: {
   allowRawInvoke?: boolean;
   initialMemoryBytes?: number;
   maximumMemoryBytes?: number;
+  maxThreads?: number;
+  threadHostcallChannel?: {
+    channelName: string;
+    token: string;
+    maxResponseBytes?: number;
+    timeoutMs?: number;
+  };
+  enableBrowserWasiThreads?: boolean;
+  directInvokeRequestArenaBytes?: number;
   logOutput?: boolean;
 }): Promise<BrowserModuleHarness>;
 

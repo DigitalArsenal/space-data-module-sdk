@@ -90,12 +90,13 @@ async function handleInit(message) {
     timeoutMs: message.hostcallTimeoutMs,
     postRequest: (request) => port.post({ type: "hostcall", ...request }),
   });
+  // Plaintext-hygiene contract: the controlling thread compiles once and
+  // ships the WebAssembly.Module (never raw bytes) — see toWasmModule() in
+  // workerModuleHarness.js. createBrowserModuleHarness's compileWasmModule
+  // already returns a Module input unchanged, so this never re-compiles.
   const harnessOptions = {
     ...(message.harnessOptions ?? {}),
-    wasmSource:
-      message.wasmBytes instanceof Uint8Array
-        ? message.wasmBytes
-        : new Uint8Array(message.wasmBytes),
+    wasmSource: message.wasmModule,
     hostcallDispatch: dispatch,
   };
   harness = await createBrowserModuleHarness(harnessOptions);
