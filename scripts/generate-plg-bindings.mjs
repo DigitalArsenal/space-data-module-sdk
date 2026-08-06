@@ -13,15 +13,8 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
-const packageRoot = path.resolve(__dirname, "..");
-const sdsPackageRoot = process.env.SPACE_DATA_STANDARDS_ROOT
-  ? path.resolve(process.env.SPACE_DATA_STANDARDS_ROOT)
-  : path.dirname(require.resolve("spacedatastandards.org/package.json"));
-const sdsSchemaRoot = path.join(sdsPackageRoot, "schema");
-const schemaPath = path.join(sdsSchemaRoot, "PLG", "main.fbs");
-const jsBindingsRoot = path.join(sdsPackageRoot, "lib", "js", "PLG");
-const tsBindingsRoot = path.join(sdsPackageRoot, "lib", "ts", "PLG");
-const outputRoot = path.join(
+export const packageRoot = path.resolve(__dirname, "..");
+export const defaultOutputRoot = path.join(
   packageRoot,
   "src",
   "generated",
@@ -29,7 +22,34 @@ const outputRoot = path.join(
   "plg",
 );
 
-async function main() {
+/**
+ * Resolve the spacedatastandards.org package root. `SPACE_DATA_STANDARDS_ROOT`
+ * is a DEVELOPER convenience for regenerating against a local uncommitted SDS
+ * checkout — never sanctioned for an automated gate, which must always mirror
+ * the RELEASED, npm-pinned package (hard-no-unreleased-deps-gate). Callers
+ * that need to refuse the override entirely should check
+ * `process.env.SPACE_DATA_STANDARDS_ROOT` themselves before calling this.
+ */
+export function resolveSdsPackageRoot() {
+  return process.env.SPACE_DATA_STANDARDS_ROOT
+    ? path.resolve(process.env.SPACE_DATA_STANDARDS_ROOT)
+    : path.dirname(require.resolve("spacedatastandards.org/package.json"));
+}
+
+/**
+ * Mirror the SDS PLG bindings into `outputRoot` (defaults to the committed
+ * tree). Returns the resolved sdsPackageRoot used, for callers that want to
+ * report provenance.
+ */
+export async function generatePlgBindings({
+  outputRoot = defaultOutputRoot,
+  sdsPackageRoot = resolveSdsPackageRoot(),
+} = {}) {
+  const sdsSchemaRoot = path.join(sdsPackageRoot, "schema");
+  const schemaPath = path.join(sdsSchemaRoot, "PLG", "main.fbs");
+  const jsBindingsRoot = path.join(sdsPackageRoot, "lib", "js", "PLG");
+  const tsBindingsRoot = path.join(sdsPackageRoot, "lib", "ts", "PLG");
+
   await fs.access(schemaPath);
   await fs.access(jsBindingsRoot);
   await fs.access(tsBindingsRoot);
@@ -38,12 +58,19 @@ async function main() {
   await fs.cp(jsBindingsRoot, outputRoot, { recursive: true });
   await fs.cp(tsBindingsRoot, outputRoot, { recursive: true });
 
+  return { sdsPackageRoot, outputRoot };
+}
+
+async function main() {
+  const { sdsPackageRoot, outputRoot } = await generatePlgBindings();
   console.log(
-    `Mirrored SDS PLG TS+JS bindings into ${path.relative(packageRoot, outputRoot)}`,
+    `Mirrored SDS PLG TS+JS bindings from ${sdsPackageRoot} into ${path.relative(packageRoot, outputRoot)}`,
   );
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

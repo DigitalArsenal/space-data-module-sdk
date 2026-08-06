@@ -82,6 +82,7 @@
     "start:lab": "node ./lab/server.js",
     "check:nav": "node scripts/check-sdn-stack-nav.mjs module-sdk docs/index.html docs/styles.css",
     "check:compliance": "node ./bin/space-data-module.js check --repo-root .",
+    "check:generated-bindings": "node scripts/check-generated-bindings.mjs",
     "generate:vectors": "node ./examples/single-file-bundle/generate-vectors.mjs",
     "prepublishOnly": "npm test && npm run check:compliance"
   },
