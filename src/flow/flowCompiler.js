@@ -84,7 +84,7 @@ import {
   TriggerBindingT,
   TriggerKind,
 } from "../generated/orbpro/flow.js";
-import { DrainPolicy } from "../generated/orbpro/manifest.js";
+import { DrainPolicy, PluginFamily } from "../generated/orbpro/manifest.js";
 
 const RUNTIME_TEMPLATE_PATH = fileURLToPath(
   new URL("./runtime-src/flow_runtime.cpp", import.meta.url),
@@ -1184,6 +1184,131 @@ export function validateFlowAPIDeclaration(flow, issues) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Family/interface-typed node binding (PLUGGABLE-PROPAGATION LAW, ruling E).
+//
+// The exact-pluginId path above is the ONLY binding mode this compiler has
+// ever had — every propagator reference in every flow.json was a design-time
+// fixed ID, which is exactly the gap the law's own flow-side contract
+// ("propagator input ports in composed flows") left unclosed. This adds an
+// ADDITIVE alternative: a node may declare `pluginFamily` (e.g.
+// "propagator") instead of `pluginId`, and is bound at CHECK TIME to the one
+// dependency in that family whose manifest exposes `methodId` — "any
+// pluginFamily:propagator satisfying method X". Resolution is a
+// DECLARATION, never an inference: zero or more than one qualifying
+// candidate is a compile error, never a guess (mirrors the wasi-sequential
+// thread model's own rule, applied here).
+//
+// Ruling C (provider method vocabulary): providers in one family are NOT
+// required to share a uniform method vocabulary beyond whatever the
+// binding's own declared `methodId` demands — sgp4 exposes
+// ingest_omm/upsert_cat/propagate_state/propagate_path/catalog_query, hpop
+// exposes invoke/ingest_state/propagate_state/prepare_trajectory_segments/
+// describe_trajectory_segments; a node that asks for "propagator satisfying
+// propagate_state" resolves against either, a node that asks for
+// "propagator satisfying catalog_query" resolves only against sgp4-shaped
+// providers. No vocabulary unification is needed: findMethod() already
+// enforces this per-candidate, the same check exact-ID binding uses.
+//
+// Ruling E (scope): this binds NODE -> PLUGIN only. Edge type contracts
+// still resolve by concrete SDS type refs (unrelated mechanism), and
+// requiredPlugins still enumerates concrete plugin ids — once a family
+// binding resolves, `node.pluginId` is backfilled with the concrete winner
+// BEFORE any other validation runs, so every downstream stage (edge typing,
+// manifest capability union, generateFlowTables, buildFlowModuleManifest,
+// the embedded FlowProgram record itself) sees an ordinary exact-ID node.
+// This is authoring-time sugar, not a new wire concept: zero ABI/schema
+// change, zero tri-runtime parity impact — the compiled artifact never
+// carries the word "pluginFamily".
+function normalizePluginFamilyName(value) {
+  if (typeof value === "number") {
+    return PluginFamily[value] ?? null;
+  }
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return null;
+  const upper = trimmed.toUpperCase().replace(/[\s-]+/g, "_");
+  return upper === "DATASOURCE" ? "DATA_SOURCE" : upper;
+}
+
+function resolveNodePluginFamilyBindings({ flow, dependencies, issues }) {
+  const failed = new Set();
+  const nodes = Array.isArray(flow?.nodes) ? flow.nodes : [];
+  nodes.forEach((node, index) => {
+    if (!node || !node.pluginFamily) return;
+    const label = node.nodeId || `flow.nodes[${index}]`;
+    const location = `flow.nodes[${index}].pluginFamily`;
+    if (node.pluginId) {
+      pushIssue(
+        issues,
+        "error",
+        "ambiguous-plugin-binding",
+        `Node "${label}" declares both pluginId and pluginFamily; a node binds by ` +
+          `EXACTLY ONE (declaration, never inference).`,
+        location,
+      );
+      failed.add(node);
+      return;
+    }
+    const requestedFamily = normalizePluginFamilyName(node.pluginFamily);
+    if (!requestedFamily) {
+      pushIssue(
+        issues,
+        "error",
+        "invalid-plugin-family",
+        `Node "${label}" declares an empty or unreadable pluginFamily.`,
+        location,
+      );
+      failed.add(node);
+      return;
+    }
+    if (!node.methodId) {
+      pushIssue(
+        issues,
+        "error",
+        "missing-method-id",
+        `Node "${label}" declares pluginFamily "${node.pluginFamily}" but no methodId to resolve ` +
+          `against (family binding always resolves by "pluginFamily:<X> satisfying method <Y>").`,
+        location,
+      );
+      failed.add(node);
+      return;
+    }
+    const candidates = [...dependencies.values()].filter(
+      (dependency) =>
+        normalizePluginFamilyName(dependency.normalized?.pluginFamily) === requestedFamily &&
+        findMethod(dependency.normalized, node.methodId),
+    );
+    if (candidates.length === 0) {
+      pushIssue(
+        issues,
+        "error",
+        "unresolvable-plugin-family",
+        `Node "${label}" requests pluginFamily "${node.pluginFamily}" satisfying method ` +
+          `"${node.methodId}", but no resolvable dependency in that family exposes it.`,
+        location,
+      );
+      failed.add(node);
+      return;
+    }
+    if (candidates.length > 1) {
+      pushIssue(
+        issues,
+        "error",
+        "ambiguous-plugin-family",
+        `Node "${label}" requests pluginFamily "${node.pluginFamily}" satisfying method ` +
+          `"${node.methodId}", but ${candidates.length} dependencies qualify (` +
+          `${candidates.map((c) => c.pluginId).sort().join(", ")}); disambiguate with an exact pluginId.`,
+        location,
+      );
+      failed.add(node);
+      return;
+    }
+    node.pluginId = candidates[0].pluginId;
+    node.resolvedFromPluginFamily = requestedFamily;
+  });
+  return failed;
+}
+
 /**
  * Validate a flow document against its dependency manifests. Returns
  * { ok, issues, capabilities, nodes } where `capabilities` is the computed
@@ -1192,6 +1317,11 @@ export function validateFlowAPIDeclaration(flow, issues) {
  */
 export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
   const issues = [];
+  const familyResolutionFailed = resolveNodePluginFamilyBindings({
+    flow,
+    dependencies,
+    issues,
+  });
   const nodes = Array.isArray(flow?.nodes) ? flow.nodes : [];
   const edges = Array.isArray(flow?.edges) ? flow.edges : [];
   const triggers = Array.isArray(flow?.triggers) ? flow.triggers : [];
@@ -1270,7 +1400,11 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
           location,
         );
       }
-    } else if (!isHostModelNode(node)) {
+    } else if (!isHostModelNode(node) && !familyResolutionFailed.has(node)) {
+      // A node in familyResolutionFailed already has its own precise error
+      // (ambiguous/unresolvable/invalid pluginFamily) from
+      // resolveNodePluginFamilyBindings above; "references plugin undefined"
+      // here would just be a confusing echo of that same failure.
       pushIssue(
         issues,
         "error",
@@ -1655,6 +1789,9 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
       pluginId: entry.node.pluginId,
       methodId: entry.node.methodId,
       dispatchModel: entry.dispatchModel,
+      // Present only for nodes bound via the additive pluginFamily path;
+      // absent (undefined) for ordinary exact-pluginId nodes.
+      resolvedFromPluginFamily: entry.node.resolvedFromPluginFamily ?? null,
     })),
   };
 }
@@ -2897,4 +3034,6 @@ export const __testables = {
   // SHARED statement-domain vectors directly, instead of inferring it from a
   // full compile that fails for a dozen later reasons.
   verifyIsomorphicNodeArtifacts,
+  normalizePluginFamilyName,
+  resolveNodePluginFamilyBindings,
 };

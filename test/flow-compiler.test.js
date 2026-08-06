@@ -137,12 +137,13 @@ function makeDependency({
   threadModel,
   methods,
   dependencies,
+  pluginFamily = "foundation",
 }) {
   const manifest = {
     pluginId,
     name: pluginId,
     version,
-    pluginFamily: "foundation",
+    pluginFamily,
     capabilities,
     externalInterfaces: [],
     runtimeTargets: ["browser"],
@@ -294,6 +295,192 @@ test("flow check passes a well-formed flow and computes the capability union", (
   assert.deepEqual(
     check.nodes.map((node) => node.dispatchModel),
     ["linked-direct", "linked-direct", "host"],
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Family/interface-typed node binding (PLUGGABLE-PROPAGATION LAW, ruling E) —
+// the additive alternative to exact-pluginId binding: a node declares
+// `pluginFamily` + `methodId` instead of `pluginId` and is resolved at check
+// time to the one qualifying dependency.
+// ---------------------------------------------------------------------------
+
+const sgp4Dependency = makeDependency({
+  pluginId: "com.spacedatanetwork.sgp4",
+  pluginFamily: "propagator",
+  capabilities: [],
+  methods: [
+    "ingest_omm",
+    "upsert_cat",
+    "propagate_state",
+    "propagate_path",
+    "catalog_query",
+  ].map((methodId) => ({
+    methodId,
+    inputPorts: [port("state", { typeSets: [typedTypeSet("state", "OMM.fbs", "$OMM")] })],
+    outputPorts: [port("out", { typeSets: [typedTypeSet("out", "OMM.fbs", "$OMM")] })],
+    maxBatch: 1,
+    drainPolicy: "single-shot",
+  })),
+});
+
+const hpopDependency = makeDependency({
+  pluginId: "com.spacedatanetwork.hpop",
+  pluginFamily: "propagator",
+  capabilities: [],
+  methods: [
+    "invoke",
+    "ingest_state",
+    "propagate_state",
+    "prepare_trajectory_segments",
+    "describe_trajectory_segments",
+  ].map((methodId) => ({
+    methodId,
+    inputPorts: [port("state", { typeSets: [typedTypeSet("state", "OMM.fbs", "$OMM")] })],
+    outputPorts: [port("out", { typeSets: [typedTypeSet("out", "OMM.fbs", "$OMM")] })],
+    maxBatch: 1,
+    drainPolicy: "single-shot",
+  })),
+});
+
+function familyFlow(nodeOverrides = {}) {
+  return {
+    programId: "test.family-flow",
+    name: "Family flow",
+    version: "0.1.0",
+    nodes: [
+      {
+        nodeId: "propagate",
+        methodId: "propagate_state",
+        kind: "transform",
+        pluginFamily: "propagator",
+        ...nodeOverrides,
+      },
+    ],
+    edges: [],
+    triggers: [{ triggerId: "manual", kind: "manual" }],
+    triggerBindings: [
+      { triggerId: "manual", targetNodeId: "propagate", targetPortId: "state" },
+    ],
+    requiredPlugins: [],
+  };
+}
+
+test("normalizePluginFamilyName canonicalizes case, separators, and the datasource alias", () => {
+  const { normalizePluginFamilyName } = __testables;
+  assert.equal(normalizePluginFamilyName("propagator"), "PROPAGATOR");
+  assert.equal(normalizePluginFamilyName("PROPAGATOR"), "PROPAGATOR");
+  assert.equal(normalizePluginFamilyName(" Propagator "), "PROPAGATOR");
+  assert.equal(normalizePluginFamilyName("data_source"), "DATA_SOURCE");
+  assert.equal(normalizePluginFamilyName("datasource"), "DATA_SOURCE");
+  assert.equal(normalizePluginFamilyName("data-source"), "DATA_SOURCE");
+  assert.equal(normalizePluginFamilyName(1), "PROPAGATOR");
+  assert.equal(normalizePluginFamilyName(""), null);
+  assert.equal(normalizePluginFamilyName(null), null);
+});
+
+test("a node bound by pluginFamily resolves to the single qualifying dependency", () => {
+  const flow = familyFlow();
+  const dependencies = dependencyMap(sgp4Dependency);
+  const check = checkFlowProgram({ flow, dependencies });
+
+  assert.equal(check.ok, true, JSON.stringify(check.issues));
+  assert.equal(flow.nodes[0].pluginId, "com.spacedatanetwork.sgp4");
+  assert.equal(check.nodes[0].pluginId, "com.spacedatanetwork.sgp4");
+  assert.equal(check.nodes[0].resolvedFromPluginFamily, "PROPAGATOR");
+
+  // No trace of the family declaration reaches the compiled artifact's own
+  // embedded flow record — the resolved node round-trips as an ordinary
+  // exact-pluginId node (zero wire/ABI change).
+  const decoded = decodeFlowProgram(encodeFlowDocumentProgram(flow));
+  assert.equal(decoded.nodes[0].pluginId, "com.spacedatanetwork.sgp4");
+
+  // The other downstream stage that reads flow.nodes[].pluginId directly
+  // (not through check.nodes) also sees the resolved concrete id.
+  const manifest = buildFlowModuleManifest({ flow, check, dependencies });
+  assert.deepEqual(
+    manifest.flowNodes.map((node) => node.pluginId),
+    ["com.spacedatanetwork.sgp4"],
+  );
+});
+
+test("pluginFamily resolution picks the ONE dependency exposing the requested method (heterogeneous vocabulary)", () => {
+  // Only sgp4 exposes catalog_query (ruling C: no shared vocabulary is required
+  // beyond whatever the node's own methodId demands).
+  const flow = familyFlow({ methodId: "catalog_query" });
+  const check = checkFlowProgram({
+    flow,
+    dependencies: dependencyMap(sgp4Dependency, hpopDependency),
+  });
+  assert.equal(check.ok, true, JSON.stringify(check.issues));
+  assert.equal(flow.nodes[0].pluginId, "com.spacedatanetwork.sgp4");
+});
+
+test("pluginFamily resolution is an error, never a guess, when more than one candidate qualifies", () => {
+  const flow = familyFlow(); // propagate_state: both sgp4 and hpop qualify
+  const check = checkFlowProgram({
+    flow,
+    dependencies: dependencyMap(sgp4Dependency, hpopDependency),
+  });
+  assert.equal(check.ok, false);
+  const issue = check.errors.find((entry) => entry.code === "ambiguous-plugin-family");
+  assert.ok(issue, JSON.stringify(check.issues));
+  assert.match(issue.message, /com\.spacedatanetwork\.hpop/);
+  assert.match(issue.message, /com\.spacedatanetwork\.sgp4/);
+  assert.equal(flow.nodes[0].pluginId, undefined, "an ambiguous binding must not silently pick one");
+});
+
+test("pluginFamily resolution fails closed when no dependency in the family exposes the method", () => {
+  const flow = familyFlow({ methodId: "prepare_trajectory_segments" });
+  const check = checkFlowProgram({
+    flow,
+    dependencies: dependencyMap(sgp4Dependency), // sgp4 does not expose it
+  });
+  assert.equal(check.ok, false);
+  assert.ok(check.errors.some((entry) => entry.code === "unresolvable-plugin-family"));
+});
+
+test("pluginFamily resolution rejects an unknown family with no matching candidate", () => {
+  const flow = familyFlow({ pluginFamily: "renderer" });
+  const check = checkFlowProgram({
+    flow,
+    dependencies: dependencyMap(sgp4Dependency),
+  });
+  assert.equal(check.ok, false);
+  assert.ok(check.errors.some((entry) => entry.code === "unresolvable-plugin-family"));
+});
+
+test("a node declaring both pluginId and pluginFamily is a value error (declaration, never inference)", () => {
+  const flow = familyFlow({ pluginId: "com.spacedatanetwork.sgp4" });
+  const check = checkFlowProgram({
+    flow,
+    dependencies: dependencyMap(sgp4Dependency),
+  });
+  assert.equal(check.ok, false);
+  assert.ok(check.errors.some((entry) => entry.code === "ambiguous-plugin-binding"));
+});
+
+test("pluginFamily without a methodId to resolve against is a value error", () => {
+  const flow = familyFlow({ methodId: undefined });
+  const check = checkFlowProgram({
+    flow,
+    dependencies: dependencyMap(sgp4Dependency),
+  });
+  assert.equal(check.ok, false);
+  assert.ok(check.errors.some((entry) => entry.code === "missing-method-id"));
+});
+
+test("exact-pluginId binding is unaffected by the additive pluginFamily path", () => {
+  // Backward compatibility: every pre-existing flow.json shape (no
+  // pluginFamily field anywhere) must behave byte-for-byte as before.
+  const check = checkFlowProgram({
+    flow: makeFlow(),
+    dependencies: dependencyMap(producerDependency, consumerDependency),
+  });
+  assert.equal(check.ok, true, JSON.stringify(check.issues));
+  assert.deepEqual(
+    check.nodes.map((node) => node.resolvedFromPluginFamily),
+    [null, null, null],
   );
 });
 
