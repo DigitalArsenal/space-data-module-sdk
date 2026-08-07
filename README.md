@@ -277,6 +277,19 @@ GPU-accelerated modules should follow the host-owned GPU capability standard in
 header and starter manifest live in
 [`templates/gpu-module`](./templates/gpu-module).
 
+Modules that need to control imagery/terrain providers or read the decoded tile
+bytes those providers already hold use the Provider Access ABI in
+[`docs/provider-access-abi.md`](./docs/provider-access-abi.md); the guest header
+is
+[`templates/provider-access-module/include/space_data_provider_abi.h`](./templates/provider-access-module/include/space_data_provider_abi.h).
+It is one generalized port over two planes — control on the existing
+`space_data_module_host` bridge, data on three dedicated `space_data_provider`
+imports that write straight into guest linear memory (one copy, no re-decode).
+In the browser it is satisfied from live engine provider objects; under
+WasmEdge from a host-side tile store built on the existing `filesystem`/`http`
+capabilities; and where nothing is bound it returns the same error code every
+runtime returns, as a value rather than a trap.
+
 The GPU surface is intentionally host-owned. A portable module advertises the
 optional `gpu_compute` capability with scope `webgpu.v1`, keeps a correct CPU
 fallback in `dist/isomorphic/module.wasm`, and lets the embedding host choose a

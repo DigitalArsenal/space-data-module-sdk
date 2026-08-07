@@ -19,6 +19,11 @@ they use words like "canonical", "required", or "must".
 - Keep binary FlatBuffer ingest guidance aligned with
   `docs/flatsql-streaming-standard.md`.
 - Keep testing claims aligned with `docs/testing-harness.md`.
+- Imagery/terrain provider access is `docs/provider-access-abi.md`. The guest
+  port is exactly three `space_data_provider` imports, all i32; control rides
+  the existing `space_data_module_host` bridge as `provider.*`. Never add a
+  fourth import, never put tile bytes in a hostcall envelope, and never let an
+  adapter exceed the request's declared `maxCost`.
 - If you change user-facing behavior, update the nearest example README as well.
 
 ## Read These First
