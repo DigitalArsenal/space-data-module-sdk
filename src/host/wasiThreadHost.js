@@ -37,6 +37,9 @@ const IS_NODE =
   !!process.release &&
   process.release.name === "node";
 
+// Split so no bundler can constant-fold it back into a literal `node:` import.
+const NODE_BUILTIN_PREFIX = "no" + "de:";
+
 const BROWSER_WORKER_URL = new URL(
   "./wasiThreadBrowserWorker.mjs",
   import.meta.url,
@@ -207,7 +210,15 @@ export async function createWasiThreadSpawn({
     // pthread_create time is fine here — there is no startup-vs-join deadlock.
     const workers = new Set();
     const osThreadIds = new Set();
-    const workerThreads = await import("node:worker_threads");
+    // The specifier is assembled at runtime on purpose. This branch is dead in
+    // a browser, but a LITERAL `import("node:worker_threads")` is still
+    // statically resolved by esbuild/vite/rollup under a browser target, and
+    // the whole bundle fails to build. Keeping it opaque is what lets one host
+    // shim serve both runtimes; the browser branch below is the SAB+Worker one.
+    const nodeWorkerThreadsSpecifier = NODE_BUILTIN_PREFIX + "worker_threads";
+    const workerThreads = await import(
+      /* @vite-ignore */ /* webpackIgnore: true */ nodeWorkerThreadsSpecifier
+    );
     const NodeWorker = workerThreads.Worker;
     const nodeWorkerUrl = new URL("./wasiThreadWorker.mjs", import.meta.url);
 
