@@ -114,7 +114,7 @@ Every compliant module produced here should satisfy all of the following:
 - Use size-prefixed FlatBuffer frames for stream transport.
 - Use host-owned ingest via `src/runtime-host` when the host owns durable
   storage.
-- Use resident-module streaming via `src/testing/moduleFlatbufferStreamPump.js`
+- Use resident-module streaming via `src/host/moduleFlatbufferStreamPump.js`
   when a module owns the state machine or embeds FlatSQL internally.
 - Do not benchmark 1 GiB by constructing one giant invoke envelope. Benchmark
   chunked stream ingest instead.

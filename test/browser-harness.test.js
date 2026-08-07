@@ -11,7 +11,7 @@ import {
 } from "../src/index.js";
 import { createBrowserHost } from "../src/browser.js";
 import { createBrowserWasiShim } from "../src/host/wasiShim.js";
-import { createBrowserModuleHarness } from "../src/testing/browserModuleHarness.js";
+import { createBrowserModuleHarness } from "../src/host/browserModuleHarness.js";
 
 const execFile = promisify(execFileCallback);
 

@@ -18,14 +18,15 @@
  * cross-origin isolated (COOP+COEP). In Node, worker_threads is used.
  */
 
-import { createBrowserHost } from "../host/browserHost.js";
-import { createAsyncHostDispatcher } from "../host/abi.js";
+import { createBrowserHost } from "./browserHost.js";
+import { createAsyncHostDispatcher } from "./abi.js";
 import {
   createSabHostcallBuffer,
   createSabHostcallServer,
   DEFAULT_SAB_HOSTCALL_RESPONSE_BYTES,
-} from "../host/sabHostcallChannel.js";
-import { WASI_THREAD_HOSTCALL_MESSAGE } from "../host/wasiThreadWorkerRuntime.js";
+} from "./sabHostcallChannel.js";
+import { WASI_THREAD_HOSTCALL_MESSAGE } from "./wasiThreadWorkerRuntime.js";
+import { importNodeBuiltin } from "./nodeBuiltinSpecifier.js";
 
 const WORKER_URL = new URL("./workerModuleHarnessWorker.js", import.meta.url);
 
@@ -51,7 +52,10 @@ function isNodeRuntime() {
 
 async function spawnWorker(workerUrl) {
   if (isNodeRuntime()) {
-    const { Worker: NodeWorker } = await import("node:worker_threads");
+    // Specifier assembled at runtime on purpose — see nodeBuiltinSpecifier.js.
+    // A literal here is statically resolved by every browser bundler even
+    // though this branch is dead in a browser.
+    const { Worker: NodeWorker } = await importNodeBuiltin("worker_threads");
     const worker = new NodeWorker(workerUrl);
     return {
       post: (message) => worker.postMessage(message),

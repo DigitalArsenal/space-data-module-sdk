@@ -12,7 +12,7 @@
  *   POST /done        -> {runs:[...]} on completion or {fatal} on runner failure
  */
 
-import { createBrowserModuleHarness } from "./browserModuleHarness.js";
+import { createBrowserModuleHarness } from "../host/browserModuleHarness.js";
 
 const OK = "ok";
 const GUEST_ERROR = "guest-error";

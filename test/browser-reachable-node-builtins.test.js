@@ -1,17 +1,23 @@
 // The SDK's browser-facing export subpaths must not reach a Node builtin.
+// ZERO tolerance: there is no exception list, and there must never be one.
 //
-// A browser bundler resolves imports STATICALLY, including dynamic
-// `import("node:...")` inside a branch that can never run in a browser. One
-// leaked import fails the whole consumer bundle -- which is how a module-sdk
-// pin bump broke `sdn-js`'s browser build: `./runtime-host` reached the
-// manifest barrel (`node:fs`, `node:path`) through a relative import that
-// bypassed the package's `browser` export condition, and `./testing/browser`
-// -- the subpath whose entire purpose is the browser -- reached
-// `node:worker_threads`.
+// A browser bundler resolves imports STATICALLY, including a dynamic
+// `import("node:...")` inside a branch that can never run in a browser. What
+// happens next depends on the consumer's config and BOTH outcomes are fatal:
+// the bundle fails to build, or the specifier is emitted as an external and the
+// BROWSER tries to fetch `node:os` over HTTP. The second one is how every one
+// of OrbPro's 275 gallery demos went dark
+// (`orbpro-engine-bundle-ships-node-builtins`) after a routine pin bump — a
+// total-gallery outage that no unit test and no build step noticed.
 //
-// This walks the real import graph from each browser-facing entry and fails on
-// any Node builtin it can reach. "Works in Node" is not a defence for a
-// subpath a browser consumes.
+// This walks the real import graph from each browser-facing entry, THROUGH
+// package dependencies (resolved under the `browser` condition, as a bundler
+// would), and fails on any Node builtin it can reach. "Works in Node" is not a
+// defence for a subpath a browser consumes.
+//
+// This is the module-level half. test/browser-bundle-node-builtins.test.js is
+// the artifact-level half: it actually bundles each subpath and greps the
+// OUTPUT. Keep both — this defect class escaped module-level checking twice.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -24,7 +30,7 @@ const PACKAGE_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 // Export subpaths a browser bundle legitimately consumes. Adding a browser
 // consumer surface means adding it here; this list is the contract.
-const BROWSER_FACING_SUBPATHS = [
+export const BROWSER_FACING_SUBPATHS = [
   ".", // resolves through the `browser` condition
   "./manifest", // ditto
   "./licensing",
@@ -32,11 +38,14 @@ const BROWSER_FACING_SUBPATHS = [
   "./invoke",
   "./runtime",
   "./transport",
+  "./bundle",
   "./host/browser",
   "./host/timer-driver",
   "./host/browser-edge-shims",
   "./host/wasi-shim",
   "./host/isomorphic",
+  "./host/browser-module",
+  "./host/worker-module",
   "./testing/browser",
   "./testing/module-flatbuffer-stream-pump",
   "./utils/wasm-crypto",
@@ -45,27 +54,32 @@ const BROWSER_FACING_SUBPATHS = [
   "./compat",
 ];
 
-// KNOWN LEAKS, 2026-08-07, filed as `module-sdk-browser-entry-node-builtins`.
-// These PREDATE this guard: `src/browser.js` -- the target of the package's own
-// `browser` export condition -- reaches `src/host/isomorphicLoader.js`, which
-// imports node:fs/promises, node:child_process, node:os, node:path,
-// node:process, node:buffer and node:worker_threads; `./standards` reads its
-// catalog off disk. They are listed, not silently skipped: a browser consumer
-// that bundles any of them still fails, and the list only ever shrinks.
-const KNOWN_LEAKING_SUBPATHS = new Set([".", "./host/isomorphic", "./standards"]);
-
 const BUILTIN_NAMES = new Set([
   ...builtinModules,
   ...builtinModules.map((name) => `node:${name}`),
 ]);
 
+const PACKAGE_JSON = JSON.parse(
+  readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8"),
+);
+
+/** Pick a target out of an exports entry the way a browser bundler would. */
+function pickBrowserTarget(entry) {
+  if (typeof entry === "string") return entry;
+  if (!entry || typeof entry !== "object") return null;
+  for (const condition of ["browser", "import", "module", "default", "require"]) {
+    const value = entry[condition];
+    if (value === undefined) continue;
+    const picked = pickBrowserTarget(value);
+    if (picked) return picked;
+  }
+  return null;
+}
+
 function resolveSubpath(subpath) {
-  const { exports } = JSON.parse(
-    readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8"),
-  );
-  const entry = exports[subpath];
+  const entry = PACKAGE_JSON.exports[subpath];
   assert.ok(entry, `package.json exports has no ${subpath}`);
-  const target = typeof entry === "string" ? entry : (entry.browser ?? entry.default);
+  const target = pickBrowserTarget(entry);
   assert.ok(target, `${subpath} has no browser/default target`);
   return path.join(PACKAGE_ROOT, target);
 }
@@ -93,17 +107,92 @@ function specifiersOf(rawSource) {
   return found;
 }
 
-function resolveRelative(fromFile, specifier) {
-  const base = path.resolve(path.dirname(fromFile), specifier);
-  for (const candidate of [base, `${base}.js`, `${base}.mjs`, path.join(base, "index.js")]) {
+function existingFile(base) {
+  for (const candidate of [base, `${base}.js`, `${base}.mjs`, path.join(base, "index.js"), path.join(base, "index.mjs")]) {
+    if (existsSync(candidate) && !existsSync(path.join(candidate, "."))) return candidate;
+  }
+  for (const candidate of [base, `${base}.js`, `${base}.mjs`, path.join(base, "index.js"), path.join(base, "index.mjs")]) {
     if (existsSync(candidate)) return candidate;
   }
   return null;
 }
 
+function resolveRelative(fromFile, specifier) {
+  return existingFile(path.resolve(path.dirname(fromFile), specifier));
+}
+
+function findPackageDir(fromFile, packageName) {
+  let dir = path.dirname(fromFile);
+  while (true) {
+    const candidate = path.join(dir, "node_modules", packageName);
+    if (existsSync(path.join(candidate, "package.json"))) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+function matchExportsSubpath(exportsField, subpath) {
+  if (exportsField === undefined || exportsField === null) return null;
+  if (typeof exportsField === "string") {
+    return subpath === "." ? exportsField : null;
+  }
+  const keys = Object.keys(exportsField);
+  const isSubpathMap = keys.some((key) => key === "." || key.startsWith("./"));
+  if (!isSubpathMap) {
+    return subpath === "." ? pickBrowserTarget(exportsField) : null;
+  }
+  if (exportsField[subpath] !== undefined) {
+    return pickBrowserTarget(exportsField[subpath]);
+  }
+  for (const key of keys) {
+    if (!key.includes("*")) continue;
+    const [prefix, suffix] = key.split("*");
+    if (!subpath.startsWith(prefix) || !subpath.endsWith(suffix)) continue;
+    const star = subpath.slice(prefix.length, subpath.length - suffix.length);
+    const target = pickBrowserTarget(exportsField[key]);
+    if (target) return target.replace("*", star);
+  }
+  return null;
+}
+
+/**
+ * Resolve a bare specifier the way a browser bundler resolves it: package
+ * `exports` under the `browser` condition first, then the `browser` field, then
+ * `module`/`main`. This is the half the previous guard skipped as "the
+ * bundler's problem" — and skipping it is why a dependency's `node:sqlite`
+ * could ride into a browser bundle unchallenged.
+ */
+function resolveBare(fromFile, specifier) {
+  const scoped = specifier.startsWith("@");
+  const parts = specifier.split("/");
+  const packageName = scoped ? parts.slice(0, 2).join("/") : parts[0];
+  const subpath = `.${specifier.slice(packageName.length)}` === "." ? "." : `.${specifier.slice(packageName.length)}`;
+  const packageDir = findPackageDir(fromFile, packageName);
+  if (!packageDir) return null;
+
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(path.join(packageDir, "package.json"), "utf8"));
+  } catch {
+    return null;
+  }
+
+  const fromExports = matchExportsSubpath(manifest.exports, subpath);
+  if (fromExports) return existingFile(path.join(packageDir, fromExports));
+
+  if (subpath !== ".") return existingFile(path.join(packageDir, subpath));
+
+  const browserField = manifest.browser;
+  if (typeof browserField === "string") {
+    return existingFile(path.join(packageDir, browserField));
+  }
+  const main = manifest.module ?? manifest.main ?? "index.js";
+  return existingFile(path.join(packageDir, main));
+}
+
 test("no browser-facing export subpath can reach a Node builtin", () => {
   const offenders = [];
-  const stillLeaking = new Set();
 
   for (const subpath of BROWSER_FACING_SUBPATHS) {
     const entry = resolveSubpath(subpath);
@@ -125,10 +214,6 @@ test("no browser-facing export subpath can reach a Node builtin", () => {
 
       for (const specifier of specifiersOf(source)) {
         if (BUILTIN_NAMES.has(specifier)) {
-          if (KNOWN_LEAKING_SUBPATHS.has(subpath)) {
-            stillLeaking.add(subpath);
-            continue;
-          }
           const chain = [];
           let cursor = file;
           while (cursor) {
@@ -138,8 +223,9 @@ test("no browser-facing export subpath can reach a Node builtin", () => {
           offenders.push(`${subpath} -> ${specifier}\n    via ${chain.join("\n     -> ")}`);
           continue;
         }
-        if (!specifier.startsWith(".")) continue; // node_modules: bundler's problem
-        const resolved = resolveRelative(file, specifier);
+        const resolved = specifier.startsWith(".")
+          ? resolveRelative(file, specifier)
+          : resolveBare(file, specifier);
         if (!resolved || seen.has(resolved)) continue;
         previous.set(resolved, file);
         queue.push(resolved);
@@ -152,12 +238,48 @@ test("no browser-facing export subpath can reach a Node builtin", () => {
     [],
     `browser-facing subpaths reach Node builtins:\n\n${offenders.join("\n\n")}\n`,
   );
+});
 
-  // The exception list must shrink, never rot: a subpath that stopped leaking
-  // has to leave it, or the guard quietly stops covering that subpath.
+test("no browser-facing subpath resolves into src/testing", () => {
+  // `src/testing/**` is HARNESS surface: it may (and does) spawn WasmEdge,
+  // shell out and open files. The only thing that keeps it out of a browser
+  // bundle is that nothing browser-facing points at it. `./testing/browser` is
+  // the one deliberate exception — it is a pure re-export shim of the runtime
+  // host surfaces, kept for consumers still pointed at the old name.
+  const offenders = [];
+
+  for (const subpath of BROWSER_FACING_SUBPATHS) {
+    const entry = resolveSubpath(subpath);
+    const seen = new Set();
+    const queue = [entry];
+    const testingRoot = path.join(PACKAGE_ROOT, "src", "testing") + path.sep;
+
+    while (queue.length > 0) {
+      const file = queue.shift();
+      if (seen.has(file)) continue;
+      seen.add(file);
+
+      if (file.startsWith(testingRoot) && path.basename(file) !== "browser.js") {
+        offenders.push(`${subpath} -> ${path.relative(PACKAGE_ROOT, file)}`);
+      }
+
+      let source;
+      try {
+        source = readFileSync(file, "utf8");
+      } catch {
+        continue;
+      }
+      for (const specifier of specifiersOf(source)) {
+        if (!specifier.startsWith(".")) continue;
+        const resolved = resolveRelative(file, specifier);
+        if (resolved && !seen.has(resolved)) queue.push(resolved);
+      }
+    }
+  }
+
   assert.deepEqual(
-    [...KNOWN_LEAKING_SUBPATHS].filter((subpath) => !stillLeaking.has(subpath)),
+    offenders,
     [],
-    "a KNOWN_LEAKING_SUBPATHS entry no longer leaks — remove it and let the guard cover it",
+    `browser-facing subpaths reach src/testing harness code:\n  ${offenders.join("\n  ")}\n`,
   );
 });

@@ -146,7 +146,7 @@ The supported browser/WasmEdge entry points are:
 
 - browser entry bundle: [`src/browser.js`](/Users/tj/software/space-data-module-sdk/src/browser.js)
 - isomorphic loader: [`src/host/isomorphicLoader.js`](/Users/tj/software/space-data-module-sdk/src/host/isomorphicLoader.js)
-- browser harness: [`src/testing/browserModuleHarness.js`](/Users/tj/software/space-data-module-sdk/src/testing/browserModuleHarness.js)
+- browser harness: [`src/host/browserModuleHarness.js`](../src/host/browserModuleHarness.js)
 - browser WASI shim: [`src/host/wasiShim.js`](/Users/tj/software/space-data-module-sdk/src/host/wasiShim.js)
 - browser edge shims: [`src/host/browserEdgeShims.js`](/Users/tj/software/space-data-module-sdk/src/host/browserEdgeShims.js)
 - browser host adapter: [`src/host/browserHost.js`](/Users/tj/software/space-data-module-sdk/src/host/browserHost.js)

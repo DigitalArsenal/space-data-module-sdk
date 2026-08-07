@@ -13,7 +13,7 @@ import {
   detectArtifactProfile,
   isSharedArrayBufferLike,
   zeroWasmBytes,
-} from "../src/testing/browserModuleHarness.js";
+} from "../src/host/browserModuleHarness.js";
 import { signModuleArtifact } from "../src/bundle/signing.js";
 
 const ALIGNED_ATM_TYPE_REF = Object.freeze({
@@ -836,7 +836,7 @@ test("browser module harness can disable raw direct invoke for descriptor-only m
 });
 
 test("browser module harness external arena direct invoke bypasses raw byte-frame invoke", () => {
-  const source = readSource("../src/testing/browserModuleHarness.js");
+  const source = readSource("../src/host/browserModuleHarness.js");
   const start = source.indexOf("function invokeDirectExternalArena");
   const stop = source.indexOf("async function invokeCommandRaw", start);
   assert.notEqual(start, -1);

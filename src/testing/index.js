@@ -10,8 +10,8 @@ export {
 export {
   createBrowserModuleHarness,
   detectArtifactProfile,
-} from "./browserModuleHarness.js";
-export { createWorkerModuleHarness } from "./workerModuleHarness.js";
+} from "../host/browserModuleHarness.js";
+export { createWorkerModuleHarness } from "../host/workerModuleHarness.js";
 export {
   buildWasmEdgeSpawnEnv,
   createPluginInvokeProcessClient,
@@ -27,7 +27,7 @@ export {
   createModuleHarness,
   resolveModuleHarnessLaunchPlan,
 } from "./moduleHarness.js";
-export { createModuleFlatBufferStreamPump } from "./moduleFlatbufferStreamPump.js";
+export { createModuleFlatBufferStreamPump } from "../host/moduleFlatbufferStreamPump.js";
 export {
   PARITY_LANES,
   ExitClass as ParityExitClass,

@@ -27,7 +27,7 @@ import {
   validateArtifactWithStandards,
   validateManifestWithStandards,
 } from "../src/index.js";
-import { createBrowserModuleHarness } from "../src/testing/browserModuleHarness.js";
+import { createBrowserModuleHarness } from "../src/host/browserModuleHarness.js";
 
 function wasiThreadsAvailable() {
   try {

@@ -30,7 +30,7 @@ import { fileURLToPath } from "node:url";
 
 import { encodePluginInvokeRequest } from "../invoke/codec.js";
 import { toUint8Array } from "../runtime/bufferLike.js";
-import { toLoadableWasmBytes } from "./browserModuleHarness.js";
+import { toLoadableWasmBytes } from "../bundle/artifactBytes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

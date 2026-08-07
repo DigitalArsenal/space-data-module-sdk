@@ -21,7 +21,7 @@
  * `createHostcallBridge({ dispatch })` (src/host/abi.js) — the existing
  * envelope/error machinery is reused unchanged. `Atomics.wait` is illegal on
  * the main thread, so the guest MUST run in a Worker (see
- * src/testing/workerModuleHarness.js).
+ * src/host/workerModuleHarness.js).
  *
  * Payloads cross the channel as hostcall value envelopes (hostcallWire.js),
  * so binary leaves (Uint8Array) survive without base64/JSON round-trips.

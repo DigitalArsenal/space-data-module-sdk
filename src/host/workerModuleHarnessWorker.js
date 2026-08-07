@@ -10,7 +10,7 @@
  */
 
 import { createBrowserModuleHarness } from "./browserModuleHarness.js";
-import { createSabHostcallClientDispatch } from "../host/sabHostcallChannel.js";
+import { createSabHostcallClientDispatch } from "./sabHostcallChannel.js";
 
 async function resolvePort() {
   if (

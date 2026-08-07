@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { cleanupCompilation, compileModuleFromSource } from "../src/index.js";
-import { createWorkerModuleHarness } from "../src/testing/workerModuleHarness.js";
+import { createWorkerModuleHarness } from "../src/host/workerModuleHarness.js";
 import { decodeHostcallValueEnvelope } from "../src/host/hostcallWire.js";
 
 // WS6.1 — async in-WASM host bridge. The guest makes SYNCHRONOUS

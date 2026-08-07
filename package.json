@@ -1,6 +1,6 @@
 {
   "name": "space-data-module-sdk",
-  "version": "0.8.7",
+  "version": "0.8.8",
   "description": "Module SDK for building, validating, signing, and deploying WebAssembly modules on the Space Data Network.",
   "type": "module",
   "types": "./src/index.d.ts",
@@ -50,14 +50,22 @@
     "./http": "./src/http/index.js",
     "./host/browser-edge-shims": "./src/host/browserEdgeShims.js",
     "./host/wasi-shim": "./src/host/wasiShim.js",
-    "./host/isomorphic": "./src/host/isomorphicLoader.js",
-    "./testing/browser": "./src/testing/browserModuleHarness.js",
+    "./host/isomorphic": {
+      "browser": "./src/host/isomorphicLoaderBrowser.js",
+      "default": "./src/host/isomorphicLoader.js"
+    },
+    "./host/browser-module": "./src/host/browserModuleHarness.js",
+    "./host/worker-module": "./src/host/workerModuleHarness.js",
+    "./testing/browser": "./src/testing/browser.js",
     "./testing/module-flatbuffer-stream-pump": {
       "types": "./src/index.d.ts",
-      "default": "./src/testing/moduleFlatbufferStreamPump.js"
+      "default": "./src/host/moduleFlatbufferStreamPump.js"
     },
     "./testing": "./src/testing/index.js",
-    "./standards": "./src/standards/index.js",
+    "./standards": {
+      "browser": "./src/standards/browser.js",
+      "default": "./src/standards/index.js"
+    },
     "./utils/wasm-crypto": "./src/utils/wasmCrypto.js",
     "./schemas/*": "./schemas/*",
     "./compat": "./src/compat/index.js"

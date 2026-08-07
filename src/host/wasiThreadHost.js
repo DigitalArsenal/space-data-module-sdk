@@ -32,13 +32,12 @@
 //
 // See docs/isomorphic-pthreads.md and docs/browser-wasmedge-isomorphic.md.
 
+import { NODE_BUILTIN_PREFIX } from "./nodeBuiltinSpecifier.js";
+
 const IS_NODE =
   typeof process !== "undefined" &&
   !!process.release &&
   process.release.name === "node";
-
-// Split so no bundler can constant-fold it back into a literal `node:` import.
-const NODE_BUILTIN_PREFIX = "no" + "de:";
 
 const BROWSER_WORKER_URL = new URL(
   "./wasiThreadBrowserWorker.mjs",

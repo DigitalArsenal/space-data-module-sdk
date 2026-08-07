@@ -1,42 +1,38 @@
 /**
- * Isomorphic module loader.
+ * Isomorphic module loader — NODE/WasmEdge leg (the `default` condition).
  *
  * Unified entry point that detects the runtime environment and artifact
  * profile, then loads the module through the appropriate path:
- *   - Browser: createBrowserModuleHarness (WASI shim + optional space_data_module_host)
- *   - Node/WasmEdge: createModuleHarness (subprocess)
+ *   - Browser (jsdom/embedded window under Node): createBrowserModuleHarness
+ *   - Node/WasmEdge: createModuleHarness (subprocess) or the WasmEdge command
+ *     harness below
  *
- * The same compiled .wasm artifact works in both environments.
+ * The same compiled .wasm artifact works in every environment; only HOW it is
+ * launched differs, and that difference is absorbed here — never in a guest.
+ *
+ * A browser resolves `./host/isomorphic` to `isomorphicLoaderBrowser.js`
+ * instead, via the package's `browser` export condition. The two legs share
+ * `isomorphicLoaderCore.js` so the runtime-independent half cannot drift. The
+ * split is what keeps a browser bundle from statically resolving the
+ * node:child_process/os/path/fs imports below
+ * (`module-sdk-browser-entry-node-builtins`).
  */
 
 import {
   createBrowserModuleHarness,
-  detectArtifactProfile,
   toLoadableWasmBytes,
-} from "../testing/browserModuleHarness.js";
-import { createAsyncHostDispatcher } from "./abi.js";
+} from "./browserModuleHarness.js";
 import {
   resolveModuleSignaturePolicy,
   verifyModuleArtifact,
 } from "../bundle/signing.js";
+import { attachHostDispatch, inspectModule } from "./isomorphicLoaderCore.js";
+
+export { inspectModule, attachHostDispatch };
 
 const isBrowser =
   typeof globalThis.window !== "undefined" &&
   typeof globalThis.document !== "undefined";
-
-function attachHostDispatch(harness, host) {
-  if (!host || typeof host !== "object") {
-    return harness;
-  }
-  const dispatchHost = createAsyncHostDispatcher(host);
-  return {
-    ...harness,
-    host,
-    async callHost(operation, params = {}) {
-      return dispatchHost(operation, params);
-    },
-  };
-}
 
 async function createWasmEdgeCommandHarness(options = {}) {
   const [
@@ -268,28 +264,4 @@ export async function loadModule(options = {}) {
     }),
     options.host ?? null,
   );
-}
-
-/**
- * Inspect a WASM module's artifact profile without instantiating it.
- *
- * @param {Uint8Array|ArrayBuffer|WebAssembly.Module} source
- * @returns {Promise<{profile: string, exports: string[], imports: Array}>}
- */
-export async function inspectModule(source) {
-  let wasmModule;
-  if (source instanceof WebAssembly.Module) {
-    wasmModule = source;
-  } else {
-    const bytes =
-      source instanceof ArrayBuffer ? new Uint8Array(source) : source;
-    // Tolerate signed/published artifacts (appended publication records).
-    wasmModule = await WebAssembly.compile(toLoadableWasmBytes(bytes));
-  }
-
-  const profile = detectArtifactProfile(wasmModule);
-  const exports = WebAssembly.Module.exports(wasmModule).map((e) => e.name);
-  const imports = WebAssembly.Module.imports(wasmModule);
-
-  return { profile, exports, imports };
 }

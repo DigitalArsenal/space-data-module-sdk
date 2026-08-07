@@ -11,7 +11,7 @@
 import {
   createBrowserModuleHarness,
   detectArtifactProfile,
-} from "../../src/testing/browserModuleHarness.js";
+} from "../../src/host/browserModuleHarness.js";
 import {
   encodePluginInvokeRequest,
   decodePluginInvokeResponse,

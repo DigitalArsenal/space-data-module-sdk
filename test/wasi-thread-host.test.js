@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createBrowserModuleHarness } from "../src/testing/browserModuleHarness.js";
-import { createWorkerModuleHarness } from "../src/testing/workerModuleHarness.js";
+import { createBrowserModuleHarness } from "../src/host/browserModuleHarness.js";
+import { createWorkerModuleHarness } from "../src/host/workerModuleHarness.js";
 
 const WORKER_HOSTCALL_MODULE_BYTES = new Uint8Array(
   Buffer.from(

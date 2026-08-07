@@ -1,9 +1,17 @@
 /**
- * Browser-side module harness.
+ * Browser module host — the browser leg of the tri-runtime contract.
  *
- * Loads the same standalone WASI .wasm artifact that WasmEdge runs,
- * instantiating it in the browser with the WASI shim + optional space_data_module_host
- * bridge. Matches the createModuleHarness() API surface.
+ * Loads the same standalone WASI .wasm artifact that native WasmEdge and the
+ * Docker WasmEdge container run, instantiating it in the browser with the WASI
+ * shim + optional space_data_module_host bridge. Matches the
+ * createModuleHarness() API surface.
+ *
+ * This is PRODUCTION runtime surface, published as
+ * `space-data-module-sdk/host/browser-module`. It lived under `src/testing/`
+ * until 2026-08-07, which made every browser consumer import a test-harness
+ * subpath to load a module and let the Node harnesses next door reach a browser
+ * bundle (`orbpro-engine-bundle-ships-node-builtins`). Nothing browser-facing
+ * lives under `src/testing/` any more.
  *
  * Supports two invoke paths:
  *   1. "direct" — call plugin_invoke_stream(ptr, len, &outLen) and read
@@ -12,19 +20,19 @@
  *      stdout for the response bytes.
  */
 
-import { createBrowserWasiShim, WasiExitError } from "../host/wasiShim.js";
+import { createBrowserWasiShim, WasiExitError } from "./wasiShim.js";
 import {
   createWasiThreadSpawn,
   isWasiThreadsModule,
-} from "../host/wasiThreadHost.js";
-import { createBrowserHost } from "../host/browserHost.js";
+} from "./wasiThreadHost.js";
+import { createBrowserHost } from "./browserHost.js";
 import { getWasmWallet } from "../utils/wasmCrypto.js";
 import {
   createHostcallBridge,
   createAsyncHostDispatcher,
   createHostSyncDispatcher,
   DEFAULT_HOSTCALL_IMPORT_MODULE,
-} from "../host/abi.js";
+} from "./abi.js";
 import {
   DefaultInvokeExports,
   DefaultManifestExports,
@@ -41,33 +49,12 @@ import {
   resolveModuleSignaturePolicy,
   verifyModuleArtifact,
 } from "../bundle/signing.js";
-import { extractPublicationRecordCollection } from "../transport/records.js";
+// Artifact byte reduction is an ARTIFACT concern shared by all three runtimes,
+// so it lives on `space-data-module-sdk/bundle`. Re-exported here because a
+// caller loading a module in the browser needs it in the same breath.
+import { toLoadableWasmBytes } from "../bundle/artifactBytes.js";
 
-/**
- * Reduce a module artifact to the bytes a wasm engine can compile.
- *
- * Signed/published artifacts carry an appended publication record collection
- * (MBL bundle with the sds.signature entry, PNM/REC trailers). Wasm engines
- * reject those trailing bytes ("unknown section code"), so the canonical
- * module payload must be extracted before compile. ENC-protected payloads
- * cannot be loaded here — decryption is a host concern.
- *
- * @param {Uint8Array} bytes - raw artifact bytes
- * @returns {Uint8Array} compilable wasm bytes
- */
-export function toLoadableWasmBytes(bytes) {
-  const publication = extractPublicationRecordCollection(bytes);
-  if (!publication) {
-    return bytes;
-  }
-  if (publication.enc) {
-    throw new ModuleSignatureError(
-      "encrypted_artifact",
-      "Module artifact payload is ENC-protected; decrypt it before loading.",
-    );
-  }
-  return publication.payloadBytes;
-}
+export { toLoadableWasmBytes };
 
 const STANDALONE_SHARED_MEMORY_ENV_STUBS = Object.freeze({
   _emscripten_init_main_thread_js: () => 0,

@@ -5,7 +5,7 @@ import {
 } from "../bundle/signing.js";
 import { getWasmCustomSections } from "../bundle/wasm.js";
 import { decodePlgManifest } from "../manifest/plgCodec.js";
-import { createBrowserModuleHarness } from "../testing/browserModuleHarness.js";
+import { createBrowserModuleHarness } from "../host/browserModuleHarness.js";
 import { extractPublicationRecordCollection } from "../transport/records.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { bytesToHex } from "../utils/encoding.js";
