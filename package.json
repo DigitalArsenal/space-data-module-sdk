@@ -1,6 +1,6 @@
 {
   "name": "space-data-module-sdk",
-  "version": "0.8.8",
+  "version": "0.8.9",
   "description": "Module SDK for building, validating, signing, and deploying WebAssembly modules on the Space Data Network.",
   "type": "module",
   "types": "./src/index.d.ts",
@@ -55,6 +55,7 @@
       "default": "./src/host/isomorphicLoader.js"
     },
     "./host/browser-module": "./src/host/browserModuleHarness.js",
+    "./host/node-builtin": "./src/host/nodeBuiltinSpecifier.js",
     "./host/worker-module": "./src/host/workerModuleHarness.js",
     "./testing/browser": "./src/testing/browser.js",
     "./testing/module-flatbuffer-stream-pump": {

@@ -45,6 +45,7 @@ export const BROWSER_FACING_SUBPATHS = [
   "./host/wasi-shim",
   "./host/isomorphic",
   "./host/browser-module",
+  "./host/node-builtin",
   "./host/worker-module",
   "./testing/browser",
   "./testing/module-flatbuffer-stream-pump",
