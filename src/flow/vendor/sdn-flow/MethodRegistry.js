@@ -1,10 +1,15 @@
 import { DrainPolicy } from "./constants.js";
+// Import the type-ref helpers from their own module, NOT from the manifest
+// barrel: `manifest/index.js` re-exports the build-time embedded-manifest
+// writers, which pull `node:fs`/`node:path`. A relative import bypasses the
+// package's `browser` export condition, so the barrel would drag Node builtins
+// into every browser bundle that reaches the flow runtime host.
 import {
   clonePayloadTypeRef,
   normalizePayloadWireFormatName,
   payloadTypeRefsMatch,
   selectPreferredPayloadTypeRef,
-} from "../../../manifest/index.js";
+} from "../../../manifest/typeRefs.js";
 import { normalizeFrame, normalizeManifest } from "./normalize.js";
 
 const INTERNAL_ALIGNED_BINARY_EXCEPTION_INTERFACE_KINDS = new Set([
