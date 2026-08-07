@@ -19,8 +19,10 @@ import {
   ProviderKind,
   decodeTileDescriptor,
   encodeTileDescriptor,
+  ProviderStrategy,
   providerLevelForSpacing,
   providerSourceId,
+  providerStrategyName,
 } from "../src/host/providerAccessAbi.js";
 import {
   createProviderAccessBridge,
@@ -847,8 +849,9 @@ test("the seam takes a target spacing and reports which level answered", async (
   // asking for most-detailed everywhere is what makes a solve slow.
   const coarse = await source.readProfile(positions, { spacing: 5000 });
   const fine = await source.readProfile(positions, { spacing: 30 });
-  assert.equal(coarse.strategy, "spacing");
-  assert.equal(fine.strategy, "spacing");
+  // Strategy names match the consumer's existing vocabulary verbatim.
+  assert.equal(coarse.strategy, "grid-matched-level");
+  assert.equal(fine.strategy, "grid-matched-level");
   assert.ok(
     fine.level > coarse.level,
     `finer spacing must pick a deeper level (${fine.level} vs ${coarse.level})`,
@@ -858,7 +861,7 @@ test("the seam takes a target spacing and reports which level answered", async (
   // The level a caller was GIVEN is reported, not the one it guessed at.
   const fixed = await source.readProfile(positions, { level: 7 });
   assert.equal(fixed.level, 7);
-  assert.equal(fixed.strategy, "fixed");
+  assert.equal(fixed.strategy, "fixed-level");
 });
 
 test("browser and host tile store choose the SAME level for the same spacing", () => {
@@ -878,4 +881,88 @@ test("browser and host tile store choose the SAME level for the same spacing", (
     assert.ok(level >= previous, `level must not decrease as spacing tightens`);
     previous = level;
   }
+});
+
+test("raster in: a 262,144-point field goes in as bytes, not as JSON", async () => {
+  const memory = new WebAssembly.Memory({ initial: 200 }); // 12.8 MiB
+  const port = createProviderAccessPort({
+    adapters: [createFixtureTerrainProvider({ maxLevel: 14 })],
+  });
+  const bridge = createProviderAccessBridge({
+    getMemory: () => memory,
+    dispatch: drainable(port),
+    directRead: (p, d) => port.directReadInto(p, d),
+  });
+  const imports = bridge.imports[PROVIDER_IMPORT_MODULE];
+
+  // The RF coverage solve's real shape: a flattened 512x512 raster.
+  const count = 512 * 512;
+  const positionsPtr = 1 << 20;
+  const positions = new Float64Array(memory.buffer, positionsPtr, count * 2);
+  for (let row = 0; row < 512; row += 1) {
+    for (let column = 0; column < 512; column += 1) {
+      const index = (row * 512 + column) * 2;
+      positions[index] = -1.9 + column * 1e-5;
+      positions[index + 1] = 0.65 + row * 1e-5;
+    }
+  }
+
+  const request = JSON.stringify({
+    op: "profile",
+    providerId: "terrain.fixture",
+    positionsPtr,
+    positionsCount: count,
+    spacing: 30,
+  });
+  const requestBytes = new TextEncoder().encode(request);
+  // The entire request stays small no matter how big the field is. That is the
+  // whole point: JSON-encoding 262,144 positions would be megabytes.
+  assert.ok(
+    requestBytes.length < 200,
+    `request must stay tiny, was ${requestBytes.length} bytes`,
+  );
+  new Uint8Array(memory.buffer, 512, requestBytes.length).set(requestBytes);
+
+  const handle = imports.acquire(512, requestBytes.length, 4096);
+  assert.ok(handle > 0, `acquire failed with ${handle}`);
+  const descriptor = decodeTileDescriptor(
+    new Uint8Array(memory.buffer, 4096, PROVIDER_TILE_DESC_BYTES),
+  );
+  assert.equal(descriptor.width, count);
+  assert.equal(descriptor.encoding, ProviderEncoding.HEIGHT_F64);
+  assert.equal(descriptor.hostCopies, 1);
+  // Provenance reaches the guest through the descriptor, not only through JS.
+  assert.equal(descriptor.strategy, ProviderStrategy.GRID_MATCHED_LEVEL);
+  assert.equal(providerStrategyName(descriptor.strategy), "grid-matched-level");
+
+  const heightsPtr = 5 << 20;
+  const written = imports.read(handle, 0, 0, heightsPtr, count * 8);
+  assert.equal(written, count * 8);
+  const heights = new Float64Array(memory.buffer, heightsPtr, count);
+  assert.ok(Number.isFinite(heights[0]));
+  assert.ok(Number.isFinite(heights[count - 1]));
+  assert.equal(imports.release(handle), 0);
+});
+
+test("a bad positions pointer is E_BOUNDS, not a trap and not a silent short read", () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const port = createProviderAccessPort({ adapters: [createFixtureTerrainProvider()] });
+  const bridge = createProviderAccessBridge({
+    getMemory: () => memory,
+    dispatch: drainable(port),
+    directRead: (p, d) => port.directReadInto(p, d),
+  });
+  const requestBytes = new TextEncoder().encode(
+    JSON.stringify({
+      op: "profile",
+      providerId: "terrain.fixture",
+      positionsPtr: 60000,
+      positionsCount: 100000,
+    }),
+  );
+  new Uint8Array(memory.buffer, 128, requestBytes.length).set(requestBytes);
+  assert.equal(
+    bridge.imports[PROVIDER_IMPORT_MODULE].acquire(128, requestBytes.length, 4096),
+    ProviderError.BOUNDS,
+  );
 });

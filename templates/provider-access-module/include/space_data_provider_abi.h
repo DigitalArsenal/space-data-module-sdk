@@ -64,6 +64,16 @@ extern "C" {
 #define SDM_PROVIDER_COST_REFETCH 3u
 #define SDM_PROVIDER_COST_READBACK 4u
 
+/* ---- level-selection provenance ---------------------------------------- *
+ * A consumer that cannot see which level answered cannot tell a solve that
+ * resolved the ridges from one that interpolated them away. Names mirror the
+ * engine consumer's existing vocabulary.
+ */
+#define SDM_PROVIDER_STRATEGY_DEFAULT 0u
+#define SDM_PROVIDER_STRATEGY_GRID_MATCHED_LEVEL 1u
+#define SDM_PROVIDER_STRATEGY_MOST_DETAILED 2u
+#define SDM_PROVIDER_STRATEGY_FIXED_LEVEL 3u
+
 /* ---- error codes ------------------------------------------------------- *
  * Negative results from acquire/read/release. Identical value, identical
  * meaning and identical trap class (none — these are VALUES) in every runtime.
@@ -130,7 +140,8 @@ typedef struct sdm_provider_tile_desc {
   uint32_t host_copies;     /* 104 host->guest copies per whole-plane read */
   uint32_t source_id;       /* 108 FNV-1a 32 of the provider id */
   uint32_t cost_class;      /* 112 what this acquire actually cost */
-  uint32_t reserved[3];     /* 116 */
+  uint32_t strategy;        /* 116 how the level was chosen */
+  uint32_t reserved[2];     /* 120 */
 } sdm_provider_tile_desc_t;
 
 _Static_assert(sizeof(sdm_provider_tile_desc_t) == SDM_PROVIDER_TILE_DESC_BYTES,
@@ -147,10 +158,20 @@ _Static_assert(sizeof(sdm_provider_tile_desc_t) == SDM_PROVIDER_TILE_DESC_BYTES,
  *   {"op":"tile","providerId":"...","level":9,"x":1,"y":2}
  *   {"op":"profile","providerId":"...","start":[lon,lat],"end":[lon,lat],
  *    "samples":256,"level":"mostDetailed"}
+ *   {"op":"profile","providerId":"...","positionsPtr":P,"positionsCount":N}
  *   {"op":"region","providerId":"...","rectangle":[w,s,e,n],
  *    "width":256,"height":256,"level":9}
  *
- * plus optional "maxCost" (default 1) and "plane".
+ * plus optional "maxCost" (default 1), "plane", and "spacing" (the target
+ * sample spacing in METRES — preferred over "level": you know your own march
+ * stride, you do not know a provider's level scheme).
+ *
+ * RASTER IN: a coverage field is commonly 512x512 = 262,144 positions.
+ * Encoding those as JSON would be a multi-megabyte request string parsed on
+ * every call — a worse cost than the read it is asking for. Pass
+ * "positionsPtr"/"positionsCount" instead and the host reads interleaved f64
+ * lon/lat pairs straight out of guest memory with ONE copy, symmetric with the
+ * way results come back.
  *
  * Returns a handle > 0, or a negative SDM_PROVIDER_E_* code. `desc` is left
  * untouched on failure. The call blocks until the tile is resident.

@@ -244,6 +244,7 @@ export function createProviderAccessPort(options = {}) {
       hostCopies: 1,
       sourceId: providerSourceId(adapter.id),
       costClass,
+      strategy: info.strategy ?? 0,
     };
 
     const handle = nextHandle++;
@@ -589,6 +590,27 @@ export function createProviderAccessBridge(options = {}) {
       const request = JSON.parse(
         textDecoder.decode(guestView(getMemory, reqPtr, reqLen)),
       );
+      // RASTER IN. A coverage field is 512x512 = 262,144 positions; encoding
+      // those as JSON would be a multi-megabyte request string parsed per
+      // call, which is a worse cost than the tile read it is asking for. So
+      // positions may instead be a pointer to interleaved f64 lon/lat pairs
+      // already in guest memory, read with ONE copy — symmetric with the way
+      // the results come back.
+      if (Number.isInteger(request.positionsPtr)) {
+        const count = request.positionsCount | 0;
+        if (count < 0) {
+          throw new ProviderAccessError(
+            ProviderError.INVALID_REQUEST,
+            "positionsCount must be a non-negative integer.",
+          );
+        }
+        const bytes = guestView(getMemory, request.positionsPtr, count * 16);
+        const pairs = new Float64Array(count * 2);
+        new Uint8Array(pairs.buffer).set(bytes);
+        request.positionsBuffer = pairs;
+        delete request.positionsPtr;
+        delete request.positionsCount;
+      }
       const result = dispatch("provider.acquire", request);
       const descriptor =
         result?.descriptor instanceof Uint8Array

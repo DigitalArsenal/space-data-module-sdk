@@ -26,6 +26,7 @@ import {
   ProviderEncoding,
   ProviderError,
   ProviderFlags,
+  normalizeRequestPositions,
   resolveRequestLevel,
 } from "./providerAccessAbi.js";
 
@@ -71,7 +72,7 @@ export function createTileStoreTerrainProvider(options = {}) {
       minLevel: options.minLevel ?? 0,
       defaultLevel,
       mostDetailedLevel: options.mostDetailedLevel ?? maxLevel,
-    }).level;
+    });
   }
 
   function loadTile(level, x, y) {
@@ -125,7 +126,7 @@ export function createTileStoreTerrainProvider(options = {}) {
     },
 
     acquireTile(request) {
-      const level = resolveLevel(request);
+      const { level, strategyCode } = resolveLevel(request);
       const x = request.x | 0;
       const y = request.y | 0;
       return thenish(loadTile(level, x, y), (tile) => {
@@ -158,7 +159,7 @@ export function createTileStoreTerrainProvider(options = {}) {
     },
 
     async acquireProfile(request) {
-      const level = resolveLevel(request);
+      const { level, strategyCode } = resolveLevel(request);
       const positions = interpolate(request);
       const heights = new Float64Array(positions.length);
       const cache = new Map();
@@ -207,12 +208,13 @@ export function createTileStoreTerrainProvider(options = {}) {
           south: Math.min(first[1], last[1]),
           north: Math.max(first[1], last[1]),
           costClass,
+          strategy: strategyCode,
         },
       };
     },
 
     async acquireRegion(request) {
-      const level = resolveLevel(request);
+      const { level, strategyCode } = resolveLevel(request);
       const [west, south, east, north] = request.rectangle ?? [0, 0, 0, 0];
       const width = Math.max(1, request.width | 0);
       const height = Math.max(1, request.height | 0);
@@ -264,6 +266,7 @@ export function createTileStoreTerrainProvider(options = {}) {
           east,
           north,
           costClass,
+          strategy: strategyCode,
         },
       };
     },
@@ -348,9 +351,8 @@ function toTileSample(lon, lat, level, tileWidth, tileHeight) {
 }
 
 function interpolate(request) {
-  if (Array.isArray(request.positions)) {
-    return request.positions.map(([lon, lat]) => [Number(lon), Number(lat)]);
-  }
+  const explicit = normalizeRequestPositions(request);
+  if (explicit) return explicit;
   const [lon0, lat0] = request.start ?? [0, 0];
   const [lon1, lat1] = request.end ?? [0, 0];
   const samples = Math.max(2, request.samples | 0 || 2);

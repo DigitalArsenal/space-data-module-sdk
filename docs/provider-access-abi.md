@@ -161,7 +161,8 @@ guest may read them with aligned loads on every target.
 | 104    | u32   | `hostCopies`      | host→guest copies this acquire will cost per whole-plane read |
 | 108    | u32   | `sourceId`        | FNV-1a 32 of the provider id — stable, comparable across runtimes |
 | 112    | u32   | `costClass`       | what this acquire actually cost — see [Cost classes](#cost-classes) |
-| 116    | u32[3]| `reserved`        | zero |
+| 116    | u32   | `strategy`        | how the level was chosen: `0` default, `1` grid-matched-level, `2` most-detailed, `3` fixed-level |
+| 120    | u32[2]| `reserved`        | zero |
 
 `encoding`:
 
@@ -272,6 +273,23 @@ or with explicit positions:
 {"op":"profile","providerId":"terrain.fixture",
  "positions":[[-1.9,0.65],[-1.899,0.6501]]}
 ```
+
+**Raster in.** A coverage field is commonly 512x512 = **262,144 positions**.
+Encoding those as JSON would be a multi-megabyte request string, parsed on
+every call — a worse cost than the read it is asking for, and it would make the
+control plane carry bulk data, which this ABI exists to prevent. So positions
+may instead be a pointer:
+
+```json
+{"op":"profile","providerId":"terrain.fixture",
+ "positionsPtr":1048576,"positionsCount":262144,"spacing":30}
+```
+
+The host reads interleaved f64 lon/lat pairs straight out of guest memory with
+ONE copy, symmetric with the way results come back. The request string stays
+under 200 bytes no matter how large the field is. A pointer or count outside
+linear memory is `SDM_PROVIDER_E_BOUNDS` — a value, never a trap and never a
+silent short read.
 
 **`spacing` beats `level`.** Any shape may carry `"spacing": <metres>` — the
 sample stride the caller intends to march at — and the port picks the coarsest

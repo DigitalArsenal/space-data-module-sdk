@@ -19,6 +19,7 @@ import {
   ProviderCost,
   ProviderEncoding,
   ProviderKind,
+  normalizeRequestPositions,
   resolveRequestLevel,
 } from "./providerAccessAbi.js";
 
@@ -89,7 +90,7 @@ function resolveLevelInfo(request, options) {
 }
 
 function resolveLevel(request, fallback, options = {}) {
-  return resolveLevelInfo(request, { defaultLevel: fallback, ...options }).level;
+  return resolveLevelInfo(request, { defaultLevel: fallback, ...options });
 }
 
 /**
@@ -99,9 +100,8 @@ function resolveLevel(request, fallback, options = {}) {
  * not geodesy.
  */
 function interpolatePositions(request) {
-  if (Array.isArray(request.positions)) {
-    return request.positions.map(([lon, lat]) => [Number(lon), Number(lat)]);
-  }
+  const explicit = normalizeRequestPositions(request);
+  if (explicit) return explicit;
   const [lon0, lat0] = request.start ?? [0, 0];
   const [lon1, lat1] = request.end ?? [0, 0];
   const samples = Math.max(2, Math.min(request.samples | 0 || 2, 1 << 20));
@@ -176,7 +176,7 @@ export function createFixtureTerrainProvider(options = {}) {
     },
 
     acquireTile(request) {
-      const level = resolveLevel(request, defaultLevel);
+      const { level, strategyCode } = resolveLevel(request, defaultLevel);
       const x = request.x | 0;
       const y = request.y | 0;
       if (isVoid(level, x, y)) {
@@ -207,13 +207,14 @@ export function createFixtureTerrainProvider(options = {}) {
           minValue: min,
           maxValue: max,
           costClass: ProviderCost.RESIDENT,
+          strategy: strategyCode,
           ...tileRectangle(level, x, y),
         },
       };
     },
 
     acquireProfile(request) {
-      const level = resolveLevel(request, defaultLevel, {
+      const { level, strategyCode } = resolveLevel(request, defaultLevel, {
         tileWidth,
         maxLevel,
         mostDetailedLevel: maxLevel,
@@ -260,12 +261,13 @@ export function createFixtureTerrainProvider(options = {}) {
           south: Math.min(first[1], last[1]),
           north: Math.max(first[1], last[1]),
           costClass: ProviderCost.RESIDENT,
+          strategy: strategyCode,
         },
       };
     },
 
     acquireRegion(request) {
-      const level = resolveLevel(request, defaultLevel, {
+      const { level, strategyCode } = resolveLevel(request, defaultLevel, {
         tileWidth,
         maxLevel,
         mostDetailedLevel: maxLevel,
@@ -307,6 +309,7 @@ export function createFixtureTerrainProvider(options = {}) {
           east,
           north,
           costClass: ProviderCost.RESIDENT,
+          strategy: strategyCode,
         },
       };
     },
@@ -368,7 +371,7 @@ export function createFixtureImageryProvider(options = {}) {
     },
 
     acquireTile(request) {
-      const level = resolveLevel(request, defaultLevel);
+      const { level, strategyCode } = resolveLevel(request, defaultLevel);
       const x = request.x | 0;
       const y = request.y | 0;
       return {
@@ -381,13 +384,14 @@ export function createFixtureImageryProvider(options = {}) {
           tileX: x,
           tileY: y,
           costClass: ProviderCost.RESIDENT,
+          strategy: strategyCode,
           ...tileRectangle(level, x, y),
         },
       };
     },
 
     acquireRegion(request) {
-      const level = resolveLevel(request, defaultLevel);
+      const { level, strategyCode } = resolveLevel(request, defaultLevel);
       const [west, south, east, north] = request.rectangle ?? [0, 0, 0, 0];
       const width = Math.max(1, request.width | 0);
       const height = Math.max(1, request.height | 0);
@@ -423,6 +427,7 @@ export function createFixtureImageryProvider(options = {}) {
           east,
           north,
           costClass: ProviderCost.RESIDENT,
+          strategy: strategyCode,
         },
       };
     },

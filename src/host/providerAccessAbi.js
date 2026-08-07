@@ -64,6 +64,29 @@ export const ProviderCost = Object.freeze({
 
 export const DEFAULT_MAX_COST = ProviderCost.DEQUANTIZE;
 
+/**
+ * How the level was chosen. Carried in the DESCRIPTOR, not just in a JS
+ * return value, because the consumers that most need provenance are wasm
+ * modules. Names mirror the consumer's existing vocabulary verbatim.
+ */
+export const ProviderStrategy = Object.freeze({
+  DEFAULT: 0,
+  GRID_MATCHED_LEVEL: 1,
+  MOST_DETAILED: 2,
+  FIXED_LEVEL: 3,
+});
+
+const STRATEGY_NAMES = Object.freeze({
+  [ProviderStrategy.DEFAULT]: "default",
+  [ProviderStrategy.GRID_MATCHED_LEVEL]: "grid-matched-level",
+  [ProviderStrategy.MOST_DETAILED]: "most-detailed",
+  [ProviderStrategy.FIXED_LEVEL]: "fixed-level",
+});
+
+export function providerStrategyName(strategy) {
+  return STRATEGY_NAMES[strategy] ?? "default";
+}
+
 export const ProviderError = Object.freeze({
   INVALID_REQUEST: -1,
   NO_CAPABILITY: -2,
@@ -171,21 +194,61 @@ export function resolveRequestLevel(request, options = {}) {
   if (spacing !== undefined && spacing !== null) {
     return {
       level: providerLevelForSpacing(spacing, options),
-      strategy: "spacing",
+      // Strategy names match the consumer's existing vocabulary verbatim
+      // (RfTerrainAnalysis surfaces them in coverage metadata and in the demo
+      // legend). A port that renamed them would force every consumer to keep a
+      // translation table.
+      strategy: "grid-matched-level",
+      strategyCode: ProviderStrategy.GRID_MATCHED_LEVEL,
     };
   }
   const level = request?.level;
   if (level === "mostDetailed") {
-    return { level: options.mostDetailedLevel ?? options.maxLevel ?? fallback, strategy: "mostDetailed" };
+    return {
+      level: options.mostDetailedLevel ?? options.maxLevel ?? fallback,
+      strategy: "most-detailed",
+      strategyCode: ProviderStrategy.MOST_DETAILED,
+    };
   }
   if (level === undefined || level === null) {
-    return { level: fallback, strategy: "default" };
+    return { level: fallback, strategy: "default", strategyCode: ProviderStrategy.DEFAULT };
   }
   const numeric = Number(level);
   if (!Number.isInteger(numeric) || numeric < 0) {
-    return { level: fallback, strategy: "default" };
+    return { level: fallback, strategy: "default", strategyCode: ProviderStrategy.DEFAULT };
   }
-  return { level: numeric, strategy: "fixed" };
+  return {
+    level: numeric,
+    strategy: "fixed-level",
+    strategyCode: ProviderStrategy.FIXED_LEVEL,
+  };
+}
+
+/**
+ * Normalize a request's positions into [lon, lat] pairs.
+ *
+ * Accepts the JSON `positions` array OR the binary `positionsBuffer`
+ * (interleaved f64 lon/lat) that the guest bridge materializes from a pointer.
+ * Shared by every adapter so a raster field is read identically everywhere.
+ */
+export function normalizeRequestPositions(request) {
+  const buffer = request?.positionsBuffer;
+  if (buffer && ArrayBuffer.isView(buffer)) {
+    const count = Math.floor(buffer.length / 2);
+    const positions = new Array(count);
+    for (let index = 0; index < count; index += 1) {
+      positions[index] = [buffer[index * 2], buffer[index * 2 + 1]];
+    }
+    return positions;
+  }
+  if (Array.isArray(request?.positions)) {
+    return request.positions.map((position) =>
+      Array.isArray(position)
+        ? [Number(position[0]), Number(position[1])]
+        : [Number(position.longitude), Number(position.latitude)],
+    );
+  }
+  return null;
 }
 
 /** FNV-1a 32. Stable provider-id hash, identical in every runtime. */
@@ -223,6 +286,7 @@ const DESC_OFFSETS = Object.freeze({
   hostCopies: 104,
   sourceId: 108,
   costClass: 112,
+  strategy: 116,
 });
 
 export const PROVIDER_LEVEL_NONE = 0xffffffff;
@@ -260,6 +324,7 @@ export function encodeTileDescriptor(desc) {
   u32(DESC_OFFSETS.hostCopies, desc.hostCopies ?? 1);
   u32(DESC_OFFSETS.sourceId, desc.sourceId ?? 0);
   u32(DESC_OFFSETS.costClass, desc.costClass ?? ProviderCost.RESIDENT);
+  u32(DESC_OFFSETS.strategy, desc.strategy ?? ProviderStrategy.DEFAULT);
   return bytes;
 }
 
@@ -307,6 +372,7 @@ export function decodeTileDescriptor(bytes) {
     hostCopies: u32(DESC_OFFSETS.hostCopies),
     sourceId: u32(DESC_OFFSETS.sourceId),
     costClass: u32(DESC_OFFSETS.costClass),
+    strategy: u32(DESC_OFFSETS.strategy),
   };
 }
 

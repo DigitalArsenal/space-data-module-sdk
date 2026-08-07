@@ -27,6 +27,7 @@ import {
   ProviderEncoding,
   ProviderError,
   ProviderFlags,
+  normalizeRequestPositions,
 } from "./providerAccessAbi.js";
 
 function engineTerrainProvider(scene) {
@@ -143,9 +144,7 @@ function createSampledTerrainAdapter(options) {
     },
 
     async acquireProfile(request) {
-      const positions = Array.isArray(request.positions)
-        ? request.positions
-        : interpolate(request);
+      const positions = normalizeRequestPositions(request) ?? interpolate(request);
       const level = Number.isInteger(request.level) ? request.level : undefined;
       const { heights, min, max, partial } = pack(
         await sampleHeights(positions, level),

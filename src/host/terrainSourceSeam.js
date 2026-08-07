@@ -24,6 +24,7 @@ import {
   ProviderFlags,
   decodeTileDescriptor,
   isProviderNoData,
+  providerStrategyName,
 } from "./providerAccessAbi.js";
 
 const PROVIDER_FLAG_PARTIAL = ProviderFlags.PARTIAL;
@@ -117,6 +118,14 @@ export function createTerrainSourceFromPort(port, options = {}) {
     }
   }
 
+  function strategyOf(callOptions = {}) {
+    const spacing = callOptions.spacing ?? options.spacing;
+    if (spacing !== undefined && spacing !== null) return "grid-matched-level";
+    return (callOptions.level ?? level) === "mostDetailed"
+      ? "most-detailed"
+      : "fixed-level";
+  }
+
   function toHeights(bytes) {
     return new Float64Array(
       bytes.buffer,
@@ -155,13 +164,13 @@ export function createTerrainSourceFromPort(port, options = {}) {
             callOptions.out)
           : heights.slice(),
         level: decoded.level,
-        strategy:
-          (callOptions.spacing ?? options.spacing) !== undefined &&
-          (callOptions.spacing ?? options.spacing) !== null
-            ? "spacing"
-            : (callOptions.level ?? level) === "mostDetailed"
-              ? "mostDetailed"
-              : "fixed",
+        // Provenance comes from the DESCRIPTOR the adapter filled, so it
+        // reports what actually happened rather than what was asked for. The
+        // request-shaped guess is only a fallback for an adapter that has not
+        // been taught to report yet.
+        strategy: decoded.strategy
+          ? providerStrategyName(decoded.strategy)
+          : strategyOf(callOptions),
         costClass: decoded.costClass,
         partial: Boolean(decoded.flags & PROVIDER_FLAG_PARTIAL),
         interpolated: Boolean(decoded.flags & PROVIDER_FLAG_INTERPOLATED),
