@@ -125,6 +125,69 @@ export function encodingLayout(encoding) {
   return layout;
 }
 
+/**
+ * Level selection from a TARGET SAMPLE SPACING, in metres.
+ *
+ * Callers know the stride they intend to march at; they do not know a
+ * provider's level scheme. Asking for "most detailed" everywhere is what makes
+ * a solve slow, and asking for coarser than the march stride is what makes it
+ * wrong — a coverage solve sampling at its output raster's spacing instead of
+ * its profile's mis-reported a 400 m ridge by 27 dB. So the caller states
+ * spacing and the port picks the coarsest level that satisfies it.
+ *
+ * Defined HERE, once, and shared by every adapter: if the browser and the host
+ * tile store chose levels by their own arithmetic they would sample different
+ * ground and byte parity would be lost for a reason no one could see.
+ */
+export const PROVIDER_EARTH_CIRCUMFERENCE_METERS = 40075016.6855785;
+
+export function providerLevelForSpacing(spacingMeters, options = {}) {
+  const tileWidth = Math.max(2, options.tileWidth ?? 65);
+  const maxLevel = options.maxLevel ?? 20;
+  const minLevel = options.minLevel ?? 0;
+  const spacing = Number(spacingMeters);
+  if (!Number.isFinite(spacing) || spacing <= 0) return maxLevel;
+
+  for (let level = minLevel; level <= maxLevel; level += 1) {
+    // Level L has 2^(L+1) tiles around the equator, each covering
+    // (tileWidth - 1) sample intervals.
+    const tilesAcross = Math.pow(2, level + 1);
+    const levelSpacing =
+      PROVIDER_EARTH_CIRCUMFERENCE_METERS / (tilesAcross * (tileWidth - 1));
+    if (levelSpacing <= spacing) return level;
+  }
+  return maxLevel;
+}
+
+/**
+ * Resolve a request's level, and report HOW it was resolved. A consumer that
+ * cannot see which level answered cannot tell a solve that resolved the ridges
+ * from one that interpolated them away, so provenance is returned, never
+ * inferred.
+ */
+export function resolveRequestLevel(request, options = {}) {
+  const fallback = options.defaultLevel ?? options.maxLevel ?? 0;
+  const spacing = request?.spacing ?? request?.targetSpacingMeters;
+  if (spacing !== undefined && spacing !== null) {
+    return {
+      level: providerLevelForSpacing(spacing, options),
+      strategy: "spacing",
+    };
+  }
+  const level = request?.level;
+  if (level === "mostDetailed") {
+    return { level: options.mostDetailedLevel ?? options.maxLevel ?? fallback, strategy: "mostDetailed" };
+  }
+  if (level === undefined || level === null) {
+    return { level: fallback, strategy: "default" };
+  }
+  const numeric = Number(level);
+  if (!Number.isInteger(numeric) || numeric < 0) {
+    return { level: fallback, strategy: "default" };
+  }
+  return { level: numeric, strategy: "fixed" };
+}
+
 /** FNV-1a 32. Stable provider-id hash, identical in every runtime. */
 export function providerSourceId(id) {
   let hash = 0x811c9dc5;

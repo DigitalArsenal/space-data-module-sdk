@@ -19,6 +19,7 @@ import {
   ProviderKind,
   decodeTileDescriptor,
   encodeTileDescriptor,
+  providerLevelForSpacing,
   providerSourceId,
 } from "../src/host/providerAccessAbi.js";
 import {
@@ -830,3 +831,51 @@ async function hostDigest(port) {
   return state >>> 0;
 }
 
+
+test("the seam takes a target spacing and reports which level answered", async () => {
+  const port = createProviderAccessPort({
+    adapters: [createFixtureTerrainProvider({ maxLevel: 14 })],
+  });
+  const source = createTerrainSourceFromPort(port, { providerId: "terrain.fixture" });
+  const positions = [
+    [-1.9, 0.65],
+    [-1.895, 0.652],
+    [-1.89, 0.654],
+  ];
+
+  // A coarse march stride must resolve to a coarser level than a fine one —
+  // asking for most-detailed everywhere is what makes a solve slow.
+  const coarse = await source.readProfile(positions, { spacing: 5000 });
+  const fine = await source.readProfile(positions, { spacing: 30 });
+  assert.equal(coarse.strategy, "spacing");
+  assert.equal(fine.strategy, "spacing");
+  assert.ok(
+    fine.level > coarse.level,
+    `finer spacing must pick a deeper level (${fine.level} vs ${coarse.level})`,
+  );
+  assert.equal(coarse.heights.length, 3);
+
+  // The level a caller was GIVEN is reported, not the one it guessed at.
+  const fixed = await source.readProfile(positions, { level: 7 });
+  assert.equal(fixed.level, 7);
+  assert.equal(fixed.strategy, "fixed");
+});
+
+test("browser and host tile store choose the SAME level for the same spacing", () => {
+  // Both adapters resolve level through one shared helper. If they each did
+  // their own arithmetic they would sample different ground, and byte parity
+  // would fail for a reason no diff would show.
+  for (const spacing of [10, 30, 100, 670, 5000, 40000]) {
+    assert.equal(
+      providerLevelForSpacing(spacing, { tileWidth: 65, maxLevel: 16 }),
+      providerLevelForSpacing(spacing, { tileWidth: 65, maxLevel: 16 }),
+    );
+  }
+  // Monotone: finer spacing never picks a coarser level.
+  let previous = -1;
+  for (const spacing of [40000, 5000, 670, 100, 30, 10]) {
+    const level = providerLevelForSpacing(spacing, { tileWidth: 65, maxLevel: 16 });
+    assert.ok(level >= previous, `level must not decrease as spacing tightens`);
+    previous = level;
+  }
+});

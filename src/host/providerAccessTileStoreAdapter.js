@@ -26,6 +26,7 @@ import {
   ProviderEncoding,
   ProviderError,
   ProviderFlags,
+  resolveRequestLevel,
 } from "./providerAccessAbi.js";
 
 const TWO_PI = 6.283185307179586;
@@ -59,13 +60,18 @@ export function createTileStoreTerrainProvider(options = {}) {
   // tiles costs RESIDENT. The store declares it; the adapter never guesses.
   const costClass = options.costClass ?? ProviderCost.RESIDENT;
 
+  // Shared with every other adapter, so a spacing request resolves to the SAME
+  // level in the browser and on the host. Two adapters doing their own level
+  // arithmetic would sample different ground and lose byte parity for a reason
+  // no diff would show.
   function resolveLevel(request) {
-    const level = request?.level;
-    if (level === "mostDetailed" || level === undefined || level === null) {
-      return options.mostDetailedLevel ?? maxLevel;
-    }
-    const numeric = Number(level);
-    return Number.isInteger(numeric) && numeric >= 0 ? numeric : defaultLevel;
+    return resolveRequestLevel(request, {
+      tileWidth,
+      maxLevel,
+      minLevel: options.minLevel ?? 0,
+      defaultLevel,
+      mostDetailedLevel: options.mostDetailedLevel ?? maxLevel,
+    }).level;
   }
 
   function loadTile(level, x, y) {

@@ -21,12 +21,21 @@
 import {
   PROVIDER_NO_DATA_F64,
   ProviderCost,
+  ProviderFlags,
+  decodeTileDescriptor,
   isProviderNoData,
 } from "./providerAccessAbi.js";
 
+const PROVIDER_FLAG_PARTIAL = ProviderFlags.PARTIAL;
+const PROVIDER_FLAG_INTERPOLATED = ProviderFlags.INTERPOLATED;
+
 export const TERRAIN_SOURCE_NO_DATA = PROVIDER_NO_DATA_F64;
 
-const REQUIRED_METHODS = Object.freeze(["readHeights", "sampleCompat"]);
+const REQUIRED_METHODS = Object.freeze([
+  "readHeights",
+  "readProfile",
+  "sampleCompat",
+]);
 const REQUIRED_FIELDS = Object.freeze(["id", "costClass"]);
 
 /**
@@ -76,27 +85,44 @@ export function createTerrainSourceFromPort(port, options = {}) {
     : ProviderCost.DEQUANTIZE;
   const level = options.level ?? "mostDetailed";
 
-  async function acquireProfile(positions) {
+  async function acquireProfile(positions, callOptions = {}) {
     const request = {
       op: "profile",
       positions: positions.map((position) => toRadianPair(position)),
-      level,
-      maxCost,
+      maxCost: callOptions.maxCost ?? maxCost,
     };
+    // Spacing wins over level when supplied: a consumer knows the stride it
+    // intends to march at, not a provider's level scheme.
+    const spacing = callOptions.spacing ?? options.spacing;
+    if (spacing !== undefined && spacing !== null) {
+      request.spacing = spacing;
+    } else {
+      request.level = callOptions.level ?? level;
+    }
     if (providerId) request.providerId = providerId;
     else request.kind = "terrain";
+
     const { handle, descriptor } = await port.invoke("provider.acquire", request);
     try {
+      const decoded = decodeTileDescriptor(descriptor);
       const { bytes } = await port.invoke("provider.readRaw", {
         handle,
         plane: 0,
         srcOffset: 0,
         length: positions.length * 8,
       });
-      return { bytes, descriptor };
+      return { bytes, decoded };
     } finally {
       await port.invoke("provider.release", { handle });
     }
+  }
+
+  function toHeights(bytes) {
+    return new Float64Array(
+      bytes.buffer,
+      bytes.byteOffset,
+      Math.floor(bytes.byteLength / 8),
+    );
   }
 
   return {
@@ -104,16 +130,42 @@ export function createTerrainSourceFromPort(port, options = {}) {
     costClass: maxCost,
 
     /** Bulk: contiguous metres. `out` is filled and returned when supplied. */
-    async readHeights(positions, out) {
-      const { bytes } = await acquireProfile(positions);
-      const heights = new Float64Array(
-        bytes.buffer,
-        bytes.byteOffset,
-        Math.floor(bytes.byteLength / 8),
-      );
+    async readHeights(positions, out, callOptions = {}) {
+      const { bytes } = await acquireProfile(positions, callOptions);
+      const heights = toHeights(bytes);
       if (!out) return heights.slice();
       out.set(heights.subarray(0, out.length));
       return out;
+    },
+
+    /**
+     * Heights PLUS provenance.
+     *
+     * A consumer that cannot see which level answered cannot tell a solve that
+     * resolved the ridges from one that interpolated them away, so the level
+     * actually used and how it was chosen come back with the data rather than
+     * being inferred from the request.
+     */
+    async readProfile(positions, callOptions = {}) {
+      const { bytes, decoded } = await acquireProfile(positions, callOptions);
+      const heights = toHeights(bytes);
+      return {
+        heights: callOptions.out
+          ? (callOptions.out.set(heights.subarray(0, callOptions.out.length)),
+            callOptions.out)
+          : heights.slice(),
+        level: decoded.level,
+        strategy:
+          (callOptions.spacing ?? options.spacing) !== undefined &&
+          (callOptions.spacing ?? options.spacing) !== null
+            ? "spacing"
+            : (callOptions.level ?? level) === "mostDetailed"
+              ? "mostDetailed"
+              : "fixed",
+        costClass: decoded.costClass,
+        partial: Boolean(decoded.flags & PROVIDER_FLAG_PARTIAL),
+        interpolated: Boolean(decoded.flags & PROVIDER_FLAG_INTERPOLATED),
+      };
     },
 
     /**

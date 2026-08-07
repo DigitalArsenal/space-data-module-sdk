@@ -273,6 +273,21 @@ or with explicit positions:
  "positions":[[-1.9,0.65],[-1.899,0.6501]]}
 ```
 
+**`spacing` beats `level`.** Any shape may carry `"spacing": <metres>` — the
+sample stride the caller intends to march at — and the port picks the coarsest
+level whose sample spacing is at or below it. This is the preferred form:
+a consumer knows its own stride, it does not know a provider's level scheme.
+Asking for `"mostDetailed"` everywhere is what makes a solve slow; asking for
+coarser than the march stride is what makes it wrong. Level selection lives in
+one shared helper (`providerLevelForSpacing`) used by every adapter, so the
+browser and a host tile store resolve the same spacing to the same level — two
+adapters doing their own arithmetic would sample different ground and lose byte
+parity for a reason no diff would show.
+
+The level actually used comes back in `descriptor.level`, always. A consumer
+that cannot see which level answered cannot tell a solve that resolved the
+ridges from one that interpolated them away.
+
 `level` is an integer, `"mostDetailed"`, or omitted (adapter's default). The
 sampled positions are great-circle-interpolated between `start` and `end` by
 the *host adapter*, using the adapter's native sampler, so that two runtimes
@@ -508,10 +523,19 @@ that whatever it was handed is the real seam:
 {
   id,                                   // stable provider id
   costClass,                            // what readHeights will cost
-  readHeights(positions, out) -> Promise<Float64Array>,   // bulk, contiguous metres
+  readHeights(positions, out, opts) -> Promise<Float64Array>,   // bulk metres
+  readProfile(positions, opts) -> Promise<{                     // + provenance
+    heights, level, strategy, costClass, partial, interpolated
+  }>,
   sampleCompat(provider, positions) -> Promise<Cartographic[]>, // legacy shape
 }
 ```
+
+`opts` carries `spacing` (metres — the caller's march stride, preferred),
+`level`, `maxCost`, and `out`. One call carries a whole field: the solver's
+coverage rasters reach 512×512 = 262,144 points, and a per-point call cannot
+survive a boundary crossing at that count, which is why the seam is batched and
+in-place rather than scalar.
 
 `sampleCompat` is signature-compatible with the sampler the solver's injectable
 statics already hold, so the seam can be assigned on day one with no call-site

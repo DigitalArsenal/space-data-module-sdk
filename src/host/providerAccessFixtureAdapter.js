@@ -19,6 +19,7 @@ import {
   ProviderCost,
   ProviderEncoding,
   ProviderKind,
+  resolveRequestLevel,
 } from "./providerAccessAbi.js";
 
 const TWO_PI = 6.283185307179586;
@@ -78,16 +79,17 @@ function tileRectangle(level, x, y) {
   return { west, south: north - height, east: west + width, north };
 }
 
-function resolveLevel(request, fallback) {
-  const level = request?.level;
-  if (level === "mostDetailed" || level === undefined || level === null) {
-    return fallback;
-  }
-  const numeric = Number(level);
-  if (!Number.isInteger(numeric) || numeric < 0) {
-    return fallback;
-  }
-  return numeric;
+/**
+ * Level resolution goes through the SHARED helper so the fixture and any host
+ * tile store pick the same level for the same request. Divergence here would
+ * be invisible in a diff and fatal in a parity run.
+ */
+function resolveLevelInfo(request, options) {
+  return resolveRequestLevel(request, options);
+}
+
+function resolveLevel(request, fallback, options = {}) {
+  return resolveLevelInfo(request, { defaultLevel: fallback, ...options }).level;
 }
 
 /**
@@ -211,7 +213,11 @@ export function createFixtureTerrainProvider(options = {}) {
     },
 
     acquireProfile(request) {
-      const level = resolveLevel(request, defaultLevel);
+      const level = resolveLevel(request, defaultLevel, {
+        tileWidth,
+        maxLevel,
+        mostDetailedLevel: maxLevel,
+      });
       const positions = interpolatePositions(request);
       const heights = new Float64Array(positions.length);
       let min = Infinity;
@@ -259,7 +265,11 @@ export function createFixtureTerrainProvider(options = {}) {
     },
 
     acquireRegion(request) {
-      const level = resolveLevel(request, defaultLevel);
+      const level = resolveLevel(request, defaultLevel, {
+        tileWidth,
+        maxLevel,
+        mostDetailedLevel: maxLevel,
+      });
       const [west, south, east, north] = request.rectangle ?? [0, 0, 0, 0];
       const width = Math.max(1, request.width | 0);
       const height = Math.max(1, request.height | 0);
