@@ -33,6 +33,10 @@ import {
   packageRootDir,
   DEFAULT_GATE_MANIFEST,
 } from "../src/testing/parityGate.js";
+import {
+  normalizeWasmEdgeOutcome,
+  splitWasmEdgeDiagnostics,
+} from "../src/testing/wasmedgeOutput.js";
 
 // --- synthetic wasm builder ---------------------------------------------------
 // A wasm module with exactly the imports we ask for and nothing else, so the
@@ -202,9 +206,68 @@ test("WasmEdge probe: linking succeeded even when the GUEST exits nonzero", () =
   const probe = classifyWasmEdgeProbe({
     code: 1,
     signal: null,
-    stderrText: "guest said no",
+    stderrText: "",
+    guestOutputLength: 12,
   });
   assert.equal(probe.outcome, "instantiated");
+});
+
+test("REGRESSION: a silent nonzero exit is a probe-failure, NEVER an inferred pass", () => {
+  // This is the exact shape that produced a FALSE PASS: WasmEdge logs its
+  // diagnostics to stdout, so a classifier reading only stderr saw nothing,
+  // and the old default was `instantiated`. An acceptance instrument may say
+  // "I could not tell". It may never say "fine" by default.
+  const probe = classifyWasmEdgeProbe({
+    code: 1,
+    signal: null,
+    stderrText: "",
+    guestOutputLength: 0,
+  });
+  assert.equal(probe.outcome, "probe-failure");
+  assert.match(probe.detail, /Refusing to infer a pass/);
+});
+
+test("WasmEdge probe: a reactor artifact with no command entry point counts as linked", () => {
+  const probe = classifyWasmEdgeProbe({
+    code: 1,
+    signal: null,
+    stderrText: "[2026-08-08 00:00:00.000] [error] wasm function not found: _start",
+    guestOutputLength: 0,
+  });
+  assert.equal(probe.outcome, "instantiated");
+});
+
+test("WasmEdge diagnostics are split OUT of the guest's stdout (the runtime logs to stdout)", () => {
+  const encoder = new TextEncoder();
+  const merged = encoder.encode(
+    "$PIVguestbytes\n" +
+      '[2026-08-08 00:45:38.689] [error] instantiation failed: unknown import, Code: 0x302\n' +
+      '[2026-08-08 00:45:38.689] [error]     When linking module: "env" , function name: "flatsql_io_open"',
+  );
+  const { stdout, diagnostics } = splitWasmEdgeDiagnostics(merged);
+  assert.equal(new TextDecoder().decode(stdout), "$PIVguestbytes");
+  assert.match(diagnostics, /unknown import/);
+  assert.match(diagnostics, /flatsql_io_open/);
+
+  // Guest-only output is returned untouched — the shim never rewrites a byte
+  // the module wrote.
+  const guestOnly = encoder.encode("$PIV binary");
+  const clean = splitWasmEdgeDiagnostics(guestOnly);
+  assert.deepEqual(clean.stdout, guestOnly);
+  assert.equal(clean.diagnostics, "");
+});
+
+test("normalizeWasmEdgeOutcome merges stderr with stdout-logged diagnostics for classification", () => {
+  const encoder = new TextEncoder();
+  const normalized = normalizeWasmEdgeOutcome({
+    stdout: encoder.encode(
+      "out\n[2026-08-08 00:00:00.000] [error] instantiation failed: unknown import, Code: 0x302",
+    ),
+    stderr: encoder.encode("stderr line"),
+  });
+  assert.match(normalized.diagnosticText, /stderr line/);
+  assert.match(normalized.diagnosticText, /instantiation failed/);
+  assert.equal(new TextDecoder().decode(normalized.stdout), "out");
 });
 
 // --- verdict rules ---------------------------------------------------------------

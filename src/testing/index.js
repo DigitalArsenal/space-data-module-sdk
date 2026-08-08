@@ -63,6 +63,10 @@ export {
   resolveHostSurface,
 } from "./hostContract.js";
 export {
+  normalizeWasmEdgeOutcome,
+  splitWasmEdgeDiagnostics,
+} from "./wasmedgeOutput.js";
+export {
   ContractVerdict,
   DEFAULT_GATE_MANIFEST,
   LANE_EVIDENCE,

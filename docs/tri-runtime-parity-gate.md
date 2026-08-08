@@ -113,6 +113,32 @@ could not be cross-verified, which is *recorded*, not passed. Hosts that
 provision the binary run with `--require-native-wasmedge`, which turns the gap
 into a failure.
 
+## The one runtime difference the SDK absorbs (and where)
+
+**Measured on WasmEdge 0.16.4, native and containerized: the CLI writes its own
+diagnostics — `[2026-08-08 00:45:38.689] [error] …` — to STDOUT, not stderr.**
+`src/testing/wasmedgeOutput.js` is the shim that absorbs this, and it is a
+*host shim*, which is the only place a runtime difference is ever allowed to
+live. It does two things and nothing else: it lifts the runtime's log lines out
+of the captured stdout so the harness byte-compares the GUEST's bytes, and it
+hands those lines to the classifier so a failed instantiation is actually seen.
+
+Both halves were live defects before it existed:
+
+- the gate's WasmEdge probe read only stderr and **defaulted to
+  `instantiated`** when it recognized nothing — so an artifact that
+  demonstrably cannot link (`flatsql-wasi` at 1.4.4 under the bare CLI) read as
+  a clean pass. A false pass in an acceptance instrument is worse than no
+  instrument. The classifier now requires POSITIVE evidence of linking (clean
+  exit, guest output, or a post-link diagnostic such as a missing `_start` on a
+  reactor artifact) and otherwise returns `probe-failure`, which fails the gate.
+  Regression test: *"a silent nonzero exit is a probe-failure, NEVER an
+  inferred pass"*.
+- the parity harness compared those log lines as if they were guest output, so
+  any error-path fixture would have reported a phantom output divergence, and
+  its trap-class detection (which scanned stderr for trap markers) could never
+  fire on a WasmEdge trap.
+
 ## Negative control
 
 `parity/negative-control.json` declares a known-bad artifact and is run with

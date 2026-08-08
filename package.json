@@ -103,7 +103,7 @@
   "dependencies": {
     "flatbuffers": "^25.9.23",
     "flatc-wasm": "^26.1.32",
-    "flatsql": "^0.4.2",
+    "flatsql": "^1.4.4",
     "hd-wallet-wasm": "2.0.28",
     "sdn-emception": "1.0.0",
     "spacedatastandards.org": "https://github.com/DigitalArsenal/spacedatastandards.org/archive/06deda5079204a46bd97a7ce6ac2868e991c6b8f.tar.gz"

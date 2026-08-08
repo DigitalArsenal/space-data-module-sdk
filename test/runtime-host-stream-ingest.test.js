@@ -63,14 +63,36 @@ test("runtime-host stream ingestor appends chunked size-prefixed FlatBuffer fram
   assert.equal(ingestor.pushBytes(stream.subarray(19)), 2);
   assert.equal(ingestor.finish(), 0);
 
+  // listRows() is `ORDER BY schemaFileId, rowId` — ordering is by schema id,
+  // NOT by ingest order. This assertion used to read OMM-then-ENTM and passed
+  // only because flatsql 0.4.2 silently ignored ORDER BY and handed back
+  // insertion order; 1.4.4 honours it. Assert the CONTRACT (sorted), and
+  // assert payload-by-handle separately so the test can never again encode an
+  // engine bug as if it were the SDK's semantics.
   const storedRows = rows.listRows();
   assert.equal(storedRows.length, 2);
-  assert.deepEqual(storedRows[0].handle, { schemaFileId: "OMM", rowId: 1 });
-  assert.deepEqual(storedRows[1].handle, { schemaFileId: "ENTM", rowId: 1 });
-  assert.ok(storedRows[0].payload instanceof Uint8Array);
-  assert.ok(storedRows[1].payload instanceof Uint8Array);
-  assert.deepEqual(storedRows[0].payload, ommPayload);
-  assert.deepEqual(storedRows[1].payload, entityPayload);
+  assert.deepEqual(
+    storedRows.map((row) => row.handle),
+    [
+      { schemaFileId: "ENTM", rowId: 1 },
+      { schemaFileId: "OMM", rowId: 1 },
+    ],
+    "listRows() must return rows ordered by schemaFileId, then rowId",
+  );
+  const payloadBySchema = new Map(
+    storedRows.map((row) => [row.handle.schemaFileId, row.payload]),
+  );
+  for (const payload of payloadBySchema.values()) {
+    assert.ok(payload instanceof Uint8Array);
+  }
+  assert.deepEqual(payloadBySchema.get("OMM"), ommPayload);
+  assert.deepEqual(payloadBySchema.get("ENTM"), entityPayload);
+  // Ingest ORDER is still observable per schema id, which is the property the
+  // ingestor actually owns.
+  assert.deepEqual(
+    rows.listRows("OMM").map((row) => row.handle.rowId),
+    [1],
+  );
   assert.equal(ingestor.stats.framesDecoded, 2);
   assert.equal(ingestor.stats.framesAppended, 2);
   assert.equal(ingestor.stats.framesRouted, 0);

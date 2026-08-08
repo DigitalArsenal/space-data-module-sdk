@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { ExitClass, assertWasmEdgeVersionMatchesPin } from "./parityHarness.js";
+import { normalizeWasmEdgeOutcome } from "./wasmedgeOutput.js";
 
 const execFile = promisify(execFileCallback);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -192,18 +193,21 @@ export async function runNativeWasmEdgeLane(context) {
             timeoutMs: context.timeoutMs,
           },
         );
+        // WasmEdge logs its own diagnostics to STDOUT; pull them out before
+        // anything compares guest bytes or classifies an exit.
+        const normalized = normalizeWasmEdgeOutcome(outcome);
         const { exitClass, exitDetail } = classifyProcessOutcome({
           code: outcome.code,
           signal: outcome.signal,
-          stderrText: Buffer.from(outcome.stderr).toString("utf8"),
+          stderrText: normalized.diagnosticText,
         });
         runs.push({
           caseId: planCase.id,
           threadCount,
           exitClass,
           exitDetail,
-          stdout: outcome.stdout,
-          stderr: outcome.stderr,
+          stdout: normalized.stdout,
+          stderr: normalized.stderr,
           stateFiles: null,
         });
       }
@@ -306,18 +310,19 @@ export async function runDockerWasmEdgeLane(context) {
           stdinBytes: planCase.stdinBytes,
           timeoutMs: context.timeoutMs,
         });
+        const normalized = normalizeWasmEdgeOutcome(outcome);
         const { exitClass, exitDetail } = classifyProcessOutcome({
           code: outcome.code,
           signal: outcome.signal,
-          stderrText: Buffer.from(outcome.stderr).toString("utf8"),
+          stderrText: normalized.diagnosticText,
         });
         runs.push({
           caseId: planCase.id,
           threadCount,
           exitClass,
           exitDetail,
-          stdout: outcome.stdout,
-          stderr: outcome.stderr,
+          stdout: normalized.stdout,
+          stderr: normalized.stderr,
           stateFiles: null,
         });
       }

@@ -63,6 +63,7 @@ import {
   describeClassification,
   resolveHostSurface,
 } from "./hostContract.js";
+import { normalizeWasmEdgeOutcome } from "./wasmedgeOutput.js";
 import {
   assertWasmEdgeVersionMatchesPin,
   loadWasmEdgePin,
@@ -214,11 +215,25 @@ const UNKNOWN_IMPORT_RE =
   /unknown import[\s\S]*?When linking module:\s*"([^"]*)"\s*,\s*function name:\s*"([^"]*)"/;
 
 /**
- * Classify a bare-WasmEdge probe run. Instantiation happens BEFORE any guest
- * code, so an `unknown import` diagnostic is proof about linking, and its
- * absence is proof the module linked — whatever the guest then did.
+ * Classify a bare-WasmEdge probe run.
+ *
+ * `instantiated` requires POSITIVE evidence — a clean exit, or a diagnostic
+ * that can only be produced AFTER linking succeeded (a reactor artifact has no
+ * `_start`, so "function not found" is proof it linked). Anything else is a
+ * `probe-failure`, which fails the gate as `lane-unavailable`.
+ *
+ * The earlier version of this function defaulted to `instantiated` whenever it
+ * did not recognize the output, and it read only stderr — while WasmEdge logs
+ * to STDOUT. Together those produced a silent FALSE PASS on an artifact that
+ * demonstrably cannot link. An acceptance instrument may return "I could not
+ * tell"; it may never return "fine" by default.
  */
-export function classifyWasmEdgeProbe({ code, signal, stderrText }) {
+export function classifyWasmEdgeProbe({
+  code,
+  signal,
+  stderrText,
+  guestOutputLength = 0,
+}) {
   const text = String(stderrText ?? "");
   const unknownImport = UNKNOWN_IMPORT_RE.exec(text);
   if (unknownImport) {
@@ -228,27 +243,45 @@ export function classifyWasmEdgeProbe({ code, signal, stderrText }) {
       detail: `instantiation failed: unknown import ${unknownImport[1]}.${unknownImport[2]}`,
     };
   }
+  const head = (limit = 3) => text.trim().split("\n").slice(0, limit).join(" | ");
   if (/instantiation failed/i.test(text)) {
+    return { outcome: "instantiate-error", missingImport: null, detail: head() };
+  }
+  if (/(loading failed|validation failed|magic header|malformed|invalid section)/i.test(text)) {
+    return { outcome: "compile-error", missingImport: null, detail: head() };
+  }
+  // Linked, then the CLI could not find a start entry: a reactor artifact.
+  // Only reachable after successful instantiation.
+  if (/(wasm function not found|function not found|_start|_initialize)/i.test(text)) {
     return {
-      outcome: "instantiate-error",
+      outcome: "instantiated",
       missingImport: null,
-      detail: text.trim().split("\n").slice(0, 3).join(" | "),
+      detail: `linked; no command entry point (reactor artifact): ${head(1)}`,
     };
   }
-  if (/(loading failed|validation failed|magic header|malformed)/i.test(text)) {
+  if (!signal && code === 0) {
+    return { outcome: "instantiated", missingImport: null, detail: "linked; guest exited 0" };
+  }
+  if (/\[error\]/i.test(text)) {
+    return { outcome: "instantiate-error", missingImport: null, detail: head() };
+  }
+  if (guestOutputLength > 0) {
+    // The guest WROTE something, so it ran, so it linked — even though it then
+    // chose to exit nonzero.
     return {
-      outcome: "compile-error",
+      outcome: "instantiated",
       missingImport: null,
-      detail: text.trim().split("\n").slice(0, 3).join(" | "),
+      detail: `linked; guest produced ${guestOutputLength} byte(s) and exited (code=${code ?? "null"}, signal=${signal ?? "null"})`,
     };
   }
+  // Nonzero/​signalled exit, no runtime diagnostic, no guest output: nothing
+  // observed instantiation. Do not guess. (This is precisely the shape that
+  // used to read as a pass — a docker mount that delivered no file, a runtime
+  // that logged to a stream nobody read.)
   return {
-    outcome: "instantiated",
+    outcome: "probe-failure",
     missingImport: null,
-    detail:
-      signal || code
-        ? `linked; guest exited (code=${code ?? "null"}, signal=${signal ?? "null"})`
-        : "linked; guest exited 0",
+    detail: `WasmEdge exited (code=${code ?? "null"}, signal=${signal ?? "null"}) with no diagnostic output and no guest output — the probe could not observe instantiation. Refusing to infer a pass.`,
   };
 }
 
@@ -335,10 +368,12 @@ async function probeWithNativeWasmEdge(context, staged) {
       timeoutMs: context.timeoutMs,
     },
   );
+  const normalized = normalizeWasmEdgeOutcome(outcome);
   return classifyWasmEdgeProbe({
     code: outcome.code,
     signal: outcome.signal,
-    stderrText: outcome.stderr.toString("utf8"),
+    stderrText: normalized.diagnosticText,
+    guestOutputLength: normalized.stdout.length,
   });
 }
 
@@ -362,10 +397,12 @@ async function probeWithDockerWasmEdge(context, staged) {
     env: process.env,
     timeoutMs: context.timeoutMs,
   });
+  const normalized = normalizeWasmEdgeOutcome(outcome);
   return classifyWasmEdgeProbe({
     code: outcome.code,
     signal: outcome.signal,
-    stderrText: outcome.stderr.toString("utf8"),
+    stderrText: normalized.diagnosticText,
+    guestOutputLength: normalized.stdout.length,
   });
 }
 
