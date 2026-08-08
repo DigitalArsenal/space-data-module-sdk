@@ -62,8 +62,35 @@ function collectFlatbufferTableFields(idl, tableName) {
     .filter(Boolean);
 }
 
+// A schema has TWO written forms in this ecosystem and they mean the same file:
+//
+//   "SCV.fbs"       — the catalog's canonical form, built as `<CODE>.fbs` from
+//                     the standards manifest (parseStandardsEntry below).
+//   "SCV/main.fbs"  — the PATH form, which is how the schema actually lives in
+//                     spacedatastandards.org (`schema/SCV/main.fbs`) and is
+//                     therefore what modules, tests and generated bindings across
+//                     the stack write.
+//
+// Matching them as raw strings made every manifest using the path form fail
+// resolution with `standards-type-identity-mismatch` — "mixes a known
+// schemaName ... with a different standards entry" — because the `$SCV` file
+// identifier DID resolve while the name did not. That is not a manifest defect
+// and not a schema defect; it is this matcher refusing a spelling the standards
+// repository itself uses. The rest of the toolchain already treats the two as
+// one schema (see the closed-modules builder's
+// `^([A-Z][A-Z0-9]{2})(?:\/main)?\.fbs$` header-injection regex), so the
+// catalog must too, or a correct module cannot be compiled.
+//
+// Deliberately narrow: ONLY the exact `<CODE>/main.fbs` shape collapses. Any
+// other path is left alone so two genuinely different schemas can never be
+// merged by a loose rule.
+const SCHEMA_PATH_FORM = /^([A-Za-z][A-Za-z0-9_]*)\/main\.fbs$/;
+
 function normalizeSchemaName(value) {
-  return value === undefined || value === null ? "" : String(value);
+  if (value === undefined || value === null) return "";
+  const text = String(value);
+  const pathForm = SCHEMA_PATH_FORM.exec(text);
+  return pathForm ? `${pathForm[1]}.fbs` : text;
 }
 
 function normalizeFileIdentifier(value) {

@@ -61,6 +61,7 @@ import { toLoadableWasmBytes } from "../bundle/artifactBytes.js";
 import {
   classifyArtifactImports,
   describeClassification,
+  readWasmExportNames,
   resolveHostSurface,
 } from "./hostContract.js";
 import { normalizeWasmEdgeOutcome } from "./wasmedgeOutput.js";
@@ -250,6 +251,21 @@ export function classifyWasmEdgeProbe({
   if (/(loading failed|validation failed|magic header|malformed|invalid section)/i.test(text)) {
     return { outcome: "compile-error", missingImport: null, detail: head() };
   }
+  // The CLI rejected the INVOCATION, before loading anything: reactor mode
+  // needs an entry name. This says nothing about the artifact, so it must not
+  // be reported against the artifact — stageArtifact() now names `_initialize`
+  // for reactor artifacts, and this branch exists so a regression there is
+  // legible instead of masquerading as a cross-runtime divergence.
+  if (/function name is required when reactor mode is enabled/i.test(text)) {
+    return {
+      outcome: "probe-failure",
+      missingImport: null,
+      detail:
+        "WasmEdge refused the invocation: reactor mode requires an entry " +
+        "function name. This is a PROBE defect, not an artifact defect — the " +
+        "lane must pass the artifact's reactor entry (see resolveReactorEntry).",
+    };
+  }
   // Linked, then the CLI could not find a start entry: a reactor artifact.
   // Only reachable after successful instantiation.
   if (/(wasm function not found|function not found|_start|_initialize)/i.test(text)) {
@@ -359,15 +375,11 @@ async function probeWithNativeWasmEdge(context, staged) {
     context.pin,
     `native binary ${detected.binary}`,
   );
-  const outcome = await spawnCapture(
-    detected.binary,
-    ["--enable-threads", staged.basename],
-    {
-      cwd: staged.dir,
-      env: { PATH: process.env.PATH ?? "" },
-      timeoutMs: context.timeoutMs,
-    },
-  );
+  const outcome = await spawnCapture(detected.binary, wasmEdgeProbeArgs(staged), {
+    cwd: staged.dir,
+    env: { PATH: process.env.PATH ?? "" },
+    timeoutMs: context.timeoutMs,
+  });
   const normalized = normalizeWasmEdgeOutcome(outcome);
   return classifyWasmEdgeProbe({
     code: outcome.code,
@@ -391,7 +403,7 @@ async function probeWithDockerWasmEdge(context, staged) {
     "/parity",
   ];
   if (context.dockerPlatform) args.push("--platform", String(context.dockerPlatform));
-  args.push(context.pin.dockerImage, "--enable-threads", staged.basename);
+  args.push(context.pin.dockerImage, ...wasmEdgeProbeArgs(staged));
   const outcome = await spawnCapture(context.dockerBinary ?? "docker", args, {
     cwd: staged.dir,
     env: process.env,
@@ -688,11 +700,52 @@ export function lanesAgree(a, b) {
 
 // --- Orchestrator ---------------------------------------------------------------
 
+/**
+ * A REACTOR artifact has no `_start`; its initialisation entry is `_initialize`
+ * (clang `-mexec-model=reactor`). The WasmEdge CLI refuses to run one without
+ * being told which function to call — "A function name is required when reactor
+ * mode is enabled." on stderr, exit 1, and NO runtime diagnostic — which the
+ * probe classifier could only honestly report as `probe-failure`. The effect
+ * was that a CORRECTLY built library module (the shape the module contract
+ * mandates for the RF family) was reported as a P1 cross-runtime divergence
+ * while the browser lane passed: the gate failed the artifact for the gate's
+ * own inability to invoke it.
+ *
+ * Naming the entry is also STRICTLY STRONGER evidence than the old bare
+ * invocation: a clean exit 0 means the runtime linked the imports, instantiated
+ * the module, and RAN its initialiser — observed, not inferred from an error
+ * string.
+ */
+export function resolveReactorEntry(loadableBytes) {
+  let exportNames;
+  try {
+    exportNames = readWasmExportNames(loadableBytes);
+  } catch {
+    return null;
+  }
+  if (exportNames.includes("_start")) return null;
+  return exportNames.includes("_initialize") ? "_initialize" : null;
+}
+
 async function stageArtifact(artifact) {
   const dir = await mkdtemp(path.join(os.tmpdir(), `sdm-gate-${artifact.id}-`));
   const basename = "artifact.wasm";
   await writeFile(path.join(dir, basename), artifact.loadableBytes);
-  return { dir, basename };
+  return {
+    dir,
+    basename,
+    reactorEntry: resolveReactorEntry(artifact.loadableBytes),
+  };
+}
+
+/**
+ * The invocation tail shared by both WasmEdge lanes, so the native and Docker
+ * lanes can never drift into probing the same artifact two different ways.
+ */
+export function wasmEdgeProbeArgs(staged) {
+  return staged.reactorEntry
+    ? ["--enable-threads", "--reactor", staged.basename, staged.reactorEntry]
+    : ["--enable-threads", staged.basename];
 }
 
 /**

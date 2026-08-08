@@ -1703,6 +1703,78 @@ test("standards catalogs can load from an explicit standards root", async () => 
   }
 });
 
+// REGRESSION (closed-modules-rf-artifacts-are-emcc-shaped, 2026-08-08).
+//
+// A schema has two written forms that name the SAME file: the catalog's
+// `<CODE>.fbs` and the on-disk path form `<CODE>/main.fbs` that
+// spacedatastandards.org actually uses (`schema/SCV/main.fbs`) and that every
+// module manifest, test and generated binding in the stack writes. Matching
+// them as raw strings meant a correct manifest failed with
+// `standards-type-identity-mismatch` — the file identifier resolved, the name
+// did not — and the module could not be compiled at all. `sensor-model` and
+// `sensor-coverage` were both unbuildable for this reason, which is how
+// sensor-model kept shipping a stale, emcc-shaped, browser-only artifact.
+test("standards validation accepts the `<CODE>/main.fbs` path form as the same schema", async () => {
+  const catalog = [
+    {
+      schemaCode: "TST",
+      schemaName: "TST.fbs",
+      fileIdentifier: "TSTR",
+      rootTypeName: "TestRecord",
+      hash: null,
+      version: null,
+      idl: "",
+      files: [],
+    },
+  ];
+
+  for (const schemaName of ["TST.fbs", "TST/main.fbs"]) {
+    const manifest = createTestManifest();
+    const typeSet = createDualTypeSet("tst", schemaName, "TSTR", "TestRecord");
+    manifest.methods[0].inputPorts[0].acceptedTypeSets = [typeSet];
+    manifest.methods[0].outputPorts[0].acceptedTypeSets = [typeSet];
+    const report = await validateManifestWithStandards(manifest, { catalog });
+    assert.equal(
+      report.errors.filter(
+        (issue) => issue.code === "standards-type-identity-mismatch",
+      ).length,
+      0,
+      `${schemaName}: ${JSON.stringify(report.issues)}`,
+    );
+  }
+});
+
+test("the path-form collapse is NARROW — it never merges two different schemas", async () => {
+  const catalog = [
+    {
+      schemaCode: "TST",
+      schemaName: "TST.fbs",
+      fileIdentifier: "TSTR",
+      rootTypeName: "TestRecord",
+      hash: null,
+      version: null,
+      idl: "",
+      files: [],
+    },
+  ];
+
+  // Only the exact `<CODE>/main.fbs` shape collapses. A different leaf, a
+  // nested path, or a different code must still fail identity resolution.
+  for (const schemaName of ["TST/other.fbs", "TST/v2/main.fbs", "OMM/main.fbs"]) {
+    const manifest = createTestManifest();
+    const typeSet = createDualTypeSet("tst", schemaName, "TSTR", "TestRecord");
+    manifest.methods[0].inputPorts[0].acceptedTypeSets = [typeSet];
+    manifest.methods[0].outputPorts[0].acceptedTypeSets = [typeSet];
+    const report = await validateManifestWithStandards(manifest, { catalog });
+    assert.ok(
+      report.errors.some(
+        (issue) => issue.code === "standards-type-identity-mismatch",
+      ),
+      `${schemaName} must NOT resolve to TST.fbs`,
+    );
+  }
+});
+
 test("standards validation treats every empty schema-hash encoding as absent", async () => {
   const catalog = [
     {

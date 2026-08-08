@@ -32,6 +32,8 @@ import {
   gateReceiptDigest,
   packageRootDir,
   DEFAULT_GATE_MANIFEST,
+  resolveReactorEntry as resolveReactorEntryForTest,
+  wasmEdgeProbeArgs as wasmEdgeProbeArgsForTest,
 } from "../src/testing/parityGate.js";
 import {
   normalizeWasmEdgeOutcome,
@@ -81,6 +83,26 @@ function buildWasm(imports) {
     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
     ...typeSection,
     ...importSection,
+  ]);
+}
+
+/** exports: ["name", ...] — all bound to function index 0. */
+function buildWasmWithExports(exports) {
+  const typeSection = section(1, [...uleb(1), 0x60, ...uleb(0), ...uleb(0)]);
+  const functionSection = section(3, [...uleb(1), ...uleb(0)]);
+  const entries = [];
+  for (const name of exports) {
+    entries.push(...str(name), 0x00, ...uleb(0));
+  }
+  const exportSection = section(7, [...uleb(exports.length), ...entries]);
+  const body = [...uleb(0), 0x0b];
+  const codeSection = section(10, [...uleb(1), ...uleb(body.length), ...body]);
+  return new Uint8Array([
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    ...typeSection,
+    ...functionSection,
+    ...exportSection,
+    ...codeSection,
   ]);
 }
 
@@ -235,6 +257,61 @@ test("WasmEdge probe: a reactor artifact with no command entry point counts as l
     guestOutputLength: 0,
   });
   assert.equal(probe.outcome, "instantiated");
+});
+
+// REGRESSION (closed-modules-rf-artifacts-are-emcc-shaped, 2026-08-08).
+//
+// The RF family's CORRECT shape — clang `-mexec-model=reactor`, no `_start` —
+// could not be probed at all: `wasmedge --enable-threads artifact.wasm` refuses
+// the invocation with "A function name is required when reactor mode is
+// enabled." on stderr, exit 1, and NO runtime diagnostic. That fell through to
+// `probe-failure`, so the wasmedge lane "violated" while the browser lane
+// passed and the gate reported a P1 cross-runtime DIVERGENCE against a
+// perfectly isomorphic artifact. The gate was failing modules for the gate's
+// own inability to invoke them, which is the most expensive kind of false
+// positive: it makes the correct fix look like the defect.
+test("probe: reactor-mode refusal is a PROBE defect, never charged to the artifact", () => {
+  const probe = classifyWasmEdgeProbe({
+    code: 1,
+    signal: null,
+    stderrText: "A function name is required when reactor mode is enabled.",
+    guestOutputLength: 0,
+  });
+  assert.equal(probe.outcome, "probe-failure");
+  assert.match(probe.detail, /PROBE defect, not an artifact defect/);
+});
+
+test("probe: a reactor artifact is invoked at its `_initialize` entry in BOTH WasmEdge lanes", () => {
+  // Instantiation must be OBSERVED (exit 0 from a named entry), never inferred
+  // from an error string. Both lanes must derive the invocation identically or
+  // they can disagree about an artifact for reasons that are not the artifact.
+  const reactor = wasmEdgeProbeArgsForTest({
+    basename: "artifact.wasm",
+    reactorEntry: "_initialize",
+  });
+  assert.deepEqual(reactor, [
+    "--enable-threads",
+    "--reactor",
+    "artifact.wasm",
+    "_initialize",
+  ]);
+
+  const command = wasmEdgeProbeArgsForTest({
+    basename: "artifact.wasm",
+    reactorEntry: null,
+  });
+  assert.deepEqual(command, ["--enable-threads", "artifact.wasm"]);
+});
+
+test("probe: `_start` wins over `_initialize` — a command artifact is not a reactor", () => {
+  const commandModule = buildWasmWithExports(["_start", "_initialize"]);
+  assert.equal(resolveReactorEntryForTest(commandModule), null);
+
+  const reactorModule = buildWasmWithExports(["_initialize", "plugin_init"]);
+  assert.equal(resolveReactorEntryForTest(reactorModule), "_initialize");
+
+  const bareLibrary = buildWasmWithExports(["plugin_init"]);
+  assert.equal(resolveReactorEntryForTest(bareLibrary), null);
 });
 
 test("WasmEdge diagnostics are split OUT of the guest's stdout (the runtime logs to stdout)", () => {
