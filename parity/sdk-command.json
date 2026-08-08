@@ -1,0 +1,22 @@
+{
+  "name": "sdk-command-parity",
+  "threadEnvVar": "SDM_PARITY_THREADS",
+  "threadCounts": [1, 2, 4, 8],
+  "cases": [
+    {
+      "id": "empty-stdin",
+      "stdinUtf8": "",
+      "//": "The command surface's no-input path. Every runtime must emit the SAME response frame bytes and take the SAME exit class — a deterministic error path is parity evidence exactly like a success path."
+    },
+    {
+      "id": "malformed-stdin",
+      "stdinUtf8": "not a PIV frame",
+      "//": "Malformed input: the trap/error CLASS must be identical across runtimes, not merely 'an error in each'."
+    },
+    {
+      "id": "truncated-piv-header",
+      "stdinHex": "24504956",
+      "//": "A valid PIV file identifier with nothing after it — the truncated-frame path, which is where lanes with different stdin buffering habits diverge if anything does."
+    }
+  ]
+}

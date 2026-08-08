@@ -38,6 +38,8 @@ async function main(argv) {
       return runFlow(rest);
     case "parity":
       return runParity(rest);
+    case "parity-gate":
+      return runParityGateCommand(rest);
     case "protect":
       return runProtect(rest);
     case "sign":
@@ -142,6 +144,38 @@ function parseArgs(argv) {
       case "--allow-single-lane":
         options.allowSingleLane = true;
         break;
+      case "--gate-manifest":
+        options.gateManifestPath = path.resolve(
+          requireValue(argv, ++index, value),
+        );
+        break;
+      case "--artifact": {
+        // --artifact <id>=<path>[:<surface>] — inject an artifact owned by
+        // another repo (e.g. a decrypted closed rf-* module) WITHOUT this repo
+        // depending on that checkout.
+        const spec = requireValue(argv, ++index, value);
+        const eq = spec.indexOf("=");
+        if (eq < 1) {
+          throw new Error(`--artifact expects <id>=<path>[:<surface>], got "${spec}"`);
+        }
+        const id = spec.slice(0, eq);
+        const rest = spec.slice(eq + 1);
+        const colon = rest.lastIndexOf(":");
+        const hasSurface = colon > 0 && !rest.slice(colon + 1).includes("/");
+        options.extraArtifacts = options.extraArtifacts ?? [];
+        options.extraArtifacts.push({
+          id,
+          path: path.resolve(hasSurface ? rest.slice(0, colon) : rest),
+          surface: hasSurface ? rest.slice(colon + 1) : "module",
+        });
+        break;
+      }
+      case "--require-native-wasmedge":
+        options.requireNativeWasmEdge = true;
+        break;
+      case "--expect-fail":
+        options.expectFailure = true;
+        break;
       default:
         throw new Error(`Unknown argument: ${value}`);
     }
@@ -166,6 +200,9 @@ function printUsage() {
   space-data-module parity --wasm ./dist/isomorphic/module.wasm --fixture ./fixtures/parity/basic.json
   space-data-module parity --wasm ./dist/isomorphic/module.wasm --fixture ./f.json --lanes browser,wasmedge,docker-wasmedge [--json]
   space-data-module parity ... --self-test-divergence docker-wasmedge   (fire drill: prove the diff fails loudly)
+  space-data-module parity-gate                                          (THE isomorphism acceptance gate: certified artifact set x real lanes)
+  space-data-module parity-gate --artifact rf-fspl=./dist/isomorphic/module.wasm:module --json
+  space-data-module parity-gate --gate-manifest ./parity/negative-control.json --expect-fail   (prove the gate can fail)
   space-data-module flow check ./flows/my.flow.json --deps ./modules-root
   space-data-module flow compile ./flows/my.flow.json --deps ./modules-root [--out ./flows/my/dist]
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
@@ -318,6 +355,61 @@ async function runParity(argv) {
     } else {
       console.error(text);
     }
+  }
+  return report.ok ? 0 : 2;
+}
+
+// space-data-module parity-gate [--gate-manifest ./parity/gate.json]
+//   [--artifact <id>=<path>[:<surface>]] [--lanes ...] [--json]
+//   [--require-native-wasmedge] [--expect-fail] [--timeout-sec N]
+//
+// THE acceptance gate for tri-runtime isomorphism: every artifact in the
+// certified set is really instantiated under the pinned WasmEdge AND in a real
+// headless Chrome behind COOP/COEP, its import set is classified against the
+// declared host contract, and command-profile artifacts are additionally
+// byte-diffed across lanes and thread counts.
+//
+// Exit 0 only when every artifact satisfies the contract in every lane and no
+// behavioral divergence is found. `--expect-fail` inverts the verdict: it is
+// how the negative control (a known-bad artifact) proves the gate can fail.
+async function runParityGateCommand(argv) {
+  const options = parseArgs(argv);
+  const { runParityGate, formatGateReport, gateReceiptDigest } = await import(
+    "../src/testing/parityGate.js"
+  );
+  const report = await runParityGate({
+    manifestPath: options.gateManifestPath,
+    extraArtifacts: options.extraArtifacts,
+    lanes: options.lanes,
+    timeoutMs: options.timeoutMs,
+    chromeBinary: options.chromeBinary,
+    wasmedgeBinary: options.wasmedgeBinary,
+    dockerPlatform: options.dockerPlatform,
+    requireNativeWasmEdge: options.requireNativeWasmEdge === true,
+    log: (line) => console.error(line),
+  });
+  if (options.json) {
+    console.log(
+      JSON.stringify({ ...report, receiptDigest: gateReceiptDigest(report) }, null, 2),
+    );
+  } else {
+    const text = formatGateReport(report);
+    if (report.ok) console.log(text);
+    else console.error(text);
+  }
+
+  if (options.expectFailure) {
+    if (report.ok) {
+      console.error(
+        "NEGATIVE CONTROL BROKEN: --expect-fail was set and the gate PASSED. " +
+          "A gate that cannot fail on a known-bad artifact is not a gate.",
+      );
+      return 3;
+    }
+    console.error(
+      `negative control OK: gate failed as required (${report.failures.length} failure(s), kinds: ${[...new Set(report.failures.map((f) => f.kind))].join(", ")}).`,
+    );
+    return 0;
   }
   return report.ok ? 0 : 2;
 }

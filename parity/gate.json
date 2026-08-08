@@ -1,0 +1,28 @@
+{
+  "//": "THE representative artifact set the module SDK certifies as isomorphic. Every entry resolves INSIDE this repo (a repo-relative path or a node-resolved dependency) so the gate runs in ANY fresh worktree with zero shared-checkout coupling — reaching into a sibling checkout is exactly what made the previous parity lane silently un-runnable (graph: parity-harness-cannot-run-locally). Artifacts owned by other repos (e.g. a decrypted closed rf-* module) are INJECTED by the caller with --artifact id=path:surface, so the owning repo's gauntlet profile supplies them without this repo ever depending on that checkout.",
+  "name": "module-sdk-tri-runtime",
+  "artifacts": [
+    {
+      "id": "sdk-command-module",
+      "path": "examples/single-file-bundle/vectors/base-module.wasm",
+      "surface": "module",
+      "profile": "command",
+      "fixture": "sdk-command.json",
+      "note": "An SDK-built module: clang wasm32-wasip1-threads, WASI-only imports, generic hooks over the PIV codec on stdin/stdout. Instantiates and RUNS in every lane, so it carries the behavioral (Tier B) parity too."
+    },
+    {
+      "id": "sdk-published-module",
+      "path": "examples/single-file-bundle/vectors/single-file-module.wasm",
+      "surface": "module",
+      "profile": "command",
+      "note": "The SAME module after publication: signature/manifest records appended as a trailing custom section. Proves the record-stripping path yields a loadable payload that instantiates identically in all lanes — a published artifact must never be a fourth runtime."
+    },
+    {
+      "id": "flatsql-standalone",
+      "packagePath": "flatsql/wasm/flatsql-wasi.wasm",
+      "surface": "flatsql-engine",
+      "profile": "library",
+      "note": "The FlatSQL engine as the SDK's own dependency pin resolves it. Contract: WASI preview1 + EXACTLY the seven declared flatsql_io_* VFS imports (offsets f64, never i64). An emscripten-glue build here is an auto-reject: it cannot instantiate on a plain WasmEdge host, which is precisely the ^0.4.2 floor defect (graph: module-sdk-flatsql-floor-not-isomorphic)."
+    }
+  ]
+}

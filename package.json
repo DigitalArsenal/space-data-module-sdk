@@ -74,6 +74,7 @@
   "files": [
     "bin/",
     "docs/",
+    "parity/",
     "schemas/",
     "src/",
     "templates/"
@@ -84,6 +85,10 @@
     "test:runtime-matrix": "SPACE_DATA_MODULE_SDK_ENABLE_RUNTIME_MATRIX=1 node --test test/runtime-matrix.test.js",
     "test:parity": "node --test test/parity-harness.test.js",
     "test:parity-tri-lane": "SPACE_DATA_MODULE_SDK_ENABLE_TRI_RUNTIME_PARITY=1 node --test test/parity-tri-lane.test.js",
+    "test:parity-gate": "node --test test/parity-gate.test.js",
+    "test:parity-gate-lanes": "SPACE_DATA_MODULE_SDK_ENABLE_PARITY_GATE=1 node --test test/parity-gate-lanes.test.js",
+    "gate:parity": "node ./bin/space-data-module.js parity-gate",
+    "gate:parity-negative-control": "node ./bin/space-data-module.js parity-gate --gate-manifest ./parity/negative-control.json --expect-fail",
     "test:stream-ingest": "node --test test/runtime-host-stream-ingest.test.js",
     "test:module-stream": "node --test test/module-flatbuffer-stream-pump.test.js",
     "benchmark:stream-1gib": "SPACE_DATA_MODULE_SDK_ENABLE_1GB_STREAM_TEST=1 node --test test/runtime-host-stream-ingest.test.js",

@@ -1,0 +1,14 @@
+{
+  "//": "NEGATIVE CONTROL. This manifest deliberately declares an artifact known to violate the module contract, and the gate is run with --expect-fail. A gate that has never been observed to fail is indistinguishable from a gate that cannot fail — which is exactly the defect this whole task exists to repair (the previous slot was a hardcoded `exit 1` that could never go green, and before that a `required:false` red everyone learned to ignore). Run: `space-data-module parity-gate --gate-manifest ./parity/negative-control.json --expect-fail`.",
+  "name": "module-sdk-tri-runtime-NEGATIVE-CONTROL",
+  "artifacts": [
+    {
+      "id": "negative-control-flatsql-emscripten-glue",
+      "packagePath": "flatsql/wasm/flatsql.wasm",
+      "surface": "flatsql-engine",
+      "profile": "library",
+      "negativeControl": true,
+      "note": "The emscripten BROWSER build of the FlatSQL engine, declared against the isomorphic engine surface. It carries minified emscripten glue imports and cannot instantiate on a plain WasmEdge host. The gate MUST report a forbidden-import-class failure. If this ever passes, the classifier has been broken — not the artifact fixed."
+    }
+  ]
+}

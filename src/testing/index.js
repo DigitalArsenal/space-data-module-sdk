@@ -48,6 +48,34 @@ export {
   runDockerWasmEdgeLane,
   runNativeWasmEdgeLane,
 } from "./parityLanes.js";
+export {
+  FLATSQL_IO_IMPORTS,
+  FLATSQL_IO_SIGNATURES,
+  FORBIDDEN_IMPORT_CLASSES,
+  HOSTCALL_IMPORTS,
+  HOSTCALL_IMPORT_MODULE,
+  HOST_SURFACES,
+  WASI_THREADS_IMPORTS,
+  classifyArtifactImports,
+  describeClassification,
+  readWasmImportDescriptors,
+  readWasmImports,
+  resolveHostSurface,
+} from "./hostContract.js";
+export {
+  ContractVerdict,
+  DEFAULT_GATE_MANIFEST,
+  LANE_EVIDENCE,
+  classifyWasmEdgeProbe,
+  deriveContractVerdict,
+  detectNativeWasmEdge,
+  formatGateReport,
+  gateReceiptDigest,
+  lanesAgree,
+  loadGateManifest,
+  packageRootDir,
+  runParityGate,
+} from "./parityGate.js";
 
 const CapabilitySurfaceMatrix = Object.freeze({
   logging: Object.freeze({
