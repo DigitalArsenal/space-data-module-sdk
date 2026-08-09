@@ -755,6 +755,40 @@ export function deriveContractVerdict({
  * under the bare WasmEdge CLI is NOT a divergence, and the report says so in
  * those words rather than pretending the lanes matched.
  */
+/**
+ * The P1 cross-runtime divergences among the lanes that ACTUALLY RAN.
+ *
+ * Extracted and exported so a test can drive the real comparison instead of
+ * re-implementing it: a test that hand-rolls this loop passes whether or not
+ * the shipped one is correct, which is precisely how the defect below survived
+ * its own regression test.
+ *
+ * Pass the COMPARED lanes — the ones not `out-of-declared-scope`. This used to
+ * pivot on `lanes[0]`, which is the BROWSER lane, and for a WasmEdge-only
+ * artifact that entry is `out-of-declared-scope`, which agrees with everything.
+ * Pivoting on it silently stopped comparing wasmedge-native against
+ * wasmedge-docker: the gate reported such an artifact adequately gated on two
+ * lanes while comparing nothing at all, defeating the very rule
+ * `certified-on-a-single-lane` states. Scoping a lane out must remove that LANE
+ * from the comparison, never the comparison itself.
+ *
+ * @param {Array<{lane: string, contractVerdict: string, reason?: string|null}>} comparedLanes
+ * @returns {string[]} one message per divergence
+ */
+export function laneDivergences(comparedLanes) {
+  const messages = [];
+  for (let index = 1; index < (comparedLanes?.length ?? 0); index += 1) {
+    const pivot = comparedLanes[0];
+    const other = comparedLanes[index];
+    if (lanesAgree(pivot.contractVerdict, other.contractVerdict)) continue;
+    messages.push(
+      `P1 cross-runtime divergence: ${pivot.lane}=${pivot.contractVerdict} vs ` +
+        `${other.lane}=${other.contractVerdict} (${other.reason ?? "-"})`,
+    );
+  }
+  return messages;
+}
+
 export function lanesAgree(a, b) {
   // A lane the artifact declared itself out of cannot disagree with anything:
   // there is no behaviour to compare, only a scope statement.
@@ -1168,27 +1202,8 @@ export async function runParityGate(options = {}) {
       }
     }
 
-    // DIVERGENCE IS COMPARED AMONG THE LANES THAT RAN. This loop used to pivot
-    // on `lanes[0]`, which is the BROWSER lane — and for a WasmEdge-only
-    // artifact that entry is now `out-of-declared-scope`, which agrees with
-    // everything. Pivoting on it silently stopped comparing wasmedge-native
-    // against wasmedge-docker: the gate would have reported such an artifact
-    // adequately gated on two lanes while comparing nothing at all, defeating
-    // the very rule `certified-on-a-single-lane` states. Scoping a lane out
-    // must remove that lane from the comparison, never the comparison itself.
-    for (let index = 1; index < comparedLanes.length; index += 1) {
-      if (
-        !lanesAgree(
-          comparedLanes[0].contractVerdict,
-          comparedLanes[index].contractVerdict,
-        )
-      ) {
-        failures.push({
-          artifact: artifact.id,
-          kind: "lane-divergence",
-          message: `P1 cross-runtime divergence: ${comparedLanes[0].lane}=${comparedLanes[0].contractVerdict} vs ${comparedLanes[index].lane}=${comparedLanes[index].contractVerdict} (${comparedLanes[index].reason ?? "-"})`,
-        });
-      }
+    for (const message of laneDivergences(comparedLanes)) {
+      failures.push({ artifact: artifact.id, kind: "lane-divergence", message });
     }
 
     artifactReports.push({

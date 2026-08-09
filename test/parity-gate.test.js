@@ -38,6 +38,7 @@ import {
   wasmEdgeProbeArgs as wasmEdgeProbeArgsForTest,
   declaredRuntimeTargets,
   laneIsInDeclaredScope,
+  laneDivergences,
   LANE_RUNTIME_TARGET,
   runParityGate,
 } from "../src/testing/parityGate.js";
@@ -717,13 +718,17 @@ test("the gate manifest's lane claim outranks the artifact's own declaration", a
 });
 
 test("scoping a lane out removes THAT LANE from the comparison, never the comparison itself", () => {
-  // THE REGRESSION THAT SHIPPED AND WAS CAUGHT IN REVIEW. The divergence loop
-  // used to pivot on lanes[0] — the browser lane — and `lanesAgree` treats
-  // out-of-declared-scope as agreeing with everything. For a WasmEdge-only
-  // artifact, lanes[0] is out of scope, so wasmedge-native was never compared
-  // against wasmedge-docker: the gate reported the artifact adequately gated
-  // on two lanes while comparing nothing at all. Pivoting on the COMPARED
-  // lanes is the fix; this test is the proof it stays fixed.
+  // THE REGRESSION THAT SHIPPED AND WAS CAUGHT IN REVIEW. The divergence
+  // comparison used to pivot on lanes[0] — the browser lane — and `lanesAgree`
+  // treats out-of-declared-scope as agreeing with everything. For a
+  // WasmEdge-only artifact lanes[0] is out of scope, so wasmedge-native was
+  // never compared against wasmedge-docker: the gate reported the artifact
+  // adequately gated on two lanes while comparing nothing at all.
+  //
+  // This drives `laneDivergences`, THE SHIPPED COMPARISON, rather than a
+  // hand-rolled copy of it — a test that re-implements the loop passes whether
+  // or not the real one is correct, which is exactly how the defect got past a
+  // regression test the first time.
   const lanes = [
     { lane: "browser", contractVerdict: ContractVerdict.OutOfDeclaredScope, reason: "declared out" },
     { lane: "wasmedge-docker", contractVerdict: ContractVerdict.Satisfied, reason: null },
@@ -733,28 +738,52 @@ test("scoping a lane out removes THAT LANE from the comparison, never the compar
     (entry) => entry.contractVerdict !== ContractVerdict.OutOfDeclaredScope,
   );
 
-  // What the defective loop saw: pivot on lanes[0], which agrees with all.
-  const pivotOnFirstLane = [];
-  for (let index = 1; index < lanes.length; index += 1) {
-    if (!lanesAgree(lanes[0].contractVerdict, lanes[index].contractVerdict)) {
-      pivotOnFirstLane.push(lanes[index].lane);
-    }
-  }
+  // A genuine WasmEdge-only artifact still has two lanes to compare…
+  assert.equal(compared.length, 2);
+  // …and the shipped comparison reports their disagreement.
+  const reported = laneDivergences(compared);
+  assert.equal(reported.length, 1, JSON.stringify(reported));
+  assert.match(reported[0], /wasmedge-docker=satisfied vs wasmedge-native=violated/);
+
+  // Feeding it the UNFILTERED lanes is the defect, and it reports nothing —
+  // pinned here so the fix cannot be quietly reverted at the call site.
   assert.deepEqual(
-    pivotOnFirstLane,
+    laneDivergences(lanes),
     [],
-    "the defective pivot really did report nothing — this is why the test exists",
+    "pivoting on an out-of-scope lane reports nothing; that is why the call site must pass comparedLanes",
   );
 
-  // What the shipped loop must see.
-  const pivotOnCompared = [];
-  for (let index = 1; index < compared.length; index += 1) {
-    if (!lanesAgree(compared[0].contractVerdict, compared[index].contractVerdict)) {
-      pivotOnCompared.push(compared[index].lane);
-    }
-  }
-  assert.deepEqual(pivotOnCompared, ["wasmedge-native"]);
+  // And a real disagreement between two in-scope lanes is still caught when no
+  // lane is scoped out at all.
+  assert.equal(
+    laneDivergences([
+      { lane: "browser", contractVerdict: ContractVerdict.Satisfied, reason: null },
+      { lane: "wasmedge-native", contractVerdict: ContractVerdict.Violated, reason: "x" },
+    ]).length,
+    1,
+  );
+});
 
-  // And a genuine WasmEdge-only artifact still has two lanes to compare.
-  assert.equal(compared.length, 2);
+test("the gate feeds the divergence comparison the COMPARED lanes, not every lane", () => {
+  // The half the unit test above cannot reach. `laneDivergences` is correct for
+  // whatever it is handed; the defect was in WHAT the call site handed it, and
+  // no local run can manufacture a genuine docker-vs-native disagreement to
+  // catch that (both lanes are identical by construction, and an unavailable
+  // lane is dropped from activeLanes rather than marked divergent). So assert
+  // the argument directly. Reverting the call site to `lanes` fails here, which
+  // is the whole point — verified by doing exactly that.
+  const source = readFileSync(
+    path.join(REPO_ROOT, "src/testing/parityGate.js"),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /laneDivergences\(comparedLanes\)/,
+    "runParityGate must compare only the lanes that actually ran",
+  );
+  assert.doesNotMatch(
+    source,
+    /laneDivergences\(lanes\)/,
+    "pivoting on an out-of-scope lane silently disables P1 divergence detection",
+  );
 });
