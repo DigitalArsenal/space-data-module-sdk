@@ -10,8 +10,10 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import os from "node:os";
 import path from "node:path";
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 
 import {
   classifyArtifactImports,
@@ -34,7 +36,14 @@ import {
   DEFAULT_GATE_MANIFEST,
   resolveReactorEntry as resolveReactorEntryForTest,
   wasmEdgeProbeArgs as wasmEdgeProbeArgsForTest,
+  declaredRuntimeTargets,
+  laneIsInDeclaredScope,
+  LANE_RUNTIME_TARGET,
+  runParityGate,
 } from "../src/testing/parityGate.js";
+import { appendWasmCustomSection } from "../src/bundle/wasm.js";
+import { SDS_MANIFEST_SECTION_NAME } from "../src/bundle/constants.js";
+import { encodePluginManifest } from "../src/manifest/index.js";
 import {
   normalizeWasmEdgeOutcome,
   splitWasmEdgeDiagnostics,
@@ -491,4 +500,218 @@ test("the report names the defect class and the receipt digest tracks verdicts",
     ],
   });
   assert.notEqual(digest, flipped, "the digest must move when a lane verdict moves");
+});
+
+
+// --- declared runtime-target scoping ------------------------------------------
+//
+// Composed flows DERIVE their runtimeTargets, so an artifact that legitimately
+// runs on one leg only now exists. The browser harness refuses such an
+// artifact by name — correctly — and before this scoping the gate classed that
+// refusal as a TRAP and scored it a P1 cross-runtime divergence. A gate that
+// fails the artifacts the compiler is supposed to emit is worse than no gate:
+// it makes the correct fix look like the defect.
+
+test("a lane the artifact declared itself out of is in scope for nobody, and disagrees with nobody", () => {
+  assert.equal(laneIsInDeclaredScope("browser", ["wasmedge"]), false);
+  assert.equal(laneIsInDeclaredScope("wasmedge-native", ["wasmedge"]), true);
+  assert.equal(laneIsInDeclaredScope("wasmedge-docker", ["wasmedge"]), true);
+  assert.equal(laneIsInDeclaredScope("browser", ["browser", "wasmedge"]), true);
+  // wasi is the portability baseline: it satisfies both legs.
+  assert.equal(laneIsInDeclaredScope("browser", ["wasi"]), true);
+  assert.equal(laneIsInDeclaredScope("wasmedge-native", ["wasi"]), true);
+  // An artifact that declares nothing is unconstrained.
+  assert.equal(laneIsInDeclaredScope("browser", []), true);
+  assert.equal(laneIsInDeclaredScope("browser", undefined), true);
+
+  assert.equal(LANE_RUNTIME_TARGET.browser, "browser");
+  assert.equal(LANE_RUNTIME_TARGET["wasmedge-native"], "wasmedge");
+  assert.equal(LANE_RUNTIME_TARGET["wasmedge-docker"], "wasmedge");
+});
+
+test("out-of-declared-scope is not a divergence, and every other pairing still is", () => {
+  assert.equal(
+    lanesAgree(ContractVerdict.OutOfDeclaredScope, ContractVerdict.Satisfied),
+    true,
+  );
+  assert.equal(
+    lanesAgree(ContractVerdict.Satisfied, ContractVerdict.OutOfDeclaredScope),
+    true,
+  );
+  assert.equal(
+    lanesAgree(ContractVerdict.OutOfDeclaredScope, ContractVerdict.Violated),
+    true,
+    "a lane the artifact does not claim carries no behaviour to compare",
+  );
+  // The gate must still be able to fail.
+  assert.equal(lanesAgree(ContractVerdict.Satisfied, ContractVerdict.Violated), false);
+  assert.equal(lanesAgree(ContractVerdict.Satisfied, ContractVerdict.Unavailable), false);
+});
+
+test("declaredRuntimeTargets reads the artifact's own record, and is silent when there is none", () => {
+  // A synthetic module with no SDS manifest section declares nothing.
+  assert.deepEqual(declaredRuntimeTargets(buildWasm([])), []);
+  // The repo's own shipped vector carries a real manifest.
+  const vector = readFileSync(
+    path.join(REPO_ROOT, "examples/single-file-bundle/vectors/single-file-module.wasm"),
+  );
+  const targets = declaredRuntimeTargets(new Uint8Array(vector));
+  assert.ok(Array.isArray(targets));
+});
+
+test("the wasi baseline does not admit a lane for a capability that lane cannot serve", () => {
+  // `pipe` is in BOTH the standalone-WASI capability subset and the
+  // browser-incompatible set, so a `runtimeTargets:["wasi"]` artifact carrying
+  // it passes compliance and would otherwise be admitted to the browser lane
+  // against the SDK's own policy.
+  assert.equal(laneIsInDeclaredScope("browser", ["wasi"], ["logging"]), true);
+  assert.equal(laneIsInDeclaredScope("browser", ["wasi"], ["pipe"]), false);
+  assert.equal(laneIsInDeclaredScope("wasmedge-native", ["wasi"], ["pipe"]), true);
+  // Capability records, not just plain strings.
+  assert.equal(
+    laneIsInDeclaredScope("browser", ["wasi"], [{ name: "pipe", required: true }]),
+    false,
+  );
+});
+
+test("an artifact cannot certify itself by scoping out of every lane", async (t) => {
+  // THE NEGATIVE CONTROL FOR THE SCOPING ITSELF. Scoping a lane out is a
+  // legitimate statement about where an artifact runs; it must never become a
+  // way to be certified without being run. One manifest string would otherwise
+  // disarm the whole gate.
+  // A module with NO manifest of its own, so the one appended below is the
+  // only declaration the gate can find. (A shipped vector already carries an
+  // embedded $PLG, and the first one located wins.)
+  const bytes = buildWasm([]);
+  const dir = await mkdtemp(path.join(os.tmpdir(), "parity-scope-control-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  const write = async (name, runtimeTargets) => {
+    const manifest = {
+      pluginId: `com.digitalarsenal.test.${name}`,
+      name,
+      version: "1.0.0",
+      pluginFamily: "foundation",
+      capabilities: [],
+      invokeSurfaces: ["command"],
+      runtimeTargets,
+      methods: [],
+      schemasUsed: [],
+      abiVersion: 1,
+    };
+    const artifactPath = path.join(dir, `${name}.wasm`);
+    await writeFile(
+      artifactPath,
+      appendWasmCustomSection(
+        new Uint8Array(bytes),
+        SDS_MANIFEST_SECTION_NAME,
+        encodePluginManifest(manifest),
+      ),
+    );
+    return artifactPath;
+  };
+
+  const offRoadPath = await write("off-road", ["node"]);
+  const singleLanePath = await write("browser-only", ["browser"]);
+  const manifestPath = path.join(dir, "gate.json");
+  await writeFile(
+    manifestPath,
+    JSON.stringify({
+      name: "scope-negative-control",
+      artifacts: [
+        { id: "off-road", path: offRoadPath, surface: "module", profile: "command" },
+        { id: "browser-only", path: singleLanePath, surface: "module", profile: "command" },
+      ],
+    }),
+  );
+
+  const report = await runParityGate({
+    manifestPath,
+    lanes: ["browser", "wasmedge-native", "wasmedge-docker"],
+    // Every lane is deliberately unavailable: this test is about the SCOPING
+    // decision, which is made from the artifact's own declaration and must
+    // stand on its own before any lane runs.
+    chromeBinary: path.join(dir, "no-such-chrome"),
+    wasmedgeBinary: path.join(dir, "no-such-wasmedge"),
+    dockerBinary: path.join(dir, "no-such-docker"),
+    autoBuildDockerImage: false,
+    log: () => {},
+  });
+
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.failures.some(
+      (failure) =>
+        failure.artifact === "off-road" &&
+        failure.kind === "artifact-out-of-every-lane",
+    ),
+    `expected artifact-out-of-every-lane, got ${JSON.stringify(report.failures)}`,
+  );
+});
+
+test("the gate manifest's lane claim outranks the artifact's own declaration", async (t) => {
+  // An artifact must not be able to shrink what it is examined on by editing
+  // its own $PLG. The manifest is the SDK's claim about what it certifies.
+  const bytes = buildWasm([]);
+  const dir = await mkdtemp(path.join(os.tmpdir(), "parity-expected-lanes-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  const manifest = {
+    pluginId: "com.digitalarsenal.test.shrinker",
+    name: "shrinker",
+    version: "1.0.0",
+    pluginFamily: "foundation",
+    capabilities: [],
+    invokeSurfaces: ["command"],
+    runtimeTargets: ["wasmedge"],
+    methods: [],
+    schemasUsed: [],
+    abiVersion: 1,
+  };
+  const artifactPath = path.join(dir, "shrinker.wasm");
+  await writeFile(
+    artifactPath,
+    appendWasmCustomSection(
+      new Uint8Array(bytes),
+      SDS_MANIFEST_SECTION_NAME,
+      encodePluginManifest(manifest),
+    ),
+  );
+  const manifestPath = path.join(dir, "gate.json");
+  await writeFile(
+    manifestPath,
+    JSON.stringify({
+      name: "expected-lanes-control",
+      artifacts: [
+        {
+          id: "shrinker",
+          path: artifactPath,
+          surface: "module",
+          profile: "command",
+          expectedLanes: ["browser"],
+        },
+      ],
+    }),
+  );
+
+  const report = await runParityGate({
+    manifestPath,
+    lanes: ["browser", "wasmedge-native", "wasmedge-docker"],
+    chromeBinary: path.join(dir, "no-such-chrome"),
+    wasmedgeBinary: path.join(dir, "no-such-wasmedge"),
+    dockerBinary: path.join(dir, "no-such-docker"),
+    autoBuildDockerImage: false,
+    log: () => {},
+  });
+
+  assert.equal(report.ok, false);
+  assert.ok(
+    report.failures.some(
+      (failure) =>
+        failure.artifact === "shrinker" &&
+        failure.kind === "expected-lane-not-compared" &&
+        /browser/.test(failure.message),
+    ),
+    `expected expected-lane-not-compared, got ${JSON.stringify(report.failures)}`,
+  );
 });

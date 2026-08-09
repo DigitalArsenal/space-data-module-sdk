@@ -58,6 +58,8 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { toLoadableWasmBytes } from "../bundle/artifactBytes.js";
+import { locateEmbeddedPlgManifest } from "../compliance/index.js";
+import { runtimeTargetSatisfies } from "../host/runtimeTargetGate.js";
 import {
   classifyArtifactImports,
   describeClassification,
@@ -110,7 +112,55 @@ export const ContractVerdict = Object.freeze({
   ShimGap: "shim-gap",
   /** The lane could not run at all. */
   Unavailable: "lane-unavailable",
+  /**
+   * The artifact DECLARES that it does not run on this lane's runtime target.
+   * Not a pass, not a divergence, not a trap: a scope statement the artifact
+   * itself makes, recorded as evidence. Composed flows derive their
+   * runtimeTargets from their parts, so a WasmEdge-only flow is legitimate —
+   * and without this class its (correct, loud) refusal by the browser harness
+   * scored as a P1 cross-runtime divergence, which would have made the gate
+   * fail exactly the artifacts this SDK just taught the compiler to emit.
+   */
+  OutOfDeclaredScope: "out-of-declared-scope",
 });
+
+/** Which runtime target each parity lane stands for. */
+export const LANE_RUNTIME_TARGET = Object.freeze({
+  browser: "browser",
+  "wasmedge-native": "wasmedge",
+  "wasmedge-docker": "wasmedge",
+});
+
+/**
+ * The artifact's own declared runtimeTargets, read from its embedded `$PLG`.
+ * An artifact that declares none is unconstrained — every lane is in scope,
+ * which is the historical behaviour and stays the default.
+ */
+export function declaredRuntimeTargets(loadableBytes) {
+  try {
+    const located = locateEmbeddedPlgManifest(loadableBytes);
+    const declared = located?.decoded?.runtimeTargets;
+    return Array.isArray(declared)
+      ? declared.map((t) => String(t ?? "").trim().toLowerCase()).filter(Boolean)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function declaredCapabilities(loadableBytes) {
+  try {
+    const located = locateEmbeddedPlgManifest(loadableBytes);
+    return located?.decoded?.capabilities ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export function laneIsInDeclaredScope(laneName, targets, capabilities) {
+  const leg = LANE_RUNTIME_TARGET[laneName];
+  return leg ? runtimeTargetSatisfies(targets, leg, capabilities) : true;
+}
 
 // --- Manifest ------------------------------------------------------------------
 
@@ -181,6 +231,16 @@ export async function loadGateManifest(manifestPath = DEFAULT_GATE_MANIFEST) {
           ? path.resolve(path.dirname(resolved), String(spec.fixture))
           : null,
         required: spec.required !== false,
+        // The GATE'S claim about which lanes this artifact owes evidence on.
+        // Authority for that belongs to the manifest, not to the artifact's
+        // own `$PLG`: an artifact must not be able to reduce what it is
+        // examined on by editing its own declaration. Omitted means "every
+        // active lane its declaration admits".
+        expectedLanes: Object.freeze(
+          Array.isArray(spec.expectedLanes)
+            ? spec.expectedLanes.map((lane) => String(lane))
+            : [],
+        ),
         note: spec.note ? String(spec.note) : null,
         negativeControl: spec.negativeControl === true,
       }),
@@ -205,6 +265,11 @@ export function makeExternalArtifact(spec) {
     profile: String(spec.profile ?? "library"),
     fixture: spec.fixture ? path.resolve(String(spec.fixture)) : null,
     required: spec.required !== false,
+    expectedLanes: Object.freeze(
+      Array.isArray(spec.expectedLanes)
+        ? spec.expectedLanes.map((lane) => String(lane))
+        : [],
+    ),
     note: spec.note ? String(spec.note) : "injected by caller (external artifact)",
     negativeControl: spec.negativeControl === true,
   });
@@ -691,6 +756,14 @@ export function deriveContractVerdict({
  * those words rather than pretending the lanes matched.
  */
 export function lanesAgree(a, b) {
+  // A lane the artifact declared itself out of cannot disagree with anything:
+  // there is no behaviour to compare, only a scope statement.
+  if (
+    a === ContractVerdict.OutOfDeclaredScope ||
+    b === ContractVerdict.OutOfDeclaredScope
+  ) {
+    return true;
+  }
   const equivalence = (verdict) =>
     verdict === ContractVerdict.RunnerCannotSupplyCapability
       ? ContractVerdict.Satisfied
@@ -797,6 +870,8 @@ export async function runParityGate(options = {}) {
         artifactSha256: sha256Hex(rawBytes),
         moduleSha256: sha256Hex(loadableBytes),
         structural: classifyArtifactImports(loadableBytes, spec.surface),
+        declaredRuntimeTargets: declaredRuntimeTargets(loadableBytes),
+        declaredCapabilities: declaredCapabilities(loadableBytes),
       });
     } catch (error) {
       if (spec.required) {
@@ -877,10 +952,25 @@ export async function runParityGate(options = {}) {
   // --- Tier A: real instantiation probes
   const laneProbes = new Map(); // lane -> Map(artifactId -> probe)
 
-  if (activeLanes.includes("browser") && artifacts.length > 0) {
+  // SCOPE BEFORE PROBING. An artifact that declares it does not run on a lane
+  // has nothing to learn from being launched there; probing anyway costs a
+  // Chrome start or a WasmEdge spawn per artifact for evidence the verdict
+  // then discards, and leaves the (expected) trap in the log as noise the
+  // report says was out of scope.
+  const inScopeArtifacts = (lane) =>
+    artifacts.filter((artifact) =>
+      laneIsInDeclaredScope(
+        lane,
+        artifact.declaredRuntimeTargets,
+        artifact.declaredCapabilities,
+      ),
+    );
+
+  const browserArtifacts = inScopeArtifacts("browser");
+  if (activeLanes.includes("browser") && browserArtifacts.length > 0) {
     const probes = new Map();
     try {
-      const results = await runBrowserProbeLane(context, artifacts);
+      const results = await runBrowserProbeLane(context, browserArtifacts);
       for (const result of results) {
         probes.set(result.id, {
           outcome: result.outcome,
@@ -890,7 +980,9 @@ export async function runParityGate(options = {}) {
           crossOriginIsolated: result.crossOriginIsolated === true,
         });
       }
-      const missing = artifacts.filter((artifact) => !probes.has(artifact.id));
+      const missing = browserArtifacts.filter(
+        (artifact) => !probes.has(artifact.id),
+      );
       for (const artifact of missing) {
         probes.set(artifact.id, {
           outcome: "lane-unavailable",
@@ -899,7 +991,7 @@ export async function runParityGate(options = {}) {
         });
       }
     } catch (error) {
-      for (const artifact of artifacts) {
+      for (const artifact of browserArtifacts) {
         probes.set(artifact.id, {
           outcome: "lane-unavailable",
           detail: error?.message ?? String(error),
@@ -917,7 +1009,7 @@ export async function runParityGate(options = {}) {
 
   for (const lane of wasmedgeLanes) {
     const probes = new Map();
-    for (const artifact of artifacts) {
+    for (const artifact of inScopeArtifacts(lane)) {
       const staged = await stageArtifact(artifact);
       try {
         const probe =
@@ -942,26 +1034,105 @@ export async function runParityGate(options = {}) {
   const artifactReports = [];
   for (const artifact of artifacts) {
     const lanes = [];
-    for (const lane of laneProbes.keys()) {
-      const probe = laneProbes.get(lane).get(artifact.id) ?? {
+    // Iterate the ACTIVE lanes, not the probed ones: a lane with no in-scope
+    // artifact is never launched, and its scoping still has to appear in the
+    // report. A skipped lane is evidence; a missing row is silence.
+    for (const lane of activeLanes) {
+      const probe = laneProbes.get(lane)?.get(artifact.id) ?? {
         outcome: "lane-unavailable",
         detail: "no probe recorded",
         missingImport: null,
       };
-      const derived = deriveContractVerdict({
-        laneSuppliesCapabilities: lane === "browser",
-        probe,
-        structural: artifact.structural,
-      });
+      const inScope = laneIsInDeclaredScope(
+        lane,
+        artifact.declaredRuntimeTargets,
+        artifact.declaredCapabilities,
+      );
+      const derived = inScope
+        ? deriveContractVerdict({
+            laneSuppliesCapabilities: lane === "browser",
+            probe,
+            structural: artifact.structural,
+          })
+        : {
+            verdict: ContractVerdict.OutOfDeclaredScope,
+            reason:
+              `the artifact declares runtimeTargets ` +
+              `[${artifact.declaredRuntimeTargets.join(", ")}], which does not include ` +
+              `"${LANE_RUNTIME_TARGET[lane]}" — this lane is out of its declared scope, ` +
+              "so its refusal here is the contract working, not a divergence",
+          };
       lanes.push({
         lane,
-        evidence: LANE_EVIDENCE[lane] ?? "unlabelled lane",
-        outcome: probe.outcome,
-        missingImport: probe.missingImport ?? null,
-        detail: probe.detail ?? null,
+        evidence: inScope
+          ? (LANE_EVIDENCE[lane] ?? "unlabelled lane")
+          : "artifact's own embedded runtimeTargets declaration",
+        outcome: inScope ? probe.outcome : "out-of-declared-scope",
+        missingImport: inScope ? (probe.missingImport ?? null) : null,
+        detail: inScope ? (probe.detail ?? null) : derived.reason,
         contractVerdict: derived.verdict,
         reason: derived.reason,
-        crossOriginIsolated: probe.crossOriginIsolated,
+        crossOriginIsolated: inScope ? (probe.crossOriginIsolated ?? null) : null,
+        declaredRuntimeTargets: artifact.declaredRuntimeTargets,
+      });
+    }
+
+    // THE ARTIFACT DOES NOT PICK ITS EXAMINERS.
+    //
+    // Scoping a lane out is a legitimate statement about where an artifact
+    // runs; it is not a way to be certified without being run. An artifact in
+    // the gate's own certified set that scopes ITSELF out of every lane — or
+    // out of all but one, leaving nothing to compare — has not been gated at
+    // all, and `lanesAgree` returning true pairwise must never stand in for
+    // "two lanes were compared". One manifest string would otherwise disarm
+    // the negative control.
+    const comparedLanes = lanes.filter(
+      (entry) => entry.contractVerdict !== ContractVerdict.OutOfDeclaredScope,
+    );
+    const comparedLaneNames = comparedLanes.map((entry) => entry.lane);
+    if (comparedLanes.length === 0) {
+      failures.push({
+        artifact: artifact.id,
+        kind: "artifact-out-of-every-lane",
+        message:
+          `declares runtimeTargets [${artifact.declaredRuntimeTargets.join(", ")}], ` +
+          `which admits none of the active lanes [${activeLanes.join(", ")}] — ` +
+          "it cannot be certified by a gate that never ran it",
+      });
+    } else if (activeLanes.length > 1 && comparedLanes.length < 2) {
+      // NO ARTIFACT IS CERTIFIED ON THE EVIDENCE OF A SINGLE LANE. The rule is
+      // about evidence, not about the artifact's shape: one lane is one
+      // execution, and one execution is not parity. A WasmEdge-only artifact
+      // still clears this — native host vs pinned container at one pin is a
+      // real comparison, and those pins bump together by law. A browser-only
+      // artifact does not, until the second browser lane (sequential vs
+      // worker-pool, owed by browser-worker-topology) exists to compare it to.
+      failures.push({
+        artifact: artifact.id,
+        kind: "certified-on-a-single-lane",
+        message:
+          `only lane "${comparedLanes[0].lane}" of [${activeLanes.join(", ")}] compared it ` +
+          `(it declares runtimeTargets [${artifact.declaredRuntimeTargets.join(", ")}]) — ` +
+          "one execution is not parity, so no artifact is certified on the evidence of a " +
+          "single lane",
+      });
+    }
+    // The manifest's claim outranks the artifact's declaration: an artifact
+    // may not shrink the set of lanes it is examined on by editing its own
+    // `$PLG`.
+    const owed = (artifact.expectedLanes ?? []).filter((lane) =>
+      activeLanes.includes(lane),
+    );
+    const unmet = owed.filter((lane) => !comparedLaneNames.includes(lane));
+    if (unmet.length > 0) {
+      failures.push({
+        artifact: artifact.id,
+        kind: "expected-lane-not-compared",
+        message:
+          `the gate manifest requires lanes [${owed.join(", ")}] for this artifact, but ` +
+          `[${unmet.join(", ")}] produced no comparison — its own declaration ` +
+          `[${artifact.declaredRuntimeTargets.join(", ")}] cannot narrow what the gate ` +
+          "claims to certify",
       });
     }
 
@@ -1008,6 +1179,7 @@ export async function runParityGate(options = {}) {
       artifactSha256: artifact.artifactSha256,
       moduleSha256: artifact.moduleSha256,
       byteLength: artifact.loadableBytes.length,
+      declaredRuntimeTargets: artifact.declaredRuntimeTargets,
       structural: {
         verdict: artifact.structural.verdict,
         summary: describeClassification(artifact.structural),
@@ -1025,7 +1197,50 @@ export async function runParityGate(options = {}) {
   const behavioral = [];
   for (const artifact of artifacts) {
     if (!artifact.fixture) continue;
-    const harnessLanes = ["browser", ...(wasmedgeLanes.includes("wasmedge-native") ? ["wasmedge"] : []), "docker-wasmedge"];
+    // Behavioral lanes are scoped by the artifact's OWN declaration too: a
+    // WasmEdge-only artifact has no browser behaviour to compare, and running
+    // it there would score the harness's (correct) refusal as a divergence.
+    // The scoping is RECORDED — a skipped lane is evidence, never silence.
+    const harnessLanes = [
+      "browser",
+      ...(wasmedgeLanes.includes("wasmedge-native") ? ["wasmedge"] : []),
+      "docker-wasmedge",
+    ].filter((laneName) =>
+      laneIsInDeclaredScope(
+        laneName === "wasmedge"
+          ? "wasmedge-native"
+          : laneName === "docker-wasmedge"
+            ? "wasmedge-docker"
+            : laneName,
+        artifact.declaredRuntimeTargets,
+        artifact.declaredCapabilities,
+      ),
+    );
+    const outOfScopeLanes = ["browser", "wasmedge", "docker-wasmedge"].filter(
+      (laneName) => !harnessLanes.includes(laneName),
+    );
+    if (harnessLanes.length < 2) {
+      // An artifact that declared a FIXTURE asked to be compared. If its own
+      // declaration leaves nothing to compare it against, that is a defect in
+      // the certified set, not a free pass.
+      const message =
+        `behavioral parity needs two comparable lanes; this artifact declares ` +
+        `runtimeTargets [${artifact.declaredRuntimeTargets.join(", ")}] and only ` +
+        `${harnessLanes.length} lane(s) remain in scope`;
+      behavioral.push({
+        artifact: artifact.id,
+        ok: false,
+        outOfDeclaredScope: outOfScopeLanes,
+        declaredRuntimeTargets: artifact.declaredRuntimeTargets,
+        note: message,
+      });
+      failures.push({
+        artifact: artifact.id,
+        kind: "behavioral-not-comparable",
+        message,
+      });
+      continue;
+    }
     try {
       const report = await runParityHarness({
         wasmPath: artifact.artifactPath,
@@ -1037,7 +1252,17 @@ export async function runParityGate(options = {}) {
         timeoutMs: context.timeoutMs,
         log,
       });
-      behavioral.push({ artifact: artifact.id, ok: report.ok, report });
+      behavioral.push({
+        artifact: artifact.id,
+        ok: report.ok,
+        report,
+        ...(outOfScopeLanes.length > 0
+          ? {
+              outOfDeclaredScope: outOfScopeLanes,
+              declaredRuntimeTargets: artifact.declaredRuntimeTargets,
+            }
+          : {}),
+      });
       if (!report.ok) {
         for (const failure of report.failures) {
           failures.push({

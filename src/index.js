@@ -16,6 +16,17 @@ export * from "./deployment/index.js";
 export * from "./app/index.js";
 export { FLOW_INVALID_INDEX, createFlowRuntimeHost } from "./flow/flowRuntimeHost.js";
 export { createIsomorphicFlowRuntimeHost } from "./flow/isomorphicFlowHost.js";
+// The runtime-target gate: a composed flow derives its runtimeTargets, so a
+// single-leg artifact exists and every loader refuses one that is not its own.
+// Exported so a consumer can catch the refusal by CLASS rather than by
+// matching a message string, and can ask the same question before offering a
+// module to a leg.
+export {
+  RuntimeTargetError,
+  runtimeTargetSatisfies,
+  resolveRuntimeTargetRefusal,
+  embeddedRuntimeTargets,
+} from "./host/runtimeTargetGate.js";
 export {
   DefaultInvokeExports,
   DefaultManifestExports,

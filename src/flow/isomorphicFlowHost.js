@@ -220,6 +220,14 @@ export async function createIsomorphicFlowRuntimeHost(options = {}) {
   );
   const parent = await createFlowRuntimeHost({
     wasmSource: parentArtifactBytes,
+    // UNCONDITIONAL, with no opt-out. This host mounts every isomorphic child
+    // through the BROWSER module harness, whose gate cannot be turned off — so
+    // an escape hatch here would only ever produce an ungated parent with
+    // gated children, and a half-gate is not a gate. There is no legitimate
+    // non-browser use of this host precisely because of that mount; callers
+    // that want the runtime-agnostic host call createFlowRuntimeHost, which
+    // does take a stated leg.
+    runtimeTarget: "browser",
     args: options.args,
     env: options.env,
     logOutput: options.logOutput,

@@ -264,6 +264,7 @@ async function runFlow(argv) {
         console.log(`  ${issue.severity.toUpperCase()} ${issue.code}: ${issue.message}`);
       }
       console.log(`  capabilities: [${check.capabilities.join(", ")}]`);
+      console.log(`  runtimeTargets: [${(check.runtimeTargets ?? []).join(", ")}]`);
       for (const node of check.nodes) {
         console.log(`  node ${node.nodeId}: ${node.pluginId}:${node.methodId} (${node.dispatchModel})`);
       }
@@ -307,6 +308,9 @@ async function runFlow(argv) {
   } else {
     console.log(`Wrote ${result.outputs.moduleWasmPath}`);
     console.log(`  capabilities: [${result.check.capabilities.join(", ")}]`);
+    console.log(
+      `  runtimeTargets: [${(result.manifest?.runtimeTargets ?? result.check.runtimeTargets ?? []).join(", ")}]`,
+    );
     for (const node of result.check.nodes) {
       console.log(`  node ${node.nodeId}: ${node.pluginId}:${node.methodId} (${node.dispatchModel})`);
     }

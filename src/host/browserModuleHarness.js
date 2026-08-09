@@ -49,6 +49,10 @@ import {
   resolveModuleSignaturePolicy,
   verifyModuleArtifact,
 } from "../bundle/signing.js";
+import {
+  assertArtifactRuntimeTarget,
+  RuntimeTargetError,
+} from "./runtimeTargetGate.js";
 // Artifact byte reduction is an ARTIFACT concern shared by all three runtimes,
 // so it lives on `space-data-module-sdk/bundle`. Re-exported here because a
 // caller loading a module in the browser needs it in the same breath.
@@ -257,6 +261,27 @@ function createImportedMemory(options = {}) {
   }
 
   return new WebAssembly.Memory(descriptor);
+}
+
+const BROWSER_RUNTIME_TARGET = "browser";
+
+export { RuntimeTargetError };
+
+/**
+ * TRI-RUNTIME ISOMORPHISM, ENFORCED AT THE DOOR.
+ *
+ * This harness IS the browser leg of the tri-runtime contract, wherever the
+ * JavaScript happens to be running — asking it to load an artifact that does
+ * not declare the browser is asking for a divergence. The shared gate in
+ * `runtimeTargetGate.js` does the work; both declarations are consulted and
+ * the artifact's own embedded record wins on conflict.
+ */
+export function assertBrowserRuntimeTarget(wasmModule, manifest) {
+  assertArtifactRuntimeTarget({
+    wasmModule,
+    manifest,
+    leg: BROWSER_RUNTIME_TARGET,
+  });
 }
 
 function resolveManifestSurface(manifest) {
@@ -471,6 +496,7 @@ export async function createBrowserModuleHarness(options = {}) {
   ownedArtifactBytes = null;
   wasmSource = null;
   options.wasmSource = null;
+  assertBrowserRuntimeTarget(wasmModule, options.manifest);
   const moduleImports = WebAssembly.Module.imports(wasmModule);
   const needsHostBridge = moduleImports.some(
     (entry) => entry.module === DEFAULT_HOSTCALL_IMPORT_MODULE,

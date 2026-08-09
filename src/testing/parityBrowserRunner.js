@@ -17,6 +17,7 @@ import { createBrowserModuleHarness } from "../host/browserModuleHarness.js";
 const OK = "ok";
 const GUEST_ERROR = "guest-error";
 const TRAP = "trap";
+const OUT_OF_SCOPE = "out-of-declared-scope";
 
 function base64ToBytes(value) {
   const binary = atob(String(value ?? ""));
@@ -41,6 +42,16 @@ function classifyBrowserError(error) {
   // with one means a real nonzero guest exit.
   if (error?.name === "WasiExitError") {
     return { exitClass: GUEST_ERROR, exitDetail: `exit=${error.code}` };
+  }
+  // The harness refused the artifact because the ARTIFACT declares it does not
+  // run here. That is the contract working. Classing it TRAP would score a
+  // correct refusal as a P1 cross-runtime divergence — the gate failing the
+  // very artifacts the compiler now legitimately emits.
+  if (error?.name === "RuntimeTargetError") {
+    return {
+      exitClass: OUT_OF_SCOPE,
+      exitDetail: `declared runtimeTargets [${(error.declaredTargets ?? []).join(", ")}]`,
+    };
   }
   return {
     exitClass: TRAP,

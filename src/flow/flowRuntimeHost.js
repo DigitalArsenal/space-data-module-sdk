@@ -16,6 +16,10 @@
 
 import { createBrowserWasiShim } from "../host/wasiShim.js";
 import {
+  assertArtifactRuntimeTarget,
+  detectBrowserLeg,
+} from "../host/runtimeTargetGate.js";
+import {
   isPayloadSchemaHashValid,
   normalizePayloadSchemaHash,
 } from "../manifest/typeRefs.js";
@@ -209,6 +213,28 @@ export async function createFlowRuntimeHost(options = {}) {
     // defensive `.slice().buffer` copy here would only add an extra
     // plaintext buffer that nothing zeroes. Compile from the view; no copy.
     wasmModule = await WebAssembly.compile(bytes);
+  }
+
+  // THE COMPOSED FLOW'S DOOR. A composed artifact now derives its
+  // runtimeTargets from its parts, so a WasmEdge-only flow is a real thing —
+  // and this host is how one gets loaded. It is genuinely runtime-agnostic
+  // (the same function backs the Node/WasmEdge leg), so the leg is stated by
+  // the caller; absent that, a real browser is detected and gated. Passing
+  // runtimeTarget: null opts out explicitly, which is not the same as
+  // forgetting.
+  const declaredLeg =
+    options.runtimeTarget === undefined
+      ? detectBrowserLeg()
+        ? "browser"
+        : null
+      : options.runtimeTarget;
+  if (declaredLeg) {
+    assertArtifactRuntimeTarget({
+      wasmModule,
+      manifest: options.manifest,
+      leg: String(declaredLeg).trim().toLowerCase(),
+      what: "composed flow artifact",
+    });
   }
 
   const wasi = createBrowserWasiShim({

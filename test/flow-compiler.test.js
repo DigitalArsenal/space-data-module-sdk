@@ -28,6 +28,7 @@ import {
 } from "../src/flow/flowCompiler.js";
 import { decodeFlowProgram } from "../src/flow/flowCodec.js";
 import { createFlowRuntimeHost } from "../src/flow/flowRuntimeHost.js";
+import { createIsomorphicFlowRuntimeHost } from "../src/flow/isomorphicFlowHost.js";
 import { normalizeManifestForSdnFlow } from "../src/flow/normalize.js";
 import {
   decodePluginManifest,
@@ -37,6 +38,11 @@ import {
   signModuleArtifact,
   verifyModuleArtifact,
 } from "../src/bundle/signing.js";
+import {
+  locateEmbeddedPlgManifest,
+  validatePluginManifest,
+} from "../src/compliance/index.js";
+import { createBrowserModuleHarness } from "../src/host/browserModuleHarness.js";
 
 const execFileAsync = promisify(execFile);
 const CLI_PATH = fileURLToPath(new URL("../bin/space-data-module.js", import.meta.url));
@@ -138,6 +144,11 @@ function makeDependency({
   methods,
   dependencies,
   pluginFamily = "foundation",
+  // Every real module manifest in the stack declares the isomorphic pair; the
+  // old ["browser"] default made these fixtures teach a shape that does not
+  // exist, and now that composed targets are DERIVED it made them derive the
+  // wrong answer too.
+  runtimeTargets = ["browser", "wasmedge"],
 }) {
   const manifest = {
     pluginId,
@@ -146,7 +157,7 @@ function makeDependency({
     pluginFamily,
     capabilities,
     externalInterfaces: [],
-    runtimeTargets: ["browser"],
+    runtimeTargets,
     methods,
     schemasUsed: [],
     abiVersion: 1,
@@ -1724,7 +1735,12 @@ test("flow check rejects a node capability escalation beyond its root manifest",
   assert.ok(check.errors.some((issue) => issue.code === "capability-escalation"));
 });
 
-test("flow compile rejects an invalid composed manifest before writing outputs", async (t) => {
+test("flow compile rejects an invalid DEPENDENCY manifest before writing outputs", async (t) => {
+  // The node's OWN manifest is the defect here: it declares the browser
+  // alongside a capability the browser cannot serve. That is caught at the
+  // per-dependency standards pass, BEFORE the composed manifest exists — which
+  // is why the composed-manifest pre-bake path needs its own test below rather
+  // than borrowing this one's name.
   const dependency = makeDependency({
     pluginId: "test.invalid-browser-capability",
     capabilities: ["process_exec"],
@@ -1745,6 +1761,45 @@ test("flow compile rejects an invalid composed manifest before writing outputs",
       error?.report?.errors?.some(
         (issue) => issue.code === "capability-runtime-conflict",
       ) === true || /capability-runtime-conflict/.test(error?.message ?? ""),
+  );
+  assert.equal(existsSync(outDir), false, "failed compliance must not leave a dist tree");
+});
+
+test("flow compile rejects an invalid COMPOSED manifest before writing outputs", async (t) => {
+  // A defect that exists ONLY on the composed manifest and that the runtime-
+  // target derivation cannot launder: the flow's own blank name, which
+  // `checkFlowProgram` does not police (it validates programId) and which no
+  // dependency can cause. Every dependency here is valid, so reaching this
+  // failure proves the composed manifest is compliance-validated before
+  // anything is baked. The compiler does NOT quietly substitute programId for
+  // a name the author blanked — putting words in the flow's mouth is the
+  // defect class this whole change exists to remove.
+  const dependency = makeDependency({
+    pluginId: "test.valid-node",
+    capabilities: [],
+    methods: producerDependency.manifest.methods,
+  });
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "flow-invalid-composed-test-"));
+  t.after(() => rm(tempRoot, { recursive: true, force: true }));
+  const outDir = path.join(tempRoot, "dist");
+
+  const flow = { ...singleNodeFlow(dependency), name: "" };
+  await assert.rejects(
+    () =>
+      compileFlowProgram({
+        flow,
+        dependencies: dependencyMap(dependency),
+        outDir,
+        catalog: catalogForManifests(dependency.manifest),
+      }),
+    (error) => {
+      assert.match(error?.message ?? "", /Flow manifest compliance validation failed/);
+      assert.ok(
+        (error?.report?.errors ?? []).length > 0,
+        JSON.stringify(error?.report?.issues ?? []),
+      );
+      return true;
+    },
   );
   assert.equal(existsSync(outDir), false, "failed compliance must not leave a dist tree");
 });
@@ -2970,4 +3025,646 @@ test("a bare-digest module signature verifies but is refused for composition", a
   });
   assert.equal(outcome.admitted, false, "verified is not the same as admissible");
   assert.match(outcome.message, /SDN-MODULE-PUBLICATION-V1/);
+});
+
+// ---------------------------------------------------------------------------
+// Composed runtimeTargets are DERIVED, not asserted
+// (upstream-module-sdk-4). The composed manifest used to hardcode
+// runtimeTargets ["browser","wasmedge"], and that manifest is compliance-
+// validated before the bake — so any flow containing a node with a
+// browser-incompatible capability (wallet_sign, tcp, storage_write, …) died on
+// `capability-runtime-conflict`. wallet_sign is the ONLY gate on
+// keyslot.unwrap, so the hardcode meant NO composed flow could ever unwrap a
+// host-held key. The fix: intersect the parts' declared targets. The invariant
+// it must not weaken: a browser-incompatible capability and a browser target
+// remain impossible together.
+// ---------------------------------------------------------------------------
+
+const BROWSER_INCOMPATIBLE_CAPABILITY = "wallet_sign";
+
+function credentialMediatorDependency(overrides = {}) {
+  return makeDependency({
+    pluginId: "test.credential-mediator",
+    capabilities: [BROWSER_INCOMPATIBLE_CAPABILITY],
+    runtimeTargets: ["wasmedge"],
+    methods: [
+      {
+        methodId: "mediate",
+        inputPorts: [
+          port("stream", { typeSets: [typedTypeSet("in", "OMM.fbs", "$OMM")] }),
+        ],
+        outputPorts: [
+          port("done", {
+            typeSets: [typedTypeSet("resp", "HttpResponseAbi.fbs", "$HTR")],
+          }),
+        ],
+        maxBatch: 1,
+        drainPolicy: "single-shot",
+      },
+    ],
+    ...overrides,
+  });
+}
+
+function mediatorFlow() {
+  return makeFlow({
+    programId: "test.credential-flow",
+    nodes: [
+      { nodeId: "producer", pluginId: "test.producer", methodId: "produce", kind: "transform" },
+      {
+        nodeId: "mediator",
+        pluginId: "test.credential-mediator",
+        methodId: "mediate",
+        kind: "transform",
+      },
+      { nodeId: "egress", pluginId: "test.sink", methodId: "collect", kind: "sink" },
+    ],
+    edges: [
+      { fromNodeId: "producer", fromPortId: "stream", toNodeId: "mediator", toPortId: "stream" },
+      { fromNodeId: "mediator", fromPortId: "done", toNodeId: "egress", toPortId: "response" },
+    ],
+    requiredPlugins: ["test.producer", "test.credential-mediator"],
+  });
+}
+
+test("a flow of fully isomorphic nodes keeps both runtime targets", () => {
+  const isomorphicProducer = makeDependency({
+    pluginId: "test.producer",
+    capabilities: ["storage_query"],
+    runtimeTargets: ["browser", "wasmedge"],
+    methods: producerDependency.manifest.methods,
+  });
+  const isomorphicConsumer = makeDependency({
+    pluginId: "test.consumer",
+    capabilities: ["http"],
+    runtimeTargets: ["browser", "wasmedge"],
+    methods: consumerDependency.manifest.methods,
+  });
+  const check = checkFlowProgram({
+    flow: makeFlow(),
+    dependencies: dependencyMap(isomorphicProducer, isomorphicConsumer),
+  });
+  assert.equal(check.ok, true, JSON.stringify(check.issues));
+  assert.deepEqual(check.runtimeTargets, ["browser", "wasmedge"]);
+
+  const manifest = buildFlowModuleManifest({
+    flow: makeFlow(),
+    check,
+    dependencies: dependencyMap(isomorphicProducer, isomorphicConsumer),
+  });
+  assert.deepEqual(manifest.runtimeTargets, ["browser", "wasmedge"]);
+  assert.equal(manifest.buildArtifacts[0].target, "browser,wasmedge");
+});
+
+test("one wasmedge-only node makes the whole composition wasmedge-only", () => {
+  const producer = makeDependency({
+    pluginId: "test.producer",
+    capabilities: ["storage_query"],
+    runtimeTargets: ["browser", "wasmedge"],
+    methods: producerDependency.manifest.methods,
+  });
+  const mediator = credentialMediatorDependency();
+  const flow = mediatorFlow();
+  const dependencies = dependencyMap(producer, mediator);
+  const check = checkFlowProgram({ flow, dependencies });
+
+  assert.equal(check.ok, true, JSON.stringify(check.issues));
+  assert.deepEqual(check.runtimeTargets, ["wasmedge"]);
+  assert.ok(check.capabilities.includes(BROWSER_INCOMPATIBLE_CAPABILITY));
+
+  const manifest = buildFlowModuleManifest({ flow, check, dependencies });
+  assert.deepEqual(manifest.runtimeTargets, ["wasmedge"]);
+  assert.equal(manifest.buildArtifacts[0].target, "wasmedge");
+
+  // THE REGRESSION: this exact manifest is what compileFlowProgram validates
+  // before baking. With the derived target set it is compliant; with the old
+  // hardcoded pair it is not.
+  const derived = validatePluginManifest(manifest, { sourceName: "flow" });
+  assert.equal(
+    derived.issues.some((issue) => issue.code === "capability-runtime-conflict"),
+    false,
+    JSON.stringify(derived.issues.filter((issue) => issue.severity === "error")),
+  );
+
+  const hardcoded = validatePluginManifest(
+    { ...manifest, runtimeTargets: ["browser", "wasmedge"] },
+    { sourceName: "flow" },
+  );
+  assert.ok(
+    hardcoded.issues.some(
+      (issue) =>
+        issue.code === "capability-runtime-conflict" && issue.severity === "error",
+    ),
+    "the browser-incompatible capability must still be refused against a browser target",
+  );
+});
+
+test("a resolved component dependency constrains the composition's targets too", () => {
+  const wasmedgeOnlyComponent = makeDependency({
+    pluginId: "test.component.wasmedge-only",
+    capabilities: ["storage_write"],
+    runtimeTargets: ["wasmedge"],
+    methods: producerDependency.manifest.methods,
+  });
+  const producer = makeDependency({
+    pluginId: "test.producer",
+    capabilities: ["storage_query"],
+    runtimeTargets: ["browser", "wasmedge"],
+    methods: producerDependency.manifest.methods,
+    dependencies: [
+      { pluginId: "test.component.wasmedge-only", minVersion: "1.0.0", maxVersion: "1.0.0" },
+    ],
+  });
+  const consumer = makeDependency({
+    pluginId: "test.consumer",
+    capabilities: ["http"],
+    runtimeTargets: ["browser", "wasmedge"],
+    methods: consumerDependency.manifest.methods,
+  });
+  const check = checkFlowProgram({
+    flow: makeFlow(),
+    dependencies: dependencyMap(producer, consumer, wasmedgeOnlyComponent),
+  });
+  assert.equal(check.ok, true, JSON.stringify(check.issues));
+  assert.deepEqual(check.runtimeTargets, ["wasmedge"]);
+  assert.ok(check.capabilities.includes("storage_write"));
+});
+
+test("a node that declares no runtime targets constrains nothing", () => {
+  const silentProducer = makeDependency({
+    pluginId: "test.producer",
+    capabilities: ["storage_query"],
+    runtimeTargets: [],
+    methods: producerDependency.manifest.methods,
+  });
+  const consumer = makeDependency({
+    pluginId: "test.consumer",
+    capabilities: ["http"],
+    runtimeTargets: ["browser", "wasmedge"],
+    methods: consumerDependency.manifest.methods,
+  });
+  const check = checkFlowProgram({
+    flow: makeFlow(),
+    dependencies: dependencyMap(silentProducer, consumer),
+  });
+  assert.equal(check.ok, true, JSON.stringify(check.issues));
+  assert.deepEqual(check.runtimeTargets, ["browser", "wasmedge"]);
+});
+
+test("a composition with no shared runtime is refused, naming the constraints", () => {
+  const browserOnly = makeDependency({
+    pluginId: "test.producer",
+    capabilities: ["storage_query"],
+    runtimeTargets: ["browser"],
+    methods: producerDependency.manifest.methods,
+  });
+  const wasmedgeOnly = makeDependency({
+    pluginId: "test.consumer",
+    capabilities: ["http"],
+    runtimeTargets: ["wasmedge"],
+    methods: consumerDependency.manifest.methods,
+  });
+  const check = checkFlowProgram({
+    flow: makeFlow(),
+    dependencies: dependencyMap(browserOnly, wasmedgeOnly),
+  });
+  assert.equal(check.ok, false);
+  const issue = check.errors.find(
+    (entry) => entry.code === "empty-runtime-target-intersection",
+  );
+  assert.ok(issue, JSON.stringify(check.errors));
+  assert.match(issue.message, /"test\.producer" declares runtimeTargets \[browser\]/);
+  assert.match(issue.message, /"test\.consumer" declares runtimeTargets \[wasmedge\]/);
+  assert.deepEqual(check.runtimeTargets, []);
+});
+
+test("the composed artifact BAKES, RUNS and is refused by the browser with a wasmedge-only node holding wallet_sign", async () => {
+  // THE END-TO-END REGRESSION. Before the fix this composition could not be
+  // baked AT ALL: compileFlowProgram stamped ["browser","wasmedge"] on the
+  // composed manifest, compliance saw a browser target next to wallet_sign,
+  // and the compile died before it ever reached the linker. Since wallet_sign
+  // is the only gate on keyslot.unwrap, that made host-side key unwrapping
+  // unreachable from any flow.
+  const stageArtifact = await signedEmptyArtifact("4a", "iso-stage-test");
+  const mediatorArtifact = await signedEmptyArtifact("4b", "wasmedge-mediator-test");
+
+  const stage = {
+    ...makeDependency({
+      pluginId: "test.iso-stage",
+      capabilities: ["storage_query"],
+      runtimeTargets: ["browser", "wasmedge"],
+      methods: producerDependency.manifest.methods,
+    }),
+    guestLink: null,
+    artifactBytes: stageArtifact.bytes,
+    publisherRecord: stageArtifact.publisher,
+  };
+  const mediator = {
+    ...makeDependency({
+      pluginId: "test.wasmedge-only-mediator",
+      capabilities: [BROWSER_INCOMPATIBLE_CAPABILITY],
+      runtimeTargets: ["wasmedge"],
+      methods: [
+        {
+          methodId: "mediate",
+          inputPorts: [
+            port("stream", { typeSets: [typedTypeSet("in", "OMM.fbs", "$OMM")] }),
+          ],
+          outputPorts: [
+            port("done", {
+              typeSets: [typedTypeSet("resp", "HttpResponseAbi.fbs", "$HTR")],
+            }),
+          ],
+          maxBatch: 1,
+          drainPolicy: "single-shot",
+        },
+      ],
+    }),
+    guestLink: null,
+    artifactBytes: mediatorArtifact.bytes,
+    publisherRecord: mediatorArtifact.publisher,
+  };
+
+  const flow = {
+    programId: "test.wasmedge-only-composition",
+    name: "WasmEdge-only composition",
+    version: "0.1.0",
+    nodes: [
+      {
+        nodeId: "stage",
+        pluginId: stage.pluginId,
+        methodId: "produce",
+        kind: "transform",
+        dispatchModel: "isomorphic",
+        artifact: {
+          path: "nodes/stage/module.wasm",
+          sha256: stageArtifact.sha256,
+          publisher: "nodes/stage/publisher.json",
+        },
+      },
+      {
+        nodeId: "mediator",
+        pluginId: mediator.pluginId,
+        methodId: "mediate",
+        kind: "transform",
+        dispatchModel: "isomorphic",
+        artifact: {
+          path: "nodes/mediator/module.wasm",
+          sha256: mediatorArtifact.sha256,
+          publisher: "nodes/mediator/publisher.json",
+        },
+      },
+      { nodeId: "egress", pluginId: "test.sink", methodId: "collect", kind: "sink" },
+    ],
+    edges: [
+      { fromNodeId: "stage", fromPortId: "stream", toNodeId: "mediator", toPortId: "stream" },
+      { fromNodeId: "mediator", fromPortId: "done", toNodeId: "egress", toPortId: "response" },
+    ],
+    triggers: [{ triggerId: "manual", kind: "manual" }],
+    triggerBindings: [
+      { triggerId: "manual", targetNodeId: "stage", targetPortId: "request" },
+    ],
+    requiredPlugins: [stage.pluginId, mediator.pluginId],
+  };
+
+  const dependencies = dependencyMap(stage, mediator);
+  const result = await compileFlowProgram({
+    flow,
+    dependencies,
+    catalog: catalogForManifests(stage.manifest, mediator.manifest),
+  });
+
+  assert.deepEqual(result.check.runtimeTargets, ["wasmedge"]);
+  assert.deepEqual(result.manifest.runtimeTargets, ["wasmedge"]);
+  assert.equal(result.manifest.buildArtifacts[0].target, "wasmedge");
+  assert.ok(
+    result.manifest.capabilities.includes(BROWSER_INCOMPATIBLE_CAPABILITY),
+    JSON.stringify(result.manifest.capabilities),
+  );
+  assert.equal(result.report.ok, true, JSON.stringify(result.report.errors ?? []));
+
+  // The declaration travels IN the artifact, so a loader handed nothing but
+  // bytes can still refuse it.
+  const embedded = locateEmbeddedPlgManifest(result.wasmBytes);
+  assert.deepEqual(embedded?.decoded?.runtimeTargets, ["wasmedge"]);
+
+  // It RUNS on the runtime it claims: instantiate the composed artifact and
+  // drive one frame through the whole graph, mediator included.
+  const host = await createFlowRuntimeHost({ wasmSource: result.wasmBytes });
+  const canonicalType = (manifest, methodId, direction, portId) =>
+    manifest.methods
+      .find((method) => method.methodId === methodId)[direction]
+      .find((candidate) => candidate.portId === portId)
+      .acceptedTypeSets[0].allowedTypes.find(
+        (typeRef) => typeRef.wireFormat === "flatbuffer",
+      );
+  const seen = [];
+  host.enqueueTriggerFrame(0, {
+    portId: "request",
+    bytes: new TextEncoder().encode("request"),
+  });
+  await host.drain(
+    {
+      "test.iso-stage:produce": () => {
+        seen.push("stage");
+        return {
+          outputs: [
+            {
+              portId: "stream",
+              bytes: new TextEncoder().encode("orbit"),
+              typeRef: canonicalType(stage.manifest, "produce", "outputPorts", "stream"),
+            },
+          ],
+        };
+      },
+      "test.wasmedge-only-mediator:mediate": ({ frames }) => {
+        seen.push("mediator");
+        assert.equal(new TextDecoder().decode(frames[0].bytes), "orbit");
+        return {
+          outputs: [
+            {
+              portId: "done",
+              bytes: new TextEncoder().encode("stored"),
+              typeRef: canonicalType(mediator.manifest, "mediate", "outputPorts", "done"),
+            },
+          ],
+        };
+      },
+      "test.sink:collect": ({ frames }) => {
+        seen.push("sink");
+        assert.equal(new TextDecoder().decode(frames[0].bytes), "stored");
+        return { statusCode: 0 };
+      },
+    },
+    { maxIterations: 10 },
+  );
+  assert.deepEqual(seen, ["stage", "mediator", "sink"]);
+
+  // B1: the COMPOSED FLOW'S OWN DOOR. createFlowRuntimeHost is what actually
+  // loads a composed artifact in a browser page; gating only the single-module
+  // harness would have let this artifact in through the front entrance while
+  // the side door was locked. It is runtime-agnostic, so the leg is stated —
+  // and stating "browser" must refuse.
+  await assert.rejects(
+    () =>
+      createFlowRuntimeHost({
+        wasmSource: result.wasmBytes,
+        runtimeTarget: "browser",
+      }),
+    (error) => {
+      assert.equal(error.name, "RuntimeTargetError");
+      assert.equal(error.declarationSource, "embedded");
+      assert.deepEqual(error.declaredTargets, ["wasmedge"]);
+      assert.match(error.message, /composed flow artifact/);
+      return true;
+    },
+  );
+  // The isomorphic flow host stands for the browser leg by construction (it
+  // mounts every child through the browser module harness), so it refuses the
+  // parent without being told.
+  await assert.rejects(
+    () =>
+      createIsomorphicFlowRuntimeHost({
+        wasmSource: result.wasmBytes,
+        children: [],
+      }),
+    (error) => {
+      assert.equal(error.name, "RuntimeTargetError");
+      return true;
+    },
+  );
+
+  // And the browser leg refuses it loudly rather than silently skipping — both
+  // from the supplied manifest and from the artifact's own embedded record.
+  await assert.rejects(
+    () =>
+      createBrowserModuleHarness({
+        wasmSource: result.wasmBytes,
+        manifest: result.manifest,
+      }),
+    /does not target "browser"[\s\S]*runtimeTargets \[wasmedge\]/,
+  );
+  await assert.rejects(
+    () => createBrowserModuleHarness({ wasmSource: result.wasmBytes }),
+    /does not target "browser"[\s\S]*runtimeTargets \[wasmedge\]/,
+  );
+});
+
+test("a capability the browser cannot serve drops the browser target even when NO node declares one", () => {
+  // The commonest manifest shape, and the one that would have re-created the
+  // original defect: a plugin that carries a browser-incompatible capability
+  // and simply omits runtimeTargets. Declarations alone say nothing here; the
+  // capability union does.
+  const producer = makeDependency({
+    pluginId: "test.producer",
+    capabilities: ["storage_query"],
+    runtimeTargets: [],
+    methods: producerDependency.manifest.methods,
+  });
+  const mediator = {
+    ...credentialMediatorDependency(),
+    manifest: {
+      ...credentialMediatorDependency().manifest,
+      runtimeTargets: undefined,
+    },
+  };
+  mediator.normalized = normalizeManifestForSdnFlow(mediator.manifest);
+  const flow = mediatorFlow();
+  const dependencies = dependencyMap(producer, mediator);
+  const check = checkFlowProgram({ flow, dependencies });
+
+  assert.equal(check.ok, true, JSON.stringify(check.errors));
+  assert.deepEqual(check.runtimeTargets, ["wasmedge"]);
+  const warning = check.warnings.find(
+    (issue) => issue.code === "narrowed-runtime-targets",
+  );
+  assert.ok(warning, JSON.stringify(check.warnings));
+  assert.match(warning.message, /"wallet_sign"/);
+
+  // And the composed manifest that comes out is compliant, which is the whole
+  // point — the compiler no longer stamps a target its own compliance rejects.
+  const manifest = buildFlowModuleManifest({ flow, check, dependencies });
+  assert.deepEqual(manifest.runtimeTargets, ["wasmedge"]);
+  const report = validatePluginManifest(manifest, { sourceName: "flow" });
+  assert.equal(
+    report.issues.some((issue) => issue.code === "capability-runtime-conflict"),
+    false,
+    JSON.stringify(report.errors),
+  );
+});
+
+test("dropping a runtime target is never silent", () => {
+  const producer = makeDependency({
+    pluginId: "test.producer",
+    capabilities: ["storage_query"],
+    methods: producerDependency.manifest.methods,
+  });
+  const consumer = makeDependency({
+    pluginId: "test.consumer",
+    capabilities: ["http"],
+    runtimeTargets: ["wasmedge"],
+    methods: consumerDependency.manifest.methods,
+  });
+  const check = checkFlowProgram({
+    flow: makeFlow(),
+    dependencies: dependencyMap(producer, consumer),
+  });
+  assert.equal(check.ok, true, JSON.stringify(check.errors));
+  assert.deepEqual(check.runtimeTargets, ["wasmedge"]);
+  const warning = check.warnings.find(
+    (issue) => issue.code === "narrowed-runtime-targets",
+  );
+  assert.ok(warning, JSON.stringify(check.warnings));
+  assert.match(warning.message, /"test\.consumer" declares runtimeTargets \[wasmedge\]/);
+});
+
+test("a legacy check record with no shared runtime THROWS instead of declaring nothing", () => {
+  const browserOnly = makeDependency({
+    pluginId: "test.producer",
+    capabilities: ["storage_query"],
+    runtimeTargets: ["browser"],
+    methods: producerDependency.manifest.methods,
+  });
+  const wasmedgeOnly = makeDependency({
+    pluginId: "test.consumer",
+    capabilities: ["http"],
+    runtimeTargets: ["wasmedge"],
+    methods: consumerDependency.manifest.methods,
+  });
+  const flow = makeFlow();
+  const dependencies = dependencyMap(browserOnly, wasmedgeOnly);
+  const check = checkFlowProgram({ flow, dependencies });
+  // Simulate a check record produced by an SDK that predates the derivation:
+  // the field simply is not there.
+  const legacyCheck = { ...check };
+  delete legacyCheck.runtimeTargets;
+
+  assert.throws(
+    () => buildFlowModuleManifest({ flow, check: legacyCheck, dependencies }),
+    /has no runtime target/,
+  );
+});
+
+test("wasi is the portability baseline, not a fourth runtime", () => {
+  const wasiProducerBase = makeDependency({
+    pluginId: "test.producer",
+    // A `wasi`-declaring artifact must satisfy the standalone-WASI rules:
+    // the `command` invoke surface and the pure WASI capability subset.
+    capabilities: [],
+    runtimeTargets: ["wasi", "wasmedge"],
+    methods: producerDependency.manifest.methods,
+  });
+  const wasiProducer = {
+    ...wasiProducerBase,
+    manifest: {
+      ...wasiProducerBase.manifest,
+      invokeSurfaces: ["direct", "command"],
+    },
+  };
+  wasiProducer.normalized = normalizeManifestForSdnFlow(wasiProducer.manifest);
+  const consumer = makeDependency({
+    pluginId: "test.consumer",
+    capabilities: ["http"],
+    methods: consumerDependency.manifest.methods,
+  });
+  const check = checkFlowProgram({
+    flow: makeFlow(),
+    dependencies: dependencyMap(wasiProducer, consumer),
+  });
+  assert.equal(check.ok, true, JSON.stringify(check.errors));
+  // `wasi` is the portability baseline and it ADMITS the browser leg — the
+  // compiler and the loaders answer this with one rule, so a part declaring
+  // ["wasi","wasmedge"] must not have the browser stripped from every flow it
+  // joins while the browser harness happily admits the same declaration.
+  assert.deepEqual(check.runtimeTargets, ["browser", "wasmedge"]);
+  assert.equal(
+    check.warnings.some((issue) => issue.code === "narrowed-runtime-targets"),
+    false,
+    JSON.stringify(check.warnings),
+  );
+});
+
+test("the wasi baseline admits a leg only for capabilities that leg can serve", () => {
+  // `pipe` is in BOTH the standalone-WASI subset and the browser-incompatible
+  // set. runtimeTargets:["wasi"] + capabilities:["pipe"] passes compliance —
+  // it names no browser target for the rule to fire on — so without the
+  // capability check the baseline would admit it to the browser leg against
+  // the SDK's own policy.
+  const pipeProducerBase = makeDependency({
+    pluginId: "test.producer",
+    capabilities: ["pipe"],
+    runtimeTargets: ["wasi"],
+    methods: producerDependency.manifest.methods,
+  });
+  const pipeProducer = {
+    ...pipeProducerBase,
+    manifest: {
+      ...pipeProducerBase.manifest,
+      invokeSurfaces: ["direct", "command"],
+    },
+  };
+  pipeProducer.normalized = normalizeManifestForSdnFlow(pipeProducer.manifest);
+  const consumer = makeDependency({
+    pluginId: "test.consumer",
+    capabilities: ["http"],
+    methods: consumerDependency.manifest.methods,
+  });
+  const check = checkFlowProgram({
+    flow: makeFlow(),
+    dependencies: dependencyMap(pipeProducer, consumer),
+  });
+  assert.equal(check.ok, true, JSON.stringify(check.errors));
+  assert.deepEqual(check.runtimeTargets, ["wasmedge"]);
+});
+
+test("a wasi-only plugin makes a portability statement, not an exclusion", () => {
+  const wasiOnlyBase = makeDependency({
+    pluginId: "test.producer",
+    capabilities: [],
+    runtimeTargets: ["wasi"],
+    methods: producerDependency.manifest.methods,
+  });
+  const wasiOnly = {
+    ...wasiOnlyBase,
+    manifest: { ...wasiOnlyBase.manifest, invokeSurfaces: ["direct", "command"] },
+  };
+  wasiOnly.normalized = normalizeManifestForSdnFlow(wasiOnly.manifest);
+  const consumer = makeDependency({
+    pluginId: "test.consumer",
+    capabilities: ["http"],
+    methods: consumerDependency.manifest.methods,
+  });
+  const check = checkFlowProgram({
+    flow: makeFlow(),
+    dependencies: dependencyMap(wasiOnly, consumer),
+  });
+  assert.equal(check.ok, true, JSON.stringify(check.errors));
+  // `wasi` is the portable subset both legs serve — it must not silently cost
+  // the composition every runtime it has.
+  assert.deepEqual(check.runtimeTargets, ["browser", "wasmedge"]);
+});
+
+test("a plugin that targets no runtime a flow can reach empties the set on purpose", () => {
+  const offRoad = makeDependency({
+    pluginId: "test.producer",
+    capabilities: ["storage_query"],
+    runtimeTargets: ["node", "desktop"],
+    methods: producerDependency.manifest.methods,
+  });
+  const consumer = makeDependency({
+    pluginId: "test.consumer",
+    capabilities: ["http"],
+    methods: consumerDependency.manifest.methods,
+  });
+  const check = checkFlowProgram({
+    flow: makeFlow(),
+    dependencies: dependencyMap(offRoad, consumer),
+  });
+  assert.equal(check.ok, false);
+  assert.ok(
+    check.errors.some(
+      (issue) => issue.code === "empty-runtime-target-intersection",
+    ),
+    JSON.stringify(check.errors),
+  );
 });

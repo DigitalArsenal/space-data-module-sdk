@@ -241,6 +241,98 @@ treats that as the explicit "one binary for both" profile. That pair now
 defaults to a shared `single-thread` artifact so the compiled wasm can be loaded
 unchanged by the browser harness and the WasmEdge harness.
 
+### Composed flows derive their targets
+
+A COMPOSED flow artifact (`space-data-module flow compile`) does not declare
+its own `runtimeTargets` — it **derives** them, inside the universe a composed
+artifact can reach at all (`browser` + `wasmedge`; the flow runtime template is
+never a standalone `wasi` command, a `node` package, a `desktop` bundle or an
+`edge` worker). Two things narrow that universe:
+
+1. **Every part's declaration**, tested with `runtimeTargetSatisfies` — THE
+   SAME function every loader uses, so a declaration cannot mean one thing to
+   the compiler and another at the door. A flow runs only where all of its
+   parts run. A part that declares nothing constrains nothing. `wasi` is the
+   strict portability baseline rather than a fourth runtime, so a part
+   declaring it admits both legs — unless that part's own capabilities say
+   otherwise (`pipe` is in both the standalone-WASI subset and the
+   browser-incompatible set).
+2. **The capability union.** A capability in `BrowserIncompatibleCapabilityIds`
+   (`wallet_sign`, `tcp`, `storage_write`, …) drops `browser` regardless of what
+   anything declared, because the composition provably cannot run there. This is
+   the proof-based half: it catches the commonest manifest shape, a plugin that
+   carries such a capability and simply omits `runtimeTargets`.
+
+Outcomes:
+
+- All parts isomorphic, no browser-incompatible capability → the flow keeps
+  `["browser", "wasmedge"]`.
+- One WasmEdge-only part, or one browser-incompatible capability → the flow is
+  `["wasmedge"]`, its `buildArtifacts[].target` says `wasmedge`, and a
+  `narrowed-runtime-targets` warning names what cost it the browser. Losing a
+  runtime is never silent.
+- No shared runtime → `empty-runtime-target-intersection`, a hard error naming
+  the constraining plugins.
+
+This is what makes a host-only capability usable from a flow at all: the
+composed manifest is compliance-validated before the bake, and a
+browser-incompatible capability next to a `browser` target is a hard
+`capability-runtime-conflict`. Deriving the target set keeps that rule intact —
+the conflict still fires whenever a browser target is genuinely claimed — while
+letting the legitimate WasmEdge-only composition exist. `wallet_sign` gates
+`keyslot.unwrap`, so before this the hardcoded pair meant no flow could unwrap a
+host-held key at all.
+
+### Both legs refuse an artifact that is not theirs
+
+A legitimate single-leg artifact now exists, so every loader that stands for a
+runtime leg refuses one that declares itself out of scope — by name, quoting
+the declaration, never a silent skip and never a trap five frames deep inside a
+capability that leg cannot serve. The shared assert is
+`src/host/runtimeTargetGate.js`:
+
+| Loader | Leg |
+| --- | --- |
+| `createBrowserModuleHarness` | `browser` |
+| `createWorkerModuleHarness` | `browser`, checked before any worker is spawned |
+| `createIsomorphicFlowRuntimeHost` | `browser` (it mounts children in the browser harness) |
+| `createFlowRuntimeHost` | stated via `runtimeTarget`; defaults to `browser` in a real browser, ungated elsewhere |
+| `loadModule({runtimeKind: "wasmedge"})` | `wasmedge` |
+
+Both declarations are consulted — the caller-supplied manifest and the
+artifact's own embedded `$PLG` — and **the embedded one wins on conflict**,
+because that is what the artifact's signature covers. The refusal throws a
+`RuntimeTargetError` carrying `declaredTargets`, `leg` and `declarationSource`.
+
+A declaration that names the leg outright is trusted as written; the `wasi`
+baseline, which is an inference the SDK makes on the author's behalf, is
+additionally capability-checked. Declaration → trust the author; inference →
+prove it.
+
+**Consumer migration.** `createFlowRuntimeHost` is runtime-agnostic and only
+detects a real browser. If you drive a composed flow from Node — a flow test, a
+server-side runner — state the leg, or the mirror gate is principle rather than
+fact:
+
+```js
+const host = await createFlowRuntimeHost({
+  wasmSource: bytes,
+  runtimeTarget: "wasmedge",
+});
+```
+
+The tri-runtime parity gate reads the same declaration: a lane the artifact
+declared itself out of is scored `out-of-declared-scope`, skipped before it is
+launched, and recorded as evidence rather than compared. Without that, a
+correct refusal on the browser lane would have been counted as a P1
+cross-runtime divergence.
+
+Scoping is not a way to be certified without being run. An artifact in the
+gate's certified set that scopes itself out of every active lane fails
+(`artifact-out-of-every-lane`), and one that leaves fewer than two lanes to
+compare fails too (`artifact-not-cross-runtime-comparable`) — a single lane
+proves no parity, and one manifest string must never disarm the gate.
+
 ## WasmEdge Pthreads
 
 `space-data-module-sdk` is also the source of truth for module thread-model

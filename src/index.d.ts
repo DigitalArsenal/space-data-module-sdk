@@ -2337,7 +2337,29 @@ export interface FlowRuntimeHostOptions {
   engineLink?: {
     exports: WebAssembly.Exports & { memory: WebAssembly.Memory };
   } | null;
+  /**
+   * The runtime leg this host stands for. A composed flow DERIVES its
+   * runtimeTargets from its parts, so a single-leg artifact exists and must be
+   * refused by name on any other leg. Omit and a real browser is detected and
+   * gated; pass `null` to opt out explicitly.
+   */
+  runtimeTarget?: string | null;
+  /** Caller-side manifest; the artifact's embedded record wins on conflict. */
+  manifest?: PluginManifest | Record<string, unknown>;
 }
+
+export declare class RuntimeTargetError extends Error {
+  code: "runtime-target-out-of-scope";
+  declaredTargets: string[];
+  leg: string;
+  declarationSource: "embedded" | "caller";
+}
+
+/** Does a declared target set admit this leg? `wasi` satisfies both legs. */
+export function runtimeTargetSatisfies(
+  targets: string[] | undefined,
+  leg: string,
+): boolean;
 
 export const FLOW_INVALID_INDEX: number;
 export function createFlowRuntimeHost(

@@ -56,6 +56,7 @@ import {
 } from "../compiler/pthreadArtifactGuard.js";
 import { resolveWasiThreadsToolchain } from "../compiler/wasiThreadsToolchain.js";
 import {
+  BrowserIncompatibleCapabilityIds,
   validateArtifactWithStandards,
   validatePluginManifest,
 } from "../compliance/index.js";
@@ -66,6 +67,7 @@ import {
   payloadSchemaIdentitiesEqual,
 } from "../manifest/index.js";
 import { appendWasmCustomSection } from "../bundle/wasm.js";
+import { runtimeTargetSatisfies } from "../host/runtimeTargetGate.js";
 import { SDS_MANIFEST_SECTION_NAME } from "../bundle/constants.js";
 import { verifyModuleArtifact } from "../bundle/signing.js";
 import { DOMAIN_MODULE_PUBLICATION_V1 } from "../bundle/sigdomain.js";
@@ -161,6 +163,16 @@ export function flowEngineLinkage(flow) {
     `flow.engineLinkage "${flow.engineLinkage}" is retired: FlatSQL must be an independently signed and instantiated isomorphic WASM node.`,
   );
 }
+
+// The runtimes a COMPOSED flow artifact can possibly reach. The flow runtime
+// template is baked once, as the isomorphic browser/WasmEdge artifact — it is
+// never a standalone `wasi` command, a `node` package, a `desktop` bundle, or
+// an `edge` worker, so those targets are not in the universe a composition can
+// claim. A node's own declaration can only ever SUBTRACT from this set.
+const COMPOSED_FLOW_RUNTIME_TARGET_UNIVERSE = Object.freeze([
+  "browser",
+  "wasmedge",
+]);
 
 const GUEST_LINK_OBJECT_FILENAME = "module-link.o";
 const GUEST_LINK_METADATA_FILENAME = "metadata.json";
@@ -882,12 +894,182 @@ function collectComponentDependencies({ nodePluginIds, dependencies, issues, cap
         "warning",
         "unresolved-component-dependency",
         `Component dependency "${declared.pluginId}" (declared by "${declaredBy}") is not resolvable from the ` +
-          "dependency set; it is propagated into the bundle DEPENDENCIES but its capabilities cannot be verified.",
+          "dependency set; it is propagated into the bundle DEPENDENCIES but neither its capabilities nor its " +
+          "runtimeTargets can be verified — so it constrains neither the flow's capability union nor its " +
+          "derived runtime targets, and the composed artifact may claim a runtime this component cannot reach.",
         "flow.dependencies",
       );
     }
   }
   return [...components.values()].sort((a, b) => a.pluginId.localeCompare(b.pluginId));
+}
+
+const BROWSER_RUNTIME_TARGET = "browser";
+const BrowserIncompatibleCapabilitySet = new Set(
+  BrowserIncompatibleCapabilityIds,
+);
+
+function declaredRuntimeTargets(manifest) {
+  const declared = Array.isArray(manifest?.runtimeTargets)
+    ? manifest.runtimeTargets
+        .map((target) => String(target ?? "").trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+  return declared.length > 0 ? declared : null;
+}
+
+/**
+ * collectFlowRuntimeTargets derives the COMPOSED artifact's runtimeTargets from
+ * its constituents instead of asserting a fixed pair.
+ *
+ * A flow runs only where ALL of its parts run, so the composition's target set
+ * is the INTERSECTION of the declared target sets of every node plugin and
+ * every resolved component dependency, taken inside the universe a composed
+ * artifact can reach at all (browser + WasmEdge). A part that declares no
+ * targets is unconstraining — it says nothing, so it subtracts nothing. The
+ * admission test is `runtimeTargetSatisfies`, THE SAME ONE every loader uses,
+ * so a declaration cannot mean one thing to the compiler and another at the
+ * door.
+ *
+ * The CAPABILITY UNION subtracts too. A declared target set is not the only
+ * way a part can be non-browser: a plugin that carries `wallet_sign` and
+ * simply omits `runtimeTargets` says nothing about where it runs, yet the
+ * composition provably cannot run in a browser, because compliance forbids
+ * exactly that capability against a browser target. Deriving only from the
+ * declarations left the commonest manifest shape re-creating the original
+ * defect — the compiler stamping a target its own compliance pass then
+ * rejects. So `browser` is also dropped whenever the flow's capability union
+ * meets `BrowserIncompatibleCapabilityIds`, and the diagnostic names the
+ * capability that cost it.
+ *
+ * This is the difference between a truthful manifest and a wish. The hardcoded
+ * ["browser","wasmedge"] made every composition claim the browser, which made
+ * `capability-runtime-conflict` fire on any flow containing a node with a
+ * browser-incompatible capability (wallet_sign, tcp, storage_write, …) — so a
+ * WasmEdge-only flow was not merely mislabelled, it was IMPOSSIBLE TO BAKE.
+ * Deriving the set keeps the real invariant intact (a browser-incompatible
+ * capability and a browser target still cannot coexist) while letting the
+ * legitimate WasmEdge-only composition exist.
+ */
+function collectFlowRuntimeTargets({
+  resolvedNodes,
+  componentDependencies,
+  dependencies,
+  capabilities,
+  issues,
+}) {
+  let targets = new Set(COMPOSED_FLOW_RUNTIME_TARGET_UNIVERSE);
+  // pluginId -> the declared set, for the diagnostic when nothing survives.
+  const constraints = new Map();
+  // target -> why it is gone. Losing a runtime is never silent.
+  const droppedBecause = new Map();
+
+  const narrow = (allowed, reasonFor) => {
+    for (const target of [...targets]) {
+      if (allowed(target)) continue;
+      targets.delete(target);
+      if (!droppedBecause.has(target)) {
+        droppedBecause.set(target, reasonFor(target));
+      }
+    }
+  };
+
+  const consider = (pluginId, manifest) => {
+    if (!pluginId || constraints.has(pluginId)) return;
+    const declared = declaredRuntimeTargets(manifest);
+    if (!declared) return;
+    constraints.set(pluginId, [...declared].sort());
+    // ONE RULE, shared with the loaders (`runtimeTargetSatisfies`). Two rules
+    // for one field is how a manifest comes to mean different things to the
+    // compiler and to the door: a `["wasi","wasmedge"]` part had the browser
+    // leg stripped from every flow it joined while the browser harness happily
+    // admitted that same declaration. `wasi` is the portability baseline, so
+    // it admits both legs unless the part's own capabilities say otherwise;
+    // proof-based narrowing is the capability-union pass below.
+    narrow(
+      (target) =>
+        runtimeTargetSatisfies(declared, target, manifest?.capabilities),
+      () =>
+        `"${pluginId}" declares runtimeTargets [${[...declared].sort().join(", ")}]`,
+    );
+  };
+
+  for (const entry of resolvedNodes) {
+    if (!entry?.dependency) continue;
+    consider(entry.node?.pluginId, entry.dependency.manifest);
+  }
+  for (const component of componentDependencies ?? []) {
+    if (!component?.resolved) continue;
+    consider(
+      component.pluginId,
+      dependencies.get(component.pluginId)?.manifest,
+    );
+  }
+
+  const browserIncompatible = [...(capabilities ?? [])]
+    .filter((capability) => BrowserIncompatibleCapabilitySet.has(capability))
+    .sort();
+  if (browserIncompatible.length > 0) {
+    narrow(
+      (target) => target !== BROWSER_RUNTIME_TARGET,
+      () =>
+        `the flow's capability union contains ${browserIncompatible
+          .map((capability) => `"${capability}"`)
+          .join(", ")}, which the canonical browser runtime target cannot serve`,
+    );
+  }
+
+  const ordered = COMPOSED_FLOW_RUNTIME_TARGET_UNIVERSE.filter((target) =>
+    targets.has(target),
+  );
+  const reasons = [...droppedBecause.entries()]
+    .map(([target, why]) => `${target} (${why})`)
+    .join("; ");
+  if (ordered.length === 0) {
+    pushIssue(
+      issues,
+      "error",
+      "empty-runtime-target-intersection",
+      "No runtime runs every part of this flow: every candidate target was ruled " +
+        `out — ${reasons}. A composed flow can only target the runtimes shared by ` +
+        "all of its nodes and resolved component dependencies; split the flow, or " +
+        "widen the constraining plugin's runtimeTargets.",
+      "flow.nodes",
+    );
+  } else if (droppedBecause.size > 0) {
+    pushIssue(
+      issues,
+      "warning",
+      "narrowed-runtime-targets",
+      `This flow composes to runtimeTargets [${ordered.join(", ")}] — narrower than ` +
+        `the isomorphic pair. Dropped: ${reasons}. The artifact is still written to ` +
+        "dist/isomorphic/module.wasm, but it is NOT loadable on the dropped runtime " +
+        "and every harness for that leg will refuse it by name.",
+      "flow.nodes",
+    );
+  }
+  return ordered;
+}
+
+/**
+ * Rebuild the derived target set from a check record produced by an older SDK
+ * (one with no `runtimeTargets` field). Issues are discarded here on purpose —
+ * the caller re-raises the only one that matters, an empty result, as a throw.
+ */
+function recomputeFlowRuntimeTargets(check, dependencies) {
+  return collectFlowRuntimeTargets({
+    resolvedNodes: (check?.nodes ?? [])
+      .filter((node) => node.dispatchModel !== "host")
+      .map((node) => ({
+        node,
+        dependency: dependencies.get(node.pluginId) ?? null,
+      }))
+      .filter((entry) => entry.dependency),
+    componentDependencies: check?.componentDependencies,
+    dependencies,
+    capabilities: check?.capabilities ?? [],
+    issues: [],
+  });
 }
 
 /**
@@ -1773,6 +1955,14 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
     capabilities,
   });
 
+  const runtimeTargets = collectFlowRuntimeTargets({
+    resolvedNodes,
+    componentDependencies,
+    dependencies,
+    capabilities,
+    issues,
+  });
+
   const errors = issues.filter((issue) => issue.severity === "error");
   return {
     ok: errors.length === 0,
@@ -1780,6 +1970,7 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
     errors,
     warnings: issues.filter((issue) => issue.severity === "warning"),
     capabilities: [...capabilities].sort(),
+    runtimeTargets,
     engineLinkage,
     threadModel,
     componentDependencies,
@@ -1908,6 +2099,23 @@ export function buildFlowModuleManifest({ flow, check, dependencies }) {
   const checkedNodeById = new Map(
     check.nodes.map((node) => [node.nodeId, node]),
   );
+  // `check.runtimeTargets` is the derived intersection. It is absent only when
+  // a caller hands in a check record built by an older SDK; recompute rather
+  // than silently re-asserting the historical pair — and THROW on the empty
+  // intersection instead of swallowing it. A check record has an issue sink;
+  // this path does not, and an artifact that declares no runtime at all is
+  // read as unconstrained by every loader downstream, which is the most
+  // permissive possible answer to the least certain question.
+  const runtimeTargets = Array.isArray(check.runtimeTargets)
+    ? [...check.runtimeTargets]
+    : recomputeFlowRuntimeTargets(check, dependencies);
+  if (runtimeTargets.length === 0) {
+    throw new Error(
+      `Flow "${flow?.programId ?? "(unknown)"}" has no runtime target: no runtime runs ` +
+        "every one of its parts. Refusing to build a manifest that declares nothing — " +
+        "run checkFlowProgram and read the empty-runtime-target-intersection error.",
+    );
+  }
 
   const hostModelNodeIds = new Set(
     check.nodes.filter((node) => node.dispatchModel === "host").map((node) => node.nodeId),
@@ -2032,13 +2240,17 @@ export function buildFlowModuleManifest({ flow, check, dependencies }) {
     externalInterfaces,
     methods,
     schemasUsed,
-    runtimeTargets: ["browser", "wasmedge"],
+    // DERIVED, never asserted: the runtimes shared by every node plugin and
+    // resolved component dependency (see collectFlowRuntimeTargets). A flow of
+    // fully isomorphic nodes keeps both targets; a flow containing one
+    // WasmEdge-only node is a WasmEdge-only flow and says so.
+    runtimeTargets,
     buildArtifacts: [
       {
         artifactId: `${cIdent(flow.programId)}-flow-runtime`,
         kind: "wasm",
         path: "dist/isomorphic/module.wasm",
-        target: "browser,wasmedge",
+        target: runtimeTargets.join(","),
       },
     ],
     flowNodes: nodes.map((node) => {

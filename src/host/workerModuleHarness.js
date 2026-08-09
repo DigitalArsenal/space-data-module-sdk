@@ -27,6 +27,7 @@ import {
 } from "./sabHostcallChannel.js";
 import { WASI_THREAD_HOSTCALL_MESSAGE } from "./wasiThreadWorkerRuntime.js";
 import { importNodeBuiltin } from "./nodeBuiltinSpecifier.js";
+import { assertBrowserRuntimeTarget } from "./browserModuleHarness.js";
 
 const WORKER_URL = new URL("./workerModuleHarnessWorker.js", import.meta.url);
 
@@ -130,6 +131,12 @@ async function toWasmModule(source, label) {
  */
 export async function createWorkerModuleHarness(options = {}) {
   const wasmModule = await toWasmModule(options.wasmSource, "wasmSource");
+  // Fail on THIS thread, before a worker, a SAB channel and a BroadcastChannel
+  // are stood up for an artifact the browser leg must not run. The in-worker
+  // createBrowserModuleHarness would refuse it too, but a rejection that
+  // arrives after the whole rig exists reads like a worker fault rather than
+  // the declaration it actually is.
+  assertBrowserRuntimeTarget(wasmModule, options.harnessOptions?.manifest);
   const host = options.host ?? createBrowserHost(options.hostOptions);
   const dispatch = options.dispatchHost ?? createAsyncHostDispatcher(host);
   const buffer = createSabHostcallBuffer({

@@ -21,12 +21,14 @@
 import {
   createBrowserModuleHarness,
   toLoadableWasmBytes,
+  zeroWasmBytes,
 } from "./browserModuleHarness.js";
 import {
   resolveModuleSignaturePolicy,
   verifyModuleArtifact,
 } from "../bundle/signing.js";
 import { attachHostDispatch, inspectModule } from "./isomorphicLoaderCore.js";
+import { assertArtifactRuntimeTarget } from "./runtimeTargetGate.js";
 
 export { inspectModule, attachHostDispatch };
 
@@ -203,21 +205,48 @@ export async function loadModule(options = {}) {
     );
   }
 
-  if (signaturePolicy) {
+  const runtimeKind = options.runtimeKind ?? "wasmedge";
+
+  // ONE READ of the artifact, serving every question this function asks of the
+  // bytes: the signature, the runtime-target declaration, and the profile
+  // inspection below. Each of those used to open the file for itself. The
+  // plaintext buffer this function materialized is scrubbed the moment the
+  // last of them is answered, matching the browser harness's
+  // ownedArtifactBytes contract.
+  const needsBytes = Boolean(signaturePolicy) || runtimeKind === "wasmedge";
+  let artifactBytes = null;
+  let wasmModule = null;
+  if (needsBytes) {
     const { readFile } = await import("node:fs/promises");
-    await verifyModuleArtifact(await readFile(source), signaturePolicy);
+    artifactBytes = new Uint8Array(await readFile(source));
+    if (signaturePolicy) {
+      await verifyModuleArtifact(artifactBytes, signaturePolicy);
+    }
+    if (runtimeKind === "wasmedge") {
+      wasmModule = await WebAssembly.compile(toLoadableWasmBytes(artifactBytes));
+    }
+    zeroWasmBytes(artifactBytes);
+    artifactBytes = null;
   }
 
-  const runtimeKind = options.runtimeKind ?? "wasmedge";
   if (runtimeKind === "wasmedge") {
+    // MIRROR OF THE BROWSER GATE. Enforcing the declaration on one leg only is
+    // itself a divergence between the legs: a `["browser"]`-only artifact
+    // handed to WasmEdge would run until it reached something WasmEdge does
+    // not serve, while the reverse case is refused at the door. Both legs read
+    // the same declaration and refuse the same way.
+    assertArtifactRuntimeTarget({
+      wasmModule,
+      manifest: options.manifest,
+      leg: "wasmedge",
+    });
     const runtimeHostRequested =
       String(options.hostProfile ?? "").trim().toLowerCase() === "runtime-host" ||
       Array.isArray(options.modules) ||
       (typeof options.defaultModuleId === "string" &&
         options.defaultModuleId.trim().length > 0);
     if (!runtimeHostRequested && !options.wasmEdgeRunnerBinary) {
-      const { readFile } = await import("node:fs/promises");
-      const inspection = await inspectModule(await readFile(source));
+      const inspection = await inspectModule(wasmModule);
       if (
         (inspection.profile === "standalone" || inspection.profile === "module-host-abi") &&
         inspection.exports.includes("_start")

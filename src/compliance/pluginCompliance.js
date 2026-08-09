@@ -13,6 +13,7 @@ import {
   RuntimeTarget,
 } from "../runtime/constants.js";
 import {
+  BrowserIncompatibleCapabilityIds,
   RecommendedCapabilityIds,
   StandaloneWasiCapabilityIds,
 } from "../capabilities.js";
@@ -49,24 +50,7 @@ const ExternalInterfaceDirectionSet = new Set(
 const ExternalInterfaceKindSet = new Set(Object.values(ExternalInterfaceKind));
 const ProtocolRoleSet = new Set(Object.values(ProtocolRole));
 const ProtocolTransportKindSet = new Set(Object.values(ProtocolTransportKind));
-const BrowserIncompatibleCapabilitySet = new Set([
-  "pipe",
-  "network",
-  "tcp",
-  "udp",
-  "mqtt",
-  "tls",
-  "database",
-  "storage_write",
-  "protocol_dial",
-  "protocol_handle",
-  "process_exec",
-  "wallet_sign",
-  "ipfs",
-  "scene_access",
-  "entity_access",
-  "render_hooks",
-]);
+const BrowserIncompatibleCapabilitySet = new Set(BrowserIncompatibleCapabilityIds);
 const StandaloneWasiProtocolTransportKindSet = new Set([
   ProtocolTransportKind.WASI_PIPE,
 ]);

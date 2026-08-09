@@ -23,10 +23,21 @@ export * from "./host/isomorphicLoaderBrowser.js";
 // Browser module hosts. These are runtime surface and live in src/host/;
 // nothing under src/testing/ is reachable from this entry.
 export {
+  assertBrowserRuntimeTarget,
   createBrowserModuleHarness,
   detectArtifactProfile,
   zeroWasmBytes,
   isSharedArrayBufferLike,
 } from "./host/browserModuleHarness.js";
+// The runtime-target gate is reachable so a consumer can catch the refusal by
+// CLASS (`error instanceof RuntimeTargetError`) rather than by matching a
+// message string, and can ask the same question the loaders ask before it
+// offers a module to a leg.
+export {
+  RuntimeTargetError,
+  runtimeTargetSatisfies,
+  resolveRuntimeTargetRefusal,
+  embeddedRuntimeTargets,
+} from "./host/runtimeTargetGate.js";
 export { createWorkerModuleHarness } from "./host/workerModuleHarness.js";
 export { createModuleFlatBufferStreamPump } from "./host/moduleFlatbufferStreamPump.js";

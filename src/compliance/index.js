@@ -11,6 +11,7 @@ import {
   validatePluginManifest,
 } from "./pluginCompliance.js";
 import {
+  BrowserIncompatibleCapabilityIds,
   RecommendedCapabilityIds,
   StandaloneWasiCapabilityIds,
 } from "../capabilities.js";
@@ -48,6 +49,7 @@ export async function validateArtifactWithStandards(options = {}) {
 }
 
 export {
+  BrowserIncompatibleCapabilityIds,
   findManifestFiles,
   getWasmExportNames,
   getWasmExportNamesFromFile,

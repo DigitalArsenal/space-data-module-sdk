@@ -15,6 +15,9 @@ import {
   zeroWasmBytes,
 } from "../src/host/browserModuleHarness.js";
 import { signModuleArtifact } from "../src/bundle/signing.js";
+import { appendWasmCustomSection } from "../src/bundle/wasm.js";
+import { SDS_MANIFEST_SECTION_NAME } from "../src/bundle/constants.js";
+import { encodePluginManifest } from "../src/manifest/index.js";
 
 const ALIGNED_ATM_TYPE_REF = Object.freeze({
   schemaName: "ATM.fbs",
@@ -1049,4 +1052,113 @@ test("createBrowserModuleHarness drops its options.wasmSource reference once com
   t.after(() => verifiedHarness.destroy());
   assert.equal(verifiedOptions.wasmSource, null);
   assert.equal(verifiedHarness.runtime.profile, "standalone");
+});
+
+// ---------------------------------------------------------------------------
+// Runtime-target refusal (upstream-module-sdk-4).
+//
+// Composed flows now DERIVE their runtimeTargets from their nodes, so a
+// legitimate WasmEdge-only artifact exists. Tri-runtime isomorphism means the
+// browser leg must refuse such an artifact BY NAME — not skip it, not load it
+// and trap five frames deep inside a capability the browser host cannot serve.
+// ---------------------------------------------------------------------------
+
+function wasmedgeOnlyManifest() {
+  return {
+    pluginId: "com.digitalarsenal.test.wasmedge-only",
+    name: "WasmEdge-only artifact",
+    version: "1.0.0",
+    pluginFamily: "data_source",
+    capabilities: ["wallet_sign"],
+    invokeSurfaces: ["direct"],
+    runtimeTargets: ["wasmedge"],
+    methods: [],
+    schemasUsed: [],
+    abiVersion: 1,
+  };
+}
+
+test("browser module harness refuses an artifact that does not declare the browser target", async () => {
+  await assert.rejects(
+    () =>
+      createBrowserModuleHarness({
+        wasmSource: createExportedMemoryModuleBytes(),
+        manifest: wasmedgeOnlyManifest(),
+      }),
+    (error) => {
+      assert.match(error.message, /does not target "browser"/);
+      assert.match(error.message, /runtimeTargets \[wasmedge\]/);
+      return true;
+    },
+  );
+});
+
+test("browser module harness reads the refusal out of the artifact's own embedded manifest", async () => {
+  const bytes = appendWasmCustomSection(
+    createExportedMemoryModuleBytes(),
+    SDS_MANIFEST_SECTION_NAME,
+    encodePluginManifest(wasmedgeOnlyManifest()),
+  );
+  await assert.rejects(
+    () => createBrowserModuleHarness({ wasmSource: bytes }),
+    /does not target "browser"[\s\S]*runtimeTargets \[wasmedge\]/,
+  );
+});
+
+test("browser module harness still loads an artifact that declares the browser target", async (t) => {
+  const harness = await createBrowserModuleHarness({
+    wasmSource: createExportedMemoryModuleBytes(),
+    manifest: { ...wasmedgeOnlyManifest(), runtimeTargets: ["browser", "wasmedge"] },
+  });
+  t.after(() => harness.destroy());
+  assert.ok(harness);
+});
+
+test("an artifact that declares no runtime targets is not refused", async (t) => {
+  const manifest = wasmedgeOnlyManifest();
+  delete manifest.runtimeTargets;
+  const harness = await createBrowserModuleHarness({
+    wasmSource: createExportedMemoryModuleBytes(),
+    manifest,
+  });
+  t.after(() => harness.destroy());
+  assert.ok(harness);
+});
+
+test("a caller manifest cannot override the artifact's own embedded declaration", async () => {
+  // THE BYPASS THAT MUST NOT EXIST. verifyModuleArtifact covers the embedded
+  // $PLG; options.manifest is caller input. If the caller were consulted
+  // first, {runtimeTargets: ["browser"]} would open a signed WasmEdge-only
+  // artifact — and the isomorphic flow host passes exactly such a caller-side
+  // manifest for every child it mounts.
+  const bytes = appendWasmCustomSection(
+    createExportedMemoryModuleBytes(),
+    SDS_MANIFEST_SECTION_NAME,
+    encodePluginManifest(wasmedgeOnlyManifest()),
+  );
+  await assert.rejects(
+    () =>
+      createBrowserModuleHarness({
+        wasmSource: bytes,
+        manifest: { ...wasmedgeOnlyManifest(), runtimeTargets: ["browser"] },
+      }),
+    (error) => {
+      assert.equal(error.name, "RuntimeTargetError");
+      assert.equal(error.declarationSource, "embedded");
+      assert.deepEqual(error.declaredTargets, ["wasmedge"]);
+      return true;
+    },
+  );
+});
+
+test("a wasi-only artifact is the portability baseline and loads in the browser", async (t) => {
+  const manifest = wasmedgeOnlyManifest();
+  manifest.runtimeTargets = ["wasi"];
+  manifest.capabilities = ["logging"];
+  const harness = await createBrowserModuleHarness({
+    wasmSource: createExportedMemoryModuleBytes(),
+    manifest,
+  });
+  t.after(() => harness.destroy());
+  assert.ok(harness);
 });
