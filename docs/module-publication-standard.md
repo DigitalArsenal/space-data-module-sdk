@@ -128,7 +128,9 @@ instantiates and the node's capability policy identifies by content hash.
 
 The domain prefix exists because the node's publisher key is the NODE key, and
 that one bonded key signs several unrelated kinds of statement (dataset
-publications, module artifacts, and — reserved — update manifests). If every
+publications, module artifacts, update SIGNALS — the advisory pub/sub nudge a
+publisher pushes so every install upgrades itself in place, which has a live
+producer — and, still reserved, update manifests). If every
 statement were a bare SHA-256 digest, a caller who could reach the node's
 signing endpoint could submit the bytes of one kind of document and staple the
 returned signature onto another. An ASCII domain label, a `NUL` that cannot
@@ -137,8 +139,10 @@ in a disjoint message space with no length ambiguity anywhere in the preimage.
 
 The domain registry is **closed**: a verifier refuses any label that is not
 registered, and a module verifier additionally refuses any registered label
-other than `SDN-MODULE-PUBLICATION-V1` — so a signature minted for a signed
-update can never be replayed into a module trailer. Adding a domain is a
+other than `SDN-MODULE-PUBLICATION-V1` — so a signature minted for an update
+manifest or an update signal can never be replayed into a module trailer, which
+the shared vectors pin as `foreign-registered-domain` and
+`update-signal-domain-is-refused-for-a-module`. Adding a domain is a
 reviewed change in every implementation at once
 (`src/bundle/sigdomain.js` here; `internal/sigdomain` and its kubo twin in the
 node), never a request parameter.

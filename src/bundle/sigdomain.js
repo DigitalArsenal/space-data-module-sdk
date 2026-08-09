@@ -62,6 +62,24 @@ export const DOMAIN_MODULE_PUBLICATION_V1 = "SDN-MODULE-PUBLICATION-V1";
 export const DOMAIN_UPDATE_MANIFEST_V1 = "SDN-UPDATE-MANIFEST-V1";
 
 /**
+ * An UPDATE SIGNAL: the small pub/sub nudge a publisher emits after an artifact
+ * is on the update feed, telling the fleet that a new version exists and where
+ * to fetch it (owner ruling 2026-08-09, "pushing an update signal to all
+ * installs to upgrade in place").
+ *
+ * A separate domain from {@link DOMAIN_UPDATE_MANIFEST_V1} even though the same
+ * bonded key signs both, and the separation is load-bearing in one direction: a
+ * signal is a POINTER, a manifest is an AUTHORIZATION. A signal signature is
+ * cheap, frequent and broadcast to anyone listening, so if the two shared a
+ * preimage space one could be replayed as authorization for bytes. The signal
+ * grants nothing — everything it names is re-fetched and re-verified against the
+ * signed manifest before a byte is swapped. Registered here so the JS registry
+ * still mirrors the node's exactly; a module verifier must REFUSE it, which the
+ * shared vectors pin.
+ */
+export const DOMAIN_UPDATE_SIGNAL_V1 = "SDN-UPDATE-SIGNAL-V1";
+
+/**
  * The CLOSED set of statement domains this SDK will verify. The map value is a
  * short human description: this table is the answer to "what can the bonded
  * node key be made to say?". Mirrors Go's `sigdomain.registry` exactly,
@@ -75,6 +93,10 @@ const REGISTRY = new Map([
   [
     DOMAIN_UPDATE_MANIFEST_V1,
     "update manifest, canonical manifest SHA-256 (reserved; no producer yet)",
+  ],
+  [
+    DOMAIN_UPDATE_SIGNAL_V1,
+    "update signal, canonical signal SHA-256 (advisory pub/sub nudge; authorizes nothing)",
   ],
 ]);
 

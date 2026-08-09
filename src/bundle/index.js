@@ -11,6 +11,7 @@ export {
   CONTENT_HASH_SIZE as SIGNATURE_STATEMENT_CONTENT_HASH_SIZE,
   DOMAIN_MODULE_PUBLICATION_V1,
   DOMAIN_UPDATE_MANIFEST_V1,
+  DOMAIN_UPDATE_SIGNAL_V1,
   SignatureDomainError,
   describe as describeSignatureDomain,
   domains as registeredSignatureDomains,

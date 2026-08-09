@@ -11,10 +11,12 @@
 //
 //   test/support/statement-domain-vectors.json
 //     == space-data-network/sdn-server/internal/modulert/testdata/statement-domain-vectors.json
+//     == space-data-network/kubo/sdn/modulert/testdata/statement-domain-vectors.json
 //
-// Both suites pin the file's sha256 (VECTORS_SHA256 here,
-// vectorsSHA256 in publication_signature_vectors_test.go), so editing one copy
-// turns the OTHER suite red. Every signature in it was produced by Go's
+// All three suites pin the file's sha256 (VECTORS_SHA256 here,
+// vectorsSHA256 in both copies of publication_signature_vectors_test.go), so
+// editing one copy turns the OTHERS red. The regeneration recipe lives in the
+// sdn-server copy's header and only there. Every signature in it was produced by Go's
 // crypto/ed25519 over a preimage built by Go's sigdomain.Statement; the
 // artifact envelopes were produced by this SDK's own writer. Neither side gets
 // to grade its own homework.
@@ -35,6 +37,7 @@ import {
   CONTENT_HASH_SIZE,
   DOMAIN_MODULE_PUBLICATION_V1,
   DOMAIN_UPDATE_MANIFEST_V1,
+  DOMAIN_UPDATE_SIGNAL_V1,
   SignatureDomainError,
   describe as describeDomain,
   domains as registeredDomains,
@@ -52,7 +55,7 @@ const VECTORS_PATH = path.join(
 
 // Pinned in the node's Go suite too. See this file's header.
 const VECTORS_SHA256 =
-  "72124d7710658858ca747c90593e7d0c23fb63560cb7b2cd3fe607d542d83c58";
+  "3f750e0def2b0d673578e91e7ec89c8917b98c84aa9ef2488618ae51677c312c";
 
 function hexToBytes(hex) {
   const out = new Uint8Array(hex.length / 2);
@@ -92,11 +95,16 @@ test("the statement-domain registry is closed and matches the node's", () => {
   }
   assert.equal(registered("SDN-MADE-UP-DOMAIN"), false);
   assert.equal(CONTENT_HASH_SIZE, 32);
-  // The two domains the node registers, named explicitly so adding a third
-  // cannot slip in as "the vectors said so".
+  // The domains the node registers, named explicitly so a fourth cannot slip in
+  // as "the vectors said so". SDN-UPDATE-SIGNAL-V1 was admitted deliberately on
+  // 2026-08-09 (owner ruling: the publisher pushes a signed update signal and
+  // every install upgrades itself in place) — registered, so the JS registry
+  // still mirrors the node's exactly, and REFUSED by the module verifier, which
+  // the update-signal-domain-is-refused-for-a-module vector below pins.
   assert.deepEqual(registeredDomains(), [
     DOMAIN_MODULE_PUBLICATION_V1,
     DOMAIN_UPDATE_MANIFEST_V1,
+    DOMAIN_UPDATE_SIGNAL_V1,
   ]);
 });
 
