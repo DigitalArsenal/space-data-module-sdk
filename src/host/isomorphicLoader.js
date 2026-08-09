@@ -213,9 +213,24 @@ export async function loadModule(options = {}) {
   // plaintext buffer this function materialized is scrubbed the moment the
   // last of them is answered, matching the browser harness's
   // ownedArtifactBytes contract.
+  const runtimeHostRequested =
+    String(options.hostProfile ?? "").trim().toLowerCase() === "runtime-host" ||
+    Array.isArray(options.modules) ||
+    (typeof options.defaultModuleId === "string" &&
+      options.defaultModuleId.trim().length > 0);
+  // The profile inspection is the ONLY consumer here that needs a compiled
+  // module. The runtime-host path does not take it, and it must not start
+  // paying a V8 compile of the whole artifact on every load just because the
+  // runtime-target gate arrived — the gate reads a custom section, which is a
+  // byte-level question.
+  const needsCompiledModule =
+    runtimeKind === "wasmedge" &&
+    !runtimeHostRequested &&
+    !options.wasmEdgeRunnerBinary;
   const needsBytes = Boolean(signaturePolicy) || runtimeKind === "wasmedge";
   let artifactBytes = null;
   let wasmModule = null;
+  let embeddedManifest = null;
   if (needsBytes) {
     const { readFile } = await import("node:fs/promises");
     artifactBytes = new Uint8Array(await readFile(source));
@@ -223,6 +238,13 @@ export async function loadModule(options = {}) {
       await verifyModuleArtifact(artifactBytes, signaturePolicy);
     }
     if (runtimeKind === "wasmedge") {
+      const { locateEmbeddedPlgManifest } = await import(
+        "../compliance/index.js"
+      );
+      embeddedManifest =
+        locateEmbeddedPlgManifest(artifactBytes)?.decoded ?? null;
+    }
+    if (needsCompiledModule) {
       wasmModule = await WebAssembly.compile(toLoadableWasmBytes(artifactBytes));
     }
     zeroWasmBytes(artifactBytes);
@@ -236,16 +258,11 @@ export async function loadModule(options = {}) {
     // not serve, while the reverse case is refused at the door. Both legs read
     // the same declaration and refuse the same way.
     assertArtifactRuntimeTarget({
-      wasmModule,
+      embeddedManifest,
       manifest: options.manifest,
       leg: "wasmedge",
     });
-    const runtimeHostRequested =
-      String(options.hostProfile ?? "").trim().toLowerCase() === "runtime-host" ||
-      Array.isArray(options.modules) ||
-      (typeof options.defaultModuleId === "string" &&
-        options.defaultModuleId.trim().length > 0);
-    if (!runtimeHostRequested && !options.wasmEdgeRunnerBinary) {
+    if (needsCompiledModule) {
       const inspection = await inspectModule(wasmModule);
       if (
         (inspection.profile === "standalone" || inspection.profile === "module-host-abi") &&

@@ -143,10 +143,14 @@ export function embeddedPlgManifest(wasmModule) {
     try {
       const bytes = new Uint8Array(section);
       if (!isPlgManifestBuffer(bytes)) continue;
-      const decoded = decodePlgManifest(bytes);
-      if (normalizedRuntimeTargets(decoded).length > 0) return decoded;
+      // FIRST DECODABLE MANIFEST WINS — the same rule the node-side locator
+      // (`locateEmbeddedPlgManifest`) applies. Skipping a manifest merely
+      // because its runtimeTargets are empty made this reader disagree with
+      // that one on the very same bytes, so an artifact could be scoped by one
+      // declaration and enforced against another.
+      return decodePlgManifest(bytes);
     } catch {
-      // An unreadable section is not a declaration. Keep looking.
+      // An UNDECODABLE section is not a declaration. Keep looking.
     }
   }
   return null;
@@ -171,8 +175,21 @@ export function embeddedRuntimeTargets(wasmModule) {
  *
  * @returns {{targets: string[], source: "embedded"|"caller"}|null}
  */
-export function resolveRuntimeTargetRefusal({ wasmModule, manifest, leg }) {
-  const embeddedManifest = wasmModule ? embeddedPlgManifest(wasmModule) : null;
+export function resolveRuntimeTargetRefusal({
+  wasmModule,
+  manifest,
+  leg,
+  embeddedManifest: providedEmbeddedManifest,
+}) {
+  // A caller that already located the artifact's own manifest from BYTES (the
+  // node leg does, via `locateEmbeddedPlgManifest`) passes it here rather than
+  // making this gate compile the module just to read a custom section. The two
+  // locators apply the same first-decodable-wins rule; the byte-side one can
+  // additionally reach a manifest carried in a bundle entry or a data segment,
+  // which only ever makes that leg MORE likely to refuse — the safe direction.
+  const embeddedManifest =
+    providedEmbeddedManifest ??
+    (wasmModule ? embeddedPlgManifest(wasmModule) : null);
   const embedded = normalizedRuntimeTargets(embeddedManifest);
   if (!runtimeTargetSatisfies(embedded, leg, embeddedManifest?.capabilities)) {
     return { targets: embedded, source: "embedded" };
@@ -194,10 +211,16 @@ export function resolveRuntimeTargetRefusal({ wasmModule, manifest, leg }) {
 export function assertArtifactRuntimeTarget({
   wasmModule,
   manifest,
+  embeddedManifest,
   leg,
   what = "module",
 }) {
-  const refusal = resolveRuntimeTargetRefusal({ wasmModule, manifest, leg });
+  const refusal = resolveRuntimeTargetRefusal({
+    wasmModule,
+    manifest,
+    embeddedManifest,
+    leg,
+  });
   if (!refusal) return;
   const { targets, source } = refusal;
   throw new RuntimeTargetError(

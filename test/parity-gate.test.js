@@ -715,3 +715,46 @@ test("the gate manifest's lane claim outranks the artifact's own declaration", a
     `expected expected-lane-not-compared, got ${JSON.stringify(report.failures)}`,
   );
 });
+
+test("scoping a lane out removes THAT LANE from the comparison, never the comparison itself", () => {
+  // THE REGRESSION THAT SHIPPED AND WAS CAUGHT IN REVIEW. The divergence loop
+  // used to pivot on lanes[0] — the browser lane — and `lanesAgree` treats
+  // out-of-declared-scope as agreeing with everything. For a WasmEdge-only
+  // artifact, lanes[0] is out of scope, so wasmedge-native was never compared
+  // against wasmedge-docker: the gate reported the artifact adequately gated
+  // on two lanes while comparing nothing at all. Pivoting on the COMPARED
+  // lanes is the fix; this test is the proof it stays fixed.
+  const lanes = [
+    { lane: "browser", contractVerdict: ContractVerdict.OutOfDeclaredScope, reason: "declared out" },
+    { lane: "wasmedge-docker", contractVerdict: ContractVerdict.Satisfied, reason: null },
+    { lane: "wasmedge-native", contractVerdict: ContractVerdict.Violated, reason: "forbidden import" },
+  ];
+  const compared = lanes.filter(
+    (entry) => entry.contractVerdict !== ContractVerdict.OutOfDeclaredScope,
+  );
+
+  // What the defective loop saw: pivot on lanes[0], which agrees with all.
+  const pivotOnFirstLane = [];
+  for (let index = 1; index < lanes.length; index += 1) {
+    if (!lanesAgree(lanes[0].contractVerdict, lanes[index].contractVerdict)) {
+      pivotOnFirstLane.push(lanes[index].lane);
+    }
+  }
+  assert.deepEqual(
+    pivotOnFirstLane,
+    [],
+    "the defective pivot really did report nothing — this is why the test exists",
+  );
+
+  // What the shipped loop must see.
+  const pivotOnCompared = [];
+  for (let index = 1; index < compared.length; index += 1) {
+    if (!lanesAgree(compared[0].contractVerdict, compared[index].contractVerdict)) {
+      pivotOnCompared.push(compared[index].lane);
+    }
+  }
+  assert.deepEqual(pivotOnCompared, ["wasmedge-native"]);
+
+  // And a genuine WasmEdge-only artifact still has two lanes to compare.
+  assert.equal(compared.length, 2);
+});

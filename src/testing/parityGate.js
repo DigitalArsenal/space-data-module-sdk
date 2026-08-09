@@ -859,6 +859,10 @@ export async function runParityGate(options = {}) {
   // --- resolve + load artifacts
   const artifacts = [];
   const failures = [];
+  // A caller may state the lanes an artifact owes from OUTSIDE the manifest
+  // file (`--artifact-lanes`), which is the only way to bind a cross-repo
+  // injected artifact whose declaration this repo does not own.
+  const expectedLanesById = options.expectedLanesById ?? {};
   for (const spec of declared) {
     try {
       const rawBytes = new Uint8Array(await readFile(spec.artifactPath));
@@ -872,6 +876,9 @@ export async function runParityGate(options = {}) {
         structural: classifyArtifactImports(loadableBytes, spec.surface),
         declaredRuntimeTargets: declaredRuntimeTargets(loadableBytes),
         declaredCapabilities: declaredCapabilities(loadableBytes),
+        ...(expectedLanesById[spec.id]
+          ? { expectedLanes: expectedLanesById[spec.id] }
+          : {}),
       });
     } catch (error) {
       if (spec.required) {
@@ -1161,12 +1168,25 @@ export async function runParityGate(options = {}) {
       }
     }
 
-    for (let index = 1; index < lanes.length; index += 1) {
-      if (!lanesAgree(lanes[0].contractVerdict, lanes[index].contractVerdict)) {
+    // DIVERGENCE IS COMPARED AMONG THE LANES THAT RAN. This loop used to pivot
+    // on `lanes[0]`, which is the BROWSER lane — and for a WasmEdge-only
+    // artifact that entry is now `out-of-declared-scope`, which agrees with
+    // everything. Pivoting on it silently stopped comparing wasmedge-native
+    // against wasmedge-docker: the gate would have reported such an artifact
+    // adequately gated on two lanes while comparing nothing at all, defeating
+    // the very rule `certified-on-a-single-lane` states. Scoping a lane out
+    // must remove that lane from the comparison, never the comparison itself.
+    for (let index = 1; index < comparedLanes.length; index += 1) {
+      if (
+        !lanesAgree(
+          comparedLanes[0].contractVerdict,
+          comparedLanes[index].contractVerdict,
+        )
+      ) {
         failures.push({
           artifact: artifact.id,
           kind: "lane-divergence",
-          message: `P1 cross-runtime divergence: ${lanes[0].lane}=${lanes[0].contractVerdict} vs ${lanes[index].lane}=${lanes[index].contractVerdict} (${lanes[index].reason ?? "-"})`,
+          message: `P1 cross-runtime divergence: ${comparedLanes[0].lane}=${comparedLanes[0].contractVerdict} vs ${comparedLanes[index].lane}=${comparedLanes[index].contractVerdict} (${comparedLanes[index].reason ?? "-"})`,
         });
       }
     }

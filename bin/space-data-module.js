@@ -170,6 +170,28 @@ function parseArgs(argv) {
         });
         break;
       }
+      case "--artifact-lanes": {
+        // --artifact-lanes <id>=<lane,lane> — the GATE'S claim about which
+        // lanes an artifact owes evidence on. Without this the strongest of the
+        // three scoping rules ("the artifact does not pick its examiners") was
+        // reachable only from a gate manifest file, i.e. never for the
+        // cross-repo artifacts injected with --artifact, which are exactly the
+        // ones whose declarations this repo does not own.
+        const spec = requireValue(argv, ++index, value);
+        const eq = spec.indexOf("=");
+        if (eq < 1) {
+          throw new Error(
+            `--artifact-lanes expects <id>=<lane,lane>, got "${spec}"`,
+          );
+        }
+        options.expectedLanesById = options.expectedLanesById ?? {};
+        options.expectedLanesById[spec.slice(0, eq)] = spec
+          .slice(eq + 1)
+          .split(",")
+          .map((lane) => lane.trim())
+          .filter(Boolean);
+        break;
+      }
       case "--require-native-wasmedge":
         options.requireNativeWasmEdge = true;
         break;
@@ -383,7 +405,13 @@ async function runParityGateCommand(argv) {
   );
   const report = await runParityGate({
     manifestPath: options.gateManifestPath,
-    extraArtifacts: options.extraArtifacts,
+    extraArtifacts: (options.extraArtifacts ?? []).map((artifact) => ({
+      ...artifact,
+      ...(options.expectedLanesById?.[artifact.id]
+        ? { expectedLanes: options.expectedLanesById[artifact.id] }
+        : {}),
+    })),
+    expectedLanesById: options.expectedLanesById,
     lanes: options.lanes,
     timeoutMs: options.timeoutMs,
     chromeBinary: options.chromeBinary,

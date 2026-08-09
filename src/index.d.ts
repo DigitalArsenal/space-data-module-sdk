@@ -2355,11 +2355,36 @@ export declare class RuntimeTargetError extends Error {
   declarationSource: "embedded" | "caller";
 }
 
-/** Does a declared target set admit this leg? `wasi` satisfies both legs. */
+/**
+ * Does a declared target set admit this leg? `wasi` is the portability
+ * baseline and admits either leg, but only when `capabilities` carries nothing
+ * that leg cannot serve.
+ */
 export function runtimeTargetSatisfies(
   targets: string[] | undefined,
   leg: string,
+  capabilities?: Array<string | { capabilityId?: string; name?: string }>,
 ): boolean;
+
+/** The artifact's own declared targets, read from its embedded `$PLG`. */
+export function embeddedRuntimeTargets(wasmModule: WebAssembly.Module): string[];
+
+/**
+ * Which declaration refuses this leg, if either does. The artifact's embedded
+ * record wins over a caller-supplied manifest.
+ */
+export function resolveRuntimeTargetRefusal(options: {
+  wasmModule?: WebAssembly.Module;
+  manifest?: PluginManifest | Record<string, unknown>;
+  embeddedManifest?: PluginManifest | Record<string, unknown> | null;
+  leg: string;
+}): { targets: string[]; source: "embedded" | "caller" } | null;
+
+/** Throws a RuntimeTargetError when the artifact does not target the browser. */
+export function assertBrowserRuntimeTarget(
+  wasmModule: WebAssembly.Module,
+  manifest?: PluginManifest | Record<string, unknown>,
+): void;
 
 export const FLOW_INVALID_INDEX: number;
 export function createFlowRuntimeHost(
