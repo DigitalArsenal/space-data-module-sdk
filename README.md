@@ -819,7 +819,7 @@ helpers for serialized command execution and virtual filesystem access.
 
 ## License
 
-[MIT](./LICENSE)
+[Apache-2.0](./LICENSE)
 
 ### Dependency licenses
 
