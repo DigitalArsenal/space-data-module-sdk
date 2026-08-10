@@ -7,6 +7,24 @@ include "TypedArenaBuffer.fbs";
 namespace orbpro.manifest;
 
 /// Canonical plugin family.
+///
+/// APPEND-ONLY. Ordinals are wire and MUST never be renumbered or reused.
+///
+/// This enum is a PROJECTION of the authoritative SDS vocabulary
+/// `pluginCategory` (spacedatastandards.org `schema/PLG/main.fbs`). SDS is the
+/// source of truth for what families exist; this enum is what the SDK code
+/// dispatches on. The two DO NOT share ordinals — they diverge from index 5
+/// onward (SDK `COMMS = 5`, SDS `EW = 5`) — so the SDK↔SDS mapping is BY NAME,
+/// declared explicitly in `src/manifest/normalize.js`
+/// (`sdsPluginCategoryByFamily`). Never convert one to the other numerically.
+///
+/// Unknown family strings used to be silently coerced to `ANALYSIS`, which
+/// mislabelled 19 first-party modules and made family-typed resolution work
+/// for propagators only. `normalizePluginFamily()` now REFUSES an unknown
+/// family, naming it and the valid vocabulary.
+///
+/// Ruling: graph/findings/official-harness-shapes.md §4.7 / §8.3
+/// Task:   graph/tasks/harness-w0-immediate-fixes.md (W0.3)
 enum PluginFamily : ubyte {
   SENSOR = 0,
   PROPAGATOR = 1,
@@ -18,7 +36,34 @@ enum PluginFamily : ubyte {
   SDF = 7,
   INFRASTRUCTURE = 8,
   FLOW = 9,
-  BRIDGE = 10
+  BRIDGE = 10,
+  /// Maneuver planning, targeting and trajectory optimization.
+  /// Projects onto SDS `pluginCategory.Maneuver`.
+  MANEUVER = 11,
+  /// Orbit determination: fitting an orbit to observations/ephemerides.
+  /// SDS has NO dedicated member yet — this projects onto
+  /// `pluginCategory.Analysis` until Themis mints one. That gap is filed as
+  /// graph/tasks/sds-plugin-category-projection-gaps.md.
+  ORBIT_DETERMINATION = 12,
+  /// Foundational math / utility library module (frames, time, numerics,
+  /// attitude, splines). Projects onto SDS `pluginCategory.Foundation`.
+  FOUNDATION = 13,
+  /// Parses raw upstream bytes into canonical SDS records.
+  /// Projects onto SDS `pluginCategory.Parser`.
+  PARSER = 14,
+  /// Validates records (integrity, physical bounds, continuity).
+  /// Projects onto SDS `pluginCategory.Validator`.
+  VALIDATOR = 15,
+  /// Exports records to external formats (CSV, etc.).
+  /// Projects onto SDS `pluginCategory.Exporter`.
+  EXPORTER = 16,
+  /// Publication: PNM signing + pub/sub announcement.
+  /// Projects onto SDS `pluginCategory.Publisher`.
+  PUBLISHER = 17,
+  /// Astrodynamics simulation / dynamics modelling.
+  /// Projects onto SDS `pluginCategory.Basilisk` (a legacy vocabulary key
+  /// retained there for wire compatibility).
+  BASILISK = 18
 }
 
 /// Host capability requested by a plugin.

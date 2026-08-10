@@ -16,5 +16,13 @@ export var PluginFamily;
     PluginFamily[PluginFamily["INFRASTRUCTURE"] = 8] = "INFRASTRUCTURE";
     PluginFamily[PluginFamily["FLOW"] = 9] = "FLOW";
     PluginFamily[PluginFamily["BRIDGE"] = 10] = "BRIDGE";
+    PluginFamily[PluginFamily["MANEUVER"] = 11] = "MANEUVER";
+    PluginFamily[PluginFamily["ORBIT_DETERMINATION"] = 12] = "ORBIT_DETERMINATION";
+    PluginFamily[PluginFamily["FOUNDATION"] = 13] = "FOUNDATION";
+    PluginFamily[PluginFamily["PARSER"] = 14] = "PARSER";
+    PluginFamily[PluginFamily["VALIDATOR"] = 15] = "VALIDATOR";
+    PluginFamily[PluginFamily["EXPORTER"] = 16] = "EXPORTER";
+    PluginFamily[PluginFamily["PUBLISHER"] = 17] = "PUBLISHER";
+    PluginFamily[PluginFamily["BASILISK"] = 18] = "BASILISK";
 })(PluginFamily || (PluginFamily = {}));
 //# sourceMappingURL=plugin-family.js.map

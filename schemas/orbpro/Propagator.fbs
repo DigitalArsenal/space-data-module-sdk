@@ -2,6 +2,24 @@ include "BaseTypes.fbs";
 
 namespace orbpro.propagator;
 
+// !! FOUR INCOMPATIBLE `ReferenceFrame` VOCABULARIES CROSS THIS SEAM !!
+// This is the `orbpro.propagator` one. Its NUMERIC values are NOT
+// interchangeable with the others; translate by NAMED TOKEN at every seam.
+//
+//   (A) orbpro.propagator (THIS)  TEME=0 J2000=1 ICRF=2 ECEF=3 MCI=4 MCMF=5
+//   (B) orbpro.plugins            ECI=0  ECEF=1  TEME=2 ICRF=3
+//       (PropagatorState.fbs / "PRST" — the wire the compiled sgp4, hpop,
+//        conjunction-assessment and sensor-shader modules already emit)
+//   (C) Cesium.ReferenceFrame     FIXED=0 INERTIAL=1
+//   (D) ConjunctionCommon.fbs     ECI=1
+//
+// ECI==0, TEME==0 and FIXED==0 all collide, and ECEF is 1 in (B) but 3 here.
+// (B)'s values are frozen by compiled WASM artifacts in the field, so
+// collapsing (A) and (B) is a wire break, not a Wave-0 edit — see
+// graph/tasks/sdk-reference-frame-enum-unification.md. The reference pattern
+// for a correct seam is propagator.hpop/index.js createSourceFromState.
+//
+// Ruling: graph/findings/official-harness-shapes.md §4.2 / §8.2
 enum ReferenceFrame : ubyte {
   TEME = 0,
   J2000 = 1,
@@ -42,6 +60,26 @@ enum PropagatorSourceKind : ubyte {
   SDP8 = 12
 }
 
+/// Orbital state vector — 64 bytes, 8-byte aligned. Mirrors
+/// `OrbProStateVector` in orbpro-integration/sdk/include/orbpro_propagator.h
+/// byte for byte:
+///
+///   0   8   epoch (Julian date, float64)
+///   8   24  position (METERS)
+///   32  24  velocity (METERS/SECOND)
+///   56  1   reference_frame (ubyte)
+///   57  3   padding, MUST be zero
+///   60  4   flags (uint32)
+///
+/// NORMATIVE UNITS: position METERS, velocity METERS/SECOND. There is no km
+/// variant and no host-side conversion — the engine hands these straight to
+/// Cesium Cartesian3, whose unit is metres, and both shipped propagators emit
+/// meters. The C header used to declare `reference_frame` as a uint32 at
+/// offset 56, wire-identical to this ubyte+padding only by little-endian
+/// accident; it now declares ubyte + 3 reserved so the two agree by
+/// construction.
+///
+/// Ruling: graph/findings/official-harness-shapes.md §4.1 / §4.2
 struct StateVector {
   epoch:double;
   position:orbpro.Vec3;

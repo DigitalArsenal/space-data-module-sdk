@@ -2,7 +2,7 @@
   "pluginId": "com.digitalarsenal.flatsql.store",
   "name": "FlatSQL Store",
   "version": "1.1.0",
-  "pluginFamily": "storage",
+  "pluginFamily": "infrastructure",
   "capabilities": ["storage_query", "storage_write", "storage_adapter"],
   "externalInterfaces": [
     {

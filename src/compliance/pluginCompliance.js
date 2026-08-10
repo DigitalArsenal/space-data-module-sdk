@@ -13,7 +13,7 @@ import {
   RuntimeTarget,
 } from "../runtime/constants.js";
 import {
-  BrowserIncompatibleCapabilityIds,
+  LegIncompatibleCapabilityIds,
   RecommendedCapabilityIds,
   StandaloneWasiCapabilityIds,
 } from "../capabilities.js";
@@ -26,6 +26,10 @@ import {
   isPayloadSchemaHashValid,
   payloadSchemaIdentitiesEqual,
 } from "../manifest/typeRefs.js";
+import {
+  PluginFamilyNames,
+  pluginFamilyByName,
+} from "../manifest/normalize.js";
 import { isLegacyWildcardPort } from "./legacyWildcardPorts.js";
 import { SDS_MANIFEST_SECTION_NAME } from "../bundle/constants.js";
 import {
@@ -50,7 +54,18 @@ const ExternalInterfaceDirectionSet = new Set(
 const ExternalInterfaceKindSet = new Set(Object.values(ExternalInterfaceKind));
 const ProtocolRoleSet = new Set(Object.values(ProtocolRole));
 const ProtocolTransportKindSet = new Set(Object.values(ProtocolTransportKind));
-const BrowserIncompatibleCapabilitySet = new Set(BrowserIncompatibleCapabilityIds);
+// One entry per runtime leg that has a declaration policy, built from the
+// single table in capabilities.js. This used to be a browser-only constant,
+// which is why an engine-hosted capability could only ever be described as
+// "not available in the browser" — the exact inverse of the truth.
+const LegIncompatibleCapabilitySets = Object.freeze(
+  Object.fromEntries(
+    Object.entries(LegIncompatibleCapabilityIds).map(([leg, ids]) => [
+      leg,
+      new Set(ids),
+    ]),
+  ),
+);
 const StandaloneWasiProtocolTransportKindSet = new Set([
   ProtocolTransportKind.WASI_PIPE,
 ]);
@@ -121,6 +136,45 @@ function normalizePayloadWireFormatName(value) {
 function validateStringField(issues, value, location, label) {
   if (!isNonEmptyString(value)) {
     pushIssue(issues, "error", "missing-string", `${label} must be a non-empty string.`, location);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * `pluginFamily` is an ENUM, not a free string.
+ *
+ * This used to be `validateStringField`, so any spelling passed compliance and
+ * `normalizePluginFamily` then silently coerced it to ANALYSIS — the two
+ * halves of the same defect. Compliance now enforces the same vocabulary the
+ * normalizer refuses on, so a bad family is caught at check time with the
+ * valid set named, instead of at load time as a mislabelled module.
+ *
+ * Ruling: graph/findings/official-harness-shapes.md §4.7 / §8.3
+ */
+function validatePluginFamilyField(issues, value, location) {
+  if (!isNonEmptyString(value)) {
+    pushIssue(
+      issues,
+      "error",
+      "missing-string",
+      "pluginFamily must be a non-empty string.",
+      location,
+    );
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (pluginFamilyByName[normalized] === undefined) {
+    pushIssue(
+      issues,
+      "error",
+      "unknown-plugin-family",
+      `pluginFamily "${value}" is not a member of the plugin family vocabulary. ` +
+        `Valid families: ${PluginFamilyNames.join(", ")}. ` +
+        `A new family is appended to schemas/PluginManifest.fbs (a projection ` +
+        `of the authoritative SDS pluginCategory), never invented in a manifest.`,
+      location,
+    );
     return false;
   }
   return true;
@@ -1412,21 +1466,27 @@ function validateRuntimeTargets(runtimeTargets, declaredCapabilities, issues, so
       );
     }
   }
-  if (
-    seenTargets.has(RuntimeTarget.BROWSER) &&
-    Array.isArray(declaredCapabilities)
-  ) {
-    for (const capability of declaredCapabilities) {
-      if (!BrowserIncompatibleCapabilitySet.has(capability)) {
+  if (Array.isArray(declaredCapabilities)) {
+    // Check EVERY declared leg that has a policy, not just the browser. An
+    // engine-hosted capability (scene_access/entity_access/render_hooks) is
+    // browser-ONLY, so the conflict it can raise is against `wasmedge`.
+    for (const target of seenTargets) {
+      const incompatible = LegIncompatibleCapabilitySets[target];
+      if (!incompatible) {
         continue;
       }
-      pushIssue(
-        issues,
-        "error",
-        "capability-runtime-conflict",
-        `Capability "${capability}" is not available in the canonical browser runtime target.`,
-        `${sourceName}.capabilities`,
-      );
+      for (const capability of declaredCapabilities) {
+        if (!incompatible.has(capability)) {
+          continue;
+        }
+        pushIssue(
+          issues,
+          "error",
+          "capability-runtime-conflict",
+          `Capability "${capability}" is not available in the canonical ${target} runtime target.`,
+          `${sourceName}.capabilities`,
+        );
+      }
     }
   }
 }
@@ -1734,7 +1794,7 @@ export function validatePluginManifest(manifest, options = {}) {
   validateStringField(issues, manifest.pluginId, `${sourceName}.pluginId`, "pluginId");
   validateStringField(issues, manifest.name, `${sourceName}.name`, "name");
   validateStringField(issues, manifest.version, `${sourceName}.version`, "version");
-  validateStringField(issues, manifest.pluginFamily, `${sourceName}.pluginFamily`, "pluginFamily");
+  validatePluginFamilyField(issues, manifest.pluginFamily, `${sourceName}.pluginFamily`);
 
   const rawDeclaredCapabilities = manifest.capabilities;
   let declaredCapabilities = null;

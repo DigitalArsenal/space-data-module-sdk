@@ -12,6 +12,14 @@ export declare enum PluginFamily {
     SDF = 7,
     INFRASTRUCTURE = 8,
     FLOW = 9,
-    BRIDGE = 10
+    BRIDGE = 10,
+    MANEUVER = 11,
+    ORBIT_DETERMINATION = 12,
+    FOUNDATION = 13,
+    PARSER = 14,
+    VALIDATOR = 15,
+    EXPORTER = 16,
+    PUBLISHER = 17,
+    BASILISK = 18
 }
 //# sourceMappingURL=plugin-family.d.ts.map

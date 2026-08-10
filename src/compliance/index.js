@@ -12,8 +12,11 @@ import {
 } from "./pluginCompliance.js";
 import {
   BrowserIncompatibleCapabilityIds,
+  EngineHostedCapabilityIds,
+  LegIncompatibleCapabilityIds,
   RecommendedCapabilityIds,
   StandaloneWasiCapabilityIds,
+  WasmEdgeIncompatibleCapabilityIds,
 } from "../capabilities.js";
 import { validateManifestAgainstStandardsCatalog } from "../standards/index.js";
 
@@ -50,6 +53,9 @@ export async function validateArtifactWithStandards(options = {}) {
 
 export {
   BrowserIncompatibleCapabilityIds,
+  EngineHostedCapabilityIds,
+  LegIncompatibleCapabilityIds,
+  WasmEdgeIncompatibleCapabilityIds,
   findManifestFiles,
   getWasmExportNames,
   getWasmExportNamesFromFile,

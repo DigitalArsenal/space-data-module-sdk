@@ -56,7 +56,7 @@ import {
 } from "../compiler/pthreadArtifactGuard.js";
 import { resolveWasiThreadsToolchain } from "../compiler/wasiThreadsToolchain.js";
 import {
-  BrowserIncompatibleCapabilityIds,
+  LegIncompatibleCapabilityIds,
   validateArtifactWithStandards,
   validatePluginManifest,
 } from "../compliance/index.js";
@@ -904,9 +904,19 @@ function collectComponentDependencies({ nodePluginIds, dependencies, issues, cap
   return [...components.values()].sort((a, b) => a.pluginId.localeCompare(b.pluginId));
 }
 
-const BROWSER_RUNTIME_TARGET = "browser";
-const BrowserIncompatibleCapabilitySet = new Set(
-  BrowserIncompatibleCapabilityIds,
+// Per-leg incompatibility, read from the ONE table in capabilities.js rather
+// than a browser-only constant. An engine-hosted capability
+// (scene_access/entity_access/render_hooks) is browser-ONLY, so the leg it
+// narrows away is `wasmedge`; the old browser-only form could only ever
+// subtract `browser`, which is how a flow that needs the engine ended up
+// unable to target the runtime the engine lives in.
+const LegIncompatibleCapabilitySets = Object.freeze(
+  Object.fromEntries(
+    Object.entries(LegIncompatibleCapabilityIds).map(([leg, ids]) => [
+      leg,
+      new Set(ids),
+    ]),
+  ),
 );
 
 function declaredRuntimeTargets(manifest) {
@@ -938,9 +948,11 @@ function declaredRuntimeTargets(manifest) {
  * exactly that capability against a browser target. Deriving only from the
  * declarations left the commonest manifest shape re-creating the original
  * defect — the compiler stamping a target its own compliance pass then
- * rejects. So `browser` is also dropped whenever the flow's capability union
- * meets `BrowserIncompatibleCapabilityIds`, and the diagnostic names the
- * capability that cost it.
+ * rejects. So a leg is also dropped whenever the flow's capability union meets
+ * that leg's entry in `LegIncompatibleCapabilityIds`, and the diagnostic names
+ * the capability that cost it. That table is per-leg, not browser-only: the
+ * engine-hosted capabilities (scene_access/entity_access/render_hooks) narrow
+ * away `wasmedge`, in the other direction.
  *
  * This is the difference between a truthful manifest and a wish. The hardcoded
  * ["browser","wasmedge"] made every composition claim the browser, which made
@@ -1006,16 +1018,20 @@ function collectFlowRuntimeTargets({
     );
   }
 
-  const browserIncompatible = [...(capabilities ?? [])]
-    .filter((capability) => BrowserIncompatibleCapabilitySet.has(capability))
-    .sort();
-  if (browserIncompatible.length > 0) {
+  const unionCapabilities = [...(capabilities ?? [])];
+  for (const leg of COMPOSED_FLOW_RUNTIME_TARGET_UNIVERSE) {
+    const incompatible = LegIncompatibleCapabilitySets[leg];
+    if (!incompatible) continue;
+    const offending = unionCapabilities
+      .filter((capability) => incompatible.has(capability))
+      .sort();
+    if (offending.length === 0) continue;
     narrow(
-      (target) => target !== BROWSER_RUNTIME_TARGET,
+      (target) => target !== leg,
       () =>
-        `the flow's capability union contains ${browserIncompatible
+        `the flow's capability union contains ${offending
           .map((capability) => `"${capability}"`)
-          .join(", ")}, which the canonical browser runtime target cannot serve`,
+          .join(", ")}, which the canonical ${leg} runtime target cannot serve`,
     );
   }
 

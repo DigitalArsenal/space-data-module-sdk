@@ -15,7 +15,16 @@ import {
 import { FlatBufferTypeRefT } from "../generated/orbpro/stream/flat-buffer-type-ref.js";
 import { ProtocolRole, ProtocolTransportKind } from "../runtime/constants.js";
 
-const pluginFamilyByName = Object.freeze({
+/**
+ * The manifest-string → PluginFamily vocabulary. This is the WHOLE vocabulary:
+ * anything not in here is refused by name, never coerced.
+ *
+ * `datasource` is the ONE alias, kept because manifests in the field spell it
+ * both ways. Do not add aliases casually — an alias is a second spelling of a
+ * family, and every one of them is a place two modules can disagree about what
+ * they are.
+ */
+export const pluginFamilyByName = Object.freeze({
   sensor: PluginFamily.SENSOR,
   propagator: PluginFamily.PROPAGATOR,
   renderer: PluginFamily.RENDERER,
@@ -28,7 +37,88 @@ const pluginFamilyByName = Object.freeze({
   infrastructure: PluginFamily.INFRASTRUCTURE,
   flow: PluginFamily.FLOW,
   bridge: PluginFamily.BRIDGE,
+  maneuver: PluginFamily.MANEUVER,
+  orbit_determination: PluginFamily.ORBIT_DETERMINATION,
+  foundation: PluginFamily.FOUNDATION,
+  parser: PluginFamily.PARSER,
+  validator: PluginFamily.VALIDATOR,
+  exporter: PluginFamily.EXPORTER,
+  publisher: PluginFamily.PUBLISHER,
+  basilisk: PluginFamily.BASILISK,
 });
+
+/** Every accepted family string, sorted — the vocabulary a refusal names. */
+export const PluginFamilyNames = Object.freeze(
+  Object.keys(pluginFamilyByName).sort(),
+);
+
+/**
+ * SDK family → authoritative SDS `pluginCategory` member name.
+ *
+ * SDS (spacedatastandards.org `schema/PLG/main.fbs`) is the source of truth for
+ * what families exist; this SDK enum is a projection of it. The two DO NOT
+ * share ordinals — they diverge from index 5 (SDK `COMMS = 5`, SDS `EW = 5`) —
+ * so this mapping is BY NAME and must stay explicit. Never convert one enum to
+ * the other numerically.
+ *
+ * Two entries have no 1:1 SDS member and are recorded honestly rather than
+ * hidden. Both are filed in graph/tasks/sds-plugin-category-projection-gaps.md:
+ *   - ORBIT_DETERMINATION → Analysis (SDS has no OD category yet)
+ *   - SDF, BRIDGE         → Analysis / Infrastructure (SDK-local concepts)
+ */
+export const sdsPluginCategoryByFamily = Object.freeze({
+  [PluginFamily.SENSOR]: "Sensor",
+  [PluginFamily.PROPAGATOR]: "Propagator",
+  [PluginFamily.RENDERER]: "Renderer",
+  [PluginFamily.ANALYSIS]: "Analysis",
+  [PluginFamily.DATA_SOURCE]: "DataSource",
+  [PluginFamily.COMMS]: "Comms",
+  [PluginFamily.SHADER]: "Shader",
+  [PluginFamily.SDF]: "Analysis",
+  [PluginFamily.INFRASTRUCTURE]: "Infrastructure",
+  [PluginFamily.FLOW]: "Flow",
+  [PluginFamily.BRIDGE]: "Infrastructure",
+  [PluginFamily.MANEUVER]: "Maneuver",
+  [PluginFamily.ORBIT_DETERMINATION]: "Analysis",
+  [PluginFamily.FOUNDATION]: "Foundation",
+  [PluginFamily.PARSER]: "Parser",
+  [PluginFamily.VALIDATOR]: "Validator",
+  [PluginFamily.EXPORTER]: "Exporter",
+  [PluginFamily.PUBLISHER]: "Publisher",
+  [PluginFamily.BASILISK]: "Basilisk",
+});
+
+const PluginFamilyValues = Object.freeze(
+  new Set(Object.values(pluginFamilyByName)),
+);
+
+/**
+ * Thrown when a manifest declares a family the SDK does not know.
+ *
+ * It is a THROW and not a fallback on purpose. The old code returned
+ * `PluginFamily.ANALYSIS` for anything unrecognized, which is why 19
+ * first-party modules shipped mislabelled and family-typed resolution only
+ * ever worked for propagators: a typo and a deliberate new family were
+ * indistinguishable, and both were silent.
+ *
+ * Ruling: graph/findings/official-harness-shapes.md §4.7 / §8.3
+ */
+export class UnknownPluginFamilyError extends Error {
+  constructor(value) {
+    super(
+      `Unknown pluginFamily ${JSON.stringify(value)}. ` +
+        `The manifest vocabulary is: ${PluginFamilyNames.join(", ")}. ` +
+        `Families are NOT invented in a manifest — the SDK enum ` +
+        `(schemas/PluginManifest.fbs PluginFamily) is a projection of the ` +
+        `authoritative SDS pluginCategory vocabulary, and a new family is ` +
+        `appended there first.`,
+    );
+    this.name = "UnknownPluginFamilyError";
+    this.code = "unknown-plugin-family";
+    this.value = value;
+    this.validFamilies = PluginFamilyNames;
+  }
+}
 
 const drainPolicyByName = Object.freeze({
   "single-shot": ManifestDrainPolicy.SINGLE_SHOT,
@@ -145,14 +235,33 @@ function normalizeUnsignedInteger(value, fallback = 0) {
   return Math.max(0, Math.trunc(normalized));
 }
 
-function normalizePluginFamily(value) {
+/**
+ * Resolve a manifest `pluginFamily` to its enum value, or REFUSE.
+ *
+ * There is no fallback. See {@link UnknownPluginFamilyError} for why.
+ *
+ * @param {string|number} value
+ * @returns {number} a PluginFamily member
+ * @throws {UnknownPluginFamilyError} on an unknown string, an out-of-range
+ *   number, or a missing/blank value.
+ */
+export function normalizePluginFamily(value) {
   if (typeof value === "number") {
+    // A numeric family still has to BE one. An out-of-range ordinal is the
+    // same defect as an unknown string, and used to sail straight through.
+    if (!PluginFamilyValues.has(value)) {
+      throw new UnknownPluginFamilyError(value);
+    }
     return value;
   }
-  const normalized = String(value ?? "analysis")
+  const normalized = String(value ?? "")
     .trim()
     .toLowerCase();
-  return pluginFamilyByName[normalized] ?? PluginFamily.ANALYSIS;
+  const resolved = pluginFamilyByName[normalized];
+  if (resolved === undefined) {
+    throw new UnknownPluginFamilyError(value);
+  }
+  return resolved;
 }
 
 function normalizeDrainPolicy(value) {
