@@ -2,6 +2,45 @@ include "BaseTypes.fbs";
 
 namespace orbpro.propagator;
 
+// =============================================================================
+// THE PROPAGATOR ABI LIVES HERE. THIS FILE IS THE SINGLE SOURCE OF TRUTH.
+// =============================================================================
+//
+// Every struct below marked `(abi)` is a BINARY CONTRACT that crosses the
+// WASM boundary between a third-party propagator module and the OrbPro engine.
+// The C header, the TypeScript byte-offset bindings and the size/offset locks
+// are all GENERATED from these declarations:
+//
+//   node scripts/generate-propagator-abi.mjs   # regenerate
+//   node scripts/check-propagator-abi.mjs      # the drift gate (runs in npm test)
+//
+// Do NOT hand-write a mirror of these structs anywhere. Five hand-vendored
+// copies of `StateVector` is what this lane exists to end, and the units
+// contradiction W0.1 fixed (km in the field comments, METERS in the layout
+// block three lines below) lived for months precisely because there was no
+// mechanical link between the IDL and the header.
+//
+// Contract document: docs/propagator-abi.md
+// Ruling: graph/findings/official-harness-shapes.md §3 / §7 SHIP-1
+// Task:   graph/tasks/harness-w1-propagator-abi-and-reference.md (W1.1)
+
+/// Marks a struct or enum as part of the binary propagator ABI. Generated
+/// artifacts are derived from exactly the declarations carrying this.
+attribute "abi";
+
+/// The C type name a generated ABI declaration takes. Part of the contract:
+/// third-party sources say `OrbProStateVector`, not `orbpro_propagator_StateVector`.
+attribute "abi_c_name";
+
+/// The C enumerator prefix for a generated ABI enum (ReferenceFrame's members
+/// are `ORBPRO_FRAME_*`, StateFlags' are `ORBPRO_STATE_*`).
+attribute "abi_c_prefix";
+
+/// The C helper-function prefix for a generated ABI struct: the generator emits
+/// `<prefix>init()` and a padding-clearing `<prefix>set_<field>()` for every
+/// enum field. Writing these by hand is how padding bytes go stale.
+attribute "abi_c_helper_prefix";
+
 // !! FOUR INCOMPATIBLE `ReferenceFrame` VOCABULARIES CROSS THIS SEAM !!
 // This is the `orbpro.propagator` one. Its NUMERIC values are NOT
 // interchangeable with the others; translate by NAMED TOKEN at every seam.
@@ -20,7 +59,7 @@ namespace orbpro.propagator;
 // for a correct seam is propagator.hpop/index.js createSourceFromState.
 //
 // Ruling: graph/findings/official-harness-shapes.md §4.2 / §8.2
-enum ReferenceFrame : ubyte {
+enum ReferenceFrame : ubyte (abi, abi_c_name: "OrbProReferenceFrame", abi_c_prefix: "ORBPRO_FRAME_") {
   TEME = 0,
   J2000 = 1,
   ICRF = 2,
@@ -29,7 +68,10 @@ enum ReferenceFrame : ubyte {
   MCMF = 5
 }
 
-enum StateFlags : uint {
+/// StateVector.flags is a BITFIELD carrying any OR-combination of these, so it
+/// is declared `uint` on the struct rather than typed to this enum. The C
+/// enumerators are generated from here anyway — they are the contract.
+enum StateFlags : uint (abi, abi_c_name: "OrbProStateFlags", abi_c_prefix: "ORBPRO_STATE_") {
   NONE = 0,
   VALID = 1,
   IN_ECLIPSE = 2,
@@ -80,12 +122,90 @@ enum PropagatorSourceKind : ubyte {
 /// construction.
 ///
 /// Ruling: graph/findings/official-harness-shapes.md §4.1 / §4.2
-struct StateVector {
+struct StateVector (abi, abi_c_name: "OrbProStateVector", abi_c_helper_prefix: "orbpro_state_") {
+  /// Julian date of this state.
   epoch:double;
+  /// Position [x, y, z] in METERS.
   position:orbpro.Vec3;
+  /// Velocity [vx, vy, vz] in METERS PER SECOND.
   velocity:orbpro.Vec3;
+  /// Reference frame of position/velocity. One byte; the three bytes that
+  /// follow are alignment padding and MUST be written as zero.
   reference_frame:ReferenceFrame;
+  /// StateFlags bitfield.
   flags:uint;
+}
+
+/// Keplerian orbital elements — the OPTIONAL initialization input accepted by
+/// `plugin_init_elements`. 64 bytes, 8-byte aligned.
+///
+/// UNITS NOTE: `semi_major_axis` is KILOMETRES. That is deliberate and it is
+/// NOT an inconsistency with StateVector's metres: this is an INPUT element
+/// set, not an output state vector, and the two are different structs on
+/// different sides of the call. Do not "unify" them — see the normative units
+/// block in the generated C header.
+struct OrbitalElements (abi, abi_c_name: "OrbProOrbitalElements", abi_c_helper_prefix: "orbpro_elements_") {
+  /// Semi-major axis in KILOMETRES.
+  semi_major_axis:double;
+  /// Orbital eccentricity (0 = circular, <1 = ellipse).
+  eccentricity:double;
+  /// Inclination in RADIANS.
+  inclination:double;
+  /// Right ascension of the ascending node in RADIANS.
+  raan:double;
+  /// Argument of periapsis in RADIANS.
+  arg_periapsis:double;
+  /// True anomaly in RADIANS.
+  true_anomaly:double;
+  /// Epoch as a Julian date.
+  epoch:double;
+  /// Reserved, MUST be written as 0.
+  reserved:double;
+}
+
+/// Binary OMM record — the mean-element ingest struct. 88 bytes, 8-byte
+/// aligned.
+///
+/// !! THIS STRUCT IS ALSO AN ON-DISK FORMAT !!
+/// -----------------------------------------------------------------------
+/// It crosses the ABI (`plugin_init_omm`, `plugin_entity_add_omm`) AND is
+/// persisted verbatim as a SQLite BLOB by the first-party SGP4 module
+/// (`sgp4_plugin.cpp`, `sqlite3_bind_blob(..., &omm, sizeof(OrbProOMMRecord), ...)`).
+/// Until W1.1 it carried NO size or offset lock anywhere in the stack, so the
+/// layout that every stored blob depends on was held only by the field order
+/// of one hand-written C struct in one module.
+///
+/// The layout declared here is that layout, EXACTLY as it has been written to
+/// disk — the four trailing padding bytes at offset 84 included. This is a
+/// description of the wire as it already exists, not a redesign of it; the
+/// generated locks now pin it. Migrating the format is explicitly out of
+/// scope and would invalidate every stored blob.
+///
+/// UNITS: angles in DEGREES, mean motion in REV/DAY, bstar in 1/earth-radii.
+/// These are the SDS $OMM units, carried through unconverted.
+struct OMMRecord (abi, abi_c_name: "OrbProOMMRecord", abi_c_helper_prefix: "orbpro_omm_") {
+  /// Epoch as a Julian date (callers convert ISO 8601 -> JD).
+  epoch_jd:double;
+  /// Mean motion in REV/DAY.
+  mean_motion:double;
+  /// Eccentricity (unitless).
+  eccentricity:double;
+  /// Inclination in DEGREES.
+  inclination:double;
+  /// Right ascension of the ascending node in DEGREES.
+  ra_of_asc_node:double;
+  /// Argument of pericenter in DEGREES.
+  arg_of_pericenter:double;
+  /// Mean anomaly in DEGREES.
+  mean_anomaly:double;
+  /// B* drag term in 1/earth-radii.
+  bstar:double;
+  /// First derivative of mean motion, REV/DAY^2.
+  mean_motion_dot:double;
+  /// Second derivative of mean motion, REV/DAY^3.
+  mean_motion_ddot:double;
+  /// NORAD catalog number — the identity authority for this record.
+  norad_cat_id:uint;
 }
 
 table PropagatorDescribeSourcesBatchRequest {

@@ -34,6 +34,8 @@ async function main(argv) {
       return runCheck(rest);
     case "compile":
       return runCompile(rest);
+    case "init":
+      return runInit(rest);
     case "flow":
       return runFlow(rest);
     case "parity":
@@ -97,6 +99,18 @@ function parseArgs(argv) {
         break;
       case "--out":
         options.outputPath = path.resolve(requireValue(argv, ++index, value));
+        break;
+      case "--family":
+        options.family = requireValue(argv, ++index, value);
+        break;
+      case "--name":
+        options.name = requireValue(argv, ++index, value);
+        break;
+      case "--plugin-id":
+        options.pluginId = requireValue(argv, ++index, value);
+        break;
+      case "--force":
+        options.force = true;
         break;
       case "--recipient-public-key":
         options.recipientPublicKeyHex = requireValue(argv, ++index, value);
@@ -219,6 +233,8 @@ function printUsage() {
   space-data-module check --repo-root .
   space-data-module check --manifest ./manifest.json --wasm ./dist/module.wasm
   space-data-module compile --manifest ./manifest.json --source ./src/module.c --out ./dist/module.wasm
+  space-data-module init --family propagator --name my-propagator
+  space-data-module init --family propagator --name my-propagator --out ./modules/my-propagator [--plugin-id com.orbpro.my.propagator] [--force] [--json]
   space-data-module parity --wasm ./dist/isomorphic/module.wasm --fixture ./fixtures/parity/basic.json
   space-data-module parity --wasm ./dist/isomorphic/module.wasm --fixture ./f.json --lanes browser,wasmedge,docker-wasmedge [--json]
   space-data-module parity ... --self-test-divergence docker-wasmedge   (fire drill: prove the diff fails loudly)
@@ -530,6 +546,42 @@ async function runCompile(argv) {
     printReport(result.report);
   }
   return result.report.ok ? 0 : 1;
+}
+
+// space-data-module init --family propagator --name <module-name>
+//   [--out <dir>] [--plugin-id <id>] [--force] [--json]
+//
+// Scaffolds a new SDN WASM module skeleton from templates/<family>-module/.
+// An unrecognized --family FAILS LOUDLY (see src/scaffold/index.js) — there
+// is no generic fallback template.
+async function runInit(argv) {
+  const options = parseArgs(argv);
+  if (!options.family) {
+    throw new Error("init requires --family <family> (e.g. --family propagator).");
+  }
+  if (!options.name) {
+    throw new Error("init requires --name <module-name>.");
+  }
+  const { scaffoldModule } = await import("../src/scaffold/index.js");
+  const result = await scaffoldModule({
+    family: options.family,
+    name: options.name,
+    outDir: options.outputPath ?? undefined,
+    pluginId: options.pluginId,
+    force: options.force === true,
+  });
+  if (options.json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    console.log(
+      `Scaffolded ${result.family} module "${result.name}" into ${result.outDir}`,
+    );
+    console.log(`  pluginId=${result.pluginId}`);
+    for (const file of result.files) {
+      console.log(`  created ${file}`);
+    }
+  }
+  return result.ok ? 0 : 1;
 }
 
 async function runProtect(argv) {
