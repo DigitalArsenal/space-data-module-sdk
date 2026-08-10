@@ -1,4 +1,9 @@
-# The FlatSQL host contract (why the floor moved to ^1.4.4)
+# The FlatSQL host contract (why the floor moved to ^1.4.4, then to ^2.0.0)
+
+The current floor is **`^2.0.0`**. The 1.x history below is what made the
+contract, and it still describes the contract 2.0.0 ships — see
+[The 2.0.0 floor is a licence change, not a port](#the-200-floor-is-a-licence-change-not-a-port)
+at the end for why the major bump costs nothing here.
 
 ## The defect the bump repairs
 
@@ -93,3 +98,31 @@ consumer would actually load. At 1.4.4 it reports `in-surface (WASI + declared
 capabilities: 7)`, `satisfied` in the real-browser lane and
 `runner-cannot-supply-declared-capability` under the bare WasmEdge CLI, naming
 `env.flatsql_io_open` as the single blocker.
+
+## The 2.0.0 floor is a licence change, not a port
+
+`flatsql` 2.0.0 is 1.4.5's code republished under the [PolyForm Noncommercial
+License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/).
+The major is semver signalling the licence, not an API break. Measured on the
+two published tarballs, every file is byte-identical except three:
+
+```
+LICENSE       Apache-2.0 -> PolyForm Noncommercial 1.0.0
+package.json  "version" and "license" only
+README.md     licence + contact section
+```
+
+The host contract above therefore carries over unchanged. On
+`wasm/flatsql-wasi.wasm`, 2.0.0 imports the same **13** — the seven
+`flatsql_io_*` on `env` plus six WASI preview1 — and exports the same **102**
+as 1.4.4, so the parity gate classifies the 2.0.0 engine exactly as it
+classified 1.4.4.
+
+Two consequences for anyone reading this floor:
+
+- **Every pre-2.0.0 `flatsql` is withdrawn from npm.** A pin below `^2.0.0`
+  resolves to nothing. There is no supported lower floor.
+- **Commercial use of the engine needs a licence** from DigitalArsenal.io, Inc.
+  ([tj@digitalarsenal.io](mailto:tj@digitalarsenal.io)). The SDK stays MIT and
+  consumes flatsql through its JS API only, but installing the SDK installs the
+  engine, so the obligation reaches the SDK's consumers.

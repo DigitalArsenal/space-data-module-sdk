@@ -779,6 +779,8 @@ inspect the parsed `REC`, `PNM`, and `ENC` records produced by the real
 
 - [`spacedatastandards.org`](https://spacedatastandards.org)
 - [`hd-wallet-wasm`](https://github.com/nicktj-dev/hd-wallet-wasm)
+- [`flatsql`](https://github.com/DigitalArsenal/flatsql) — the FlatBuffer-native
+  query engine behind `createFlatSqlRuntimeStore()`
 
 ## Development
 
@@ -818,3 +820,18 @@ helpers for serialized command execution and virtual filesystem access.
 ## License
 
 [MIT](./LICENSE)
+
+### Dependency licenses
+
+The SDK's own license (above) does not change, but one runtime dependency is
+no longer permissive: as of `flatsql` **2.0.0** the FlatSQL engine is licensed
+under the [PolyForm Noncommercial License
+1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/) — source-available
+and free for any noncommercial purpose, with commercial use requiring a separate
+license from DigitalArsenal.io, Inc.
+([tj@digitalarsenal.io](mailto:tj@digitalarsenal.io)). Installing this package
+installs `flatsql`, so a commercial deployment of anything built on the SDK's
+FlatSQL-backed runtime-host storage needs that license. Every `flatsql` release
+before 2.0.0 has been withdrawn from npm, so `^2.0.0` is the only resolvable
+floor — see [`docs/flatsql-host-contract.md`](./docs/flatsql-host-contract.md)
+for why the major bump changes no API.
