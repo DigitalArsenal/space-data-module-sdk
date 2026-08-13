@@ -42,6 +42,8 @@ async function main(argv) {
       return runParity(rest);
     case "parity-gate":
       return runParityGateCommand(rest);
+    case "conformance":
+      return runConformanceCommand(rest);
     case "protect":
       return runProtect(rest);
     case "sign":
@@ -241,6 +243,9 @@ function printUsage() {
   space-data-module parity-gate                                          (THE isomorphism acceptance gate: certified artifact set x real lanes)
   space-data-module parity-gate --artifact rf-fspl=./dist/isomorphic/module.wasm:module --json
   space-data-module parity-gate --gate-manifest ./parity/negative-control.json --expect-fail   (prove the gate can fail)
+  space-data-module conformance propagator --artifact ./dist/isomorphic/module.wasm             (official-harness conformance: WASM artifacts only)
+  space-data-module conformance propagator --artifact ./dist/isomorphic/module.wasm --vectors ./vectors/vectors.json --json
+  space-data-module conformance propagator --self-test                                          (must exit 0 BY failing: planted defects all caught)
   space-data-module flow check ./flows/my.flow.json --deps ./modules-root
   space-data-module flow compile ./flows/my.flow.json --deps ./modules-root [--out ./flows/my/dist]
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
@@ -399,6 +404,92 @@ async function runParity(argv) {
     }
   }
   return report.ok ? 0 : 2;
+}
+
+// space-data-module conformance <family> --artifact ./dist/isomorphic/module.wasm
+//   [--vectors ./vectors/vectors.json] [--json]
+//   [--leak-warmup N] [--leak-cycles N] [--leak-entities N]
+// space-data-module conformance <family> --self-test    (must exit 0 BY failing)
+//
+// The official-harness conformance runner (finding
+// graph/findings/official-harness-shapes.md §5): WASM artifacts ONLY, family-
+// dispatched, shipped with its own negative control. PASS / PASS-WITH-GAPS
+// exit 0 (gaps are named); FAIL exits 1. The self-test runs the suite against
+// mock propagators with planted defects — one per real defect class the
+// finding documented — and exits 0 only when every defect is CAUGHT.
+async function runConformanceCommand(argv) {
+  const [family, ...rest] = argv;
+  if (!family || family.startsWith("--")) {
+    throw new Error(
+      "conformance requires a family argument, e.g. `space-data-module conformance propagator ...`",
+    );
+  }
+  const options = { json: false, selfTest: false, leak: {} };
+  for (let index = 0; index < rest.length; index += 1) {
+    const value = rest[index];
+    switch (value) {
+      case "--artifact":
+      case "--wasm":
+        options.artifactPath = path.resolve(requireValue(rest, ++index, value));
+        break;
+      case "--vectors":
+        options.vectorsPath = path.resolve(requireValue(rest, ++index, value));
+        break;
+      case "--json":
+        options.json = true;
+        break;
+      case "--self-test":
+        options.selfTest = true;
+        break;
+      case "--leak-warmup":
+        options.leak.warmupCycles = Number(requireValue(rest, ++index, value));
+        break;
+      case "--leak-cycles":
+        options.leak.measureCycles = Number(requireValue(rest, ++index, value));
+        break;
+      case "--leak-entities":
+        options.leak.entities = Number(requireValue(rest, ++index, value));
+        break;
+      default:
+        throw new Error(`conformance: unknown flag ${value}`);
+    }
+  }
+
+  const conformance = await import("../src/conformance/index.js");
+
+  if (options.selfTest) {
+    if (family !== "propagator") {
+      throw new conformance.UnknownConformanceFamilyError(family);
+    }
+    const outcome = await conformance.runPropagatorSelfTest();
+    if (options.json) {
+      console.log(JSON.stringify(outcome, null, 2));
+    } else {
+      console.log(conformance.formatSelfTestReport(outcome));
+    }
+    return outcome.ok ? 0 : 1;
+  }
+
+  if (!options.artifactPath) {
+    throw new Error("conformance requires --artifact <module.wasm> (or --self-test).");
+  }
+  const report = await conformance.runConformance({
+    family,
+    artifactPath: options.artifactPath,
+    vectorsPath: options.vectorsPath,
+    leak: options.leak,
+  });
+  if (options.json) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    const text = conformance.formatConformanceReport(report);
+    if (report.verdict === "FAIL") {
+      console.error(text);
+    } else {
+      console.log(text);
+    }
+  }
+  return report.verdict === "FAIL" ? 1 : 0;
 }
 
 // space-data-module parity-gate [--gate-manifest ./parity/gate.json]

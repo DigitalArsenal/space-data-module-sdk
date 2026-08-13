@@ -28,6 +28,7 @@ test fixture.
 - [Lifetime](#lifetime)
 - [Versioning](#versioning)
 - [Parity envelope](#parity-envelope)
+- [Conformance](#conformance)
 - [Consumer seam](#consumer-seam)
 - [Guest usage](#guest-usage)
 
@@ -339,15 +340,16 @@ and must leave the module usable — a destroyed module refuses to propagate
 (`NOT_INITIALIZED`) rather than reading freed state, and comes back cleanly on
 the next ingest.
 
-> **Known defect, stated so it is not mistaken for the standard.**
-> `destroySource()` is literally `{}` in BOTH shipped first-party propagators,
-> and both therefore FAIL this leak test today. sgp4's `createSourceFromState`
-> additionally re-ingests the whole catalogue and tears down the 120 fps worker
-> pool for a single burn, polluting the identity table with a synthetic NORAD.
-> Fixing them is **W1.5** in `graph/tasks/official-harness-shapes-program.md`;
-> the finding's analysis is §4.5. The reference module passes the leak test
-> today, deliberately — it sets the bar W1.5 brings the first-party
-> propagators up to.
+> **Historical defect, retired 2026-08-12.** `destroySource()` was literally
+> `{}` in BOTH shipped first-party propagators when this ABI was written
+> (finding §4.5), and sgp4's `createSourceFromState` re-ingested the whole
+> catalogue for a single burn. The maneuver program landed the fix on OrbPro
+> `main` (`2db279766c` and `97cc38127e`): both propagators now recycle
+> post-burn source SLOTS — the entity stays resident so no index above it
+> moves, destroy marks the slot free, and creating a source re-points the
+> recycled entity in place. The reference module remains the leak-test bar,
+> now enforced mechanically by
+> `space-data-module conformance propagator` (tier4/lifecycle-leak).
 
 ## Versioning
 
@@ -398,6 +400,23 @@ Run it:
 ```
 space-data-module parity-gate --artifact <id>=./dist/isomorphic/module.wasm:module
 ```
+
+## Conformance
+
+What "official" buys a third party: one command, family-dispatched, shipped
+with its own negative control ([docs/conformance.md](conformance.md)):
+
+```
+space-data-module conformance propagator --artifact ./dist/isomorphic/module.wasm
+space-data-module conformance propagator --self-test    # must exit 0 BY failing
+```
+
+The runner adjudicates everything this document specifies that a single lane
+can observe — the export set, the corpus anchors, the invariants with no
+stored expectation, the error-code table, and the leak test — and reports the
+cross-runtime lane honestly as a gap that only the parity gate above closes.
+`PASS` / `PASS-WITH-GAPS` exit 0; `FAIL` exits 1 with the offending check
+named.
 
 ## Consumer seam
 

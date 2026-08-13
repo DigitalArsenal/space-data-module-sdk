@@ -32,6 +32,7 @@
     },
     "./include/*": "./include/*",
     "./generated/propagator-abi": "./src/generated/orbpro/propagator-abi.js",
+    "./conformance": "./src/conformance/index.js",
     "./compiler": "./src/compiler/index.js",
     "./compiler/emception": "./src/compiler/emception.js",
     "./bundle": "./src/bundle/index.js",
@@ -67,6 +68,7 @@
       "default": "./src/host/moduleFlatbufferStreamPump.js"
     },
     "./testing": "./src/testing/index.js",
+    "./testing/isomorphic": "./src/testing/isomorphicHarness.js",
     "./standards": {
       "browser": "./src/standards/browser.js",
       "default": "./src/standards/index.js"
@@ -94,6 +96,7 @@
     "test:parity-gate-lanes": "SPACE_DATA_MODULE_SDK_ENABLE_PARITY_GATE=1 node --test test/parity-gate-lanes.test.js",
     "gate:parity": "node ./bin/space-data-module.js parity-gate",
     "gate:parity-negative-control": "node ./bin/space-data-module.js parity-gate --gate-manifest ./parity/negative-control.json --expect-fail",
+    "conformance:self-test": "node ./bin/space-data-module.js conformance propagator --self-test",
     "test:stream-ingest": "node --test test/runtime-host-stream-ingest.test.js",
     "test:module-stream": "node --test test/module-flatbuffer-stream-pump.test.js",
     "benchmark:stream-1gib": "SPACE_DATA_MODULE_SDK_ENABLE_1GB_STREAM_TEST=1 node --test test/runtime-host-stream-ingest.test.js",
