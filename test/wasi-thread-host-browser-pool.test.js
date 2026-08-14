@@ -151,15 +151,25 @@ test("any probe failure disables threading entirely and terminates the pool", as
   );
 });
 
-test("a probe error (onerror) also disables the whole pool", async () => {
+test("a worker-level onerror with no prior protocol message FAILS LOUD (unreachable asset)", async () => {
+  // A pooled worker that raises onerror without ever speaking the pool protocol
+  // never ran our script -> the worker ASSET at the resolved anchor did not load
+  // (404 / wrong anchor / broken import chain). That is a deployment defect, and
+  // silently dropping to the sequential path is exactly the bug that shipped.
   installBrowserEnv({
     hardwareConcurrency: 8,
     behaviors: ["ready", "error"],
     autoExit: false,
   });
-  const h = await host({ requestedThreads: 2 });
-  assert.equal(h.threadSpawn(1), -1);
-  assert.equal(MockWorker.terminatedCount, 2);
+  await assert.rejects(
+    () => host({ requestedThreads: 2 }),
+    (error) => {
+      assert.equal(error.name, "WasiThreadWorkerUnreachableError");
+      assert.match(error.message, /unreachable/);
+      return true;
+    },
+  );
+  assert.equal(MockWorker.terminatedCount, 2, "the pool is still torn down");
 });
 
 test("a probe timeout disables the pool (no worker ever confirms ready)", async () => {
@@ -228,16 +238,18 @@ test("arming short-circuits to disabled on the FIRST not-ready — no wait for t
   );
 });
 
-test("a single onerror short-circuits arming with two silent siblings", async () => {
-  // Same short-circuit contract via the onerror path: worker 0 errors, the other
-  // two never reply, and the pool disables without any timer advance.
+test("a single onerror short-circuits arming with two silent siblings — and throws", async () => {
+  // Same short-circuit contract via the onerror path: worker 0 errors and the
+  // other two never reply, so the decision lands with NO timer advance. Under
+  // the fail-loud contract that decision is now a throw, not a quiet -1.
   installBrowserEnv({
     hardwareConcurrency: 8,
     behaviors: ["error", "timeout", "timeout"],
     autoExit: false,
   });
-  const h = await host({ requestedThreads: 3 });
-  assert.equal(h.threadSpawn(1), -1);
+  await assert.rejects(() => host({ requestedThreads: 3 }), {
+    name: "WasiThreadWorkerUnreachableError",
+  });
   assert.equal(MockWorker.terminatedCount, 3);
 });
 

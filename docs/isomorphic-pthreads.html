@@ -131,8 +131,37 @@
 <p>Passing this guardrail proves the <strong>artifact</strong> is a valid wasi-threads shared-memory/atomics wasm. It does <strong>not</strong> prove that a given WasmEdge build actually spawns and runs guest threads.</p>
 <blockquote><p><strong>Rule:</strong> Do not claim WasmEdge thread support until a real runtime invocation spawns threads and runs. Compile-time validation (wasi-threads contract + shared memory + atomics) is necessary but not sufficient; runtime thread-spawn verification is owned by the deploy/benchmark node, not by this SDK.</p></blockquote>
 <p>Record any WasmEdge runtime limitation honestly. An artifact that validates here but only compiles — and does not instantiate/spawn threads under the target runtime — must be reported as such.</p>
+<h2 id="4-integrators-the-browser-worker-anchor-required-when-you-bundle"><a class="anchor" href="#4-integrators-the-browser-worker-anchor-required-when-you-bundle" aria-hidden="true">#</a>4. Integrators: the browser worker anchor (REQUIRED when you bundle)</h2>
+<p>The browser leg of the wasi-threads host runs each guest pthread on a pooled module <code>Worker</code>. That worker is a <strong>served asset</strong>, and the SDK cannot guess where your build published it.</p>
+<p>By default the host anchors the worker to its own package layout:</p>
+<div class="codeblock"><div class="codeblock-head">js</div><pre><code>new URL(&quot;./wasiThreadBrowserWorker.mjs&quot;, import.meta.url);</code></pre></div>
+<p>That default is correct <strong>only when this source is served unbundled</strong> (Node, and plain dev servers). Any bundler inlines the host and rewrites <code>import.meta.url</code> to the <em>bundle's</em> URL — so the worker is requested next to your bundle, where it was never emitted, and the request 404s. This shipped: an engine artifact asked for <code>Build/CesiumUnminified/wasiThreadBrowserWorker.mjs</code> while the bucket served the chain under <code>js/vendor/space-data-module-sdk/src/host/</code>.</p>
+<p><strong>If you bundle the host, pass the anchor.</strong> Two equivalent forms:</p>
+<div class="codeblock"><div class="codeblock-head">js</div><pre><code>// A. Per-harness (or per-createWasiThreadSpawn) option.
+await createBrowserModuleHarness({
+  wasmBytes,
+  // The directory YOUR build serves the SDK host chain from.
+  wasiThreadWorkerBaseUrl: &quot;js/vendor/space-data-module-sdk/src/host/&quot;,
+});
+
+// B. Process-wide, installed once by the host shim.
+import { setBrowserWasiThreadWorkerBase } from &quot;space-data-module-sdk/browser&quot;;
+setBrowserWasiThreadWorkerBase(&quot;js/vendor/space-data-module-sdk/src/host/&quot;);</code></pre></div>
+<p>Resolution precedence, highest first — deterministic, and nothing else participates:</p>
+<div class="table-wrap"><table><thead><tr><th>Source</th><th>Option / API</th></tr></thead><tbody><tr><td>1. Explicit worker file</td><td><code>browserWorkerUrl</code> / <code>wasiThreadWorkerUrl</code></td></tr><tr><td>2. Explicit directory</td><td><code>browserWorkerBaseUrl</code> / <code>wasiThreadWorkerBaseUrl</code></td></tr><tr><td>3. Process-wide base</td><td><code>setBrowserWasiThreadWorkerBase(base)</code></td></tr><tr><td>4. Packaged sibling</td><td><code>new URL(&quot;./wasiThreadBrowserWorker.mjs&quot;, import.meta.url)</code></td></tr></tbody></table></div>
+<p>Rules that make this contract honest:</p>
+<ul>
+<li><strong>The anchor names a DIRECTORY that serves the WHOLE chain.</strong> <code>wasiThreadBrowserWorker.mjs</code> imports <code>./wasiThreadWorkerRuntime.js</code>. Staging the single <code>.mjs</code> next to your bundle does <strong>not</strong> work.</li>
+<li><strong>A relative base resolves against the document</strong>; absolute URLs pass through unchanged.</li>
+<li><strong>No consumer-side <code>location</code> sniffing.</strong> Forking worker resolution per consumer is not the contract; you already know your build's layout, so state it.</li>
+<li><strong>No fetch-and-retry probe.</strong> Resolution never touches the network: Node never fetches, and browser thread count may not become a function of network timing.</li>
+<li><strong>An unreachable worker fails LOUD.</strong> When the pooled path was requested (threads enabled + cross-origin isolated + shared memory) and the worker asset at the resolved anchor never loads, <code>createWasiThreadSpawn</code> <strong>throws</strong> <code>WasiThreadWorkerUnreachableError</code> naming the URL it tried. It does not drop quietly to one thread — a silent sequential fallback is how a deployment defect hid behind a passing gate as a pure performance loss.</li>
+</ul>
+<p>Genuine capability negotiation is unaffected and stays soft: a worker that loads and reports it cannot instantiate the module, a probe timeout, a non-isolated context, non-shared memory, or a 1-core host all still disable threading and let the guest run its proven sequential path (<code>wasi.thread-spawn</code> -&gt; <code>-1</code>).</p>
 <h2 id="tests"><a class="anchor" href="#tests" aria-hidden="true">#</a>Tests</h2>
 <ul>
+<li><code>test/wasi-thread-bundled-consumer-anchor.test.js</code> — the <strong>bundled-consumer guardrail</strong>: the host source is run through esbuild into a directory that does not hold the worker chain (the published-bucket geometry), driven by a Worker mock that resolves URLs on the filesystem the way a browser resolves them against an origin. With no anchor the pooled path must throw <code>WasiThreadWorkerUnreachableError</code> (the silent sequential fallback is a HARD failure); with an explicit base — or the process-wide setter — the same bundle arms its pool and spawns threads. Also pins the precedence table and asserts the resolver neither fetches nor sniffs <code>location</code>.</li>
+<li><code>test/wasi-thread-host-browser-pool.test.js</code> — warm-pool arming, short-circuit on the first not-ready, probe-deadline bound, idle reuse/teardown, and the fail-loud split between an unreachable worker asset and a negotiated fallback.</li>
 <li><code>test/pthreads-artifact-guardrail.test.js</code> — flag-assembler invariants; a positive compile that emits a validated wasi-threads shared-memory/atomics wasm; a single-thread artifact rejected; a <strong>browser-only Emscripten <code>-pthread</code> artifact rejected</strong> (has shared memory + atomics but no wasi-threads contract); a shared-flag-stripped artifact rejected; and a false-positive guard proving the atomics decoder ignores <code>0xFE</code> immediates.</li>
 <li><code>test/guest-link-symbol-prefix.test.js</code> — the guest-link prefix is the full injective hex of the pluginId; two previously-colliding ids now get distinct prefixes; fresh prefixes match the committed modules-branch artifacts byte-for-byte; and the compose path treats the guest-link metadata's <code>symbolPrefix</code> / <code>methodSymbols</code> as authoritative (never re-derived), keeping a legacy truncated-prefix artifact compatible.</li>
 </ul>
@@ -140,6 +169,7 @@
 <ul>
 <li><a href="./browser-wasmedge-isomorphic.html"><code>docs/browser-wasmedge-isomorphic.md</code></a> — the one-artifact browser + WasmEdge loading profile.</li>
 <li><code>.claude/skills/wasmedge-pthreads/Skills.md</code> — the operating rules.</li>
+<li><code>src/host/wasiThreadHost.js</code> — the isomorphic <code>wasi.thread-spawn</code> host: <code>createWasiThreadSpawn</code>, the browser worker anchor (<code>setBrowserWasiThreadWorkerBase</code>, <code>resolveBrowserWorkerUrl</code>), and <code>WasiThreadWorkerUnreachableError</code>.</li>
 <li><code>src/compiler/pthreadArtifactGuard.js</code> — the flag list + wasm validator.</li>
 <li><code>src/compiler/wasiThreadsToolchain.js</code> — the wasi-threads toolchain resolver.</li>
 <li><code>src/compiler/compileModule.js</code> — <code>ModuleThreadModel</code>, <code>buildCompilerArgs</code>, <code>compileWithWasiThreads</code>, <code>resolveThreadModel</code>, <code>compileModuleFromSource</code>.</li>
@@ -157,6 +187,7 @@
 <li><a class="depth-2" href="#2-validated-artifact-the-part-that-matters-most">2. Validated Artifact (the part that matters most)</a></li>
 <li><a class="depth-2" href="#guest-link-symbol-namespacing-collision-proof-metadata-authoritative">Guest-link symbol namespacing (collision-proof, metadata-authoritative)</a></li>
 <li><a class="depth-2" href="#3-compile-time-vs-runtime-an-honest-boundary">3. Compile-Time vs. Runtime: an honest boundary</a></li>
+<li><a class="depth-2" href="#4-integrators-the-browser-worker-anchor-required-when-you-bundle">4. Integrators: the browser worker anchor (REQUIRED when you bundle)</a></li>
 <li><a class="depth-2" href="#tests">Tests</a></li>
 <li><a class="depth-2" href="#see-also">See also</a></li></ul></nav>
     </div>

@@ -29,6 +29,19 @@ export {
   zeroWasmBytes,
   isSharedArrayBufferLike,
 } from "./host/browserModuleHarness.js";
+// The wasi-threads BROWSER WORKER ANCHOR. A bundling consumer MUST tell the SDK
+// where its build serves the host worker chain from — `import.meta.url` inside a
+// bundle points at the bundle, not at the package layout, and the worker 404s
+// (fail-loud: WasiThreadWorkerUnreachableError). Either call
+// `setBrowserWasiThreadWorkerBase(...)` once in the host shim, or pass
+// `wasiThreadWorkerBaseUrl` to `createBrowserModuleHarness`.
+export {
+  setBrowserWasiThreadWorkerBase,
+  getBrowserWasiThreadWorkerBase,
+  resolveBrowserWorkerUrl,
+  DEFAULT_BROWSER_WORKER_URL,
+  WasiThreadWorkerUnreachableError,
+} from "./host/wasiThreadHost.js";
 // The runtime-target gate is reachable so a consumer can catch the refusal by
 // CLASS (`error instanceof RuntimeTargetError`) rather than by matching a
 // message string, and can ask the same question the loaders ask before it
