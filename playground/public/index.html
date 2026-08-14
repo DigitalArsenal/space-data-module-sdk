@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SDK playground — compile a harness module in your browser</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>SDK playground</h1>
+        <p class="subtitle">
+          Edit a harness-family example in C++, compile it to WebAssembly
+          <em>in this tab</em>, drive it through the family's conformance kit,
+          and run it. Nothing leaves your machine and nothing is fetched from
+          another origin — the compiler (emception's llvm-box: clang and
+          wasm-ld, themselves compiled to wasm) is served from this page.
+        </p>
+      </div>
+      <p id="sdk-version" class="pin"></p>
+    </header>
+
+    <main>
+      <nav id="sidebar">
+        <h2>Harness families</h2>
+        <div id="families"></div>
+      </nav>
+
+      <section id="work">
+        <div class="panel">
+          <div class="panel-head">
+            <label for="examples">Example</label>
+            <select id="examples"></select>
+            <code id="example-path"></code>
+          </div>
+          <p id="family-note" class="note"></p>
+          <p id="example-summary" class="note"></p>
+          <textarea id="editor" spellcheck="false" aria-label="C++ source"></textarea>
+        </div>
+
+        <div class="panel">
+          <div class="actions">
+            <button id="btn-compile" type="button" disabled>1 · Compile</button>
+            <button id="btn-verify" type="button" disabled>2 · Verify</button>
+            <button id="btn-run" type="button" disabled>3 · Run</button>
+          </div>
+
+          <ol class="stages">
+            <li id="stage-compile" data-status="idle">
+              <span class="stage-name">COMPILE</span>
+              <span class="stage-detail"></span>
+            </li>
+            <li id="stage-verify" data-status="idle">
+              <span class="stage-name">VERIFY</span>
+              <span class="stage-detail"></span>
+            </li>
+            <li id="stage-run" data-status="idle">
+              <span class="stage-name">RUN</span>
+              <span class="stage-detail"></span>
+            </li>
+          </ol>
+
+          <h3>Compiler output</h3>
+          <div id="console" class="console"></div>
+
+          <h3>Verify</h3>
+          <div id="verify-report"></div>
+
+          <h3>Run</h3>
+          <canvas id="plot" width="520" height="520"></canvas>
+          <div id="run-report"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <h3>What this lane does not prove</h3>
+      <ul id="lane-gaps"></ul>
+    </footer>
+
+    <script type="module" src="./bundle/app.js"></script>
+  </body>
+</html>
