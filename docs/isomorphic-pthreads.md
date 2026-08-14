@@ -162,8 +162,88 @@ Record any WasmEdge runtime limitation honestly. An artifact that validates here
 but only compiles — and does not instantiate/spawn threads under the target
 runtime — must be reported as such.
 
+## 4. Integrators: the browser worker anchor (REQUIRED when you bundle)
+
+The browser leg of the wasi-threads host runs each guest pthread on a pooled
+module `Worker`. That worker is a **served asset**, and the SDK cannot guess
+where your build published it.
+
+By default the host anchors the worker to its own package layout:
+
+```js
+new URL("./wasiThreadBrowserWorker.mjs", import.meta.url);
+```
+
+That default is correct **only when this source is served unbundled** (Node, and
+plain dev servers). Any bundler inlines the host and rewrites `import.meta.url`
+to the *bundle's* URL — so the worker is requested next to your bundle, where it
+was never emitted, and the request 404s. This shipped: an engine artifact asked
+for `Build/CesiumUnminified/wasiThreadBrowserWorker.mjs` while the bucket served
+the chain under `js/vendor/space-data-module-sdk/src/host/`.
+
+**If you bundle the host, pass the anchor.** Two equivalent forms:
+
+```js
+// A. Per-harness (or per-createWasiThreadSpawn) option.
+await createBrowserModuleHarness({
+  wasmBytes,
+  // The directory YOUR build serves the SDK host chain from.
+  wasiThreadWorkerBaseUrl: "js/vendor/space-data-module-sdk/src/host/",
+});
+
+// B. Process-wide, installed once by the host shim.
+import { setBrowserWasiThreadWorkerBase } from "space-data-module-sdk/browser";
+setBrowserWasiThreadWorkerBase("js/vendor/space-data-module-sdk/src/host/");
+```
+
+Resolution precedence, highest first — deterministic, and nothing else
+participates:
+
+| Source | Option / API |
+| --- | --- |
+| 1. Explicit worker file | `browserWorkerUrl` / `wasiThreadWorkerUrl` |
+| 2. Explicit directory | `browserWorkerBaseUrl` / `wasiThreadWorkerBaseUrl` |
+| 3. Process-wide base | `setBrowserWasiThreadWorkerBase(base)` |
+| 4. Packaged sibling | `new URL("./wasiThreadBrowserWorker.mjs", import.meta.url)` |
+
+Rules that make this contract honest:
+
+- **The anchor names a DIRECTORY that serves the WHOLE chain.**
+  `wasiThreadBrowserWorker.mjs` imports `./wasiThreadWorkerRuntime.js`. Staging
+  the single `.mjs` next to your bundle does **not** work.
+- **A relative base resolves against the document**; absolute URLs pass through
+  unchanged.
+- **No consumer-side `location` sniffing.** Forking worker resolution per
+  consumer is not the contract; you already know your build's layout, so state
+  it.
+- **No fetch-and-retry probe.** Resolution never touches the network: Node never
+  fetches, and browser thread count may not become a function of network timing.
+- **An unreachable worker fails LOUD.** When the pooled path was requested
+  (threads enabled + cross-origin isolated + shared memory) and the worker asset
+  at the resolved anchor never loads, `createWasiThreadSpawn` **throws**
+  `WasiThreadWorkerUnreachableError` naming the URL it tried. It does not drop
+  quietly to one thread — a silent sequential fallback is how a deployment defect
+  hid behind a passing gate as a pure performance loss.
+
+Genuine capability negotiation is unaffected and stays soft: a worker that loads
+and reports it cannot instantiate the module, a probe timeout, a non-isolated
+context, non-shared memory, or a 1-core host all still disable threading and let
+the guest run its proven sequential path (`wasi.thread-spawn` -> `-1`).
+
 ## Tests
 
+- `test/wasi-thread-bundled-consumer-anchor.test.js` — the **bundled-consumer
+  guardrail**: the host source is run through esbuild into a directory that does
+  not hold the worker chain (the published-bucket geometry), driven by a Worker
+  mock that resolves URLs on the filesystem the way a browser resolves them
+  against an origin. With no anchor the pooled path must throw
+  `WasiThreadWorkerUnreachableError` (the silent sequential fallback is a HARD
+  failure); with an explicit base — or the process-wide setter — the same bundle
+  arms its pool and spawns threads. Also pins the precedence table and asserts
+  the resolver neither fetches nor sniffs `location`.
+- `test/wasi-thread-host-browser-pool.test.js` — warm-pool arming, short-circuit
+  on the first not-ready, probe-deadline bound, idle reuse/teardown, and the
+  fail-loud split between an unreachable worker asset and a negotiated fallback.
 - `test/pthreads-artifact-guardrail.test.js` — flag-assembler invariants; a
   positive compile that emits a validated wasi-threads shared-memory/atomics
   wasm; a single-thread artifact rejected; a **browser-only Emscripten `-pthread`
@@ -182,6 +262,10 @@ runtime — must be reported as such.
 - [`docs/browser-wasmedge-isomorphic.md`](./browser-wasmedge-isomorphic.md) —
   the one-artifact browser + WasmEdge loading profile.
 - `.claude/skills/wasmedge-pthreads/Skills.md` — the operating rules.
+- `src/host/wasiThreadHost.js` — the isomorphic `wasi.thread-spawn` host:
+  `createWasiThreadSpawn`, the browser worker anchor
+  (`setBrowserWasiThreadWorkerBase`, `resolveBrowserWorkerUrl`), and
+  `WasiThreadWorkerUnreachableError`.
 - `src/compiler/pthreadArtifactGuard.js` — the flag list + wasm validator.
 - `src/compiler/wasiThreadsToolchain.js` — the wasi-threads toolchain resolver.
 - `src/compiler/compileModule.js` — `ModuleThreadModel`, `buildCompilerArgs`,

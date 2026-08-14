@@ -362,6 +362,14 @@ async function instantiateBrowserModule(options = {}) {
       hostcallChannel: options.threadHostcallChannel,
       requiresHostcalls: needsHostBridge,
       enableBrowserThreads: options.enableBrowserWasiThreads,
+      // Explicit worker anchor for BUNDLED consumers: when this host source is
+      // bundled into an engine artifact, `import.meta.url` inside the SDK host
+      // points at the bundle and the sibling worker asset 404s. A host shim
+      // passes the directory its build actually serves the SDK host chain from
+      // (e.g. OrbPro: `js/vendor/space-data-module-sdk/src/host/`). Unset =
+      // packaged sibling, i.e. today's unbundled behavior.
+      browserWorkerBaseUrl: options.wasiThreadWorkerBaseUrl,
+      browserWorkerUrl: options.wasiThreadWorkerUrl,
     });
     importObject.wasi = {
       ...(importObject.wasi ?? {}),

@@ -39,10 +39,127 @@ const IS_NODE =
   !!process.release &&
   process.release.name === "node";
 
-const BROWSER_WORKER_URL = new URL(
-  "./wasiThreadBrowserWorker.mjs",
+// ---------------------------------------------------------------------------
+// Browser worker asset resolution (the BUNDLED-CONSUMER anchor).
+//
+// `import.meta.url` is only a correct anchor when this file is served in its
+// package layout (unbundled Node/dev). Any bundler that inlines this source
+// rewrites `import.meta.url` to the BUNDLE's URL, and the sibling
+// `wasiThreadBrowserWorker.mjs` was never emitted next to the bundle -> the
+// Worker 404s. That is a real defect that shipped: five OrbPro/sdn-js bundles
+// re-emitted this literal and the published sandcastle bucket requested
+// `Build/CesiumUnminified/wasiThreadBrowserWorker.mjs`.
+//
+// So the anchor is now an EXPLICIT, documented parameter:
+//   - `createWasiThreadSpawn({ browserWorkerUrl })` — the worker file itself, or
+//   - `createWasiThreadSpawn({ browserWorkerBaseUrl })` — the DIRECTORY that
+//     holds the worker chain, or
+//   - `setBrowserWasiThreadWorkerBase(baseUrl)` — a process-wide default a host
+//     shim installs once (OrbPro points it at the served
+//     `js/vendor/space-data-module-sdk/src/host/`).
+// The default stays today's `import.meta.url` sibling, so unbundled behavior is
+// byte-for-byte unchanged.
+//
+// IMPORTANT: the anchor names a DIRECTORY that must contain the WHOLE chain —
+// `wasiThreadBrowserWorker.mjs` imports `./wasiThreadWorkerRuntime.js`. Staging
+// only the single `.mjs` next to a bundle does NOT work.
+//
+// There is deliberately NO consumer-side `location` sniffing and NO
+// fetch-and-retry probe: resolution must be deterministic (Node never fetches;
+// browser thread count may not become a function of network timing), and an
+// unreachable worker asset fails LOUD (see WasiThreadWorkerUnreachableError).
+// ---------------------------------------------------------------------------
+
+const BROWSER_WORKER_FILENAME = "wasiThreadBrowserWorker.mjs";
+
+/** Default anchor: the sibling asset in this file's own package layout. */
+export const DEFAULT_BROWSER_WORKER_URL = new URL(
+  `./${BROWSER_WORKER_FILENAME}`,
   import.meta.url,
 );
+
+let browserWorkerBaseOverride = null;
+
+/**
+ * Install the process-wide browser worker base URL. Intended for a host shim
+ * (e.g. an engine bundle) that knows where its build published the SDK host
+ * directory. Pass `null` to restore the packaged default.
+ *
+ * @param {string|URL|null} baseUrl directory URL containing
+ *   `wasiThreadBrowserWorker.mjs` AND `wasiThreadWorkerRuntime.js`. A trailing
+ *   slash is added when missing.
+ */
+export function setBrowserWasiThreadWorkerBase(baseUrl) {
+  browserWorkerBaseOverride = baseUrl == null ? null : normalizeBase(baseUrl);
+}
+
+/** Current process-wide base override, or null when unset. */
+export function getBrowserWasiThreadWorkerBase() {
+  return browserWorkerBaseOverride;
+}
+
+function normalizeBase(baseUrl) {
+  const asString = String(baseUrl);
+  return asString.endsWith("/") ? asString : `${asString}/`;
+}
+
+/**
+ * Resolve the browser worker URL for one host. Precedence (highest first):
+ *   1. `browserWorkerUrl` option (the worker file itself)
+ *   2. `browserWorkerBaseUrl` option (directory)
+ *   3. `setBrowserWasiThreadWorkerBase()` process-wide base
+ *   4. packaged `import.meta.url` sibling (default)
+ */
+export function resolveBrowserWorkerUrl({
+  browserWorkerUrl,
+  browserWorkerBaseUrl,
+} = {}) {
+  if (browserWorkerUrl) {
+    return String(browserWorkerUrl);
+  }
+  const base = browserWorkerBaseUrl
+    ? normalizeBase(browserWorkerBaseUrl)
+    : browserWorkerBaseOverride;
+  if (base) {
+    // Resolve relative bases (e.g. "js/vendor/space-data-module-sdk/src/host/")
+    // against the document when one exists; absolute URLs pass through.
+    const documentBase =
+      typeof globalThis !== "undefined" &&
+      globalThis.location &&
+      typeof globalThis.location.href === "string"
+        ? globalThis.location.href
+        : undefined;
+    return documentBase
+      ? new URL(`${base}${BROWSER_WORKER_FILENAME}`, documentBase).href
+      : `${base}${BROWSER_WORKER_FILENAME}`;
+  }
+  return String(DEFAULT_BROWSER_WORKER_URL);
+}
+
+/**
+ * Thrown when the pooled browser path was REQUESTED (threads enabled,
+ * cross-origin isolated, shared memory) but the worker asset at the resolved
+ * anchor could not be loaded at all. This is the fail-loud replacement for the
+ * old silent sequential fallback: a 404'd worker is a deployment defect, not a
+ * capability negotiation, and it must never degrade quietly to one thread.
+ */
+export class WasiThreadWorkerUnreachableError extends Error {
+  constructor(workerUrl, cause) {
+    super(
+      `[wasi-thread] pooled browser worker asset is unreachable at ${workerUrl}. ` +
+        `The anchor must name a directory that serves BOTH ${BROWSER_WORKER_FILENAME} ` +
+        `and wasiThreadWorkerRuntime.js. When this host source is bundled, pass ` +
+        `browserWorkerBaseUrl / browserWorkerUrl to createWasiThreadSpawn (or call ` +
+        `setBrowserWasiThreadWorkerBase) — import.meta.url anchors to the bundle, not ` +
+        `to the package layout.`,
+    );
+    this.name = "WasiThreadWorkerUnreachableError";
+    this.workerUrl = String(workerUrl);
+    if (cause !== undefined) {
+      this.cause = cause;
+    }
+  }
+}
 
 /**
  * Does the compiled module require the wasi-threads host (i.e. does it import
@@ -68,12 +185,21 @@ export function isWasiThreadsModule(wasmModule) {
 const BROWSER_POOL_PROBE_TIMEOUT_MS = 1500;
 
 // Arm the browser warm pool: probe every created worker and resolve a single
-// all-or-nothing decision. Resolves true ONLY when every worker confirms
-// {t:"ready", ok:true}; resolves false the instant ANY worker reports not-ready,
-// errors, or misses the probe deadline — a committed, fast sequential fallback,
-// never a wait for the slowest loser. The per-worker onmessage handler installed
-// here is PERSISTENT: after arming it keeps dispatching {t:"exit"} (idle return)
-// and {t:"error"} (guest fault surfacing) for the life of the pool.
+// all-or-nothing decision, as `{ ok, unreachable, error }`.
+//   ok:true                      -> every worker confirmed {t:"ready", ok:true}
+//   ok:false                     -> a worker reported not-ready or missed the
+//                                   probe deadline: a committed, fast SEQUENTIAL
+//                                   fallback (capability negotiation).
+//   ok:false, unreachable:true   -> a worker raised a worker-level `onerror`
+//                                   without ever speaking the pool protocol,
+//                                   i.e. the worker ASSET did not load (404 /
+//                                   wrong anchor / broken import chain). That is
+//                                   a deployment defect, not a capability, and
+//                                   the caller must fail LOUD.
+// It resolves the instant any worker loses — never a wait for the slowest loser.
+// The per-worker onmessage handler installed here is PERSISTENT: after arming it
+// keeps dispatching {t:"exit"} (idle return) and {t:"error"} (guest fault
+// surfacing) for the life of the pool.
 function armBrowserPool(
   created,
   { wasmModule, memory, hostcallChannel, timeoutMs, onExit },
@@ -82,7 +208,8 @@ function armBrowserPool(
     let remaining = created.length;
     let settled = false;
     const timers = [];
-    const finish = (ok) => {
+    const spoke = new WeakSet();
+    const finish = (ok, extra = {}) => {
       if (settled) {
         return;
       }
@@ -90,13 +217,16 @@ function armBrowserPool(
       for (const timer of timers) {
         clearTimeout(timer);
       }
-      resolve(ok);
+      resolve({ ok, unreachable: false, error: null, ...extra });
     };
     for (const worker of created) {
       const timer = setTimeout(() => finish(false), timeoutMs);
       timers.push(timer);
       worker.onmessage = (event) => {
         const message = event.data || {};
+        // Any protocol message proves the worker script LOADED; a later onerror
+        // is then a guest fault, not an unreachable asset.
+        spoke.add(worker);
         if (message.t === "ready") {
           clearTimeout(timer);
           if (message.ok === true) {
@@ -127,7 +257,9 @@ function armBrowserPool(
           "[wasi-thread] pooled worker error:",
           error?.message ?? error,
         );
-        finish(false);
+        // A worker that errored without ever answering the pool protocol never
+        // ran our script: the asset at the resolved anchor is unreachable.
+        finish(false, { unreachable: !spoke.has(worker), error });
       };
       worker.postMessage({
         t: "probe",
@@ -181,7 +313,20 @@ function detectHardwareConcurrency() {
  *   the generic module-host ABI.
  * @param {boolean} [options.enableBrowserThreads] explicit successful host
  *   capability negotiation for an owning cross-origin-isolated worker harness.
+ * @param {string|URL} [options.browserWorkerBaseUrl] BROWSER ANCHOR — the
+ *   directory URL under which this build serves the SDK host worker chain
+ *   (`wasiThreadBrowserWorker.mjs` + `wasiThreadWorkerRuntime.js`). REQUIRED
+ *   whenever this host source is BUNDLED: `import.meta.url` then resolves to the
+ *   bundle, not to the package layout, and the sibling asset 404s. Defaults to
+ *   the process-wide `setBrowserWasiThreadWorkerBase()` value, then to the
+ *   packaged sibling.
+ * @param {string|URL} [options.browserWorkerUrl] the worker file itself; wins
+ *   over `browserWorkerBaseUrl`. Use only when the file is not named
+ *   `wasiThreadBrowserWorker.mjs` in its served directory.
  * @returns {Promise<{ threadSpawn: Function, activeThreadCount: () => number, spawnCount: () => number, distinctOsThreadCount: () => number, terminateAll: () => Promise<void> }>}
+ * @throws {WasiThreadWorkerUnreachableError} in the browser, when the pooled
+ *   path was requested but the worker asset at the resolved anchor never loaded.
+ *   Deliberately fatal: a silent drop to one thread is the defect this replaces.
  */
 export async function createWasiThreadSpawn({
   wasmModule,
@@ -190,6 +335,8 @@ export async function createWasiThreadSpawn({
   hostcallChannel,
   requiresHostcalls = false,
   enableBrowserThreads,
+  browserWorkerBaseUrl,
+  browserWorkerUrl,
 } = {}) {
   let nextTid = 0;
   let spawnCount = 0;
@@ -319,17 +466,45 @@ export async function createWasiThreadSpawn({
   };
 
   if (poolSize > 0) {
+    const workerUrl = resolveBrowserWorkerUrl({
+      browserWorkerUrl,
+      browserWorkerBaseUrl,
+    });
     const created = [];
-    for (let i = 0; i < poolSize; i += 1) {
-      created.push(new Worker(BROWSER_WORKER_URL, { type: "module" }));
+    try {
+      for (let i = 0; i < poolSize; i += 1) {
+        created.push(new Worker(workerUrl, { type: "module" }));
+      }
+    } catch (error) {
+      // Constructing a module Worker throws synchronously for a malformed or
+      // cross-origin-forbidden URL. Same class of defect as a 404: fail LOUD.
+      for (const worker of created) {
+        try {
+          worker.terminate();
+        } catch {
+          // best effort
+        }
+      }
+      throw new WasiThreadWorkerUnreachableError(workerUrl, error);
     }
-    const armed = await armBrowserPool(created, {
+    const armResult = await armBrowserPool(created, {
       wasmModule,
       memory,
       hostcallChannel,
       timeoutMs: BROWSER_POOL_PROBE_TIMEOUT_MS,
       onExit: returnWorkerToIdle,
     });
+    const armed = armResult.ok;
+    if (armResult.unreachable) {
+      for (const worker of created) {
+        try {
+          worker.terminate();
+        } catch {
+          // best effort
+        }
+      }
+      throw new WasiThreadWorkerUnreachableError(workerUrl, armResult.error);
+    }
     if (armed) {
       poolDisabled = false;
       for (const worker of created) {
