@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Status: EXPERIMENTAL. A production orbit-determination module is shipped and" />
+    <title>Estimation — Space Data Module SDK</title>
+    <link rel="stylesheet" href="../styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="../">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="../byo-wasm-quickstart.html">Quickstart</a>
+        <a href="../conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="../index.html"><span>Harness family matrix</span></a></li>
+<li><a href="../byo-wasm-quickstart.html"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="../conformance.html"><span>Conformance kit</span></a></li>
+<li><a href="../protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="../publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./propagator.html"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./maneuver.html"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./rf.html"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./conjunction.html"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./estimation.html" aria-current="page"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="../module-publication-standard.html"><span>Module publication standard</span></a></li>
+<li><a href="../browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="../isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
+<li><a href="../tri-runtime-parity.html"><span>Tri-runtime parity</span></a></li>
+<li><a href="../tri-runtime-parity-gate.html"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="../testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="../language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="../flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="../flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="../secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="../protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="../gpu-module-abi.html"><span>GPU module ABI</span></a></li>
+<li><a href="../module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="../isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="../node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+      <p class="breadcrumb"><a href="../index.html">Harness families</a> / Estimation, data and logic</p>
+        <h1>Estimation</h1>
+      <p class="doc-meta"><span class="pill pill-experimental">experimental</span><span>Experimental. The shape exists in wave-2 form and is expected to change. Do not ship a commercial module against it yet.</span></p>
+<p><strong>Status: EXPERIMENTAL.</strong> A production orbit-determination module is shipped and running, but it is not a ratified harness: it has no generated ABI header, no conformance kit, and no reference module in the harness sense. The broader estimation surface that its headers describe is largely not wired into the shipped path.</p>
+<h2 id="doctrine"><a class="anchor" href="#doctrine" aria-hidden="true">#</a>Doctrine</h2>
+<p>An estimation module turns observations into state. Observations and an initial guess go in; an estimated state, and where the family matures, a covariance, come out. It is the inverse of the propagator family, and it depends on that family: an estimator that cannot take its propagator as a pluggable port is hardwired to one force model and is not a member of this family.</p>
+<p>The pluggable-propagation law applies here with full force. Every propagator-consuming surface — an estimator emphatically included — takes the propagator as a parameter or port, never as a compiled-in choice.</p>
+<h2 id="capability"><a class="anchor" href="#capability" aria-hidden="true">#</a>Capability</h2>
+<p>Ingest observations, fit a state, emit results as standards records. The shipped path emits <code>$OMM</code>-class mean-element results and <code>$OBD</code> observation-derived records. Input ephemerides are transient by rule: they are fitted and discarded, and only the results are stored.</p>
+<h2 id="import-and-export-set"><a class="anchor" href="#import-and-export-set" aria-hidden="true">#</a>Import and export set</h2>
+<p><strong>Not specified as a harness ABI.</strong> No <code>orbpro_od_abi.h</code> or equivalent generated header exists. The shipped module is invoked through the SDK's generic module surface, not through a family-specific export set.</p>
+<p>In the manifest vocabulary the family projects onto <code>PluginFamily.ORBIT_DETERMINATION</code>, which itself carries a known projection gap: Space Data Standards has no dedicated plugin-category member for it yet, so it projects onto the analysis category until one is minted.</p>
+<h2 id="wire-layout"><a class="anchor" href="#wire-layout" aria-hidden="true">#</a>Wire layout</h2>
+<p><strong>Not specified as a public wire.</strong> The internal C++ types describe the intended shape and are useful as a design reference, but they are not a published ABI and their layout is not locked:</p>
+<div class="table-wrap"><table><thead><tr><th>Type</th><th>Fields</th></tr></thead><tbody><tr><td><code>StateVector</code></td><td><code>epoch_jd</code>, <code>x</code>, <code>y</code>, <code>z</code>, <code>vx</code>, <code>vy</code>, <code>vz</code></td></tr><tr><td><code>Observation</code></td><td><code>epoch_jd</code>, <code>type</code>, <code>value</code>, <code>sigma</code>, <code>station_id</code></td></tr><tr><td><code>GroundStation</code></td><td><code>id</code>, <code>name</code>, <code>lat_deg</code>, <code>lon_deg</code>, <code>alt_km</code></td></tr><tr><td><code>Covariance6x6</code></td><td>6×6 array of doubles</td></tr></tbody></table></div>
+<p><code>ObservationType</code> covers right ascension, declination, azimuth, elevation, range, range rate, and position components.</p>
+<p>The SDS <code>$ODW</code> problem record and its runtime wire are unminted; <code>$OBD</code> remains the results record. By explicit ruling, the OD <em>result model</em> decision stays deferred — a future record mint covers the problem and wire side only and must not freeze the result model.</p>
+<h2 id="units-and-frames"><a class="anchor" href="#units-and-frames" aria-hidden="true">#</a>Units and frames</h2>
+<p>The internal types mix conventions and this is a real hazard: epochs are Julian dates, station geodetic position is in degrees with altitude in kilometres, and state components are in the propagator family's units. Any published estimation ABI must state the unit of every field at the field, exactly as the propagator ABI does. Until it does, read the module's own headers rather than assuming.</p>
+<h2 id="sentinels"><a class="anchor" href="#sentinels" aria-hidden="true">#</a>Sentinels</h2>
+<p>Not specified. The shipped path treats a failed fit as a refusal and does not emit a record; there is no ratified sentinel vocabulary for a partially converged solution.</p>
+<h2 id="identity"><a class="anchor" href="#identity" aria-hidden="true">#</a>Identity</h2>
+<p>Objects are addressed by their catalog identity in the shipped path — the same identity the propagator family uses for an entity.</p>
+<h2 id="threading"><a class="anchor" href="#threading" aria-hidden="true">#</a>Threading</h2>
+<p><code>wasm32-wasip1-threads</code>. The shipped fit path is genuinely multi-threaded and runs a full catalog fit inside one composed WASM flow; that is the strongest evidence in this family that the threading model is sound. No harness-level shard-write discipline is specified because no batch ABI is published.</p>
+<h2 id="error-codes"><a class="anchor" href="#error-codes" aria-hidden="true">#</a>Error codes</h2>
+<p>Not specified as a named set.</p>
+<h2 id="lifetime"><a class="anchor" href="#lifetime" aria-hidden="true">#</a>Lifetime</h2>
+<p>The shipped module is instantiated once per flow run and torn down with it.</p>
+<h2 id="parity-envelope"><a class="anchor" href="#parity-envelope" aria-hidden="true">#</a>Parity envelope</h2>
+<p>Cross-runtime parity is exercised for the shipped flow, but the family has no parity envelope statement of its own. Use the generic <a href="../tri-runtime-parity-gate.html">parity gate</a>.</p>
+<h2 id="consumer-seam"><a class="anchor" href="#consumer-seam" aria-hidden="true">#</a>Consumer seam</h2>
+<p>The seam that matters is the propagator port. An estimation module accepts a propagator plugin and calls it; the consumer chooses which propagator is supplied. Any estimation module that internally hardwires a single propagator is non-conforming by the pluggable-propagation law, regardless of how good its filter is.</p>
+<h2 id="guest-c-example"><a class="anchor" href="#guest-c-example" aria-hidden="true">#</a>Guest C++ example</h2>
+<p>None published. Publishing a skeleton against an unratified ABI would invite exactly the drift this family needs to avoid. Start from the <a href="./propagator.html">propagator guest example</a> for module structure, and consume the propagator through its published ABI from inside your estimator.</p>
+<h2 id="known-gaps-stated-plainly"><a class="anchor" href="#known-gaps-stated-plainly" aria-hidden="true">#</a>Known gaps, stated plainly</h2>
+<ul>
+<li>The shipped production path is SGP4 mean-element batch fitting. That is what runs.</li>
+<li>The wider surface described in the module's own headers — Gauss, Laplace, double-r, Gibbs and Herrick-Gibbs initial orbit determination; sequential EKF and UKF; 6×6 covariance with consider parameters and state-transition-matrix propagation — is compiled but audited as dead code, reachable only from a test path and never called by the production entry points. Treat it as design intent, not as available capability.</li>
+<li>The abstract propagator interface inside that module is part of the same dead path. The pluggable-propagation law is satisfied by design in the header and not yet exercised in the shipped flow.</li>
+<li>No conformance kit, no generated header, no negative control.</li>
+</ul>
+      <section class="playground" id="playground-slot" data-family="estimation" data-playground="pending" aria-labelledby="playground-title">
+        <h2 id="playground-title">Playground</h2>
+        <p>
+          An in-browser build-and-run playground for the <code>estimation</code> harness
+          mounts here. It is being built under the graph task
+          <code>sdk-playground-emception</code>; this slot is its reserved mount
+          point and is intentionally empty until that lands.
+        </p>
+      </section>
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/families/estimation.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#doctrine">Doctrine</a></li>
+<li><a class="depth-2" href="#capability">Capability</a></li>
+<li><a class="depth-2" href="#import-and-export-set">Import and export set</a></li>
+<li><a class="depth-2" href="#wire-layout">Wire layout</a></li>
+<li><a class="depth-2" href="#units-and-frames">Units and frames</a></li>
+<li><a class="depth-2" href="#sentinels">Sentinels</a></li>
+<li><a class="depth-2" href="#identity">Identity</a></li>
+<li><a class="depth-2" href="#threading">Threading</a></li>
+<li><a class="depth-2" href="#error-codes">Error codes</a></li>
+<li><a class="depth-2" href="#lifetime">Lifetime</a></li>
+<li><a class="depth-2" href="#parity-envelope">Parity envelope</a></li>
+<li><a class="depth-2" href="#consumer-seam">Consumer seam</a></li>
+<li><a class="depth-2" href="#guest-c-example">Guest C++ example</a></li>
+<li><a class="depth-2" href="#known-gaps-stated-plainly">Known gaps, stated plainly</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>

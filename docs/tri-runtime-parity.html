@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="ONE dist/isomorphic/module.wasm, THREE runtimes, IDENTICAL behavior:" />
+    <title>Tri-runtime parity — Space Data Module SDK</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="./">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="./byo-wasm-quickstart.html">Quickstart</a>
+        <a href="./conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="./index.html"><span>Harness family matrix</span></a></li>
+<li><a href="./byo-wasm-quickstart.html"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="./conformance.html"><span>Conformance kit</span></a></li>
+<li><a href="./protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="./publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./families/propagator.html"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/maneuver.html"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./families/rf.html"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./families/breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/conjunction.html"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./families/estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="./module-publication-standard.html"><span>Module publication standard</span></a></li>
+<li><a href="./browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="./isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
+<li><a href="./tri-runtime-parity.html" aria-current="page"><span>Tri-runtime parity</span></a></li>
+<li><a href="./tri-runtime-parity-gate.html"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="./testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="./language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="./flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="./flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="./secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="./protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="./gpu-module-abi.html"><span>GPU module ABI</span></a></li>
+<li><a href="./module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="./isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="./node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+        <h1>Tri-runtime parity</h1>
+<p>ONE <code>dist/isomorphic/module.wasm</code>, THREE runtimes, IDENTICAL behavior:</p>
+<ol>
+<li><strong>browser</strong> — real headless Chrome behind COOP/COEP (cross-origin isolated, SAB-capable), running the SDK browser WASI shim. Never jsdom — jsdom masks Illegal-invocation and threading realities.</li>
+<li><strong>wasmedge</strong> — a native WasmEdge binary, version-locked to the pin.</li>
+<li><strong>docker-wasmedge</strong> — a pinned Docker WasmEdge container.</li>
+</ol>
+<p>Cross-runtime divergence is a <strong>P1 SDK defect</strong>, never a &quot;platform quirk&quot;. &quot;Works in X&quot; is inadmissible as module evidence; module-touching work needs a parity receipt from this harness.</p>
+<h2 id="running"><a class="anchor" href="#running" aria-hidden="true">#</a>Running</h2>
+<div class="codeblock"><div class="codeblock-head">bash</div><pre><code>space-data-module parity \
+  --wasm ./dist/isomorphic/module.wasm \
+  --fixture ./fixtures/parity/sgp4-command.json \
+  [--lanes browser,wasmedge,docker-wasmedge] [--json] [--timeout-sec N] \
+  [--wasmedge-binary &lt;bin&gt;] [--chrome-binary &lt;bin&gt;] [--docker-platform &lt;p&gt;]</code></pre></div>
+<ul>
+<li>Exit <code>0</code> only when every lane × thread-count run is byte-identical and every error/trap class matches. Any divergence, missing lane run, pin drift, or lane that cannot execute exits non-zero with a per-case report (SHA-256 digests, lengths, first divergent byte offset + hex windows).</li>
+<li>All three lanes run by default. <code>--lanes</code> narrows explicitly — lanes are never skipped silently, and fewer than two lanes is rejected (<code>--allow-single-lane</code> exists for lane bring-up debugging only; it can never produce parity evidence).</li>
+<li><code>--self-test-divergence &lt;lane&gt;</code> is a fire drill: it XORs one output byte of that lane after execution to prove the diff path fails loudly end-to-end.</li>
+</ul>
+<p>Programmatic API (Node): <code>runParityHarness</code>, <code>diffParityRuns</code>, <code>normalizeParityFixture</code>, <code>loadWasmEdgePin</code> from <code>space-data-module-sdk/testing</code>.</p>
+<p>CI wiring in this repo:</p>
+<ul>
+<li><code>npm run test:parity</code> — always-on unit suite (pin single-sourcing, fixture normalization, diff loudness incl. injected divergence).</li>
+<li><code>npm run test:parity-tri-lane</code> — the real three lanes against the sgp4 module (needs Chrome, native WasmEdge at the pin, Docker).</li>
+</ul>
+<h2 id="the-wasmedge-pin-one-place"><a class="anchor" href="#the-wasmedge-pin-one-place" aria-hidden="true">#</a>The WasmEdge pin: ONE place</h2>
+<p><code>src/testing/wasmedgePin.json</code> is the single source of truth:</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{ &quot;wasmedgeVersion&quot;: &quot;0.16.4&quot;, &quot;dockerImageRepository&quot;: &quot;space-data-module-sdk/parity-wasmedge&quot; }</code></pre></div>
+<ul>
+<li>The native lane runs <code>wasmedge --version</code> and hard-fails on mismatch (<code>PARITY PIN-DRIFT</code>).</li>
+<li>The docker lane derives its image tag from the same version (<code>space-data-module-sdk/parity-wasmedge:0.16.4</code>), builds it on demand from <code>src/testing/docker/wasmedge-parity.Dockerfile</code> (version injected via <code>--build-arg</code> from the pin — the Dockerfile itself pins nothing), and version-checks the container runtime before running cases.</li>
+</ul>
+<p>Host and container WasmEdge versions therefore pin and bump TOGETHER by editing one string. Keep the pin aligned with the node host's embedded runtime (space-data-network <code>scripts/install-wasmedge.sh</code>, currently 0.16.4 — the verified runtime for the libwasmedge atomic-wait fixes).</p>
+<h2 id="determinism-contract"><a class="anchor" href="#determinism-contract" aria-hidden="true">#</a>Determinism contract</h2>
+<p>Every lane receives EXACTLY the same guest-observable inputs:</p>
+<ul>
+<li>stdin bytes are encoded once by the orchestrator (<code>encodePluginInvokeRequest</code> for <code>request</code> cases, raw bytes otherwise) and shipped verbatim to each lane;</li>
+<li>guest env is delivered explicitly (<code>wasmedge --env</code>, browser shim <code>env</code>) — the ambient host environment never leaks into the guest;</li>
+<li>guest argv[0] is always <code>module.wasm</code> (relative invocation from a private staging dir in the wasmedge lanes, literal argv in the browser shim);</li>
+<li>thread counts are swept via the fixture's <code>threadEnvVar</code> (default <code>SDM_PARITY_THREADS</code>) — runs at 1/2/4/8 (fixture-configurable) must be byte-identical within a lane AND across lanes. Browser sequential <em>throughput</em> divergence is sanctioned until <code>browser-worker-topology</code> lands; results must still match byte-for-byte;</li>
+<li>signed/published artifacts are stripped to the canonical module payload once (<code>toLoadableWasmBytes</code>) so every lane executes identical wasm bytes.</li>
+</ul>
+<h2 id="fixtures"><a class="anchor" href="#fixtures" aria-hidden="true">#</a>Fixtures</h2>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{
+  &quot;name&quot;: &quot;sgp4-command-parity&quot;,
+  &quot;threadEnvVar&quot;: &quot;SDM_PARITY_THREADS&quot;,
+  &quot;threadCounts&quot;: [1, 2, 4, 8],
+  &quot;cases&quot;: [
+    {
+      &quot;id&quot;: &quot;ingest-omm&quot;,
+      &quot;expect&quot;: &quot;ok&quot;,
+      &quot;request&quot;: {
+        &quot;methodId&quot;: &quot;ingest_omm&quot;,
+        &quot;inputs&quot;: [{ &quot;portId&quot;: &quot;omm&quot;, &quot;payloadFile&quot;: &quot;omm-25544.fb&quot;,
+                     &quot;typeRef&quot;: { &quot;schemaName&quot;: &quot;orbpro.sds.omm&quot;, &quot;fileIdentifier&quot;: &quot;$OMM&quot; } }]
+      }
+    },
+    { &quot;id&quot;: &quot;malformed-stdin&quot;, &quot;stdinUtf8&quot;: &quot;not a PIV frame&quot; }
+  ]
+}</code></pre></div>
+<ul>
+<li><code>request</code> cases go through the canonical PIV invoke codec; raw cases take <code>stdinFile</code> / <code>stdinBase64</code> / <code>stdinHex</code> / <code>stdinUtf8</code>.</li>
+<li><code>expect</code> (<code>&quot;ok&quot; | &quot;guest-error&quot; | &quot;trap&quot;</code>) is optional; without it the case only requires the class to be IDENTICAL across lanes (malformed-input fixtures compare error/trap classes this way).</li>
+<li>Payloads: <code>payloadFile</code> (relative to the fixture), <code>payloadBase64</code>, <code>payloadHex</code>, <code>payloadUtf8</code>.</li>
+<li>Committed payload binaries are regenerated deterministically by <code>node fixtures/parity/generate-fixtures.mjs</code>.</li>
+</ul>
+<h2 id="scope-and-current-limits-v1"><a class="anchor" href="#scope-and-current-limits-v1" aria-hidden="true">#</a>Scope and current limits (v1)</h2>
+<ul>
+<li>The execution profile is the <strong>command surface</strong> (stdin → stdout WASI run), the one surface all three runtimes share without a host adapter. Output parity = stdout bytes + exit/trap class per run.</li>
+<li>Persisted-state manifests (<code>stateFiles</code>) are diffed whenever a lane reports them; the wasmedge lanes will populate them when fixture-declared preopens land. The browser shim currently has no filesystem authority (<code>fd_prestat_get</code> → BADF), so state-writing fixtures cannot claim tri-lane parity yet.</li>
+<li>Threaded (wasi-threads) modules run in the wasmedge lanes today; the browser lane's worker topology for nested-worker SAB sharing is the known open fork (<code>browser-worker-topology</code>). Timer restart/misfire and cursor/persist/reload parity ride on the same fixture schema (future case kinds) — the diff engine already treats every run as (class, bytes, state) so new kinds plug in without new comparison rules.</li>
+</ul>
+
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/tri-runtime-parity.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#running">Running</a></li>
+<li><a class="depth-2" href="#the-wasmedge-pin-one-place">The WasmEdge pin: ONE place</a></li>
+<li><a class="depth-2" href="#determinism-contract">Determinism contract</a></li>
+<li><a class="depth-2" href="#fixtures">Fixtures</a></li>
+<li><a class="depth-2" href="#scope-and-current-limits-v1">Scope and current limits (v1)</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>

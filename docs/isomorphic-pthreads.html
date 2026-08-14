@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="space-data-module-sdk is the enforced source of truth for isomorphic" />
+    <title>Isomorphic pthreads — Space Data Module SDK</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="./">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="./byo-wasm-quickstart.html">Quickstart</a>
+        <a href="./conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="./index.html"><span>Harness family matrix</span></a></li>
+<li><a href="./byo-wasm-quickstart.html"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="./conformance.html"><span>Conformance kit</span></a></li>
+<li><a href="./protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="./publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./families/propagator.html"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/maneuver.html"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./families/rf.html"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./families/breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/conjunction.html"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./families/estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="./module-publication-standard.html"><span>Module publication standard</span></a></li>
+<li><a href="./browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="./isomorphic-pthreads.html" aria-current="page"><span>Isomorphic pthreads</span></a></li>
+<li><a href="./tri-runtime-parity.html"><span>Tri-runtime parity</span></a></li>
+<li><a href="./tri-runtime-parity-gate.html"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="./testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="./language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="./flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="./flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="./secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="./protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="./gpu-module-abi.html"><span>GPU module ABI</span></a></li>
+<li><a href="./module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="./isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="./node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+        <h1>Isomorphic pthreads</h1>
+<p><code>space-data-module-sdk</code> is the <strong>enforced source of truth</strong> for isomorphic pthreads module artifacts. When a module is compiled for the pthreads thread model, the SDK guarantees two things that used to be optional and unchecked:</p>
+<ol>
+<li>The final link <strong>cannot omit</strong> the thread-enabling flags, and it targets the <strong>wasi-threads</strong> toolchain (not Emscripten's browser Web-Worker model).</li>
+<li>The emitted <code>.wasm</code> is <strong>parsed and validated</strong> to be a real wasi-threads artifact. A module that claims pthreads but does not emit the wasi-threads contract <strong>fails the compile</strong> — it does not ship.</li>
+</ol>
+<p>The goal is one compiled <code>.wasm</code> that threads in <strong>both</strong> the browser (via <code>SharedArrayBuffer</code> + a wasi-threads Worker shim) and WasmEdge (via wasi-threads), mirroring the <code>analysis/conjunction-assessment</code> module's <code>std::thread</code> workers.</p>
+<h2 id="why-wasi-threads-and-not-emscripten--pthread"><a class="anchor" href="#why-wasi-threads-and-not-emscripten--pthread" aria-hidden="true">#</a>Why wasi-threads and NOT Emscripten <code>-pthread</code></h2>
+<p>This is the load-bearing decision. Emscripten's <code>-pthread</code> — even with <code>-s STANDALONE_WASM=1</code> — emits the <strong>browser-only</strong> thread model:</p>
+<ul>
+<li>it imports <code>env.__pthread_create_js</code> and <code>env._emscripten_*</code> mailbox / <code>postMessage</code> hooks (a JS Web Worker protocol), and</li>
+<li>it has <strong>no</strong> wasi thread-spawn contract.</li>
+</ul>
+<p>That artifact <strong>cannot spawn threads under WasmEdge</strong> — there is no JS runtime to satisfy those imports; instantiation fails on the unknown imports, and stubbing them would require host-side thread orchestration (which is separately forbidden). It has shared memory and atomics, but those are <strong>necessary, not sufficient</strong>: a browser-only Emscripten build has them too.</p>
+<p>WasmEdge's actual thread mechanism is <strong>wasi-threads</strong>: the guest imports <code>wasi.thread-spawn</code> and exports <code>wasi_thread_start</code> over an imported shared memory. Compiling with <code>clang --target=wasm32-wasip1-threads -pthread</code> (wasi-sdk / wasi-libc + wasi-runtimes threads sysroot) produces exactly that contract, which threads under WasmEdge and loads in the browser through a wasi-threads shim.</p>
+<p><code>-mthreads</code> is likewise never used — it is a MinGW driver flag, invalid for the wasm target.</p>
+<h2 id="thread-models"><a class="anchor" href="#thread-models" aria-hidden="true">#</a>Thread Models</h2>
+<p><code>ModuleThreadModel</code> (see <code>src/compiler/compileModule.js</code>):</p>
+<ul>
+<li><code>single-thread</code> — portable, no shared memory, no atomics. Default for <code>runtimeTargets: [&quot;browser&quot;]</code> and <code>[&quot;browser&quot;, &quot;wasmedge&quot;]</code>. Built with Emscripten (emception, in-process).</li>
+<li><code>emscripten-pthreads</code> — the isomorphic threaded model (the enum value string is historical; it now compiles to a <strong>wasi-threads</strong> artifact, not an Emscripten Web-Worker build). Default for <code>runtimeTargets: [&quot;wasmedge&quot;]</code>. Built with the wasi-threads toolchain.</li>
+</ul>
+<p><code>resolveThreadModel({ manifest, threadModel })</code> resolves the model; an explicit <code>threadModel</code> option always wins over <code>runtimeTargets</code> inference.</p>
+<h2 id="1-enforced-flags-non-bypassable"><a class="anchor" href="#1-enforced-flags-non-bypassable" aria-hidden="true">#</a>1. Enforced Flags (non-bypassable)</h2>
+<p>The pthreads final link routes through one flag-assembler (<code>buildCompilerArgs</code> in <code>src/compiler/compileModule.js</code>, backed by <code>PTHREAD_FINAL_LINK_FLAGS</code> in <code>src/compiler/pthreadArtifactGuard.js</code>). For the pthreads model it <strong>always</strong> carries the wasm-ld / clang flags:</p>
+<div class="codeblock"><pre><code>-pthread -matomics -mbulk-memory -Wl,--import-memory -Wl,--shared-memory -Wl,--max-memory=2147483648</code></pre></div>
+<p>plus the toolchain args resolved by <code>src/compiler/wasiThreadsToolchain.js</code> (<code>--target=wasm32-wasip1-threads --sysroot=… -resource-dir=…</code>). Object files are compiled <code>-matomics -fno-exceptions -pthread</code> (the wasi-threads libc++ is built without exceptions, so throwing code otherwise fails to link).</p>
+<p><code>buildCompilerArgs</code> asserts its own output (<code>assertPthreadFlagsPresent</code>) so a future edit that removes a mandated flag fails loudly. There are deliberately <strong>no</strong> Emscripten <code>-s</code> settings here — those produce the browser-only build.</p>
+<p>The toolchain is resolved with sensible defaults and env overrides (<code>SDN_WASI_CLANG</code>, <code>SDN_WASI_CLANGXX</code>, <code>SDN_WASI_TARGET</code>, <code>SDN_WASI_SYSROOT</code>, <code>SDN_WASI_RESOURCE_DIR</code>). If a wasi-threads sysroot is unavailable, the pthreads compile fails with a clear, actionable error.</p>
+<h2 id="2-validated-artifact-the-part-that-matters-most"><a class="anchor" href="#2-validated-artifact-the-part-that-matters-most" aria-hidden="true">#</a>2. Validated Artifact (the part that matters most)</h2>
+<p>After the final <code>.wasm</code> is emitted, <code>compileModuleFromSource</code> calls <code>assertPthreadArtifact(wasmBytes)</code> for the pthreads model. It parses the wasm and REJECTS the compile unless ALL of the following hold:</p>
+<ul>
+<li><strong>Shared memory</strong> — an imported or declared memory with the shared limits flag (<code>flags &amp; 0x02</code>, i.e. <code>0x03</code>/<code>0x07</code>).</li>
+<li><strong>Atomics usage</strong> — the code section is walked with a real instruction decoder that counts genuine <code>0xFE</code>-prefixed atomic instructions. This is <strong>not</strong> a byte scan: a naive scan for <code>0xFE</code> false-positives on <code>i32.const</code> / LEB128 / memory-offset immediates (memory load/store opcodes <code>0x28</code>–<code>0x3E</code> carry a memarg). <code>target_features</code> is honored when present.</li>
+<li><strong>wasi thread-spawn import</strong> — <code>wasi.thread-spawn</code> (the host contract WasmEdge invokes to spawn a guest thread).</li>
+<li><strong><code>wasi_thread_start</code> export</strong> — the entry a host calls to run a spawned thread.</li>
+<li><strong>No Emscripten thread hooks</strong> — the artifact must NOT import <code>env.__pthread_create_js</code> or the <code>env._emscripten_*</code> mailbox/postMessage hooks. Their presence means it is a browser-only Web-Worker build and it is rejected.</li>
+</ul>
+<p>Shared memory + atomics <strong>alone</strong> are necessary but insufficient (the browser-only Emscripten build has both), which is exactly why the wasi-threads contract check exists. The analysis is returned on the compilation result as <code>result.threadFeatures</code> (<code>{ hasSharedMemory, usesAtomics, atomicInstructionCount, hasWasiThreadSpawnImport, hasWasiThreadStartExport, emscriptenThreadHooks, isIsomorphicPthreads, … }</code>).</p>
+<p><code>analyzeWasmThreadFeatures(wasmBytes)</code> and <code>assertPthreadArtifact(wasmBytes)</code> are exported from <code>src/compiler/index.js</code> (and the package root) for reuse by downstream validators, deploy gates, and tests.</p>
+<p>Note that the wasi-threads contract (thread-spawn import + <code>wasi_thread_start</code> export) appears only when the module <strong>actually spawns threads</strong> — the linker pulls in that machinery on demand. A module declared <code>emscripten-pthreads</code> that never spawns a thread will therefore fail this guardrail; such a module should use the <code>single-thread</code> model instead.</p>
+<h2 id="guest-link-symbol-namespacing-collision-proof-metadata-authoritative"><a class="anchor" href="#guest-link-symbol-namespacing-collision-proof-metadata-authoritative" aria-hidden="true">#</a>Guest-link symbol namespacing (collision-proof, metadata-authoritative)</h2>
+<p>For monolithic flow composition, each module also emits a <strong>guest-link</strong> wasm object whose exported method symbols are namespaced by a per-plugin prefix so that independently-built modules can be linked together with <code>wasm-ld -r</code> without symbol clashes. <code>guestLinkSymbolPrefix(pluginId)</code> in <code>src/compiler/compileModule.js</code> produces that prefix as:</p>
+<div class="codeblock"><pre><code>sdm_guest_&lt;full-lowercase-hex-of-pluginId-UTF8-bytes&gt;_</code></pre></div>
+<p>The prefix uses the <strong>full</strong> hex encoding of the pluginId — it is <strong>not</strong> truncated. Hex encoding is injective, so distinct pluginIds always map to distinct prefixes. (A prior <code>.slice(0, 24)</code> truncation to 12 bytes collided real plugin ids that share a 12-byte stem — e.g. <code>com.orbpro.iss-source</code> and <code>com.orbpro.intelsat-source</code> both collapsed to <code>hex(&quot;com.orbpro.i&quot;)</code> <code>636f6d2e6f726270726f2e69</code>, which would silently merge/clash their symbols at compose time.) Wasm symbol names have no meaningful length limit, so the full hex is always safe.</p>
+<p>The emitted <code>symbolPrefix</code> and the per-method <code>methodSymbols</code> map are recorded in the guest-link <strong>metadata</strong> (<code>sds.guest-link</code>). <strong>That metadata is the sole authoritative source consumers read at compose time</strong> — <code>generateFlowTables</code> in <code>src/flow/flowCompiler.js</code> declares and calls <code>dependency.guestLink.metadata.methodSymbols[methodId]</code> and never re-derives the prefix from the pluginId. This keeps already-committed artifacts compatible: an object that shipped with a legacy (e.g. truncated) prefix still composes, because its own metadata carries the exact symbol names its object bytes define.</p>
+<h2 id="3-compile-time-vs-runtime-an-honest-boundary"><a class="anchor" href="#3-compile-time-vs-runtime-an-honest-boundary" aria-hidden="true">#</a>3. Compile-Time vs. Runtime: an honest boundary</h2>
+<p>Passing this guardrail proves the <strong>artifact</strong> is a valid wasi-threads shared-memory/atomics wasm. It does <strong>not</strong> prove that a given WasmEdge build actually spawns and runs guest threads.</p>
+<blockquote><p><strong>Rule:</strong> Do not claim WasmEdge thread support until a real runtime invocation spawns threads and runs. Compile-time validation (wasi-threads contract + shared memory + atomics) is necessary but not sufficient; runtime thread-spawn verification is owned by the deploy/benchmark node, not by this SDK.</p></blockquote>
+<p>Record any WasmEdge runtime limitation honestly. An artifact that validates here but only compiles — and does not instantiate/spawn threads under the target runtime — must be reported as such.</p>
+<h2 id="tests"><a class="anchor" href="#tests" aria-hidden="true">#</a>Tests</h2>
+<ul>
+<li><code>test/pthreads-artifact-guardrail.test.js</code> — flag-assembler invariants; a positive compile that emits a validated wasi-threads shared-memory/atomics wasm; a single-thread artifact rejected; a <strong>browser-only Emscripten <code>-pthread</code> artifact rejected</strong> (has shared memory + atomics but no wasi-threads contract); a shared-flag-stripped artifact rejected; and a false-positive guard proving the atomics decoder ignores <code>0xFE</code> immediates.</li>
+<li><code>test/guest-link-symbol-prefix.test.js</code> — the guest-link prefix is the full injective hex of the pluginId; two previously-colliding ids now get distinct prefixes; fresh prefixes match the committed modules-branch artifacts byte-for-byte; and the compose path treats the guest-link metadata's <code>symbolPrefix</code> / <code>methodSymbols</code> as authoritative (never re-derived), keeping a legacy truncated-prefix artifact compatible.</li>
+</ul>
+<h2 id="see-also"><a class="anchor" href="#see-also" aria-hidden="true">#</a>See also</h2>
+<ul>
+<li><a href="./browser-wasmedge-isomorphic.html"><code>docs/browser-wasmedge-isomorphic.md</code></a> — the one-artifact browser + WasmEdge loading profile.</li>
+<li><code>.claude/skills/wasmedge-pthreads/Skills.md</code> — the operating rules.</li>
+<li><code>src/compiler/pthreadArtifactGuard.js</code> — the flag list + wasm validator.</li>
+<li><code>src/compiler/wasiThreadsToolchain.js</code> — the wasi-threads toolchain resolver.</li>
+<li><code>src/compiler/compileModule.js</code> — <code>ModuleThreadModel</code>, <code>buildCompilerArgs</code>, <code>compileWithWasiThreads</code>, <code>resolveThreadModel</code>, <code>compileModuleFromSource</code>.</li>
+</ul>
+
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/isomorphic-pthreads.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#why-wasi-threads-and-not-emscripten--pthread">Why wasi-threads and NOT Emscripten <code>-pthread</code></a></li>
+<li><a class="depth-2" href="#thread-models">Thread Models</a></li>
+<li><a class="depth-2" href="#1-enforced-flags-non-bypassable">1. Enforced Flags (non-bypassable)</a></li>
+<li><a class="depth-2" href="#2-validated-artifact-the-part-that-matters-most">2. Validated Artifact (the part that matters most)</a></li>
+<li><a class="depth-2" href="#guest-link-symbol-namespacing-collision-proof-metadata-authoritative">Guest-link symbol namespacing (collision-proof, metadata-authoritative)</a></li>
+<li><a class="depth-2" href="#3-compile-time-vs-runtime-an-honest-boundary">3. Compile-Time vs. Runtime: an honest boundary</a></li>
+<li><a class="depth-2" href="#tests">Tests</a></li>
+<li><a class="depth-2" href="#see-also">See also</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>

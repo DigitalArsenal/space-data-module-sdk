@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="This document defines how a compliant Space Data module is published through the" />
+    <title>Module publication standard — Space Data Module SDK</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="./">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="./byo-wasm-quickstart.html">Quickstart</a>
+        <a href="./conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="./index.html"><span>Harness family matrix</span></a></li>
+<li><a href="./byo-wasm-quickstart.html"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="./conformance.html"><span>Conformance kit</span></a></li>
+<li><a href="./protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="./publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./families/propagator.html"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/maneuver.html"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./families/rf.html"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./families/breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/conjunction.html"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./families/estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="./module-publication-standard.html" aria-current="page"><span>Module publication standard</span></a></li>
+<li><a href="./browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="./isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
+<li><a href="./tri-runtime-parity.html"><span>Tri-runtime parity</span></a></li>
+<li><a href="./tri-runtime-parity-gate.html"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="./testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="./language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="./flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="./flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="./secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="./protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="./gpu-module-abi.html"><span>GPU module ABI</span></a></li>
+<li><a href="./module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="./isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="./node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+        <h1>Module publication standard</h1>
+<p>This document defines how a compliant Space Data module is published through the language package ecosystems used around the SDK runtime surface:</p>
+<ul>
+<li>npm</li>
+<li>PyPI</li>
+<li>Maven Central</li>
+<li>NuGet</li>
+<li>Go modules</li>
+<li>crates.io</li>
+<li>Swift Package Manager</li>
+</ul>
+<p>The goal is simple: a loader should be able to inspect a package, locate the module artifact, and determine whether signatures or encrypted transport metadata are appended as SDS publication records in the module delivery file or shipped as sidecar FlatBuffers.</p>
+<h2 id="scope"><a class="anchor" href="#scope" aria-hidden="true">#</a>Scope</h2>
+<p>This publication standard covers two release modes:</p>
+<ul>
+<li><code>standalone</code>: the package's primary deliverable is the SDN module itself</li>
+<li><code>attached</code>: the package primarily exists for another language runtime, but it also ships one compliant SDN module build artifact</li>
+</ul>
+<p>In both cases the module artifact remains the same canonical format already defined by this repo:</p>
+<ul>
+<li>a runtime payload that is valid WebAssembly bytes once any SDS publication trailer has been stripped and any encrypted delivery payload has been decrypted</li>
+<li>embedded <code>PluginManifest.fbs</code></li>
+<li>manifest accessors</li>
+<ul>
+<li><code>plugin_get_manifest_flatbuffer</code></li>
+<li><code>plugin_get_manifest_flatbuffer_size</code></li>
+</ul>
+<li>optional appended SDS <code>REC</code> trailer carrying <code>MBL</code>, <code>PNM</code>, and optional <code>ENC</code></li>
+</ul>
+<h2 id="core-rules"><a class="anchor" href="#core-rules" aria-hidden="true">#</a>Core Rules</h2>
+<ol>
+<li>A signed-only or unencrypted artifact payload before any publication trailer MUST remain valid <code>.wasm</code>.</li>
+<li>An encrypted binary delivery file MUST be encoded as encrypted payload bytes followed by an appended SDS <code>REC</code> trailer. The bytes before the trailer are ciphertext and are not required to validate as wasm until decrypted.</li>
+<li>If bundle, signature, or encrypted-delivery metadata are carried in the same file, they MUST be appended as an SDS <code>REC</code> trailer at the end of that file.</li>
+<li><code>REC</code> trailers MUST carry standards-sourced <code>MBL</code> metadata plus <code>PNM</code> and optional <code>ENC</code> records where applicable.</li>
+<li>Single-file bundle metadata MUST be read from the appended <code>REC</code> trailer, not from an in-wasm custom section.</li>
+<li>Sidecar FlatBuffers are allowed when a package chooses not to append those metadata payloads to the module artifact.</li>
+<li>Paths in publication metadata are package-relative, never absolute.</li>
+</ol>
+<h2 id="publication-record-extensions"><a class="anchor" href="#publication-record-extensions" aria-hidden="true">#</a>Publication Record Extensions</h2>
+<p>Publication protection metadata is expressed as standards-backed FlatBuffer extensions layered on top of the canonical module artifact.</p>
+<ul>
+<li><code>REC.fbs</code> is the trailing collection wrapper with file identifier <code>$REC</code></li>
+<li><code>MBL.fbs</code> is the module bundle metadata record</li>
+<li><code>PNM.fbs</code> is the signature/publication notice record</li>
+<li><code>ENC.fbs</code> is the encrypted-delivery record</li>
+</ul>
+<p>These records are not arbitrary bytes. Loaders and publishers are expected to use the generated message classes from <code>spacedatastandards.org</code> and preserve the standard file identifiers:</p>
+<ul>
+<li><code>REC</code> =&gt; <code>$REC</code></li>
+<li><code>MBL</code> =&gt; <code>$MBL</code></li>
+<li><code>PNM</code> =&gt; <code>$PNM</code></li>
+<li><code>ENC</code> =&gt; <code>$ENC</code></li>
+</ul>
+<p>The runtime-facing rule stays strict:</p>
+<ol>
+<li>Strip or decrypt the publication layer first.</li>
+<li>Instantiate the remaining raw wasm module.</li>
+<li>Read the embedded <code>PluginManifest.fbs</code>.</li>
+</ol>
+<p><code>MBL</code>, <code>PNM</code>, and <code>ENC</code> extend publication and transport handling only. They do not change the canonical module ABI or manifest exports.</p>
+<h2 id="protected-binary-layout"><a class="anchor" href="#protected-binary-layout" aria-hidden="true">#</a>Protected Binary Layout</h2>
+<p>The official same-file protection layout is:</p>
+<div class="codeblock"><div class="codeblock-head">text</div><pre><code>protected-payload-bytes || REC-flatbuffer-bytes || uint32le(REC length) || &quot;$REC&quot;</code></pre></div>
+<p>For signed-only delivery, <code>protected-payload-bytes</code> are the wasm bytes. For encrypted delivery, <code>protected-payload-bytes</code> are ciphertext and the appended <code>REC</code> MUST contain an <code>ENC</code> record with the decryption parameters. Loaders MUST decrypt those ciphertext bytes before attempting wasm validation, manifest inspection, or bundle metadata parsing.</p>
+<p>The <code>PNM</code> content identity applies to the protected payload bytes as stored in the file. For encrypted delivery this means the <code>PNM.CID</code> identifies the ciphertext payload, while the decrypted bytes remain the canonical wasm module that is passed to the runtime.</p>
+<h3 id="pnm-digital-signature-extension"><a class="anchor" href="#pnm-digital-signature-extension" aria-hidden="true">#</a><code>PNM</code> digital-signature extension</h3>
+<p><code>PNM</code> carries the publication notice for the module:</p>
+<ul>
+<li>file identity (<code>FILE_NAME</code>, <code>FILE_ID</code>)</li>
+<li>content identity (<code>CID</code>)</li>
+<li>publish timestamp</li>
+<li>signature and signature-type metadata</li>
+</ul>
+<p>In practice this is the record a host inspects to determine what artifact was published and which signer attested to it.</p>
+<h3 id="mbl-signature-entry-domain-separation-statementdomain"><a class="anchor" href="#mbl-signature-entry-domain-separation-statementdomain" aria-hidden="true">#</a>MBL <code>signature</code> entry — domain separation (<code>statementDomain</code>)</h3>
+<p>The detached Ed25519 signature carried as the MBL bundle's <code>signature</code>-role entry has two forms, and the ARTIFACT chooses which one applies — never the verifier, never a policy:</p>
+<div class="table-wrap"><table><thead><tr><th><code>statementDomain</code></th><th>signature covers</th></tr></thead><tbody><tr><td><code>SDN-MODULE-PUBLICATION-V1</code></td><td>`&quot;SDN-MODULE-PUBLICATION-V1&quot; \</td><td>\</td><td>0x00 \</td><td>\</td><td>sha256(portable)`</td></tr><tr><td>absent</td><td>the bare canonical module (or bundle) digest — legacy</td></tr></tbody></table></div>
+<p><code>portable</code> is the trailer-stripped payload: the exact bytes the runtime instantiates and the node's capability policy identifies by content hash.</p>
+<p>The domain prefix exists because the node's publisher key is the NODE key, and that one bonded key signs several unrelated kinds of statement (dataset publications, module artifacts, update SIGNALS — the advisory pub/sub nudge a publisher pushes so every install upgrades itself in place, which has a live producer — and, still reserved, update manifests). If every statement were a bare SHA-256 digest, a caller who could reach the node's signing endpoint could submit the bytes of one kind of document and staple the returned signature onto another. An ASCII domain label, a <code>NUL</code> that cannot occur inside the label, and a fixed-width 32-byte tail put each statement kind in a disjoint message space with no length ambiguity anywhere in the preimage.</p>
+<p>The domain registry is <strong>closed</strong>: a verifier refuses any label that is not registered, and a module verifier additionally refuses any registered label other than <code>SDN-MODULE-PUBLICATION-V1</code> — so a signature minted for an update manifest or an update signal can never be replayed into a module trailer, which the shared vectors pin as <code>foreign-registered-domain</code> and <code>update-signal-domain-is-refused-for-a-module</code>. Adding a domain is a reviewed change in every implementation at once (<code>src/bundle/sigdomain.js</code> here; <code>internal/sigdomain</code> and its kubo twin in the node), never a request parameter.</p>
+<p><code>statementDomain</code> and <code>algorithm</code> are compared after trimming <strong>Go's</strong> whitespace set (<code>unicode.IsSpace</code> / Unicode <code>White_Space</code>), which is not JavaScript's: Go trims U+0085 NEL and JS does not, JS trims U+FEFF BOM and Go does not. Either mismatch is a &quot;loads on the node, dies in the browser&quot; split, so both are pinned by vectors rather than left to each language's default.</p>
+<p>Legacy artifacts that predate the field keep verifying unchanged. The forms, the preimage bytes and every refusal reason are pinned as shared cross-language vectors in <code>test/support/statement-domain-vectors.json</code>, byte-identical to the node's copies, and asserted by the JS suite and both Go suites.</p>
+<h3 id="enc-encrypted-delivery-extension"><a class="anchor" href="#enc-encrypted-delivery-extension" aria-hidden="true">#</a><code>ENC</code> encrypted-delivery extension</h3>
+<p><code>ENC</code> carries the decryption parameters for a transport-protected module:</p>
+<ul>
+<li>key exchange algorithm (<code>X25519</code>)</li>
+<li>symmetric algorithm (<code>AES_256_GCM</code>; wire enum value <code>1</code>)</li>
+<li>key-derivation function (<code>HKDF_SHA256</code>)</li>
+<li>ephemeral public key</li>
+<li>nonce start (the 12-byte AES-GCM IV)</li>
+<li>optional context, schema hash, recipient key id, and root type</li>
+</ul>
+<p>Encrypted delivery is authenticated:</p>
+<ul>
+<li>The protected payload bytes are laid out as <code>ciphertext || 16-byte GCM tag</code> (the <code>ENC</code> schema has no dedicated tag field).</li>
+<li>The encoded <code>ENC</code> FlatBuffer record itself is the GCM additional authenticated data (AAD), so the context, schema hash, root type, recipient key id, nonce, and ephemeral key are all bound to the ciphertext. Tampering with either the payload or the <code>ENC</code> record MUST cause decryption to fail.</li>
+<li>Records labelled <code>AES_256_CTR</code> are rejected; the SDK neither produces nor decrypts unauthenticated CTR payloads.</li>
+</ul>
+<p>It describes how to decrypt the protected delivery payload. It does not imply a different module file format after decryption.</p>
+<h2 id="aligned-binary-type-refs"><a class="anchor" href="#aligned-binary-type-refs" aria-hidden="true">#</a>Aligned-Binary Type Refs</h2>
+<p>Aligned-binary payloads use the same schema identity as the canonical FlatBuffer payload. They are advertised through the <code>FlatBufferTypeRef</code> extension fields:</p>
+<ul>
+<li><code>wireFormat: &quot;aligned-binary&quot;</code></li>
+<li><code>rootTypeName</code></li>
+<li><code>byteLength</code></li>
+<li><code>requiredAlignment</code></li>
+</ul>
+<p>Every aligned-binary declaration must be paired with the regular <code>wireFormat: &quot;flatbuffer&quot;</code> type for the same schema and file identifier in the same accepted type set. Publication protection applies to the artifact as a whole; aligned-binary is an invoke/payload optimization layered inside the manifest contract.</p>
+<h2 id="canonical-descriptor"><a class="anchor" href="#canonical-descriptor" aria-hidden="true">#</a>Canonical Descriptor</h2>
+<p>The canonical publication descriptor is named <code>sdn-module</code>.</p>
+<p>When represented as a standalone JSON file, the filename is <code>sdn-module.json</code>.</p>
+<p>The full object form is:</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{
+  &quot;specVersion&quot;: 1,
+  &quot;publicationMode&quot;: &quot;attached&quot;,
+  &quot;module&quot;: {
+    &quot;path&quot;: &quot;./dist/orbit-lib.module.wasm&quot;,
+    &quot;packaging&quot;: &quot;sds-bundled-wasm&quot;,
+    &quot;mediaType&quot;: &quot;application/wasm&quot;,
+    &quot;manifestExportSymbol&quot;: &quot;plugin_get_manifest_flatbuffer&quot;,
+    &quot;manifestSizeSymbol&quot;: &quot;plugin_get_manifest_flatbuffer_size&quot;,
+    &quot;pluginId&quot;: &quot;com.example.orbit-lib&quot;,
+    &quot;version&quot;: &quot;1.2.3&quot;
+  },
+  &quot;artifacts&quot;: {
+    &quot;signature&quot;: {
+      &quot;storage&quot;: &quot;module-trailer&quot;,
+      &quot;schemaName&quot;: &quot;PNM.fbs&quot;,
+      &quot;fileIdentifier&quot;: &quot;$PNM&quot;
+    },
+    &quot;transport&quot;: {
+      &quot;storage&quot;: &quot;module-trailer&quot;,
+      &quot;schemaName&quot;: &quot;ENC.fbs&quot;,
+      &quot;fileIdentifier&quot;: &quot;$ENC&quot;
+    }
+  },
+  &quot;integrity&quot;: {
+    &quot;moduleSha256&quot;: &quot;2bff0d3d8f4f5aa1d0c7be3e54e15f9f8c9f3a62d5f0a4e8a8d80de28f4f0b31&quot;
+  }
+}</code></pre></div>
+<h3 id="required-fields"><a class="anchor" href="#required-fields" aria-hidden="true">#</a>Required Fields</h3>
+<ul>
+<li><code>specVersion</code>: publication spec version, currently <code>1</code></li>
+<li><code>publicationMode</code>: <code>standalone</code> or <code>attached</code></li>
+<li><code>module.path</code>: relative path to the <code>.wasm</code> artifact</li>
+</ul>
+<h3 id="recommended-module-repo-build-layout"><a class="anchor" href="#recommended-module-repo-build-layout" aria-hidden="true">#</a>Recommended Module Repo Build Layout</h3>
+<p>When authoring a module repo before publication packaging, keep the shared compiled artifact at a stable runtime path:</p>
+<ul>
+<li>required: <code>dist/isomorphic/module.wasm</code></li>
+</ul>
+<p>If the repo also ships a browser-specific adapter or wrapper, place it beside the browser runtime path:</p>
+<ul>
+<li>optional: <code>dist/browser/module.js</code></li>
+<li>optional: <code>dist/browser/module.wasm</code></li>
+</ul>
+<p>The publication descriptor can still point anywhere, but the SDK standard for checked-in module repos is that the exact shared browser/WasmEdge build lands at <code>dist/isomorphic/module.wasm</code>.</p>
+<h3 id="recommended-fields"><a class="anchor" href="#recommended-fields" aria-hidden="true">#</a>Recommended Fields</h3>
+<ul>
+<li><code>module.packaging</code>: <code>plain-wasm</code> or <code>sds-bundled-wasm</code></li>
+<li><code>module.mediaType</code>: normally <code>application/wasm</code></li>
+<li><code>module.manifestExportSymbol</code></li>
+<li><code>module.manifestSizeSymbol</code></li>
+<li><code>module.pluginId</code></li>
+<li><code>module.version</code></li>
+<li><code>integrity.moduleSha256</code></li>
+</ul>
+<h3 id="artifact-descriptors"><a class="anchor" href="#artifact-descriptors" aria-hidden="true">#</a>Artifact Descriptors</h3>
+<p>Each optional entry inside <code>artifacts</code> describes one metadata payload related to the module:</p>
+<ul>
+<li><code>authorization</code></li>
+<li><code>signature</code></li>
+<li><code>transport</code></li>
+<li><code>attestation</code></li>
+</ul>
+<p>An artifact descriptor has this shape:</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{
+  &quot;storage&quot;: &quot;module-trailer&quot;,
+  &quot;path&quot;: &quot;./dist/orbit-lib.signature.fb&quot;,
+  &quot;schemaName&quot;: &quot;PNM.fbs&quot;,
+  &quot;fileIdentifier&quot;: &quot;$PNM&quot;
+}</code></pre></div>
+<p>Rules:</p>
+<ul>
+<li><code>storage</code> MUST be <code>module-trailer</code> or <code>package-file</code></li>
+<li><code>module-trailer</code> means the loader scans the end of <code>module.path</code> for an appended <code>REC</code> trailer and resolves the matching record from there</li>
+<li><code>path</code> MUST be present when <code>storage</code> is <code>package-file</code></li>
+<li><code>schemaName</code> SHOULD name the SDS FlatBuffer schema</li>
+<li><code>fileIdentifier</code> SHOULD name the FlatBuffer file identifier</li>
+</ul>
+<h2 id="minimal-shorthand"><a class="anchor" href="#minimal-shorthand" aria-hidden="true">#</a>Minimal Shorthand</h2>
+<p>Package manifests that support arbitrary metadata MAY use a shorthand string when all of the following are true:</p>
+<ul>
+<li>the package only needs to point to one module file</li>
+<li>the module uses the default manifest accessor exports</li>
+<li>all signature and transport metadata are either absent or appended through a <code>REC</code> trailer</li>
+</ul>
+<p>Example:</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{
+  &quot;name&quot;: &quot;@example/orbit-lib&quot;,
+  &quot;version&quot;: &quot;1.2.3&quot;,
+  &quot;sdn-module&quot;: &quot;./dist/orbit-lib.module.wasm&quot;
+}</code></pre></div>
+<p><code>sdn-module.json</code> files MUST use the full object form, not the string shorthand.</p>
+<h2 id="resolution-rules"><a class="anchor" href="#resolution-rules" aria-hidden="true">#</a>Resolution Rules</h2>
+<p>A package consumer resolves publication metadata in this order:</p>
+<ol>
+<li>Read the ecosystem-specific <code>sdn-module</code> carrier if one exists.</li>
+<li>If that carrier is a string, treat it as <code>module.path</code>.</li>
+<li>If that carrier is an object, use it directly.</li>
+<li>If the package has no inline carrier, look for <code>sdn-module.json</code>.</li>
+<li>For JVM artifacts, also look for <code>META-INF/sdn-module.json</code>.</li>
+<li>Resolve <code>module.path</code> and any <code>package-file</code> sidecars relative to the package root or archive root.</li>
+</ol>
+<h2 id="packaging-by-ecosystem"><a class="anchor" href="#packaging-by-ecosystem" aria-hidden="true">#</a>Packaging By Ecosystem</h2>
+<div class="table-wrap"><table><thead><tr><th>Ecosystem</th><th>Recommended carrier</th></tr></thead><tbody><tr><td>npm</td><td><code>package.json[&quot;sdn-module&quot;]</code></td></tr><tr><td>PyPI</td><td><code>pyproject.toml [tool.&quot;sdn-module&quot;]</code></td></tr><tr><td>crates.io</td><td><code>Cargo.toml [package.metadata.&quot;sdn-module&quot;]</code></td></tr><tr><td>Maven Central</td><td><code>META-INF/sdn-module.json</code> inside the JAR, optionally mirrored by a POM property</td></tr><tr><td>NuGet</td><td><code>sdn-module.json</code> at package root, optionally surfaced through build metadata</td></tr><tr><td>Go modules</td><td><code>sdn-module.json</code> at module root</td></tr><tr><td>Swift Package Manager</td><td><code>sdn-module.json</code> at package root</td></tr></tbody></table></div>
+<h3 id="npm"><a class="anchor" href="#npm" aria-hidden="true">#</a>npm</h3>
+<p>Minimal attached example:</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{
+  &quot;name&quot;: &quot;@example/orbit-lib&quot;,
+  &quot;version&quot;: &quot;1.2.3&quot;,
+  &quot;sdn-module&quot;: &quot;./dist/orbit-lib.module.wasm&quot;
+}</code></pre></div>
+<p>Full example:</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{
+  &quot;name&quot;: &quot;@example/orbit-lib&quot;,
+  &quot;version&quot;: &quot;1.2.3&quot;,
+  &quot;sdn-module&quot;: {
+    &quot;specVersion&quot;: 1,
+    &quot;publicationMode&quot;: &quot;attached&quot;,
+    &quot;module&quot;: {
+      &quot;path&quot;: &quot;./dist/orbit-lib.module.wasm&quot;,
+      &quot;packaging&quot;: &quot;sds-bundled-wasm&quot;,
+      &quot;mediaType&quot;: &quot;application/wasm&quot;,
+      &quot;manifestExportSymbol&quot;: &quot;plugin_get_manifest_flatbuffer&quot;,
+      &quot;manifestSizeSymbol&quot;: &quot;plugin_get_manifest_flatbuffer_size&quot;
+    }
+  }
+}</code></pre></div>
+<h3 id="pypi"><a class="anchor" href="#pypi" aria-hidden="true">#</a>PyPI</h3>
+<div class="codeblock"><div class="codeblock-head">toml</div><pre><code>[tool.&quot;sdn-module&quot;]
+specVersion = 1
+publicationMode = &quot;attached&quot;
+
+[tool.&quot;sdn-module&quot;.module]
+path = &quot;./dist/orbit-lib.module.wasm&quot;
+packaging = &quot;sds-bundled-wasm&quot;
+mediaType = &quot;application/wasm&quot;
+manifestExportSymbol = &quot;plugin_get_manifest_flatbuffer&quot;
+manifestSizeSymbol = &quot;plugin_get_manifest_flatbuffer_size&quot;</code></pre></div>
+<h3 id="cratesio"><a class="anchor" href="#cratesio" aria-hidden="true">#</a>crates.io</h3>
+<div class="codeblock"><div class="codeblock-head">toml</div><pre><code>[package.metadata.&quot;sdn-module&quot;]
+specVersion = 1
+publicationMode = &quot;attached&quot;
+
+[package.metadata.&quot;sdn-module&quot;.module]
+path = &quot;./dist/orbit-lib.module.wasm&quot;
+packaging = &quot;sds-bundled-wasm&quot;
+mediaType = &quot;application/wasm&quot;
+manifestExportSymbol = &quot;plugin_get_manifest_flatbuffer&quot;
+manifestSizeSymbol = &quot;plugin_get_manifest_flatbuffer_size&quot;</code></pre></div>
+<h3 id="maven-central-and-kotlin"><a class="anchor" href="#maven-central-and-kotlin" aria-hidden="true">#</a>Maven Central And Kotlin</h3>
+<p>Ship a JSON descriptor in the archive:</p>
+<div class="codeblock"><div class="codeblock-head">text</div><pre><code>src/main/resources/META-INF/sdn-module.json</code></pre></div>
+<p>Optional POM property:</p>
+<div class="codeblock"><div class="codeblock-head">xml</div><pre><code>&lt;properties&gt;
+  &lt;sdn.module.descriptor&gt;META-INF/sdn-module.json&lt;/sdn.module.descriptor&gt;
+&lt;/properties&gt;</code></pre></div>
+<h3 id="nuget"><a class="anchor" href="#nuget" aria-hidden="true">#</a>NuGet</h3>
+<p>Ship the descriptor at package root:</p>
+<div class="codeblock"><div class="codeblock-head">text</div><pre><code>sdn-module.json</code></pre></div>
+<p>The <code>.nupkg</code> should also contain the module artifact at the relative path named by <code>module.path</code>.</p>
+<h3 id="go-modules"><a class="anchor" href="#go-modules" aria-hidden="true">#</a>Go Modules</h3>
+<p>Ship <code>sdn-module.json</code> at the module root next to <code>go.mod</code>.</p>
+<h3 id="swift-package-manager"><a class="anchor" href="#swift-package-manager" aria-hidden="true">#</a>Swift Package Manager</h3>
+<p>Ship <code>sdn-module.json</code> at the package root. If the module artifact must be available through a target at runtime, include the <code>.wasm</code> and sidecar files as resources or through a binary-target wrapper.</p>
+<h2 id="standalone-publication-example"><a class="anchor" href="#standalone-publication-example" aria-hidden="true">#</a>Standalone Publication Example</h2>
+<p><code>sdn-module.json</code></p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{
+  &quot;specVersion&quot;: 1,
+  &quot;publicationMode&quot;: &quot;standalone&quot;,
+  &quot;module&quot;: {
+    &quot;path&quot;: &quot;./dist/catalog-query.bundle.wasm&quot;,
+    &quot;packaging&quot;: &quot;sds-bundled-wasm&quot;,
+    &quot;mediaType&quot;: &quot;application/wasm&quot;,
+    &quot;manifestExportSymbol&quot;: &quot;plugin_get_manifest_flatbuffer&quot;,
+    &quot;manifestSizeSymbol&quot;: &quot;plugin_get_manifest_flatbuffer_size&quot;,
+    &quot;pluginId&quot;: &quot;org.example.catalog-query&quot;,
+    &quot;version&quot;: &quot;0.2.0&quot;
+  },
+  &quot;artifacts&quot;: {
+    &quot;signature&quot;: {
+      &quot;storage&quot;: &quot;module-trailer&quot;,
+      &quot;schemaName&quot;: &quot;PNM.fbs&quot;,
+      &quot;fileIdentifier&quot;: &quot;$PNM&quot;
+    }
+  }
+}</code></pre></div>
+<h2 id="attached-publication-example"><a class="anchor" href="#attached-publication-example" aria-hidden="true">#</a>Attached Publication Example</h2>
+<p><code>sdn-module.json</code></p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{
+  &quot;specVersion&quot;: 1,
+  &quot;publicationMode&quot;: &quot;attached&quot;,
+  &quot;module&quot;: {
+    &quot;path&quot;: &quot;./dist/orbit-lib.module.wasm&quot;,
+    &quot;packaging&quot;: &quot;plain-wasm&quot;,
+    &quot;mediaType&quot;: &quot;application/wasm&quot;,
+    &quot;manifestExportSymbol&quot;: &quot;plugin_get_manifest_flatbuffer&quot;,
+    &quot;manifestSizeSymbol&quot;: &quot;plugin_get_manifest_flatbuffer_size&quot;,
+    &quot;pluginId&quot;: &quot;com.example.orbit-lib&quot;,
+    &quot;version&quot;: &quot;1.2.3&quot;
+  },
+  &quot;artifacts&quot;: {
+    &quot;signature&quot;: {
+      &quot;storage&quot;: &quot;package-file&quot;,
+      &quot;path&quot;: &quot;./dist/orbit-lib.signature.fb&quot;,
+      &quot;schemaName&quot;: &quot;PNM.fbs&quot;,
+      &quot;fileIdentifier&quot;: &quot;$PNM&quot;
+    },
+    &quot;transport&quot;: {
+      &quot;storage&quot;: &quot;package-file&quot;,
+      &quot;path&quot;: &quot;./dist/orbit-lib.transport.fb&quot;,
+      &quot;schemaName&quot;: &quot;ENC.fbs&quot;,
+      &quot;fileIdentifier&quot;: &quot;$ENC&quot;
+    }
+  }
+}</code></pre></div>
+<h2 id="loader-expectations"><a class="anchor" href="#loader-expectations" aria-hidden="true">#</a>Loader Expectations</h2>
+<p>A loader consuming this standard SHOULD:</p>
+<ol>
+<li>locate the publication descriptor</li>
+<li>read <code>module.path</code></li>
+<li>scan the artifact from the end for an appended SDS <code>REC</code> trailer</li>
+<li>resolve <code>PNM</code> / <code>ENC</code> from that trailer before runtime startup</li>
+<li>if <code>ENC</code> is present, decrypt the protected payload bytes before passing bytes to WasmEdge or any other runtime</li>
+<li>if <code>ENC</code> is absent, strip the trailer and use the remaining wasm payload</li>
+<li>inspect the parsed <code>REC</code> trailer for <code>MBL</code></li>
+<li>resolve any <code>package-file</code> metadata through relative paths</li>
+<li>validate manifest exports and any declared integrity hashes</li>
+</ol>
+<p>If <code>module.packaging</code> is <code>sds-bundled-wasm</code>, loaders SHOULD treat the decrypted or stripped wasm payload as the runtime artifact and the appended <code>REC</code> trailer as the single-file bundle/publication metadata container.</p>
+<h2 id="relationship-to-existing-bundle-format"><a class="anchor" href="#relationship-to-existing-bundle-format" aria-hidden="true">#</a>Relationship To Existing Bundle Format</h2>
+<p>This standard uses the appended <code>REC</code> trailer as the single-file publication container. It explains how a package publishes and points to the module artifact plus any appended SDS publication trailer.</p>
+<ul>
+<li><code>REC</code> stays the appended single-file/publication record container</li>
+<li><code>MBL</code> carries bundle metadata inside that trailer</li>
+<li><code>sdn-module</code> is the package-discovery descriptor</li>
+</ul>
+<p>Use the appended <code>REC</code> trailer when you want one self-describing protected artifact. Use <code>sdn-module</code> when you want package managers and loaders to discover that file reliably.</p>
+
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/module-publication-standard.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#scope">Scope</a></li>
+<li><a class="depth-2" href="#core-rules">Core Rules</a></li>
+<li><a class="depth-2" href="#publication-record-extensions">Publication Record Extensions</a></li>
+<li><a class="depth-2" href="#protected-binary-layout">Protected Binary Layout</a></li>
+<li><a class="depth-3" href="#pnm-digital-signature-extension"><code>PNM</code> digital-signature extension</a></li>
+<li><a class="depth-3" href="#mbl-signature-entry-domain-separation-statementdomain">MBL <code>signature</code> entry — domain separation (<code>statementDomain</code>)</a></li>
+<li><a class="depth-3" href="#enc-encrypted-delivery-extension"><code>ENC</code> encrypted-delivery extension</a></li>
+<li><a class="depth-2" href="#aligned-binary-type-refs">Aligned-Binary Type Refs</a></li>
+<li><a class="depth-2" href="#canonical-descriptor">Canonical Descriptor</a></li>
+<li><a class="depth-3" href="#required-fields">Required Fields</a></li>
+<li><a class="depth-3" href="#recommended-module-repo-build-layout">Recommended Module Repo Build Layout</a></li>
+<li><a class="depth-3" href="#recommended-fields">Recommended Fields</a></li>
+<li><a class="depth-3" href="#artifact-descriptors">Artifact Descriptors</a></li>
+<li><a class="depth-2" href="#minimal-shorthand">Minimal Shorthand</a></li>
+<li><a class="depth-2" href="#resolution-rules">Resolution Rules</a></li>
+<li><a class="depth-2" href="#packaging-by-ecosystem">Packaging By Ecosystem</a></li>
+<li><a class="depth-3" href="#npm">npm</a></li>
+<li><a class="depth-3" href="#pypi">PyPI</a></li>
+<li><a class="depth-3" href="#cratesio">crates.io</a></li>
+<li><a class="depth-3" href="#maven-central-and-kotlin">Maven Central And Kotlin</a></li>
+<li><a class="depth-3" href="#nuget">NuGet</a></li>
+<li><a class="depth-3" href="#go-modules">Go Modules</a></li>
+<li><a class="depth-3" href="#swift-package-manager">Swift Package Manager</a></li>
+<li><a class="depth-2" href="#standalone-publication-example">Standalone Publication Example</a></li>
+<li><a class="depth-2" href="#attached-publication-example">Attached Publication Example</a></li>
+<li><a class="depth-2" href="#loader-expectations">Loader Expectations</a></li>
+<li><a class="depth-2" href="#relationship-to-existing-bundle-format">Relationship To Existing Bundle Format</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>

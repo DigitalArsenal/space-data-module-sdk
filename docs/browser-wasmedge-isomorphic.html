@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Use this profile when you want one compiled .wasm artifact that can be loaded" />
+    <title>Browser / WasmEdge isomorphism — Space Data Module SDK</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="./">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="./byo-wasm-quickstart.html">Quickstart</a>
+        <a href="./conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="./index.html"><span>Harness family matrix</span></a></li>
+<li><a href="./byo-wasm-quickstart.html"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="./conformance.html"><span>Conformance kit</span></a></li>
+<li><a href="./protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="./publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./families/propagator.html"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/maneuver.html"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./families/rf.html"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./families/breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/conjunction.html"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./families/estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="./module-publication-standard.html"><span>Module publication standard</span></a></li>
+<li><a href="./browser-wasmedge-isomorphic.html" aria-current="page"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="./isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
+<li><a href="./tri-runtime-parity.html"><span>Tri-runtime parity</span></a></li>
+<li><a href="./tri-runtime-parity-gate.html"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="./testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="./language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="./flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="./flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="./secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="./protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="./gpu-module-abi.html"><span>GPU module ABI</span></a></li>
+<li><a href="./module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="./isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="./node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+        <h1>Browser / WasmEdge isomorphism</h1>
+<p>Use this profile when you want one compiled <code>.wasm</code> artifact that can be loaded unchanged in:</p>
+<ul>
+<li>the browser harness</li>
+<li>the WasmEdge command/runtime harness</li>
+</ul>
+<h2 id="canonical-build-rule"><a class="anchor" href="#canonical-build-rule" aria-hidden="true">#</a>Canonical Build Rule</h2>
+<p>Declare:</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{
+  &quot;runtimeTargets&quot;: [&quot;browser&quot;, &quot;wasmedge&quot;]
+}</code></pre></div>
+<p>That target pair now defaults to the shared <code>single-thread</code> artifact profile.</p>
+<p>The compiler logic lives in <code>src/compiler/compileModule.js</code>.</p>
+<p>The practical effect is:</p>
+<ul>
+<li><code>[&quot;wasmedge&quot;]</code> keeps the higher-capability WasmEdge pthread default</li>
+<li><code>[&quot;browser&quot;, &quot;wasmedge&quot;]</code> chooses the portable single-thread artifact instead</li>
+</ul>
+<p>Use the pure <code>[&quot;wasmedge&quot;]</code> target when you want maximum WasmEdge-native guest capability and do not need browser loading from the same binary.</p>
+<h3 id="pthreads-variant-shared-memory-isomorphic-threading"><a class="anchor" href="#pthreads-variant-shared-memory-isomorphic-threading" aria-hidden="true">#</a>Pthreads variant (shared-memory, isomorphic threading)</h3>
+<p>When a module needs real guest threads (the <code>emscripten-pthreads</code> thread model, default for <code>[&quot;wasmedge&quot;]</code>), the SDK compiles it through the <strong>wasi-threads</strong> toolchain (<code>clang --target=wasm32-wasip1-threads -pthread</code>), <strong>not</strong> Emscripten <code>-pthread</code> (which emits a browser-only Web-Worker build that cannot thread under WasmEdge). It <strong>enforces</strong> the wasi-threads link flags and <strong>validates the emitted <code>.wasm</code></strong> — the artifact must import <code>wasi.thread-spawn</code>, export <code>wasi_thread_start</code>, be a shared-memory/atomics wasm, and carry no Emscripten worker hooks, or the compile is rejected. That guardrail is documented in <a href="./isomorphic-pthreads.html"><code>docs/isomorphic-pthreads.md</code></a>. This present document covers the portable <code>single-thread</code> loading profile; read the pthreads doc before shipping a threaded WasmEdge artifact.</p>
+<h2 id="cross-origin-isolation-is-required-for-any-wasi-threadswasi-sequential-guest"><a class="anchor" href="#cross-origin-isolation-is-required-for-any-wasi-threadswasi-sequential-guest" aria-hidden="true">#</a>Cross-Origin Isolation Is Required For Any wasi-threads/wasi-sequential Guest</h2>
+<p><strong>Settled policy</strong> (<code>module-sdk-target-forces-sab-coop-coep</code>, arbitrated 2026-07-28, closed 2026-08-06): a host serving a module built through the <code>wasm32-wasip1-threads</code> toolchain — the <code>emscripten-pthreads</code> (real threading) model <strong>or</strong> the <code>wasi-sequential</code> model — to a browser MUST serve that page cross-origin isolated (<code>Cross-Origin-Opener-Policy: same-origin</code> + <code>Cross-Origin-Embedder-Policy: require-corp</code>, or the equivalent). There is no build-flag escape hatch:</p>
+<ul>
+<li><code>--target=wasm32-wasip1-threads</code> with <strong>zero</strong> feature flags still emits <code>+atomics</code> — the triple implies atomics.</li>
+<li>A driver-default link on that triple declares a <strong>shared</strong> memory (limits flags <code>0x03</code>) with no <code>--shared-memory</code>/<code>--import-memory</code> on the link line.</li>
+<li><code>--no-shared-memory</code> is not a wasm-ld flag. Nothing in <code>compileModule.js</code> can produce an unshared artifact on this triple. See the guardrail chain in <code>src/compiler/pthreadArtifactGuard.js</code> (<code>assertSequentialArtifact</code>) and <a href="./isomorphic-pthreads.html"><code>docs/isomorphic-pthreads.md</code></a>.</li>
+</ul>
+<p>This means an inherently-sequential guest (<code>wasi-sequential</code>, no real threading) still needs a shared-memory instantiation — same as a real threaded guest — because it shares the same compiled triple. The portable <strong><code>single-thread</code></strong> profile this document otherwise covers (Emscripten/ emception, the <code>[&quot;browser&quot;]</code> / <code>[&quot;browser&quot;,&quot;wasmedge&quot;]</code> default: no shared memory, no atomics) is the one exception and needs <strong>no</strong> cross-origin isolation. Check which profile a guest actually uses — <code>runtimeTargets</code> alone does not tell you; an explicit <code>threadModel</code> does — before assuming either way.</p>
+<p><strong>How production achieves it today</strong> (both patterns are live and <code>crossOriginIsolated</code>-verified, not hypothetical):</p>
+<ol>
+<li><strong>Native headers</strong>, when the host directly fronts the origin (e.g. a Caddy-fronted droplet): set <code>Cross-Origin-Opener-Policy: same-origin</code> and <code>Cross-Origin-Embedder-Policy: require-corp</code> at the web server, which survives a CDN in front of it.</li>
+<li><strong>A COI service worker</strong>, when the host is a static CDN that cannot set custom response headers (GitHub Pages is the concrete case: Pages sends no COOP/COEP at all). The worker intercepts navigation/asset fetches and re-serves them with the isolation headers injected, then the page does one capped self-heal reload. Reference implementation: <code>coi-serviceworker.js</code> + <code>coi-bootstrap.js</code> in the <code>spaceaware-ui</code> (<code>sdn-js</code>) and OrbPro Pages surfaces — verified live via <code>window.crossOriginIsolated === true</code> and <code>typeof SharedArrayBuffer !== &quot;undefined&quot;</code> in a real browser, per <code>deployment/topology.json</code>. Do not invent a second shim; port that one.</li>
+</ol>
+<p>Either path additionally constrains <strong>every other subresource</strong> the page loads to be CORP/CORS-clean under <code>require-corp</code> — third-party embeds, fonts, tiles, imagery all have to cooperate. This is exactly the surface the standing &quot;node UIs load ZERO external-origin bytes&quot; law removes as a concern for the surfaces that already follow it; a new module-serving surface that does NOT yet follow that law has to solve subresource compatibility separately, before COI, not after.</p>
+<p><strong>The guardrail, concretely</strong>: verify <code>crossOriginIsolated</code>/<code>SharedArrayBuffer</code> with a real browser (<code>live-verify.mjs</code>-style, not a raw <code>curl -I</code> — a service-worker-injected header is invisible to a plain HTTP request) as part of standing up ANY new surface that serves a <code>wasi-threads</code>/<code>wasi-sequential</code> artifact, before assuming module instantiation works. A silent regression here fails as an instantiation error in the browser console, not a build error — there is currently no automated CI check for it; add one alongside the new surface's own verify tooling rather than assuming this document is enough.</p>
+<h2 id="canonical-module-repo-layout"><a class="anchor" href="#canonical-module-repo-layout" aria-hidden="true">#</a>Canonical Module Repo Layout</h2>
+<p>Module repos should publish the shared compiled artifact under a stable runtime path, not a plugin-named filename:</p>
+<ul>
+<li>required: <code>dist/isomorphic/module.wasm</code></li>
+</ul>
+<p>If a repo also ships a browser-specific adapter, place it under:</p>
+<ul>
+<li>optional: <code>dist/browser/module.js</code></li>
+<li>optional: <code>dist/browser/module.wasm</code></li>
+</ul>
+<p>That keeps the artifact name stable across repos and lets runtime intent live in the path rather than in the filename.</p>
+<h2 id="toolchain-options"><a class="anchor" href="#toolchain-options" aria-hidden="true">#</a>Toolchain Options</h2>
+<p>The recommended browser-side build selector for module repos is:</p>
+<ul>
+<li><code>SDN_WASM_TOOLCHAIN=local-emsdk</code>: default. Build with a repo-local <code>deps/emsdk</code> checkout and avoid Homebrew or any other machine-global Emscripten install.</li>
+<li><code>SDN_WASM_TOOLCHAIN=sdn-emception</code>: optional SDK-first path for repos that use <code>compileModuleFromSource(...)</code> or an SDK-driven build script to emit the shared <code>dist/isomorphic/module.wasm</code> artifact.</li>
+<li><code>SDN_WASM_TOOLCHAIN=path</code>: explicit escape hatch when a repo intentionally wants to use a preinstalled Emscripten toolchain from <code>PATH</code>.</li>
+</ul>
+<p>The isomorphic contract is the compiled wasm path, not the browser wrapper. A repo can publish only <code>dist/isomorphic/module.wasm</code> and still satisfy the browser/WasmEdge shared-artifact requirement when it loads through the SDK harnesses.</p>
+<h2 id="loader-entry-points"><a class="anchor" href="#loader-entry-points" aria-hidden="true">#</a>Loader Entry Points</h2>
+<p>The supported browser/WasmEdge entry points are:</p>
+<ul>
+<li>browser entry bundle: <code>src/browser.js</code></li>
+<li>isomorphic loader: <code>src/host/isomorphicLoader.js</code></li>
+<li>browser harness: <code>src/host/browserModuleHarness.js</code></li>
+<li>browser WASI shim: <code>src/host/wasiShim.js</code></li>
+<li>browser edge shims: <code>src/host/browserEdgeShims.js</code></li>
+<li>browser host adapter: <code>src/host/browserHost.js</code></li>
+</ul>
+<p>On the server path, <code>loadModule(...)</code> now chooses the raw WasmEdge command harness automatically for standalone artifacts with <code>_start</code>. The <code>--serve-plugin-invoke</code> runner protocol remains available for explicit runtime-host / runner-backed flows.</p>
+<h2 id="what-the-browser-shims-cover"><a class="anchor" href="#what-the-browser-shims-cover" aria-hidden="true">#</a>What The Browser Shims Cover</h2>
+<p>The browser edge shims map host capabilities onto browser-native surfaces:</p>
+<ul>
+<li><code>filesystem</code>: in-memory virtual filesystem with <code>resolvePath</code>, <code>readFile</code>, <code>writeFile</code>, <code>appendFile</code>, <code>deleteFile</code>, <code>mkdir</code>, <code>readdir</code>, <code>stat</code>, <code>rename</code></li>
+<li><code>http</code>: <code>fetch</code></li>
+<li><code>websocket</code>: browser <code>WebSocket</code></li>
+<li><code>network</code>: async browser-host dispatch that routes to the available transport adapters</li>
+<li><code>ipfs</code>, <code>protocol_handle</code>, <code>protocol_dial</code>: async browser-host adapters that can be supplied by the embedding runtime</li>
+<li><code>clock</code>, <code>random</code>, <code>timers</code>, <code>schedule_cron</code>, <code>context_*</code>, <code>crypto_*</code>: browser-native implementations in the browser host adapter</li>
+</ul>
+<p>These are host shims, not raw WasmEdge socket imports. When an embedding host needs to override the reference behavior, pass <code>capabilityAdapters</code> keyed by the canonical capability ids. That same generic async capability boundary is shared by <code>BrowserHost</code>, <code>NodeHost</code>, <code>createRuntimeHost()</code>, <code>loadModule(...)</code>, and <code>createBrowserModuleHarness(...)</code>.</p>
+<h2 id="current-boundary"><a class="anchor" href="#current-boundary" aria-hidden="true">#</a>Current Boundary</h2>
+<p>One binary can load in both browser and WasmEdge today when it stays within the shared profile:</p>
+<ul>
+<li>standalone WASI imports</li>
+<li>optional sync <code>space_data_module_host</code> imports</li>
+<li>command invoke surfaces through <code>_start</code> on WasmEdge and direct or command invoke surfaces in the browser harness</li>
+<li>no Emscripten pthread imports</li>
+</ul>
+<p>Not browser-portable from the same raw guest binary:</p>
+<ul>
+<li>WasmEdge-native socket/TLS extension imports</li>
+<li>pthread-oriented <code>env.*</code> imports</li>
+<li>raw guest async hostcalls that need a broader ABI than the current sync <code>space_data_module_host</code> bridge</li>
+</ul>
+<p>Today’s portable split is:</p>
+<ul>
+<li>the guest-visible <code>space_data_module_host</code> import remains a sync-only subset for sync-safe operations</li>
+<li>the host and harness APIs can still await filesystem, network, IPFS, and protocol adapters through the generic async capability boundary in both browser and Node-hosted test/runtime flows</li>
+</ul>
+<p>For browser-hosted networking and IPFS/protocol work, use the browser edge shims or host-delegated adapters instead of relying on raw WasmEdge socket extensions.</p>
+<h2 id="checked-in-demo"><a class="anchor" href="#checked-in-demo" aria-hidden="true">#</a>Checked-In Demo</h2>
+<p>The canonical example is:</p>
+<ul>
+<li><code>examples/isomorphic-loader/README.md</code></li>
+</ul>
+<p>That example includes:</p>
+<ul>
+<li>manifest: <code>examples/isomorphic-loader/manifest.json</code></li>
+<li>guest source: <code>examples/isomorphic-loader/module.c</code></li>
+<li>build script: <code>examples/isomorphic-loader/build-demo.mjs</code></li>
+<li>browser loader: <code>examples/isomorphic-loader/browser-demo.mjs</code></li>
+<li>browser page: <code>examples/isomorphic-loader/browser-demo.html</code></li>
+<li>WasmEdge loader: <code>examples/isomorphic-loader/wasmedge-demo.mjs</code></li>
+</ul>
+<p>Both demos load the same generated artifact:</p>
+<ul>
+<li><code>examples/isomorphic-loader/generated/dist/isomorphic/module.wasm</code></li>
+</ul>
+<h2 id="streaming-into-the-same-artifact"><a class="anchor" href="#streaming-into-the-same-artifact" aria-hidden="true">#</a>Streaming Into The Same Artifact</h2>
+<p>If that shared artifact owns resident state, such as an SDN module that imports <code>flatsql</code> internally, stream raw FlatBuffer frames into the live instance with <code>createModuleFlatBufferStreamPump(...)</code>.</p>
+<p>Use:</p>
+<ul>
+<li>a persistent <code>direct</code> browser harness for browser-resident state</li>
+<li>a persistent runtime-backed harness on the server/WasmEdge side</li>
+<li>chunked size-prefixed FlatBuffer stream input</li>
+<li>many small invokes, not one monolithic invoke envelope</li>
+</ul>
+<p>That path is documented in <code>docs/flatsql-streaming-standard.md</code>.</p>
+
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/browser-wasmedge-isomorphic.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#canonical-build-rule">Canonical Build Rule</a></li>
+<li><a class="depth-3" href="#pthreads-variant-shared-memory-isomorphic-threading">Pthreads variant (shared-memory, isomorphic threading)</a></li>
+<li><a class="depth-2" href="#cross-origin-isolation-is-required-for-any-wasi-threadswasi-sequential-guest">Cross-Origin Isolation Is Required For Any wasi-threads/wasi-sequential Guest</a></li>
+<li><a class="depth-2" href="#canonical-module-repo-layout">Canonical Module Repo Layout</a></li>
+<li><a class="depth-2" href="#toolchain-options">Toolchain Options</a></li>
+<li><a class="depth-2" href="#loader-entry-points">Loader Entry Points</a></li>
+<li><a class="depth-2" href="#what-the-browser-shims-cover">What The Browser Shims Cover</a></li>
+<li><a class="depth-2" href="#current-boundary">Current Boundary</a></li>
+<li><a class="depth-2" href="#checked-in-demo">Checked-In Demo</a></li>
+<li><a class="depth-2" href="#streaming-into-the-same-artifact">Streaming Into The Same Artifact</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>

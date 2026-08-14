@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="docs/tri-runtime-parity.md describes the parity harness: one" />
+    <title>Tri-runtime parity gate — Space Data Module SDK</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="./">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="./byo-wasm-quickstart.html">Quickstart</a>
+        <a href="./conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="./index.html"><span>Harness family matrix</span></a></li>
+<li><a href="./byo-wasm-quickstart.html"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="./conformance.html"><span>Conformance kit</span></a></li>
+<li><a href="./protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="./publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./families/propagator.html"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/maneuver.html"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./families/rf.html"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./families/breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/conjunction.html"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./families/estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="./module-publication-standard.html"><span>Module publication standard</span></a></li>
+<li><a href="./browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="./isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
+<li><a href="./tri-runtime-parity.html"><span>Tri-runtime parity</span></a></li>
+<li><a href="./tri-runtime-parity-gate.html" aria-current="page"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="./testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="./language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="./flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="./flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="./secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="./protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="./gpu-module-abi.html"><span>GPU module ABI</span></a></li>
+<li><a href="./module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="./isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="./node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+        <h1>Tri-runtime parity gate</h1>
+<p><code>docs/tri-runtime-parity.md</code> describes the parity <strong>harness</strong>: one <code>module.wasm</code>, one fixture, byte-identical stdout across browser / native WasmEdge / Docker WasmEdge. This document describes the <strong>gate</strong> — the thing the dev-graph gauntlet actually runs, and the thing an isomorphism claim is accepted against.</p>
+<h2 id="why-a-gate-and-not-just-the-harness"><a class="anchor" href="#why-a-gate-and-not-just-the-harness" aria-hidden="true">#</a>Why a gate and not just the harness</h2>
+<p>The harness is necessary and not sufficient:</p>
+<ul>
+<li>it can only speak about artifacts that already instantiate in every lane, so the most important failure — <em>an artifact that is not isomorphic at all</em> — is invisible to it;</li>
+<li>it takes ONE artifact, so it says nothing about the artifact <strong>set</strong> a release ships;</li>
+<li>and until this gate landed, the gauntlet slot that was supposed to enforce it was a hardcoded <code>echo TODO …; exit 1</code> marked <code>required: false</code>. It failed on every run for every task, so every receipt read PASS-WITH-GAPS and the red became background noise. That is the worst state a gate can be in: present enough to look like coverage, incapable of ever providing it.</li>
+</ul>
+<div class="codeblock"><pre><code>space-data-module parity-gate                       # the certified set
+space-data-module parity-gate --json                # machine receipt
+space-data-module parity-gate --gate-manifest ./parity/negative-control.json --expect-fail</code></pre></div>
+<h2 id="what-it-checks"><a class="anchor" href="#what-it-checks" aria-hidden="true">#</a>What it checks</h2>
+<h3 id="tier-a-host-contract-conformance-real-instantiation-per-lane"><a class="anchor" href="#tier-a-host-contract-conformance-real-instantiation-per-lane" aria-hidden="true">#</a>Tier A — host-contract conformance (REAL instantiation, per lane)</h3>
+<p>Every artifact in the certified set is really instantiated:</p>
+<div class="table-wrap"><table><thead><tr><th>lane</th><th>what it actually is</th><th>what it proves</th></tr></thead><tbody><tr><td><code>browser</code></td><td>real headless Chrome behind COOP/COEP (cross-origin isolated, SAB-capable). Never jsdom.</td><td>The artifact instantiates against <strong>exactly</strong> the declared host surface — WASI preview1 stubs plus the declared capability imports, with signatures read from the binary. Anything else it demands is a <code>LinkError</code> naming the offender.</td></tr><tr><td><code>wasmedge-native</code></td><td>a native WasmEdge binary, version-checked against <code>src/testing/wasmedgePin.json</code>.</td><td>The artifact links on the real production runtime.</td></tr><tr><td><code>wasmedge-docker</code></td><td>the pinned WasmEdge container (image tag <strong>derived</strong> from the same pin).</td><td>Same, in the container the fleet ships.</td></tr></tbody></table></div>
+<p>Alongside the runtime probes, every artifact's import section is classified structurally against its declared surface, because <em>why</em> an instantiation failed is the entire content of the finding:</p>
+<ul>
+<li><strong>forbidden import class</strong> — <code>invoke_*</code> / <code>__cxa_*</code> / <code>__resumeException</code> / <code>llvm_eh_typeid_for</code> (emscripten EH), <code>__syscall_*</code> (emscripten JS-library syscalls), <code>emscripten_*</code> (emscripten runtime hooks), or a single-letter import module (the minified emcc browser build). These are <code>emcc</code>-shaped artifacts: browser-only by construction, EH-carrying, not instantiable on a plain WasmEdge host. <strong>Auto-reject.</strong></li>
+<li><strong>outside the declared surface</strong> — a private import is a NEW HOST CAPABILITY, which is an owner decision, never a PR.</li>
+<li><strong>in-surface</strong> — WASI plus, at most, the declared capability imports.</li>
+</ul>
+<h3 id="tier-b-behavioral-parity"><a class="anchor" href="#tier-b-behavioral-parity" aria-hidden="true">#</a>Tier B — behavioral parity</h3>
+<p>Artifacts with <code>profile: &quot;command&quot;</code> and a fixture additionally go through <code>runParityHarness()</code>: identical stdin bytes, identical explicit guest env, byte-identical stdout and identical trap classes across every lane × thread count (1/2/4/8).</p>
+<h2 id="declared-host-surfaces"><a class="anchor" href="#declared-host-surfaces" aria-hidden="true">#</a>Declared host surfaces</h2>
+<div class="table-wrap"><table><thead><tr><th>surface</th><th>contents</th></tr></thead><tbody><tr><td><code>module</code></td><td>WASI preview1 + wasi-threads (<code>wasi.thread-spawn</code>, <code>env.memory</code>) + the ONE sanctioned hostcall bridge <code>space_data_module_host.{call,response_len,read_response,clear_response,last_status_code,dispatch_current_invocation}</code> (plus the legacy <code>sdn_flow_host.dispatch_current_invocation</code>). The generic hook set (<code>http</code>/<code>tcp</code>/<code>wallet_sign</code>/<code>keyslot.sign</code>/clock/fs) rides <em>inside</em> that bridge, which is why a module needs no per-capability imports.</td></tr><tr><td><code>module-standalone</code></td><td>WASI preview1 + wasi-threads only.</td></tr><tr><td><code>flatsql-engine</code></td><td>WASI preview1 + exactly the seven <code>flatsql_io_*</code> VFS imports. Offsets are <strong>f64, never i64</strong> — emscripten legalizes i64 across the JS boundary for the browser target and not for <code>STANDALONE_WASM</code>, which would give one import two different signatures in the two lanes.</td></tr></tbody></table></div>
+<h2 id="verdicts"><a class="anchor" href="#verdicts" aria-hidden="true">#</a>Verdicts</h2>
+<div class="table-wrap"><table><thead><tr><th>verdict</th><th>meaning</th></tr></thead><tbody><tr><td><code>satisfied</code></td><td>instantiated on the declared surface.</td></tr><tr><td><code>runner-cannot-supply-declared-capability</code></td><td>did <strong>not</strong> instantiate, and the only blocker is a DECLARED capability the lane runner cannot register. The bare WasmEdge CLI has no mechanism for host functions, so an engine artifact reports this while the browser lane reports <code>satisfied</code>. <strong>This is recorded verbatim, never counted as a silent pass</strong>, and the two are treated as agreeing. Upgrade path: graph task <code>module-sdk-parity-lane-embedded-wasmedge</code> (run the guest through the node's real WasmEdge <em>embedding</em>, which also unlocks threaded guests — <code>--enable-threads</code> enables only the threads proposal, not the wasi-threads host module).</td></tr><tr><td><code>violated</code></td><td>forbidden class, out-of-surface import, or a link error the contract does not explain. <strong>FAIL.</strong></td></tr><tr><td><code>shim-gap</code></td><td>a lane that <em>does</em> supply the declared surface still failed to link a declared capability — an SDK host-shim defect. <strong>FAIL.</strong></td></tr><tr><td><code>lane-unavailable</code></td><td>the lane could not run. <strong>FAIL</strong>, and kept lexically distinct from divergence: a harness that cannot run and a runtime that disagrees must never look alike in a receipt.</td></tr></tbody></table></div>
+<p>Rules, all hard: forbidden class ⇒ FAIL even when every lane agrees (lanes agreeing that an artifact is broken everywhere is not parity); lane disagreement ⇒ FAIL as a P1 cross-runtime divergence; behavioral divergence ⇒ FAIL.</p>
+<h2 id="the-certified-set-and-fresh-worktree-isolation"><a class="anchor" href="#the-certified-set-and-fresh-worktree-isolation" aria-hidden="true">#</a>The certified set — and fresh-worktree isolation</h2>
+<p><code>parity/gate.json</code> lists the artifacts this SDK certifies. <strong>Every entry resolves inside this repo</strong> — a repo-relative path or a node-resolved dependency. That is deliberate: the previous tri-lane test defaulted its artifact path to a sibling checkout that does not exist on a normal machine, so the acceptance instrument was silently un-runnable and nobody who did not set an env var by hand had ever seen it work (graph: <code>parity-harness-cannot-run-locally</code>). The gate must run in ANY fresh worktree.</p>
+<p>Artifacts owned by other repos are <strong>injected by the caller</strong>:</p>
+<div class="codeblock"><pre><code>space-data-module parity-gate \
+  --artifact rf-fspl=./packages/rf-fspl/dist/isomorphic/module.wasm:module</code></pre></div>
+<p>so the owning repo's gauntlet profile supplies its own artifacts and this repo never depends on that checkout.</p>
+<h2 id="the-wasmedge-pin"><a class="anchor" href="#the-wasmedge-pin" aria-hidden="true">#</a>The WasmEdge pin</h2>
+<p><code>src/testing/wasmedgePin.json</code> remains the single source. Native and container runtimes are both version-checked against it; drift is a loud failure, not a warning. When no native WasmEdge exists on the box, the report carries an explicit <code>pinVerification.native = absent</code> gap — the host/container pin PAIR could not be cross-verified, which is <em>recorded</em>, not passed. Hosts that provision the binary run with <code>--require-native-wasmedge</code>, which turns the gap into a failure.</p>
+<h2 id="the-one-runtime-difference-the-sdk-absorbs-and-where"><a class="anchor" href="#the-one-runtime-difference-the-sdk-absorbs-and-where" aria-hidden="true">#</a>The one runtime difference the SDK absorbs (and where)</h2>
+<p><strong>Measured on WasmEdge 0.16.4, native and containerized: the CLI writes its own diagnostics — <code>[2026-08-08 00:45:38.689] [error] …</code> — to STDOUT, not stderr.</strong> <code>src/testing/wasmedgeOutput.js</code> is the shim that absorbs this, and it is a <em>host shim</em>, which is the only place a runtime difference is ever allowed to live. It does two things and nothing else: it lifts the runtime's log lines out of the captured stdout so the harness byte-compares the GUEST's bytes, and it hands those lines to the classifier so a failed instantiation is actually seen.</p>
+<p>Both halves were live defects before it existed:</p>
+<ul>
+<li>the gate's WasmEdge probe read only stderr and <strong>defaulted to <code>instantiated</code></strong> when it recognized nothing — so an artifact that demonstrably cannot link (<code>flatsql-wasi</code> at 1.4.4 under the bare CLI) read as a clean pass. A false pass in an acceptance instrument is worse than no instrument. The classifier now requires POSITIVE evidence of linking (clean exit, guest output, or a post-link diagnostic such as a missing <code>_start</code> on a reactor artifact) and otherwise returns <code>probe-failure</code>, which fails the gate. Regression test: <em>&quot;a silent nonzero exit is a probe-failure, NEVER an inferred pass&quot;</em>.</li>
+<li>the parity harness compared those log lines as if they were guest output, so any error-path fixture would have reported a phantom output divergence, and its trap-class detection (which scanned stderr for trap markers) could never fire on a WasmEdge trap.</li>
+</ul>
+<h2 id="negative-control"><a class="anchor" href="#negative-control" aria-hidden="true">#</a>Negative control</h2>
+<p><code>parity/negative-control.json</code> declares a known-bad artifact and is run with <code>--expect-fail</code>; a PASS there is itself an error (exit 3). Keep it. A gate nobody has watched fail is indistinguishable from a gate that cannot fail.</p>
+
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/tri-runtime-parity-gate.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#why-a-gate-and-not-just-the-harness">Why a gate and not just the harness</a></li>
+<li><a class="depth-2" href="#what-it-checks">What it checks</a></li>
+<li><a class="depth-3" href="#tier-a-host-contract-conformance-real-instantiation-per-lane">Tier A — host-contract conformance (REAL instantiation, per lane)</a></li>
+<li><a class="depth-3" href="#tier-b-behavioral-parity">Tier B — behavioral parity</a></li>
+<li><a class="depth-2" href="#declared-host-surfaces">Declared host surfaces</a></li>
+<li><a class="depth-2" href="#verdicts">Verdicts</a></li>
+<li><a class="depth-2" href="#the-certified-set-and-fresh-worktree-isolation">The certified set — and fresh-worktree isolation</a></li>
+<li><a class="depth-2" href="#the-wasmedge-pin">The WasmEdge pin</a></li>
+<li><a class="depth-2" href="#the-one-runtime-difference-the-sdk-absorbs-and-where">The one runtime difference the SDK absorbs (and where)</a></li>
+<li><a class="depth-2" href="#negative-control">Negative control</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>

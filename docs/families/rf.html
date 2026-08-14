@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Status: DESIGNED. The RF ABI has been drafted against a real paying" />
+    <title>RF — Space Data Module SDK</title>
+    <link rel="stylesheet" href="../styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="../">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="../byo-wasm-quickstart.html">Quickstart</a>
+        <a href="../conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="../index.html"><span>Harness family matrix</span></a></li>
+<li><a href="../byo-wasm-quickstart.html"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="../conformance.html"><span>Conformance kit</span></a></li>
+<li><a href="../protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="../publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./propagator.html"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./maneuver.html"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./rf.html" aria-current="page"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./conjunction.html"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="../module-publication-standard.html"><span>Module publication standard</span></a></li>
+<li><a href="../browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="../isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
+<li><a href="../tri-runtime-parity.html"><span>Tri-runtime parity</span></a></li>
+<li><a href="../tri-runtime-parity-gate.html"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="../testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="../language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="../flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="../flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="../secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="../protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="../gpu-module-abi.html"><span>GPU module ABI</span></a></li>
+<li><a href="../module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="../isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="../node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+      <p class="breadcrumb"><a href="../index.html">Harness families</a> / Environment and interaction</p>
+        <h1>RF</h1>
+      <p class="doc-meta"><span class="pill pill-designed">designed</span><span>Designed, not ratified. The ABI has been drafted against a real consumer but no generated header, conformance kit, or reference module has landed.</span></p>
+<p><strong>Status: DESIGNED.</strong> The RF ABI has been drafted against a real paying consumer, and the boundary of what will and will not be a public contract has been ruled. No <code>.fbs</code>, no generated header, no conformance kit and no reference module exist yet. Nothing on this page is a stable ABI.</p>
+<h2 id="doctrine"><a class="anchor" href="#doctrine" aria-hidden="true">#</a>Doctrine</h2>
+<p>Read this section before anything else, because it decides whether you need this family at all.</p>
+<p><strong>Most third-party RF does not need a harness.</strong> RF that takes records in and emits records out — link budgets, access intervals, coverage products expressed as <code>$RFL</code>, <code>$ACI</code> and <code>$CVP</code>-class records — is an ordinary invoke-envelope module. It has no harness requirement, no ABI freeze to wait for, and it is the entry point for a vendor bringing an existing RF engine. If your engine computes propagation loss, link margin, interference or coverage and hands back numbers, this is your path today, and it is available now: build a BYO-wasm module, emit records, publish it.</p>
+<p><strong>The RF harness family exists only for RF that writes scene state.</strong> A module that draws footprints, writes entity or render state, or otherwise participates in the consumer's scene graph needs the harness, because that is where a byte-exact shared-memory contract is required.</p>
+<p><strong>The closed scalar <code>rf_*</code> kernel ABI is never the public contract.</strong> A set of closed, encrypted, individually licensed scalar RF kernels exists — free-space path loss, link budget, antenna pattern, gaseous and rain and cloud attenuation, diffraction, Doppler and Fresnel geometry, terrain solvers, empirical and Longley-Rice models, bit-error-rate and modulation. Their scalar kernel-op ABI is internal by permanent ruling, not by maturity. It will not be offered as a third-party contract, and a third-party module must never be written against it.</p>
+<h2 id="capability"><a class="anchor" href="#capability" aria-hidden="true">#</a>Capability</h2>
+<p>A harness-class RF module computes link geometry and radio physics over many links and many epochs, and writes its results into caller-provided memory. It does not fetch data, does not decide tasking, and does not own the entities it computes over.</p>
+<h2 id="import-and-export-set"><a class="anchor" href="#import-and-export-set" aria-hidden="true">#</a>Import and export set</h2>
+<p><strong>Not specified.</strong> The design calls for one aligned-binary invocation covering many links and epochs, following the propagator family's export-set template (init, compute, destroy, plus optional typed ingest and introspection), with the symbol names to be fixed when the header is generated. <code>orbpro_rf_abi.h</code> does not exist.</p>
+<h2 id="wire-layout"><a class="anchor" href="#wire-layout" aria-hidden="true">#</a>Wire layout</h2>
+<p><strong>Drafted, not generated.</strong> The drafted bulk link-matrix ABI is a single <code>.fbs</code>-defined invocation that emits, in one call:</p>
+<div class="table-wrap"><table><thead><tr><th>Output</th><th>Shape</th></tr></thead><tbody><tr><td>Link samples</td><td>Per-link, per-epoch scalar results</td></tr><tr><td>Intervals</td><td>Access and outage intervals derived from those samples</td></tr><tr><td>Coverage grid</td><td>A gridded coverage product</td></tr><tr><td>Coverage rings</td><td>A packed ring representation of the same coverage</td></tr></tbody></table></div>
+<p>Receiver and channel grouping for interference aggregation happens inside the module, not in the consumer — a design decision, so that an interference computation is never split across the ABI boundary.</p>
+<p>No <code>.fbs</code> file for this exists in the tree yet. Field names, offsets and sizes are unfixed.</p>
+<h2 id="units-and-frames"><a class="anchor" href="#units-and-frames" aria-hidden="true">#</a>Units and frames</h2>
+<p>Not fixed. The scalar physics behind the closed kernels works in decibel-watt power and decibel loss with linear-power summation for incoherent aggregation, and any published ABI will have to state per-field units explicitly the way the propagator ABI does. Do not infer them from this page.</p>
+<h2 id="sentinels"><a class="anchor" href="#sentinels" aria-hidden="true">#</a>Sentinels</h2>
+<p>Not specified.</p>
+<h2 id="identity"><a class="anchor" href="#identity" aria-hidden="true">#</a>Identity</h2>
+<p>Not specified. Links will need a stable identity across a bulk call so a consumer can associate a sample row with the link that produced it.</p>
+<h2 id="threading"><a class="anchor" href="#threading" aria-hidden="true">#</a>Threading</h2>
+<p><code>wasm32-wasip1-threads</code>, and the drafted design explicitly reuses the propagator family's shard-write discipline for its bulk outputs: the same base pointer is given to every thread, each thread writes a disjoint range, each writes only its own row, and a failed row is zeroed rather than left partially written. That discipline is the one part of this family that is already settled, because it is inherited rather than invented.</p>
+<h2 id="error-codes"><a class="anchor" href="#error-codes" aria-hidden="true">#</a>Error codes</h2>
+<p>Not specified.</p>
+<h2 id="lifetime"><a class="anchor" href="#lifetime" aria-hidden="true">#</a>Lifetime</h2>
+<p>Not specified. Expect the propagator family's contract: a real, idempotent teardown proven by a steady-state leak test.</p>
+<h2 id="parity-envelope"><a class="anchor" href="#parity-envelope" aria-hidden="true">#</a>Parity envelope</h2>
+<p>Cross-runtime parity claims for RF are currently blocked. The existing closed RF packages are not isomorphic, and their manifests declare browser and node targets while in practice being gated on WasmEdge — an open defect. An embedded WasmEdge parity lane is a prerequisite before any RF parity claim can be made at all.</p>
+<h2 id="consumer-seam"><a class="anchor" href="#consumer-seam" aria-hidden="true">#</a>Consumer seam</h2>
+<p>One generic RF port on the consumer side, taking the module as a pluggable parameter. Not implemented.</p>
+<h2 id="guest-c-example"><a class="anchor" href="#guest-c-example" aria-hidden="true">#</a>Guest C++ example</h2>
+<p>None. Publishing a skeleton against an unfixed wire layout would create exactly the drift this family is being designed to avoid.</p>
+<h2 id="what-to-do-today"><a class="anchor" href="#what-to-do-today" aria-hidden="true">#</a>What to do today</h2>
+<p>If you are a vendor with an RF engine and you want to ship on the Space Data Network now:</p>
+<ol>
+<li>Build a records-in, records-out module. No harness required.</li>
+<li>Follow the <a href="../byo-wasm-quickstart.html">BYO-wasm quickstart</a> for the toolchain pin and the multi-TU build.</li>
+<li>Emit <code>$RFL</code>, <code>$ACI</code> and <code>$CVP</code>-class records. Use the Space Data Standards C++ headers for the record types.</li>
+<li>Run <a href="../conformance.html">conformance</a> and the <a href="../tri-runtime-parity-gate.html">parity gate</a>, then <a href="../protect-and-sign.html">protect and sign</a>.</li>
+</ol>
+<p>That path is real today and does not wait on this family's ratification. Come back to the harness only if your module must write scene state.</p>
+      <section class="playground" id="playground-slot" data-family="rf" data-playground="pending" aria-labelledby="playground-title">
+        <h2 id="playground-title">Playground</h2>
+        <p>
+          An in-browser build-and-run playground for the <code>rf</code> harness
+          mounts here. It is being built under the graph task
+          <code>sdk-playground-emception</code>; this slot is its reserved mount
+          point and is intentionally empty until that lands.
+        </p>
+      </section>
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/families/rf.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#doctrine">Doctrine</a></li>
+<li><a class="depth-2" href="#capability">Capability</a></li>
+<li><a class="depth-2" href="#import-and-export-set">Import and export set</a></li>
+<li><a class="depth-2" href="#wire-layout">Wire layout</a></li>
+<li><a class="depth-2" href="#units-and-frames">Units and frames</a></li>
+<li><a class="depth-2" href="#sentinels">Sentinels</a></li>
+<li><a class="depth-2" href="#identity">Identity</a></li>
+<li><a class="depth-2" href="#threading">Threading</a></li>
+<li><a class="depth-2" href="#error-codes">Error codes</a></li>
+<li><a class="depth-2" href="#lifetime">Lifetime</a></li>
+<li><a class="depth-2" href="#parity-envelope">Parity envelope</a></li>
+<li><a class="depth-2" href="#consumer-seam">Consumer seam</a></li>
+<li><a class="depth-2" href="#guest-c-example">Guest C++ example</a></li>
+<li><a class="depth-2" href="#what-to-do-today">What to do today</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>

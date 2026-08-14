@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Status: EXPERIMENTAL. A real maneuver module ships and a consumer-side seam" />
+    <title>Maneuver — Space Data Module SDK</title>
+    <link rel="stylesheet" href="../styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="../">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="../byo-wasm-quickstart.html">Quickstart</a>
+        <a href="../conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="../index.html"><span>Harness family matrix</span></a></li>
+<li><a href="../byo-wasm-quickstart.html"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="../conformance.html"><span>Conformance kit</span></a></li>
+<li><a href="../protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="../publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./propagator.html"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./maneuver.html" aria-current="page"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./rf.html"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./conjunction.html"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="../module-publication-standard.html"><span>Module publication standard</span></a></li>
+<li><a href="../browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="../isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
+<li><a href="../tri-runtime-parity.html"><span>Tri-runtime parity</span></a></li>
+<li><a href="../tri-runtime-parity-gate.html"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="../testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="../language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="../flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="../flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="../secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="../protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="../gpu-module-abi.html"><span>GPU module ABI</span></a></li>
+<li><a href="../module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="../isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="../node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+      <p class="breadcrumb"><a href="../index.html">Harness families</a> / Dynamics</p>
+        <h1>Maneuver</h1>
+      <p class="doc-meta"><span class="pill pill-experimental">experimental</span><span>Experimental. The shape exists in wave-2 form and is expected to change. Do not ship a commercial module against it yet.</span></p>
+<p><strong>Status: EXPERIMENTAL.</strong> A real maneuver module ships and a consumer-side seam is frozen, but the WASM invoke surface itself is not frozen and carries known defects. Do not ship a commercial module against this family yet. Everything below describes what exists, and names precisely what does not.</p>
+<h2 id="doctrine"><a class="anchor" href="#doctrine" aria-hidden="true">#</a>Doctrine</h2>
+<p>A maneuver module answers one question: given a chaser state, an optional target state, and a maneuver intent, what burns achieve it and what does the resulting trajectory look like? It computes; it does not render, and it does not decide when a burn happens — that belongs to the scheduler and behavior families.</p>
+<p>The family's defining discipline is that a computed maneuver is answered by the module or not at all. The consuming seam never falls back to arithmetic in JavaScript when the module declines; it returns an empty plan and a diagnostic. This is what makes a third-party maneuver module a real substitution rather than a decoration on a built-in solver.</p>
+<h2 id="capability"><a class="anchor" href="#capability" aria-hidden="true">#</a>Capability</h2>
+<p>A maneuver module may read the states it is given, compute impulsive or finite burns, and return a plan. It may not mutate scene state, may not fetch data, and may not schedule itself.</p>
+<p>The conformance model pinned by the shipped seam is deliberately narrow: two-body point-mass Earth with impulsive burns, <code>mu = 3.986004418e14 m^3 s^-2</code> and <code>Re = 6378137 m</code>. A module offering higher fidelity is welcome, but it must answer these vectors within the seam's tolerance to be a drop-in.</p>
+<h2 id="import-and-export-set"><a class="anchor" href="#import-and-export-set" aria-hidden="true">#</a>Import and export set</h2>
+<p><strong>Not frozen.</strong> The shipped module uses the SDK's generic command invoke surface rather than a family-specific export set. A module declares <code>invoke surface: command</code> in its manifest and receives a JSON command envelope:</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{ &quot;operation&quot;: &quot;&lt;name&gt;&quot;, &quot;params&quot;: { } }</code></pre></div>
+<p>Structured JSON comes back, with an <code>errorCode</code> on every failure path. The manifest of the shipped module declares <code>acceptsAnyFlatbuffer: true</code>, justified as a foreign-wire-format wildcard port — that wildcard is exactly the thing a frozen ABI is supposed to remove.</p>
+<p>There is no <code>orbpro_maneuver_abi.h</code>. There is no maneuver <code>.fbs</code> message ABI. The freeze of this surface is open work under the graph task <code>harness-w2-maneuver-invoke-freeze</code>.</p>
+<h2 id="wire-layout"><a class="anchor" href="#wire-layout" aria-hidden="true">#</a>Wire layout</h2>
+<p><strong>Not specified.</strong> The command envelope is JSON, not a byte-exact struct. The typed FlatBuffer runtime wire — delta-v nodes with a mandatory frame and named basis, signed doubles in metres per second, epoch-or-anchor timing — is designed but unminted; the SDS <code>$MVW</code> maneuver-plan record does not exist. Tracked by <code>harness-w3-maneuver-plan-record-mvw</code>.</p>
+<p>Until that lands, treat the JSON envelope as an implementation detail that will be replaced, not as a contract.</p>
+<h2 id="units-and-frames"><a class="anchor" href="#units-and-frames" aria-hidden="true">#</a>Units and frames</h2>
+<p>SI end-to-end at the frozen consumer seam: metres, metres per second, seconds, radians. Frames must be named explicitly on every delta-v; the future typed wire makes the frame field mandatory precisely because the current envelope allows it to be implied.</p>
+<h2 id="sentinels"><a class="anchor" href="#sentinels" aria-hidden="true">#</a>Sentinels</h2>
+<p>An unanswerable card returns an empty plan plus a diagnostic — never a zero burn, and never a silently substituted approximation. A zero-length plan is a refusal, not a no-op maneuver.</p>
+<h2 id="identity"><a class="anchor" href="#identity" aria-hidden="true">#</a>Identity</h2>
+<p>States are passed by value into the call. There is no persistent entity handle in this family today; a plan is addressed by the card kind and the seed it was produced from.</p>
+<h2 id="threading"><a class="anchor" href="#threading" aria-hidden="true">#</a>Threading</h2>
+<p><code>wasm32-wasip1-threads</code>, as for every family. The shipped module declares runtime targets browser, wasi and wasmedge. No batch or shard-write discipline is defined for this family yet, because no batch call exists.</p>
+<h2 id="error-codes"><a class="anchor" href="#error-codes" aria-hidden="true">#</a>Error codes</h2>
+<p><strong>Not frozen.</strong> The envelope returns an <code>errorCode</code> on failure paths, but the named code set is not ratified, and an audit found a dead error path in the shipped implementation. Do not depend on specific numeric values.</p>
+<h2 id="lifetime"><a class="anchor" href="#lifetime" aria-hidden="true">#</a>Lifetime</h2>
+<p>Command-surface modules are instantiated, invoked, and torn down by the host. Nothing in this family holds cross-call state today.</p>
+<h2 id="parity-envelope"><a class="anchor" href="#parity-envelope" aria-hidden="true">#</a>Parity envelope</h2>
+<p>The module builds for browser, wasi and wasmedge targets and is exercised by the project's own tests, but this family has no ratified parity envelope statement of its own. Run the generic <a href="../tri-runtime-parity-gate.html">tri-runtime parity gate</a> against any candidate.</p>
+<h2 id="consumer-seam"><a class="anchor" href="#consumer-seam" aria-hidden="true">#</a>Consumer seam</h2>
+<p>The consumer-side seam <strong>is</strong> frozen, and it is the most useful part of this family today. A solver is a pluggable port with two methods:</p>
+<div class="codeblock"><div class="codeblock-head">ts</div><pre><code>plan(cardKind, seed, chaserState, targetState?): Node[]
+reconcile(plan, simT): { liveElements, firedJobs }</code></pre></div>
+<p>Card kinds: <code>pro</code>, <code>radial</code>, <code>normal</code>, <code>cislunar</code>, <code>custom</code>, <code>hohmann</code>, <code>hohplane</code>, <code>biel</code>, <code>lambert</code>, <code>phasing</code>, <code>rendezvous</code>.</p>
+<p>The computed cards — <code>hohmann</code>, <code>hohplane</code>, <code>biel</code>, <code>phasing</code>, <code>lambert</code> — are answered by the module or not at all. The node-seed cards — <code>pro</code>, <code>radial</code>, <code>normal</code>, <code>custom</code> — have no module operation and are seeded directly.</p>
+<h2 id="guest-c-example"><a class="anchor" href="#guest-c-example" aria-hidden="true">#</a>Guest C++ example</h2>
+<p>There is no reference maneuver module in this SDK to derive a canonical example from, and publishing an invented one against an unfrozen surface would be worse than publishing none. Build against the <a href="./propagator.html">propagator guest example</a> for the module skeleton, threading model and teardown discipline, and treat the maneuver computation itself as command-envelope handling until the invoke freeze lands.</p>
+<h2 id="known-defects-stated-plainly"><a class="anchor" href="#known-defects-stated-plainly" aria-hidden="true">#</a>Known defects, stated plainly</h2>
+<p>The invoke surface is not frozen because of specific, reproduced defects:</p>
+<ul>
+<li>A dead error path that cannot be reached.</li>
+<li>Delta-v scalars that lose their sign — magnitudes are returned where signed values are required.</li>
+<li>Lambert solutions that report a converged flag which is not true, for the large majority of the tested geometries.</li>
+</ul>
+<p>These are tracked under <code>harness-w2-maneuver-invoke-freeze</code>. The seam contract publication, the invoke freeze, and the <code>$MVW</code> record mint are the three gates between this page and a Shipped status.</p>
+      <section class="playground" id="playground-slot" data-family="maneuver" data-playground="pending" aria-labelledby="playground-title">
+        <h2 id="playground-title">Playground</h2>
+        <p>
+          An in-browser build-and-run playground for the <code>maneuver</code> harness
+          mounts here. It is being built under the graph task
+          <code>sdk-playground-emception</code>; this slot is its reserved mount
+          point and is intentionally empty until that lands.
+        </p>
+      </section>
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/families/maneuver.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#doctrine">Doctrine</a></li>
+<li><a class="depth-2" href="#capability">Capability</a></li>
+<li><a class="depth-2" href="#import-and-export-set">Import and export set</a></li>
+<li><a class="depth-2" href="#wire-layout">Wire layout</a></li>
+<li><a class="depth-2" href="#units-and-frames">Units and frames</a></li>
+<li><a class="depth-2" href="#sentinels">Sentinels</a></li>
+<li><a class="depth-2" href="#identity">Identity</a></li>
+<li><a class="depth-2" href="#threading">Threading</a></li>
+<li><a class="depth-2" href="#error-codes">Error codes</a></li>
+<li><a class="depth-2" href="#lifetime">Lifetime</a></li>
+<li><a class="depth-2" href="#parity-envelope">Parity envelope</a></li>
+<li><a class="depth-2" href="#consumer-seam">Consumer seam</a></li>
+<li><a class="depth-2" href="#guest-c-example">Guest C++ example</a></li>
+<li><a class="depth-2" href="#known-defects-stated-plainly">Known defects, stated plainly</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>

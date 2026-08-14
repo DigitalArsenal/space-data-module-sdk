@@ -148,14 +148,26 @@ if (assetPath) {
   }
 }
 
-const html = contents.find(([path]) => path.endsWith(".html"))?.[1] ?? "";
-
-assertApprovedRegion(
-  html,
-  "docs/index.html",
-  "sdn-module-sdk-pages-v1",
-  "https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html",
+const htmlPages = contents.filter(
+  ([path]) => path.endsWith(".html") && !path.endsWith("wallet-callback.html"),
 );
+
+if (htmlPages.length === 0) {
+  throw new Error("Expected at least one HTML page to check");
+}
+
+// EVERY page shell on the site carries the reviewed consumer-asset region —
+// not just the landing page.
+for (const [path, content] of htmlPages) {
+  assertApprovedRegion(
+    content,
+    path,
+    "sdn-module-sdk-pages-v1",
+    "https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html",
+  );
+}
+
+const html = htmlPages[0][1];
 if (html.includes("https://spacedatastandards.org/sdn-stack-nav.js")) {
   throw new Error("Mutable SDN Stack nav URL is forbidden");
 }
