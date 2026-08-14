@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="This document defines the SDK-level standard for modules that can use GPU" />
+    <title>GPU module ABI — Space Data Module SDK</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="./">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="./byo-wasm-quickstart.html">Quickstart</a>
+        <a href="./conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="./index.html"><span>Harness family matrix</span></a></li>
+<li><a href="./byo-wasm-quickstart.html"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="./conformance.html"><span>Conformance kit</span></a></li>
+<li><a href="./protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="./publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./families/propagator.html"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/maneuver.html"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./families/rf.html"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./families/breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/conjunction.html"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./families/estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="./module-publication-standard.html"><span>Module publication standard</span></a></li>
+<li><a href="./browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="./isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
+<li><a href="./tri-runtime-parity.html"><span>Tri-runtime parity</span></a></li>
+<li><a href="./tri-runtime-parity-gate.html"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="./testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="./language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="./flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="./flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="./secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="./protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="./gpu-module-abi.html" aria-current="page"><span>GPU module ABI</span></a></li>
+<li><a href="./module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="./isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="./node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+        <h1>GPU module ABI</h1>
+<p>This document defines the SDK-level standard for modules that can use GPU compute acceleration while remaining portable across browser and WasmEdge module runtimes.</p>
+<h2 id="scope"><a class="anchor" href="#scope" aria-hidden="true">#</a>Scope</h2>
+<p>The standard covers:</p>
+<ul>
+<li>the manifest capability used by module authors</li>
+<li>the host-owned async dispatch boundary used by browsers and native hosts</li>
+<li>the C/C++ layout header shared by module code, browser adapters, and native Dawn-backed hosts</li>
+<li>the artifact layout for portable CPU fallback plus optional GPU adapters</li>
+</ul>
+<p>It does not add a new SDS FlatBuffer schema or a new <code>space_data_module_host</code> sync import. GPU dispatch is asynchronous in browser WebGPU and must stay outside the current sync guest hostcall bridge.</p>
+<h2 id="capability"><a class="anchor" href="#capability" aria-hidden="true">#</a>Capability</h2>
+<p>GPU-capable modules declare the coarse capability id:</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{
+  &quot;capability&quot;: &quot;gpu_compute&quot;,
+  &quot;scope&quot;: &quot;webgpu.v1&quot;,
+  &quot;required&quot;: false,
+  &quot;description&quot;: &quot;Optional WebGPU/Dawn compute acceleration.&quot;
+}</code></pre></div>
+<p>Use <code>required: false</code> unless the module has no correct CPU path. A missing GPU adapter must degrade to the module's CPU implementation, not to an incomplete result.</p>
+<p>The <code>gpu_compute</code> id is part of the SDK recommended capability vocabulary. The typed PLG <code>HOST_CAPABILITIES</code> enum cannot carry a dedicated GPU enum value until the canonical standards schema adds one. Until that SDS change lands, module manifests should use the string/object capability form above and avoid claiming a typed PLG host capability enum for GPU.</p>
+<h2 id="artifact-layout"><a class="anchor" href="#artifact-layout" aria-hidden="true">#</a>Artifact Layout</h2>
+<p>The canonical portable artifact remains:</p>
+<div class="codeblock"><div class="codeblock-head">text</div><pre><code>dist/isomorphic/module.wasm</code></pre></div>
+<p>That artifact must be valid without GPU access. Optional GPU adapters belong outside the shared guest binary:</p>
+<div class="codeblock"><div class="codeblock-head">text</div><pre><code>dist/browser/module.js
+dist/browser/module.wasm
+dist/wasmedge/gpu-host.{so,dylib,dll}</code></pre></div>
+<p>The browser adapter owns the browser <code>GPUDevice</code>. The WasmEdge host extension owns the native Dawn instance/device. The guest module owns correctness, fallback, exact refinement, and final result validation.</p>
+<h2 id="abi-layers"><a class="anchor" href="#abi-layers" aria-hidden="true">#</a>ABI Layers</h2>
+<h3 id="1-data-layout-abi"><a class="anchor" href="#1-data-layout-abi" aria-hidden="true">#</a>1. Data Layout ABI</h3>
+<p>The reusable C/C++ header is:</p>
+<div class="codeblock"><div class="codeblock-head">text</div><pre><code>templates/gpu-module/include/space_data_gpu_abi.h</code></pre></div>
+<p>It defines:</p>
+<ul>
+<li><code>SDN_GPU_ABI_VERSION</code></li>
+<li>the <code>gpu_compute</code> capability id and <code>webgpu.v1</code> scope</li>
+<li>status codes</li>
+<li>backend and buffer role enums</li>
+<li>split <code>f64</code> helpers using high/low <code>f32</code></li>
+<li>packed dispatch/result descriptors</li>
+</ul>
+<p>All multi-byte fields are little-endian in serialized buffers. Structs in the header are fixed-width and intentionally avoid owning pointers. Pointers are runtime-local implementation details and must not appear in durable manifests, publication metadata, or cross-process descriptors.</p>
+<h3 id="2-host-dispatch-abi"><a class="anchor" href="#2-host-dispatch-abi" aria-hidden="true">#</a>2. Host Dispatch ABI</h3>
+<p>The canonical operation is:</p>
+<div class="codeblock"><div class="codeblock-head">text</div><pre><code>gpu_compute.dispatch.v1</code></pre></div>
+<p>The host adapter receives:</p>
+<ul>
+<li>an ABI version</li>
+<li>a stable kernel id</li>
+<li>storage/uniform buffer descriptors</li>
+<li>little-endian input bytes</li>
+<li>requested workgroup counts</li>
+<li>declared output buffer sizes</li>
+</ul>
+<p>The host adapter returns:</p>
+<ul>
+<li>a status code</li>
+<li>backend metadata (<code>browser-webgpu</code>, <code>dawn-native</code>, or <code>cpu-fallback</code>)</li>
+<li>output buffer bytes</li>
+<li>optional counters such as candidates emitted, overflow count, and elapsed device time</li>
+</ul>
+<p>Browser and native hosts may expose this through their existing async capability adapter registries. A shared browser/WasmEdge guest must not depend on raw asynchronous wasm imports for this operation.</p>
+<h3 id="3-module-level-api"><a class="anchor" href="#3-module-level-api" aria-hidden="true">#</a>3. Module-Level API</h3>
+<p>Module methods should keep the public invoke contract domain-specific. For example, a conjunction assessment module should expose conjunction assessment request/response ports, not generic WebGPU command buffers.</p>
+<p>The GPU dispatch boundary is an implementation detail between the host runtime and the module/adapter pair. Hosts may precompute a GPU broadphase and pass coarse hits into the guest, or they may let a browser-specific adapter call the guest's exact refinement entry points after dispatch.</p>
+<h2 id="browser-backend"><a class="anchor" href="#browser-backend" aria-hidden="true">#</a>Browser Backend</h2>
+<p>Browser adapters use WebGPU through browser APIs or Emscripten's WebGPU/Dawn surface. They must:</p>
+<ul>
+<li>request and cache the <code>GPUAdapter</code> and <code>GPUDevice</code></li>
+<li>validate device limits before accepting a dispatch</li>
+<li>compile WGSL from a module-owned or SDK-owned source string</li>
+<li>copy results back through mapped buffers or equivalent browser APIs</li>
+<li>return a CPU fallback status when WebGPU is unavailable</li>
+</ul>
+<p>Browser WebGPU setup and buffer mapping are asynchronous. Do not model them as sync <code>space_data_module_host</code> calls.</p>
+<h2 id="wasmedge-backend"><a class="anchor" href="#wasmedge-backend" aria-hidden="true">#</a>WasmEdge Backend</h2>
+<p>WasmEdge deployments that need GPU acceleration should use a native host extension linked against Dawn. The native host implements the same <code>gpu_compute.dispatch.v1</code> operation and uses the same C/C++ layout header.</p>
+<p>The shared module artifact should still be loadable without that extension. A pure <code>[&quot;wasmedge&quot;]</code> artifact may choose a higher-capability native host profile, but a <code>[&quot;browser&quot;, &quot;wasmedge&quot;]</code> artifact must retain the portable fallback contract documented in <code>docs/browser-wasmedge-isomorphic.md</code>.</p>
+<h2 id="numerical-rules"><a class="anchor" href="#numerical-rules" aria-hidden="true">#</a>Numerical Rules</h2>
+<p>GPU kernels that need double-like position precision should use split high/low <code>f32</code> values:</p>
+<div class="codeblock"><div class="codeblock-head">c</div><pre><code>SdnGpuSplitF64 x = sdn_gpu_split_f64(x_km);</code></pre></div>
+<p>For orbital screening, store position components in kilometers unless a module contract states otherwise. The high component is the nearest <code>f32</code>; the low component is the residual:</p>
+<div class="codeblock"><div class="codeblock-head">text</div><pre><code>hi = f32(value)
+lo = f32(value - f64(hi))</code></pre></div>
+<p>GPU broadphase kernels must be conservative. They may emit extra candidates, but they must not drop candidates that the CPU exact path would refine. Exact TCA, probability, and final acceptance logic remain in the CPU double-precision module path unless a module ships a separately validated exact GPU algorithm.</p>
+<h2 id="template"><a class="anchor" href="#template" aria-hidden="true">#</a>Template</h2>
+<p>Start new GPU-capable modules from:</p>
+<div class="codeblock"><div class="codeblock-head">text</div><pre><code>templates/gpu-module/</code></pre></div>
+<p>The template contains:</p>
+<ul>
+<li><code>include/space_data_gpu_abi.h</code>: reusable C/C++ ABI layout header</li>
+<li><code>manifest.json</code>: manifest fragment showing <code>gpu_compute</code></li>
+<li><code>README.md</code>: integration notes for browser WebGPU and WasmEdge/Dawn hosts</li>
+</ul>
+<p>Use the template as a layout and ABI starting point. Real module repos should still define domain-specific FlatBuffer request/response schemas and must keep their canonical compiled artifact at <code>dist/isomorphic/module.wasm</code>.</p>
+
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/gpu-module-abi.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#scope">Scope</a></li>
+<li><a class="depth-2" href="#capability">Capability</a></li>
+<li><a class="depth-2" href="#artifact-layout">Artifact Layout</a></li>
+<li><a class="depth-2" href="#abi-layers">ABI Layers</a></li>
+<li><a class="depth-3" href="#1-data-layout-abi">1. Data Layout ABI</a></li>
+<li><a class="depth-3" href="#2-host-dispatch-abi">2. Host Dispatch ABI</a></li>
+<li><a class="depth-3" href="#3-module-level-api">3. Module-Level API</a></li>
+<li><a class="depth-2" href="#browser-backend">Browser Backend</a></li>
+<li><a class="depth-2" href="#wasmedge-backend">WasmEdge Backend</a></li>
+<li><a class="depth-2" href="#numerical-rules">Numerical Rules</a></li>
+<li><a class="depth-2" href="#template">Template</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>

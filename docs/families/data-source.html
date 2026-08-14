@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Status: v1 — owner directive 2026-08-07, graph task sdk-provider-access-abi." />
+    <title>Data source — Space Data Module SDK</title>
+    <link rel="stylesheet" href="../styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="../">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="../byo-wasm-quickstart.html">Quickstart</a>
+        <a href="../conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="../index.html"><span>Harness family matrix</span></a></li>
+<li><a href="../byo-wasm-quickstart.html"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="../conformance.html"><span>Conformance kit</span></a></li>
+<li><a href="../protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="../publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./propagator.html"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./maneuver.html"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./rf.html"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./conjunction.html"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./data-source.html" aria-current="page"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="../module-publication-standard.html"><span>Module publication standard</span></a></li>
+<li><a href="../browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="../isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
+<li><a href="../tri-runtime-parity.html"><span>Tri-runtime parity</span></a></li>
+<li><a href="../tri-runtime-parity-gate.html"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="../testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="../language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="../flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="../flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="../secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="../protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="../gpu-module-abi.html"><span>GPU module ABI</span></a></li>
+<li><a href="../module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="../isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="../node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+      <p class="breadcrumb"><a href="../index.html">Harness families</a> / Estimation, data and logic</p>
+        <h1>Data source</h1>
+      <p class="doc-meta"><span class="pill pill-shipped">shipped</span><span>Shipped contract. Generated from a ratified .fbs single source, covered by a conformance kit and a reference module.</span></p>
+<p><strong>Status:</strong> v1 — owner directive 2026-08-07, graph task <code>sdk-provider-access-abi</code>.</p>
+<p>One generalized port that lets a WASM module <strong>control</strong> imagery and terrain providers and <strong>read the already-decoded bytes</strong> those providers hold in memory — identical import names and signatures in the browser, in native WasmEdge, and in the Docker WasmEdge container.</p>
+<p>This is a <em>provider access</em> port, not a <em>Cesium</em> port and not an <em>OrbPro</em> port. Nothing in the guest ABI names an engine, a tile scheme, or a vendor. The same three imports serve a browser engine's live quadtree cache, a host-side tile store, and a deterministic test fixture.</p>
+<h2 id="doctrine"><a class="anchor" href="#doctrine" aria-hidden="true">#</a>Doctrine</h2>
+<p>Four rules govern every line below.</p>
+<ol>
+<li><strong>One port, two planes.</strong> Control is metadata and rides the existing <code>space_data_module_host</code> sync hostcall bridge as <code>provider.*</code> operations. Data is bulk bytes and rides three dedicated imports that write straight into guest linear memory. Control never carries pixels; data never carries JSON.</li>
+<li><strong>No runtime detection in module code.</strong> A module that reads terrain never asks which runtime it is in. Every difference is absorbed in the SDK host shims.</li>
+<li><strong>Present everywhere, honest everywhere.</strong> The imports link in <em>every</em> runtime. There is no lane where <code>space_data_provider.acquire</code> is missing — a missing import is a link-time divergence, the worst class. When nothing can serve a request the port returns a <strong>value</strong> (a negative error code), never a trap, and the same code in every runtime.</li>
+<li><strong>Decoded or nothing, by default.</strong> The port hands over buffers the provider already decoded. It never re-fetches and never re-parses <em>unless the caller explicitly raised its cost ceiling</em>. Every acquire carries a declared <a href="#cost-classes">cost class</a>; the default ceiling admits only already-resident bytes, and an adapter that would have to exceed it returns <code>SDM_PROVIDER_E_UNSUPPORTED</code> rather than quietly paying it.</li>
+</ol>
+<h2 id="capability"><a class="anchor" href="#capability" aria-hidden="true">#</a>Capability</h2>
+<p>The port is gated by the existing coarse capability, with a scope:</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{
+  &quot;capability&quot;: &quot;scene_access&quot;,
+  &quot;scope&quot;: &quot;provider.v1&quot;,
+  &quot;required&quot;: false,
+  &quot;description&quot;: &quot;Read and control imagery/terrain providers.&quot;
+}</code></pre></div>
+<p><code>scene_access</code> is already in the SDK recommended capability vocabulary (<code>src/capabilities.js</code>) and already maps to the typed <code>CapabilityKind.SCENE_ACCESS</code> PLG enum (<code>src/manifest/normalize.js</code>). <strong>This ABI introduces no new host capability</strong> — it is a scope on an existing one, exactly as <code>gpu_compute</code> uses <code>scope: &quot;webgpu.v1&quot;</code>. No owner sign-off gate, no SDS enum change, no new generic hook.</p>
+<p><code>required: false</code> is the recommended posture. A module whose analysis degrades gracefully without provider bytes must declare it optional and handle <code>SDM_PROVIDER_E_NO_PROVIDER</code> as a first-class outcome, because that is the answer it will get on a headless node with no tile store configured.</p>
+<h2 id="the-import-set"><a class="anchor" href="#the-import-set" aria-hidden="true">#</a>The import set</h2>
+<p>Import module: <strong><code>space_data_provider</code></strong>. Three functions. Every parameter and every result is <code>i32</code>.</p>
+<div class="codeblock"><div class="codeblock-head">wat</div><pre><code>(import &quot;space_data_provider&quot; &quot;acquire&quot;
+        (func (param i32 i32 i32) (result i32)))
+(import &quot;space_data_provider&quot; &quot;read&quot;
+        (func (param i32 i32 i32 i32 i32) (result i32)))
+(import &quot;space_data_provider&quot; &quot;release&quot;
+        (func (param i32) (result i32)))</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th>function</th><th>params</th><th>result</th></tr></thead><tbody><tr><td><code>acquire</code></td><td><code>reqPtr, reqLen, descPtr</code></td><td>handle <code>&gt; 0</code>, or negative error code</td></tr><tr><td><code>read</code></td><td><code>handle, plane, srcOffset, dstPtr, dstLen</code></td><td>bytes written <code>&gt;= 0</code>, or negative error code</td></tr><tr><td><code>release</code></td><td><code>handle</code></td><td><code>0</code>, or negative error code</td></tr></tbody></table></div>
+<p>Open, read, close. Three doors.</p>
+<p><strong>No <code>i64</code> appears anywhere in the boundary signature, and no <code>f64</code> either.</strong> This is deliberate. The i64 legalization trap measured on this SDK — a 64-bit-parameter import legalizes differently depending on how the host instantiates it, and the mismatch surfaces as a link failure or a silently truncated argument in exactly one runtime — is sidestepped by construction, not by convention. Every 64-bit quantity in this ABI (bounding rectangles, height extrema, sample coordinates) travels either inside the JSON acquire request or inside the descriptor struct in guest memory, where it is plain little-endian IEEE-754 the guest reads with a normal load. The boundary itself carries only pointers, lengths, indices and codes.</p>
+<ul>
+<li><code>acquire(reqPtr, reqLen, descPtr)</code> — <code>reqPtr/reqLen</code> is a UTF-8 JSON request (see <a href="#acquire-requests">Acquire requests</a>). <code>descPtr</code> is a guest pointer to at least <code>SDM_PROVIDER_TILE_DESC_BYTES</code> (128) writable bytes; on success the host fills it with the <a href="#tile-descriptor">tile descriptor</a>. The returned handle pins the provider's decoded buffer on the host side until <code>release</code>. The call blocks until the tile is resident (browser: <code>Atomics.wait</code> on the SAB hostcall channel, the same mechanism <code>http</code> and <code>storage</code> already use; WasmEdge: a blocking host call). <code>descPtr</code> is left untouched on failure.</li>
+<li><code>read(handle, plane, srcOffset, dstPtr, dstLen)</code> — copies at most <code>dstLen</code> bytes of <code>plane</code>, starting at <code>srcOffset</code> bytes into that plane, into guest memory at <code>dstPtr</code>. Returns the number of bytes written, which is <code>min(dstLen, planeByteLength - srcOffset)</code> and may legally be less than <code>dstLen</code> at the tail. Reading a plane in several chunks is supported and yields exactly the same bytes as one whole-plane read.</li>
+<li><code>release(handle)</code> — unpins. Releasing an already-released handle returns <code>SDM_PROVIDER_E_BAD_HANDLE</code>, in every runtime. Handles are per-instance and per-thread-group; they are never valid across an instance restart.</li>
+</ul>
+<p>Error detail (a message, a name, the failing operation) is retrieved through the control plane with <code>provider.lastError</code>. It is deliberately not an extra import: strings are metadata and metadata rides the existing bridge.</p>
+<h2 id="tile-descriptor"><a class="anchor" href="#tile-descriptor" aria-hidden="true">#</a>Tile descriptor</h2>
+<p><code>SDM_PROVIDER_TILE_DESC_BYTES = 128</code>. Little-endian. <code>u32</code> fields are 4-byte aligned; <code>f64</code> fields start at offset 48 and are all 8-byte aligned, so a guest may read them with aligned loads on every target.</p>
+<div class="table-wrap"><table><thead><tr><th>offset</th><th>type</th><th>field</th><th>meaning</th></tr></thead><tbody><tr><td>0</td><td>u32</td><td><code>magic</code></td><td><code>0x53445054</code> (<code>'SDPT'</code>)</td></tr><tr><td>4</td><td>u32</td><td><code>version</code></td><td><code>1</code></td></tr><tr><td>8</td><td>u32</td><td><code>kind</code></td><td><code>1</code> terrain, <code>2</code> imagery</td></tr><tr><td>12</td><td>u32</td><td><code>encoding</code></td><td>see below</td></tr><tr><td>16</td><td>u32</td><td><code>width</code></td><td>elements per row</td></tr><tr><td>20</td><td>u32</td><td><code>height</code></td><td>rows</td></tr><tr><td>24</td><td>u32</td><td><code>planeCount</code></td><td>number of readable planes, <code>&gt;= 1</code></td></tr><tr><td>28</td><td>u32</td><td><code>bytesPerElement</code></td><td>of plane 0</td></tr><tr><td>32</td><td>u32</td><td><code>rowStrideBytes</code></td><td>of plane 0; <code>&gt;= width * bytesPerElement</code></td></tr><tr><td>36</td><td>u32</td><td><code>byteLength</code></td><td>of plane 0</td></tr><tr><td>40</td><td>u32</td><td><code>flags</code></td><td>see below</td></tr><tr><td>44</td><td>u32</td><td><code>level</code></td><td>source level, or <code>0xFFFFFFFF</code> for derived tiles</td></tr><tr><td>48</td><td>f64</td><td><code>west</code></td><td>radians</td></tr><tr><td>56</td><td>f64</td><td><code>south</code></td><td>radians</td></tr><tr><td>64</td><td>f64</td><td><code>east</code></td><td>radians</td></tr><tr><td>72</td><td>f64</td><td><code>north</code></td><td>radians</td></tr><tr><td>80</td><td>f64</td><td><code>minValue</code></td><td>terrain: min height, metres. imagery: <code>0</code></td></tr><tr><td>88</td><td>f64</td><td><code>maxValue</code></td><td>terrain: max height, metres. imagery: <code>0</code></td></tr><tr><td>96</td><td>u32</td><td><code>tileX</code></td><td>source tile X, or <code>0xFFFFFFFF</code></td></tr><tr><td>100</td><td>u32</td><td><code>tileY</code></td><td>source tile Y, or <code>0xFFFFFFFF</code></td></tr><tr><td>104</td><td>u32</td><td><code>hostCopies</code></td><td>host→guest copies this acquire will cost per whole-plane read</td></tr><tr><td>108</td><td>u32</td><td><code>sourceId</code></td><td>FNV-1a 32 of the provider id — stable, comparable across runtimes</td></tr><tr><td>112</td><td>u32</td><td><code>costClass</code></td><td>what this acquire actually cost — see <a href="#cost-classes">Cost classes</a></td></tr><tr><td>116</td><td>u32</td><td><code>strategy</code></td><td>how the level was chosen: <code>0</code> default, <code>1</code> grid-matched-level, <code>2</code> most-detailed, <code>3</code> fixed-level</td></tr><tr><td>120</td><td>u32[2]</td><td><code>reserved</code></td><td>zero</td></tr></tbody></table></div>
+<p><code>encoding</code>:</p>
+<div class="table-wrap"><table><thead><tr><th>value</th><th>name</th><th>element</th></tr></thead><tbody><tr><td>1</td><td><code>SDM_PROVIDER_ENC_HEIGHT_F32</code></td><td><code>float</code> metres above the ellipsoid</td></tr><tr><td>2</td><td><code>SDM_PROVIDER_ENC_HEIGHT_F64</code></td><td><code>double</code> metres above the ellipsoid</td></tr><tr><td>16</td><td><code>SDM_PROVIDER_ENC_RGBA8</code></td><td>4 × <code>uint8_t</code></td></tr><tr><td>17</td><td><code>SDM_PROVIDER_ENC_RGB8</code></td><td>3 × <code>uint8_t</code></td></tr><tr><td>18</td><td><code>SDM_PROVIDER_ENC_GRAY8</code></td><td>1 × <code>uint8_t</code></td></tr><tr><td>19</td><td><code>SDM_PROVIDER_ENC_GRAY16</code></td><td>1 × <code>uint16_t</code></td></tr><tr><td>20</td><td><code>SDM_PROVIDER_ENC_RGBA_F32</code></td><td>4 × <code>float</code>, 0..1</td></tr></tbody></table></div>
+<p><strong>Terrain heights are always delivered in metres</strong>, as <code>f32</code> or <code>f64</code>. A provider's on-the-wire encoding — a 16-bit heightmap with <code>{heightScale, heightOffset, elementsPerHeight, stride, elementMultiplier, isBigEndian}</code> structure, or a quantized-mesh's zig-zag-encoded <code>u16</code> vertices — is the <em>provider's</em> business. The adapter dequantizes into metres exactly once and pins the result. Guests never see a scale/offset field because guests must never reimplement a provider's quantization; that is the single most likely place for two runtimes to disagree by one ULP, and the ABI removes the opportunity rather than documenting it.</p>
+<p><code>flags</code>:</p>
+<div class="table-wrap"><table><thead><tr><th>bit</th><th>name</th><th>meaning</th></tr></thead><tbody><tr><td>0</td><td><code>SDM_PROVIDER_FLAG_INTERPOLATED</code></td><td>values were interpolated from a coarser level than requested</td></tr><tr><td>1</td><td><code>SDM_PROVIDER_FLAG_STAGED</code></td><td>host had to stage a copy; <code>hostCopies</code> is <code>2</code></td></tr><tr><td>2</td><td><code>SDM_PROVIDER_FLAG_PARTIAL</code></td><td>some elements have no data and hold the no-data sentinel</td></tr><tr><td>3</td><td><code>SDM_PROVIDER_FLAG_DERIVED</code></td><td>not a source tile (profile/region request)</td></tr><tr><td>4</td><td><code>SDM_PROVIDER_FLAG_FIXTURE</code></td><td>served by the deterministic fixture adapter</td></tr></tbody></table></div>
+<p>Bit 4 exists so a parity test can <em>prove</em> it compared fixture bytes against fixture bytes, rather than assuming it.</p>
+<h3 id="the-no-data-sentinel"><a class="anchor" href="#the-no-data-sentinel" aria-hidden="true">#</a>The no-data sentinel</h3>
+<p>A terrain sample with no data is <strong>not</strong> absent, <strong>not</strong> <code>0</code>, and <strong>not</strong> NaN. It is an exact bit pattern:</p>
+<div class="table-wrap"><table><thead><tr><th>encoding</th><th>sentinel</th><th>bits</th></tr></thead><tbody><tr><td><code>HEIGHT_F32</code></td><td><code>-FLT_MAX</code></td><td><code>0xFF7FFFFF</code></td></tr><tr><td><code>HEIGHT_F64</code></td><td><code>-DBL_MAX</code></td><td><code>0xFFEFFFFFFFFFFFFF</code></td></tr></tbody></table></div>
+<p>NaN is specifically rejected. WebAssembly does not canonicalize NaN payloads across all producing operations, so two runtimes can hold <em>different bits</em> for &quot;a NaN&quot; and a byte-identical-output assertion would fail on a value that is semantically equal. A sentinel with one exact encoding cannot do that.</p>
+<p>This also closes a real defect class in the existing engine seam, where &quot;no data&quot; is expressed as <code>Cartographic.height === undefined</code> — a JS-object-only state that a typed array cannot represent at all, and which therefore silently becomes <code>0</code> (sea level) the moment anyone packs those samples into a buffer. Sea level under a ridge is exactly the failure the RF terrain solver was filed for. The sentinel is defined here, in the ABI, so no consumer has to invent it.</p>
+<h3 id="cost-classes"><a class="anchor" href="#cost-classes" aria-hidden="true">#</a>Cost classes</h3>
+<p><code>costClass</code> states what an acquire actually cost. The acquire request carries <code>&quot;maxCost&quot;</code>, and an adapter that cannot serve within it returns <code>SDM_PROVIDER_E_UNSUPPORTED</code>.</p>
+<div class="table-wrap"><table><thead><tr><th>value</th><th>name</th><th>meaning</th></tr></thead><tbody><tr><td>0</td><td><code>SDM_PROVIDER_COST_RESIDENT</code></td><td>bytes already decoded and resident; pure memcpy</td></tr><tr><td>1</td><td><code>SDM_PROVIDER_COST_DEQUANTIZE</code></td><td>resident, but dequantized to metres by the adapter</td></tr><tr><td>2</td><td><code>SDM_PROVIDER_COST_REDECODE</code></td><td>adapter re-decoded already-fetched source data</td></tr><tr><td>3</td><td><code>SDM_PROVIDER_COST_REFETCH</code></td><td>adapter went to the network</td></tr><tr><td>4</td><td><code>SDM_PROVIDER_COST_READBACK</code></td><td>adapter stalled the GPU to read a texture back</td></tr></tbody></table></div>
+<p><strong><code>maxCost</code> defaults to <code>1</code>.</strong> That default <em>is</em> the owner's &quot;never re-fetch or re-parse&quot; rule, enforced by the ABI rather than by discipline. A caller who genuinely wants the expensive path must raise the ceiling and thereby say so in its own source.</p>
+<p>Class 1 exists because it is unavoidable and honest: a quantized-mesh terrain tile holds <code>uint16</code> vertices and <strong>no metre-space array exists anywhere</strong> in the provider. The adapter dequantizes with the provider's own formula, once, into the pinned buffer. That is not a re-decode — nothing is re-parsed and nothing is re-fetched — but it is not free either, so it gets its own class instead of being hidden inside class 0.</p>
+<h2 id="acquire-requests"><a class="anchor" href="#acquire-requests" aria-hidden="true">#</a>Acquire requests</h2>
+<p>The JSON request selects one of three shapes. All angles are <strong>radians</strong>.</p>
+<p><strong><code>tile</code></strong> — one source tile, exactly as the provider decoded it. Zero resampling, zero interpolation.</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{&quot;op&quot;:&quot;tile&quot;,&quot;providerId&quot;:&quot;terrain.fixture&quot;,&quot;level&quot;:9,&quot;x&quot;:123,&quot;y&quot;:45}</code></pre></div>
+<p><strong><code>profile</code></strong> — heights along a path. The seam the RF terrain solver consumes: one call, one copy, <code>width = samples</code>, <code>height = 1</code>, <code>encoding = SDM_PROVIDER_ENC_HEIGHT_F64</code>.</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{&quot;op&quot;:&quot;profile&quot;,&quot;providerId&quot;:&quot;terrain.fixture&quot;,
+ &quot;start&quot;:[-1.9,0.65],&quot;end&quot;:[-1.88,0.66],&quot;samples&quot;:256,&quot;level&quot;:&quot;mostDetailed&quot;}</code></pre></div>
+<p>or with explicit positions:</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{&quot;op&quot;:&quot;profile&quot;,&quot;providerId&quot;:&quot;terrain.fixture&quot;,
+ &quot;positions&quot;:[[-1.9,0.65],[-1.899,0.6501]]}</code></pre></div>
+<p><strong>Raster in.</strong> A coverage field is commonly 512x512 = <strong>262,144 positions</strong>. Encoding those as JSON would be a multi-megabyte request string, parsed on every call — a worse cost than the read it is asking for, and it would make the control plane carry bulk data, which this ABI exists to prevent. So positions may instead be a pointer:</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{&quot;op&quot;:&quot;profile&quot;,&quot;providerId&quot;:&quot;terrain.fixture&quot;,
+ &quot;positionsPtr&quot;:1048576,&quot;positionsCount&quot;:262144,&quot;spacing&quot;:30}</code></pre></div>
+<p>The host reads interleaved f64 lon/lat pairs straight out of guest memory with ONE copy, symmetric with the way results come back. The request string stays under 200 bytes no matter how large the field is. A pointer or count outside linear memory is <code>SDM_PROVIDER_E_BOUNDS</code> — a value, never a trap and never a silent short read.</p>
+<p><strong><code>spacing</code> beats <code>level</code>.</strong> Any shape may carry <code>&quot;spacing&quot;: &lt;metres&gt;</code> — the sample stride the caller intends to march at — and the port picks the coarsest level whose sample spacing is at or below it. This is the preferred form: a consumer knows its own stride, it does not know a provider's level scheme. Asking for <code>&quot;mostDetailed&quot;</code> everywhere is what makes a solve slow; asking for coarser than the march stride is what makes it wrong. Level selection lives in one shared helper (<code>providerLevelForSpacing</code>) used by every adapter, so the browser and a host tile store resolve the same spacing to the same level — two adapters doing their own arithmetic would sample different ground and lose byte parity for a reason no diff would show.</p>
+<p>The level actually used comes back in <code>descriptor.level</code>, always. A consumer that cannot see which level answered cannot tell a solve that resolved the ridges from one that interpolated them away.</p>
+<p><code>level</code> is an integer, <code>&quot;mostDetailed&quot;</code>, or omitted (adapter's default). The sampled positions are great-circle-interpolated between <code>start</code> and <code>end</code> by the <em>host adapter</em>, using the adapter's native sampler, so that two runtimes sampling the same source agree byte-for-byte. A guest that interpolates its own positions and passes them explicitly gets exactly what it asked for.</p>
+<p><strong><code>region</code></strong> — a rectangle resampled onto a <code>width × height</code> grid. What a viewshed, a coverage raster, or a cloud-mask lane wants.</p>
+<div class="codeblock"><div class="codeblock-head">json</div><pre><code>{&quot;op&quot;:&quot;region&quot;,&quot;providerId&quot;:&quot;imagery.fixture&quot;,
+ &quot;rectangle&quot;:[-1.91,0.64,-1.87,0.67],&quot;width&quot;:256,&quot;height&quot;:256,&quot;level&quot;:9}</code></pre></div>
+<p><code>region</code> on a terrain provider yields heights; on an imagery provider it yields pixels. The port does not care which — that is the whole point.</p>
+<p>Every shape accepts <code>&quot;maxCost&quot;: N</code> (default <code>1</code>) and <code>&quot;plane&quot;: &quot;height&quot; | &quot;pixels&quot; | N</code>.</p>
+<h3 id="imagery-is-not-terrain-and-the-abi-says-so"><a class="anchor" href="#imagery-is-not-terrain-and-the-abi-says-so" aria-hidden="true">#</a>Imagery is not terrain, and the ABI says so</h3>
+<p>Terrain can honour <code>maxCost: 0..1</code> because a decoded terrain tile stays resident in the provider for as long as the tile is loaded. <strong>Imagery cannot</strong>, on the current engine tree: the CPU-side pixel buffer is released immediately after the texture is uploaded to the GPU, so for any tile the renderer has finished with, the decoded pixels are simply gone.</p>
+<p>The consequence is stated here rather than discovered later:</p>
+<ul>
+<li>imagery <code>acquire</code> at the default <code>maxCost: 1</code> succeeds <strong>only</strong> for tiles caught in the window between decode and upload, and returns <code>SDM_PROVIDER_E_UNSUPPORTED</code> otherwise;</li>
+<li>imagery at <code>maxCost: 4</code> may be served by GPU readback — but those are the <em>reprojected</em> pixels the renderer holds, not the source pixels, and the descriptor says so via <code>FLAG_DERIVED</code>;</li>
+<li>imagery at <code>maxCost: 3</code> re-fetches and re-decodes from the provider.</li>
+</ul>
+<p>An adapter that wants to offer resident imagery must tap the pixels <em>before</em> upload; that is an engine-side change and belongs to the engine owner, not to this ABI. Until it exists, <strong><code>SDM_PROVIDER_E_UNSUPPORTED</code> is the correct and final answer for resident imagery pixels</strong>, and it is the same answer in all three runtimes. The ABI does not promise imagery parity with terrain, because the engine cannot currently deliver it, and a port that promised it would be lying in exactly the way this SDK exists to prevent.</p>
+<h2 id="control-operations"><a class="anchor" href="#control-operations" aria-hidden="true">#</a>Control operations</h2>
+<p>Ride the existing <code>space_data_module_host.call</code> bridge. No new imports.</p>
+<div class="table-wrap"><table><thead><tr><th>operation</th><th>request</th><th>response</th></tr></thead><tbody><tr><td><code>provider.list</code></td><td>`{&quot;kind&quot;:&quot;terrain&quot;\</td><td>&quot;imagery&quot;\</td><td>null}`</td><td><code>{&quot;providers&quot;:[{id,kind,name,ready,minLevel,maxLevel,tileWidth,tileHeight,encoding,credit}]}</code></td></tr><tr><td><code>provider.describe</code></td><td><code>{&quot;id&quot;:&quot;...&quot;}</code></td><td>the same record, plus adapter-specific <code>attributes</code></td></tr><tr><td><code>provider.select</code></td><td><code>{&quot;kind&quot;:&quot;terrain&quot;,&quot;id&quot;:&quot;...&quot;}</code></td><td><code>{&quot;selected&quot;:&quot;...&quot;}</code></td></tr><tr><td><code>provider.configure</code></td><td><code>{&quot;id&quot;:&quot;...&quot;,&quot;settings&quot;:{...}}</code></td><td><code>{&quot;applied&quot;:[&quot;alpha&quot;,&quot;show&quot;],&quot;rejected&quot;:[]}</code></td></tr><tr><td><code>provider.availability</code></td><td><code>{&quot;id&quot;:&quot;...&quot;,&quot;level&quot;:9,&quot;x&quot;:1,&quot;y&quot;:2}</code></td><td><code>{&quot;available&quot;:true}</code></td></tr><tr><td><code>provider.prefetch</code></td><td><code>{&quot;id&quot;:&quot;...&quot;,&quot;rectangle&quot;:[w,s,e,n],&quot;level&quot;:9}</code></td><td><code>{&quot;requested&quot;:N,&quot;pending&quot;:M,&quot;supported&quot;:bool}</code></td></tr><tr><td><code>provider.await</code></td><td><code>{&quot;id&quot;:&quot;...&quot;,&quot;rectangle&quot;:[...],&quot;level&quot;:9,&quot;timeoutMs&quot;:30000}</code></td><td><code>{&quot;ready&quot;:true,&quot;pending&quot;:0}</code></td></tr><tr><td><code>provider.lastError</code></td><td><code>{}</code></td><td><code>{&quot;code&quot;:-3,&quot;name&quot;:&quot;...&quot;,&quot;message&quot;:&quot;...&quot;,&quot;operation&quot;:&quot;...&quot;}</code></td></tr><tr><td><code>provider.stats</code></td><td><code>{}</code></td><td><code>{&quot;acquires&quot;:N,&quot;reads&quot;:N,&quot;bytesCopied&quot;:N,&quot;hostCopies&quot;:N,&quot;pinned&quot;:N}</code></td></tr></tbody></table></div>
+<p><code>provider.list</code> returning <code>{&quot;providers&quot;:[]}</code> is a <strong>success</strong>, not an error. A headless node with nothing configured is a legitimate, enumerable state; making it an error would mean the &quot;nothing here&quot; path differs from the &quot;something here&quot; path in shape, and modules would grow runtime-shaped branches. They return the same shape, so they don't.</p>
+<p><code>provider.configure</code> is intentionally a key/value bag with an explicit <code>applied</code>/<code>rejected</code> split. Adapters apply what their underlying surface natively supports and <em>report</em> the rest as rejected. An adapter must never emulate a setting its provider does not have.</p>
+<p><code>provider.stats.hostCopies</code> is what a copy-count assertion reads. It is maintained identically by every adapter.</p>
+<p><code>provider.prefetch</code> carries <code>&quot;supported&quot;</code> because <strong>region prefetch is a genuine engine LACK</strong>, ruled by the engine owner: the browser engine loads tiles from camera position only, and its one region-shaped API loads <em>availability metadata</em>, not geometry. Rather than invent an engine API — which the native-API law forbids — the port reports <code>&quot;supported&quot;: false</code> with <code>&quot;requested&quot;: 0</code>. A host-side tile-store adapter, which has no camera and can simply fetch, reports <code>&quot;supported&quot;: true</code>. This is a real capability difference and it is <strong>declared in the response, not hidden</strong>: a module reads one boolean and does not branch on runtime. Closing the gap is engine work, tracked separately as <code>orbpro-provider-access-port</code>.</p>
+<h2 id="error-codes"><a class="anchor" href="#error-codes" aria-hidden="true">#</a>Error codes</h2>
+<p>Negative <code>i32</code>, returned from <code>acquire</code>, <code>read</code> and <code>release</code>. Identical value, identical meaning, identical trap class (none — these are values) in every runtime.</p>
+<div class="table-wrap"><table><thead><tr><th>code</th><th>name</th><th>when</th></tr></thead><tbody><tr><td><code>-1</code></td><td><code>SDM_PROVIDER_E_INVALID_REQUEST</code></td><td>malformed JSON, unknown <code>op</code>, out-of-range field</td></tr><tr><td><code>-2</code></td><td><code>SDM_PROVIDER_E_NO_CAPABILITY</code></td><td><code>scene_access</code>/<code>provider.v1</code> not granted</td></tr><tr><td><code>-3</code></td><td><code>SDM_PROVIDER_E_NO_PROVIDER</code></td><td>no provider with that id or kind</td></tr><tr><td><code>-4</code></td><td><code>SDM_PROVIDER_E_NOT_READY</code></td><td>provider exists but is not ready; <code>provider.await</code> first</td></tr><tr><td><code>-5</code></td><td><code>SDM_PROVIDER_E_NOT_AVAILABLE</code></td><td>no data at that level/x/y</td></tr><tr><td><code>-6</code></td><td><code>SDM_PROVIDER_E_BOUNDS</code></td><td>pointer/length outside guest memory, or offset past the plane</td></tr><tr><td><code>-7</code></td><td><code>SDM_PROVIDER_E_BAD_HANDLE</code></td><td>unknown or already-released handle</td></tr><tr><td><code>-8</code></td><td><code>SDM_PROVIDER_E_BAD_PLANE</code></td><td><code>plane &gt;= planeCount</code></td></tr><tr><td><code>-9</code></td><td><code>SDM_PROVIDER_E_UNSUPPORTED</code></td><td>adapter cannot serve this without re-fetch or re-decode</td></tr><tr><td><code>-10</code></td><td><code>SDM_PROVIDER_E_TIMEOUT</code></td><td>load did not complete in the adapter's budget</td></tr><tr><td><code>-11</code></td><td><code>SDM_PROVIDER_E_HOST</code></td><td>adapter threw; detail via <code>provider.lastError</code></td></tr><tr><td><code>-12</code></td><td><code>SDM_PROVIDER_E_PORT_UNAVAILABLE</code></td><td>no provider port bound in this runtime at all</td></tr></tbody></table></div>
+<p><code>-9</code> is the honesty code. An adapter that <em>could</em> produce the answer by re-downloading a tile or re-decoding a PNG must return <code>-9</code> rather than pay a cost the caller did not ask for. A caller that wants the expensive path asks for it explicitly through <code>provider.prefetch</code> + <code>provider.await</code>.</p>
+<h2 id="copy-contract"><a class="anchor" href="#copy-contract" aria-hidden="true">#</a>Copy contract</h2>
+<p>The owner's budget is <strong>one copy host→wasm, zero re-decode</strong>. The port meets it where the memory topology permits and reports honestly where it does not. <code>descriptor.hostCopies</code> and <code>provider.stats.hostCopies</code> are the measurement, readable from inside the guest, identical field in every runtime.</p>
+<div class="table-wrap"><table><thead><tr><th>lane</th><th>copies for a whole-plane <code>read</code></th><th>why</th></tr></thead><tbody><tr><td>WasmEdge native</td><td><strong>1</strong></td><td>host writes the pinned decoded buffer into linear memory</td></tr><tr><td>WasmEdge in Docker</td><td><strong>1</strong></td><td>same host path</td></tr><tr><td>Browser, wasi-threads guest</td><td><strong>1</strong></td><td>guest memory is a <code>SharedArrayBuffer</code>; the controlling thread that owns the provider caches writes into it directly at <code>dstPtr</code></td></tr><tr><td>Browser, sequential guest</td><td><strong>2</strong> (<code>FLAG_STAGED</code>)</td><td>guest memory is not shared, so the controlling thread stages into the SAB and the worker performs the final copy</td></tr></tbody></table></div>
+<p>Zero of these paths encode the bytes into a hostcall envelope. That matters: the generic <code>space_data_module_host</code> envelope route costs <strong>five</strong> copies for a tile in the browser worker topology (provider array → envelope encode → SAB <code>data.set</code> → worker <code>new Uint8Array(length)</code> → bridge <code>lastResponseBytes</code> → <code>read_response</code> into linear memory). A 262 KB heightmap through the generic route is over a megabyte of memcpy per tile. That measured cost is the entire justification for three dedicated imports instead of one more <code>provider.*</code> operation on the existing bridge.</p>
+<p>The sequential-browser <code>2</code> is the <strong>already-sanctioned browser-sequential throughput divergence</strong> and nothing more. Bytes are identical, error codes are identical, <code>FLAG_STAGED</code> and <code>hostCopies</code> state the difference out loud, and a module that wants to assert <code>hostCopies == 1</code> can — it will simply be asserting that it is running threaded. It closes when <code>browser-worker-topology</code> lands.</p>
+<h2 id="runtime-satisfaction"><a class="anchor" href="#runtime-satisfaction" aria-hidden="true">#</a>Runtime satisfaction</h2>
+<p>The imports are always present. What is bound behind them varies, and only in the SDK host shims.</p>
+<p><strong>Browser, engine present.</strong> <code>createEngineProviderAdapter({ scene })</code> satisfies the port from the engine's live provider objects, through engine-native APIs only. It binds in two tiers, and which tier answered is visible to the guest in <code>descriptor.costClass</code>:</p>
+<ul>
+<li><strong>Tier A — the engine's own <code>ProviderAccessPort</code>,</strong> when the engine exposes one. This is the <code>costClass 0/1</code> path: it walks the loaded tile cache and hands over the decoded terrain data the engine already holds. Reaching into a provider's private fields is <em>engine</em> work, not SDK work — those fields rot on every upstream pin advance, and the engine's owner keeps them tested inside the engine's own gates. The SDK calls the public port and nothing else.</li>
+<li><strong>Tier B — public engine API only,</strong> when no port is present. Terrain is served through the engine's exported most-detailed terrain sampler, which re-requests and re-decodes: <code>costClass 2</code>. Under the default <code>maxCost: 1</code> this tier therefore <strong>refuses</strong> with <code>SDM_PROVIDER_E_UNSUPPORTED</code>, and a caller gets bytes only by explicitly raising its ceiling.</li>
+</ul>
+<p>Tier B works today against real provider objects with no engine change, which is what makes the port usable before the engine port lands; Tier A is what makes it cheap afterwards. Neither tier ever silently upgrades its cost.</p>
+<p><strong>WasmEdge, native or Docker.</strong> There is no engine. The ruling, explicitly:</p>
+<blockquote><p>The server-side satisfaction is a <strong>host-side tile-store adapter</strong>, not a refusal — and not an engine port. <code>createTileStoreProviderAdapter(...)</code> serves the identical operations from tile sources reachable by the host, using <strong>only capabilities that already exist</strong>: <code>filesystem</code> for a local tileset directory, <code>http</code> for a remote tile service. It introduces no new generic hook, so it needs no owner sign-off and no new connector. Where the SDN node wants to expose its own curated terrain/imagery sources through this port, that is a node-side <em>configuration</em> of this adapter — a <code>sdn</code> escalation for wiring, never a change to this ABI.</p></blockquote>
+<p><strong>Any runtime with nothing bound.</strong> The port answers and does not lie: <code>provider.list</code> → <code>{&quot;providers&quot;:[]}</code>; <code>acquire</code> → <code>SDM_PROVIDER_E_NO_PROVIDER</code>; with the capability withheld entirely, <code>SDM_PROVIDER_E_NO_CAPABILITY</code>; with no port installed by the host at all, <code>SDM_PROVIDER_E_PORT_UNAVAILABLE</code>. All three are values, none is a trap, and <strong>all three are reachable in the browser too</strong> — ask a browser adapter for a provider id that does not exist and you get <code>-3</code>, the same <code>-3</code>. The failure path is therefore parity-testable in every lane rather than being a WasmEdge-only special case, which is the difference between a mirror and an excuse.</p>
+<p>A module never branches on runtime. It branches on <code>-3</code>, and that branch is exercised in all three lanes.</p>
+<h2 id="parity-envelope"><a class="anchor" href="#parity-envelope" aria-hidden="true">#</a>Parity envelope</h2>
+<p><strong>Inside the envelope</strong> — byte-identical across browser, native WasmEdge and Docker WasmEdge, at any thread count:</p>
+<ul>
+<li>every descriptor field for a given request against a given source</li>
+<li>every byte of every plane read from the <strong>fixture provider</strong></li>
+<li>every error code, for every malformed and unsatisfiable request</li>
+<li><code>provider.list</code> / <code>describe</code> / <code>availability</code> shapes and ordering</li>
+<li>the digest returned by the <code>provider-digest</code> demo module</li>
+</ul>
+<p>The fixture provider is a deterministic analytic source (a closed-form height field and a closed-form pixel field, both functions of tile coordinates only). It is bound in the browser as a real engine-shaped provider object and under WasmEdge as a fixture tile store, so both lanes exercise the <em>adapter</em> code paths rather than a shared shortcut. <code>FLAG_FIXTURE</code> proves which one answered.</p>
+<p><strong>Outside the envelope</strong> — and this is stated so it is never mistaken for a defect: bytes from <em>live</em> network providers. Two runtimes reading a live world-terrain service are not obliged to hold the same tiles at the same instant, and asserting so would be false rigor. Their <strong>ABI behaviour</strong> — codes, descriptor shapes, plane counts, bounds handling, copy accounting — is fully inside the envelope.</p>
+<p><strong>Divergence in anything listed as inside the envelope is a P1 SDK defect.</strong> Not a platform quirk. File, block, fix.</p>
+<h2 id="consumer-seam-terrain-source"><a class="anchor" href="#consumer-seam-terrain-source" aria-hidden="true">#</a>Consumer seam — terrain source</h2>
+<p>The immediate consumer is the RF terrain solver, and the point of defining the terrain half first is that it must not ship a private terrain path.</p>
+<p><code>src/host/terrainSourceSeam.js</code> defines the one JS interface both the engine port and the SDK adapters implement, plus <code>assertTerrainSourceConformance(source)</code> so a consumer can prove at wiring time that whatever it was handed is the real seam:</p>
+<div class="codeblock"><div class="codeblock-head">js</div><pre><code>{
+  id,                                   // stable provider id
+  costClass,                            // what readHeights will cost
+  readHeights(positions, out, opts) -&gt; Promise&lt;Float64Array&gt;,   // bulk metres
+  readProfile(positions, opts) -&gt; Promise&lt;{                     // + provenance
+    heights, level, strategy, costClass, partial, interpolated
+  }&gt;,
+  sampleCompat(provider, positions) -&gt; Promise&lt;Cartographic[]&gt;, // legacy shape
+}</code></pre></div>
+<p><code>opts</code> carries <code>spacing</code> (metres — the caller's march stride, preferred), <code>level</code>, <code>maxCost</code>, and <code>out</code>. One call carries a whole field: the solver's coverage rasters reach 512×512 = 262,144 points, and a per-point call cannot survive a boundary crossing at that count, which is why the seam is batched and in-place rather than scalar.</p>
+<p><code>sampleCompat</code> is signature-compatible with the sampler the solver's injectable statics already hold, so the seam can be assigned on day one with no call-site change. <code>readHeights</code> is the real entry: contiguous metres, no per-sample JS object, no-data expressed as the sentinel rather than <code>undefined</code>.</p>
+<p>The cutover is therefore two recorded steps, not a rewrite:</p>
+<ol>
+<li><strong>Now</strong> — the solver keeps its injectable statics and receives a conforming seam through them. No private terrain path is introduced.</li>
+<li><strong>On engine-port landing</strong> — the terrain source becomes an explicit parameter on the analysis entry points (the pluggable-propagation law applied to terrain) and call sites move from <code>sampleCompat</code> to <code>readHeights</code>. Tracked as <code>orbpro-provider-access-port</code>.</li>
+</ol>
+<h2 id="guest-usage"><a class="anchor" href="#guest-usage" aria-hidden="true">#</a>Guest usage</h2>
+<p><code>templates/provider-access-module/include/space_data_provider_abi.h</code> declares the imports and the descriptor for <code>clang --target=wasm32-wasip1-threads</code>. The module is EH-free and compiles identically for every lane; there is exactly one <code>dist/isomorphic/module.wasm</code>.</p>
+<div class="codeblock"><div class="codeblock-head">c</div><pre><code>#include &quot;space_data_provider_abi.h&quot;
+
+sdm_provider_tile_desc_t desc;
+const char *req =
+    &quot;{\&quot;op\&quot;:\&quot;profile\&quot;,\&quot;providerId\&quot;:\&quot;terrain.fixture\&quot;,&quot;
+    &quot;\&quot;start\&quot;:[-1.9,0.65],\&quot;end\&quot;:[-1.88,0.66],\&quot;samples\&quot;:256,\&quot;maxCost\&quot;:1}&quot;;
+
+int32_t h = sdm_provider_acquire(req, (int32_t)strlen(req), &amp;desc);
+if (h &lt; 0) {
+  /* -3 here on a node with no terrain configured. Same branch, every lane. */
+  return handle_no_terrain(h);
+}
+double heights[256];
+int32_t n = sdm_provider_read(h, 0, 0, (int32_t)(uintptr_t)heights,
+                              (int32_t)sizeof heights);
+sdm_provider_release(h);</code></pre></div>
+<p><code>desc.hostCopies</code> is <code>1</code> on WasmEdge and on a threaded browser guest, <code>2</code> on a sequential browser guest, and the 2048 bytes in <code>heights</code> are identical in all of them.</p>
+      <section class="playground" id="playground-slot" data-family="data-source" data-playground="pending" aria-labelledby="playground-title">
+        <h2 id="playground-title">Playground</h2>
+        <p>
+          An in-browser build-and-run playground for the <code>data-source</code> harness
+          mounts here. It is being built under the graph task
+          <code>sdk-playground-emception</code>; this slot is its reserved mount
+          point and is intentionally empty until that lands.
+        </p>
+      </section>
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/provider-access-abi.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#doctrine">Doctrine</a></li>
+<li><a class="depth-2" href="#capability">Capability</a></li>
+<li><a class="depth-2" href="#the-import-set">The import set</a></li>
+<li><a class="depth-2" href="#tile-descriptor">Tile descriptor</a></li>
+<li><a class="depth-3" href="#the-no-data-sentinel">The no-data sentinel</a></li>
+<li><a class="depth-3" href="#cost-classes">Cost classes</a></li>
+<li><a class="depth-2" href="#acquire-requests">Acquire requests</a></li>
+<li><a class="depth-3" href="#imagery-is-not-terrain-and-the-abi-says-so">Imagery is not terrain, and the ABI says so</a></li>
+<li><a class="depth-2" href="#control-operations">Control operations</a></li>
+<li><a class="depth-2" href="#error-codes">Error codes</a></li>
+<li><a class="depth-2" href="#copy-contract">Copy contract</a></li>
+<li><a class="depth-2" href="#runtime-satisfaction">Runtime satisfaction</a></li>
+<li><a class="depth-2" href="#parity-envelope">Parity envelope</a></li>
+<li><a class="depth-2" href="#consumer-seam-terrain-source">Consumer seam — terrain source</a></li>
+<li><a class="depth-2" href="#guest-usage">Guest usage</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>

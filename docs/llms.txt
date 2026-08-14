@@ -1,0 +1,85 @@
+# Space Data Module SDK
+
+> Build a WebAssembly module that plugs into the Space Data Network and into
+> any consuming engine through a uniform harness ABI. One family per kind of
+> scenario behavior; one thirteen-section spine per family. Statuses below are
+> literal: only SHIPPED families have a ratified generated header, a
+> conformance kit and a reference module.
+
+Toolchain, non-negotiable: compile guest modules with
+`clang --target=wasm32-wasip1-threads` (pinned WASI SDK). `emcc -pthread` is
+FORBIDDEN — Emscripten's pthread model is browser-only and cannot thread under
+WasmEdge, which breaks tri-runtime isomorphism. Modules must be EH-free.
+
+## Start here
+
+- [Harness family matrix](https://digitalarsenal.github.io/space-data-module-sdk/): every family and its status.
+- [BYO-wasm quickstart](https://digitalarsenal.github.io/space-data-module-sdk/byo-wasm-quickstart.html): multi-TU C++ to a loadable artifact.
+- [Conformance kit](https://digitalarsenal.github.io/space-data-module-sdk/conformance.html): self-test commands and what each asserts.
+- [Protect and sign](https://digitalarsenal.github.io/space-data-module-sdk/protect-and-sign.html): artifact protection and signing.
+- [Publication and listing](https://digitalarsenal.github.io/space-data-module-sdk/publication-submission.html): publication records and submission.
+
+## Harness families
+
+### Dynamics
+
+- [Propagator](https://digitalarsenal.github.io/space-data-module-sdk/families/propagator.html) — SHIPPED. Advance a vehicle state to a requested epoch. The reference family: generated header, conformance kit, reference module.
+- [Maneuver](https://digitalarsenal.github.io/space-data-module-sdk/families/maneuver.html) — EXPERIMENTAL. Apply an impulsive or finite burn to a state and report the resulting trajectory change.
+- [Propulsion](https://digitalarsenal.github.io/space-data-module-sdk/families/propulsion.html) — PLANNED. Model thrust production and propellant consumption as a supplier to the maneuver family.
+- [Attitude](https://digitalarsenal.github.io/space-data-module-sdk/families/attitude.html) — PLANNED. Produce body orientation over time, independent of translational state.
+- [GNC](https://digitalarsenal.github.io/space-data-module-sdk/families/gnc.html) — PLANNED. Closed-loop guidance, navigation and control that commands the maneuver and attitude families.
+
+### Environment and interaction
+
+- [RF](https://digitalarsenal.github.io/space-data-module-sdk/families/rf.html) — DESIGNED. Link budgets, coverage and interference. Records-in/records-out RF needs no harness; the harness exists for RF that writes scene state.
+- [Sensor](https://digitalarsenal.github.io/space-data-module-sdk/families/sensor.html) — PLANNED. Detection geometry and sensor tasking: what an instrument can see, when.
+- [Signature](https://digitalarsenal.github.io/space-data-module-sdk/families/signature.html) — PLANNED. Observable signature models — radar cross section, optical magnitude, thermal.
+- [Environment](https://digitalarsenal.github.io/space-data-module-sdk/families/environment.html) — PLANNED. Atmosphere, gravity field, magnetic field, and radiation environment models consumed by other families.
+- [Obstruction](https://digitalarsenal.github.io/space-data-module-sdk/families/obstruction.html) — DESIGNED. Line-of-sight occlusion against arbitrary 3D geometry with per-material electromagnetic properties.
+
+### Event physics
+
+- [Breakup](https://digitalarsenal.github.io/space-data-module-sdk/families/breakup.html) — PLANNED. Fragmentation events producing a debris population that must match the standard breakup model.
+- [Reentry](https://digitalarsenal.github.io/space-data-module-sdk/families/reentry.html) — PLANNED. Atmospheric reentry survivability, ablation, and ground footprint.
+- [Conjunction](https://digitalarsenal.github.io/space-data-module-sdk/families/conjunction.html) — DESIGNED. Close-approach screening and probability of collision over a catalog.
+- [Effects](https://digitalarsenal.github.io/space-data-module-sdk/families/effects.html) — PLANNED. Visual and volumetric effects driven by an event physics family.
+
+### Estimation, data and logic
+
+- [Estimation](https://digitalarsenal.github.io/space-data-module-sdk/families/estimation.html) — EXPERIMENTAL. Orbit determination and filtering: observations in, estimated state and covariance out.
+- [Data source](https://digitalarsenal.github.io/space-data-module-sdk/families/data-source.html) — SHIPPED. Fetch, parse and normalize external provider data into standards records inside the module.
+- [Analytics](https://digitalarsenal.github.io/space-data-module-sdk/families/analytics.html) — PLANNED. Derived figures of merit computed over a scenario.
+- [Scheduler](https://digitalarsenal.github.io/space-data-module-sdk/families/scheduler.html) — PLANNED. Ordering and tasking of activities across a scenario timeline.
+- [Behavior](https://digitalarsenal.github.io/space-data-module-sdk/families/behavior.html) — PLANNED. Scripted or reactive decision logic that drives other families.
+
+## Runtime contract
+
+- [Module publication standard](https://digitalarsenal.github.io/space-data-module-sdk/module-publication-standard.html)
+- [Browser / WasmEdge isomorphism](https://digitalarsenal.github.io/space-data-module-sdk/browser-wasmedge-isomorphic.html)
+- [Isomorphic pthreads](https://digitalarsenal.github.io/space-data-module-sdk/isomorphic-pthreads.html)
+- [Tri-runtime parity](https://digitalarsenal.github.io/space-data-module-sdk/tri-runtime-parity.html)
+- [Tri-runtime parity gate](https://digitalarsenal.github.io/space-data-module-sdk/tri-runtime-parity-gate.html)
+- [Testing harness](https://digitalarsenal.github.io/space-data-module-sdk/testing-harness.html)
+- [Language and runtime matrix](https://digitalarsenal.github.io/space-data-module-sdk/language-runtime-matrix.html)
+- [FlatSQL host contract](https://digitalarsenal.github.io/space-data-module-sdk/flatsql-host-contract.html)
+- [FlatSQL streaming standard](https://digitalarsenal.github.io/space-data-module-sdk/flatsql-streaming-standard.html)
+- [Credential lanes](https://digitalarsenal.github.io/space-data-module-sdk/secrets-capability.html)
+- [Protocol installation](https://digitalarsenal.github.io/space-data-module-sdk/protocol-installation.html)
+- [GPU module ABI](https://digitalarsenal.github.io/space-data-module-sdk/gpu-module-abi.html)
+- [Module bundle runtime](https://digitalarsenal.github.io/space-data-module-sdk/module-bundle-runtime-plan.html)
+- [Isomorphic SDN runtime](https://digitalarsenal.github.io/space-data-module-sdk/isomorphic-sdn-runtime-plan.html)
+- [Node-RED node parity](https://digitalarsenal.github.io/space-data-module-sdk/node-red-default-node-parity.html)
+
+## Rules for an agent writing a module
+
+1. Read the family page for your family FIRST; implement the exact export set it names.
+2. Never invent an export, a struct field or an error code. If the page says a
+   family is DESIGNED or PLANNED, it has no stable ABI — do not ship against it.
+3. Use the family's `.fbs`-generated header as the wire contract; do not
+   hand-write struct layouts.
+4. Return the family's named negative error codes, never a generic -1, and never
+   NaN or unphysical values as a success result.
+5. Prove the module with the conformance self-test and the parity gate before
+   protecting, signing or publishing it.
+6. Internal engine JS registries are not a public contract and never an
+   extension point. Harness contracts are WASM ABIs only.

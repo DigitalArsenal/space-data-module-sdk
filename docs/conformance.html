@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Status: v1 — W1.4 of graph/tasks/official-harness-shapes-program.md," />
+    <title>Conformance kit — Space Data Module SDK</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="./">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="./byo-wasm-quickstart.html">Quickstart</a>
+        <a href="./conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="./index.html"><span>Harness family matrix</span></a></li>
+<li><a href="./byo-wasm-quickstart.html"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="./conformance.html" aria-current="page"><span>Conformance kit</span></a></li>
+<li><a href="./protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="./publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./families/propagator.html"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/maneuver.html"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./families/rf.html"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./families/breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/conjunction.html"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./families/estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="./module-publication-standard.html"><span>Module publication standard</span></a></li>
+<li><a href="./browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="./isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
+<li><a href="./tri-runtime-parity.html"><span>Tri-runtime parity</span></a></li>
+<li><a href="./tri-runtime-parity-gate.html"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="./testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="./language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="./flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="./flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="./secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="./protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="./gpu-module-abi.html"><span>GPU module ABI</span></a></li>
+<li><a href="./module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="./isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="./node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+        <h1>Conformance kit</h1>
+<p><strong>Status:</strong> v1 — W1.4 of <code>graph/tasks/official-harness-shapes-program.md</code>, implementing <code>graph/findings/official-harness-shapes.md</code> §5. Family kits: <code>propagator</code> (SHIP 1). Maneuver is Wave 2 (EXPERIMENTAL, fix-then-freeze); OD is deferred by ruling. <strong>A family with no kit can never be <code>CORE</code>.</strong></p>
+<p>WASM artifacts ONLY (owner ruling 2026-08-10: &quot;No JS propagator!!!! WASM ONLY&quot;). The runner instantiates a compiled <code>dist/isomorphic/module.wasm</code> and drives the family's ABI directly; there is no path that certifies a JavaScript object, because JS registries are internal engine plumbing, never a public contract.</p>
+<h2 id="commands"><a class="anchor" href="#commands" aria-hidden="true">#</a>Commands</h2>
+<div class="codeblock"><pre><code>space-data-module conformance propagator --artifact ./dist/isomorphic/module.wasm
+space-data-module conformance propagator --artifact ./dist/isomorphic/module.wasm \
+    --vectors ./vectors/vectors.json --json
+space-data-module conformance propagator --self-test    # must exit 0 BY failing</code></pre></div>
+<ul>
+<li><code>--artifact</code> — the compiled module. Its sha256 goes in the report; a conformance claim binds to CONTENT, not to a name.</li>
+<li><code>--vectors</code> — the module's corpus (<code>vectors.json</code> + <code>PROVENANCE.md</code>, the format proven by the reference module's <code>vectors/</code> suite). Default: the runner walks up from the artifact to the package root and takes <code>vectors/vectors.json</code>. <strong>The corpus is the module's own</strong>: Tier B anchors are model-specific, so a two-body corpus is never forced onto an SGP4 module, and a missing corpus is a NAMED GAP, never a silent pass.</li>
+<li><code>--leak-warmup / --leak-cycles / --leak-entities</code> — lifecycle-leak window overrides (defaults 20 / 200 / 256, the reference module's proven numbers).</li>
+<li>Exit codes: <code>PASS</code> and <code>PASS-WITH-GAPS</code> exit 0 (gaps are listed in the report); <code>FAIL</code> exits 1 with the offending check and case named.</li>
+</ul>
+<p>Library surface: <code>space-data-module-sdk/conformance</code> exports <code>runConformance</code>, <code>runPropagatorSuite</code>, <code>runPropagatorSelfTest</code>, <code>computeVerdict</code>, the ABI driver and the error-code table.</p>
+<h2 id="what-is-checked"><a class="anchor" href="#what-is-checked" aria-hidden="true">#</a>What is checked</h2>
+<div class="table-wrap"><table><thead><tr><th>Tier</th><th>Check</th><th>Source of authority</th></tr></thead><tbody><tr><td>0</td><td>real instantiation + required export set</td><td><a href="./families/propagator.html">propagator-abi.md</a> §The export set</td></tr><tr><td>0</td><td>cross-runtime byte-identity</td><td><strong>GAP here by design</strong> — the parity gate (<code>space-data-module parity-gate</code>) is the Tier 0 authority; this runner never re-certifies half of it</td></tr><tr><td>B</td><td>corpus anchors reproduced within band</td><td>the module's <code>vectors.json</code> (tolerance policy `abs + rel *</td><td>expected</td><td>`); NaN is its own failure class</td></tr><tr><td>C</td><td>vis-viva closure, period closure</td><td>corpus-declared invariants (<code>conformance.mu</code> from the corpus; ECEF un-rotation when the module declares frame 3) — run only where the corpus declares them applicable to the model</td></tr><tr><td>C</td><td>determinism as BYTES, surviving destroy/re-ingest</td><td>ABI §Parity envelope</td></tr><tr><td>C</td><td>frame/flags/reserved declared, corpus-consistent</td><td>ABI §Frames — a frame declaration that contradicts the module's own corpus is the silently-wrong-numbers defect</td></tr><tr><td>C</td><td>batch and single agree exactly</td><td>ABI §Threading — the batch path is the same physics</td></tr><tr><td>C</td><td>typed refusals (NOT_INITIALIZED / BAD_ENTITY_INDEX / unphysical ingest)</td><td>ABI §Error codes — the degradation ladder needs distinguishable codes</td></tr><tr><td>C</td><td>create RETURNS its handle</td><td>ABI §Identity — &quot;the entity I just created is count−1&quot; is the race the harness exists to kill (finding §4.4)</td></tr><tr><td>4</td><td>lifecycle leak: zero page growth after warm-up</td><td>ABI §Lifetime</td></tr><tr><td>4</td><td>destroy idempotent, refuses typed, comes back cleanly</td><td>ABI §Lifetime</td></tr><tr><td>4</td><td>leak-metric negative control</td><td>a gate never observed to fail is indistinguishable from one that cannot fail</td></tr></tbody></table></div>
+<h2 id="the-self-test"><a class="anchor" href="#the-self-test" aria-hidden="true">#</a>The self-test</h2>
+<p><code>--self-test</code> runs the SAME suite against mock propagators, each carrying ONE planted defect drawn from a real defect class the finding documented live:</p>
+<div class="table-wrap"><table><thead><tr><th>Planted defect</th><th>Real-world citation</th><th>Must be caught by</th></tr></thead><tbody><tr><td><code>units-km</code> (1000× error)</td><td>the <code>orbpro_propagator.h</code> km/meters contradiction (finding §4.1)</td><td><code>tierB/anchors</code></td></tr><tr><td><code>leaky-destroy</code></td><td><code>destroySource(){}</code> in both shipped propagators (§4.5)</td><td><code>tier4/lifecycle-leak</code></td></tr><tr><td><code>confident-nonsense</code> (accepts e ≥ 1)</td><td>the underground phasing orbit (§5)</td><td><code>tierC/typed-refusals</code></td></tr><tr><td><code>count-fallback</code> (returns success, not the handle)</td><td>three families deriving count−1 (§4.4)</td><td><code>tierC/create-returns-handle</code></td></tr><tr><td><code>frame-lies</code> (declares TEME, writes ECEF)</td><td>the Δv frame never pinned (§4.3)</td><td><code>tierC/frame-flags-reserved-declared</code></td></tr><tr><td><code>batch-divergence</code></td><td>batch path not the same physics</td><td><code>tierC/batch-single-agreement</code></td></tr><tr><td><code>nondeterministic</code></td><td>byte-determinism is the parity envelope's floor</td><td><code>tierC/determinism-byte-identity</code></td></tr><tr><td><code>missing-exports</code></td><td>destroy was optional once; it is not now</td><td><code>tier0/instantiation-and-exports</code></td></tr></tbody></table></div>
+<p>The self-test exits 0 only when the conformant baseline mock is clean AND every planted defect is caught by the check that owns it. It needs no toolchain, no artifact and no network — <code>npm run conformance:self-test</code>.</p>
+<h2 id="receipt-trust-wave-4-not-yet-wired"><a class="anchor" href="#receipt-trust-wave-4-not-yet-wired" aria-hidden="true">#</a>Receipt &amp; trust (Wave 4, not yet wired)</h2>
+<p>The conformance receipt travels as a bundle <code>ATTESTATION</code> entry (publisher-signed under bundle scope); the graduated listing requirement (receipt REQUIRED for <code>CORE</code>+<code>ANONYMOUS</code>, badge for <code>RECOMMENDED</code>) and the <code>SDN-CONFORMANCE-RECEIPT-V1</code> third-party attestor domain are W4.1/W4.2 of the program — see the finding §5 &quot;Receipt &amp; trust&quot;.</p>
+<h2 id="reference-implementation"><a class="anchor" href="#reference-implementation" aria-hidden="true">#</a>Reference implementation</h2>
+<p><code>space-data-network-modules propagator/keplerian-reference</code> is the exemplar the kit was generalized from: its <code>tests/</code> are the original expression of these checks, its <code>vectors/</code> suite is the corpus format, and <code>tests/sdk-conformance-runner.test.mjs</code> proves the runner reaches the same verdict on the same artifact — including the corrupted-corpus negative control.</p>
+
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/conformance.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#commands">Commands</a></li>
+<li><a class="depth-2" href="#what-is-checked">What is checked</a></li>
+<li><a class="depth-2" href="#the-self-test">The self-test</a></li>
+<li><a class="depth-2" href="#receipt-trust-wave-4-not-yet-wired">Receipt &amp; trust (Wave 4, not yet wired)</a></li>
+<li><a class="depth-2" href="#reference-implementation">Reference implementation</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>

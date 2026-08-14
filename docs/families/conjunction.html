@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Status: DESIGNED as a harness family. This one needs an explicit caveat," />
+    <title>Conjunction — Space Data Module SDK</title>
+    <link rel="stylesheet" href="../styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="../">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="../byo-wasm-quickstart.html">Quickstart</a>
+        <a href="../conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="../index.html"><span>Harness family matrix</span></a></li>
+<li><a href="../byo-wasm-quickstart.html"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="../conformance.html"><span>Conformance kit</span></a></li>
+<li><a href="../protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="../publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./propagator.html"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./maneuver.html"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./rf.html"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./conjunction.html" aria-current="page"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="../module-publication-standard.html"><span>Module publication standard</span></a></li>
+<li><a href="../browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="../isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
+<li><a href="../tri-runtime-parity.html"><span>Tri-runtime parity</span></a></li>
+<li><a href="../tri-runtime-parity-gate.html"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="../testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="../language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="../flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="../flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="../secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="../protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="../gpu-module-abi.html"><span>GPU module ABI</span></a></li>
+<li><a href="../module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="../isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="../node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+      <p class="breadcrumb"><a href="../index.html">Harness families</a> / Event physics</p>
+        <h1>Conjunction</h1>
+      <p class="doc-meta"><span class="pill pill-designed">designed</span><span>Designed, not ratified. The ABI has been drafted against a real consumer but no generated header, conformance kit, or reference module has landed.</span></p>
+<p><strong>Status: DESIGNED as a harness family.</strong> This one needs an explicit caveat, because the plain word &quot;designed&quot; would mislead you: a mature, externally validated conjunction-assessment module ships today and is in production. What does not exist is a <em>harness</em> — a ratified family ABI that a third party implements so their screening engine drops into a consumer's conjunction port.</p>
+<p>Read that distinction carefully before choosing your path.</p>
+<h2 id="doctrine"><a class="anchor" href="#doctrine" aria-hidden="true">#</a>Doctrine</h2>
+<p>A conjunction module screens a catalog for close approaches, refines the time of closest approach, and computes collision probability. As a harness family, it would let a vendor substitute their own screening and probability engine behind a uniform port. As a shipped application module, it already does the work through the generic invoke surface.</p>
+<p>The shipped module rides the generic analysis family in the manifest vocabulary; there is no dedicated conjunction member in the runtime <code>PluginFamily</code> enum, and this family was never brought into the harness-shapes ratification program. That is why its harness status is Designed while its capability is real.</p>
+<h2 id="capability"><a class="anchor" href="#capability" aria-hidden="true">#</a>Capability</h2>
+<p>Screen a catalog, prefilter, refine time of closest approach, compute probability of collision, and emit conjunction records. In the shipped module this includes a k-d-tree candidate search, a refinement stage, and signed Conjunction Data Message output.</p>
+<h2 id="import-and-export-set"><a class="anchor" href="#import-and-export-set" aria-hidden="true">#</a>Import and export set</h2>
+<p><strong>Not specified as a harness ABI.</strong> The shipped module declares a <code>command</code> invoke surface with an assessment method, runtime targets browser, wasi and wasmedge, and a dependency on a propagator plugin. There is no <code>orbpro_conjunction_abi.h</code>.</p>
+<h2 id="wire-layout"><a class="anchor" href="#wire-layout" aria-hidden="true">#</a>Wire layout</h2>
+<p><strong>Real schemas exist, but as a module's own message set, not as a ratified family ABI.</strong> The shipped module carries a schema set including shared types and per-operation request and result messages:</p>
+<div class="table-wrap"><table><thead><tr><th>Schema group</th><th>Contents</th></tr></thead><tbody><tr><td>Common</td><td>Element-set records, B-plane geometry, screening statistics, reference-frame and source-kind enumerations</td></tr><tr><td>Probability</td><td>Probability-of-collision request and result</td></tr><tr><td>Alfano</td><td>Alfano-method request and result</td></tr><tr><td>Pair and catalog screening</td><td>Pair request, catalog screening request and result</td></tr><tr><td>Events</td><td>Time-of-closest-approach result, conjunction event, version result</td></tr></tbody></table></div>
+<p>B-plane geometry carries the miss-distance components and the combined covariance terms plus a combined hard-body radius. Screening statistics report objects screened, pairs screened, pairs prefiltered, candidates from the acceleration structure, refinements, conjunctions found, propagations performed, and elapsed time.</p>
+<p>Results are emitted as Space Data Standards <code>$CDM</code> conjunction data messages, whose schema is separately ratified.</p>
+<p>Because this is a module's message set rather than a generated family header, there are no size and offset locks and no drift gate on it as an ABI.</p>
+<h2 id="units-and-frames"><a class="anchor" href="#units-and-frames" aria-hidden="true">#</a>Units and frames</h2>
+<p>The reference frame is explicit in the schema — an enumeration covering ECI, ECEF, TEME and ICRF, plus an unknown value. That explicitness is the right pattern and should survive into any harness freeze. Per-field units are defined by the module's own schemas.</p>
+<h2 id="sentinels"><a class="anchor" href="#sentinels" aria-hidden="true">#</a>Sentinels</h2>
+<p>Enumerations carry an explicit unknown member rather than overloading zero with a real meaning. That is the one sentinel convention this family already gets right.</p>
+<h2 id="identity"><a class="anchor" href="#identity" aria-hidden="true">#</a>Identity</h2>
+<p>Objects are addressed by their catalog identity, and a conjunction event is identified by the object pair plus the time of closest approach.</p>
+<h2 id="threading"><a class="anchor" href="#threading" aria-hidden="true">#</a>Threading</h2>
+<p><code>wasm32-wasip1-threads</code>. The screening path is thread-parallel and is exercised by a standalone WasmEdge harness in the module's own test suite.</p>
+<h2 id="error-codes"><a class="anchor" href="#error-codes" aria-hidden="true">#</a>Error codes</h2>
+<p>Not specified as a named harness code set.</p>
+<h2 id="lifetime"><a class="anchor" href="#lifetime" aria-hidden="true">#</a>Lifetime</h2>
+<p>Command-surface lifetime: instantiate, invoke, tear down.</p>
+<h2 id="parity-envelope"><a class="anchor" href="#parity-envelope" aria-hidden="true">#</a>Parity envelope</h2>
+<p>The module has its own cross-runtime harness tests, including a standalone WasmEdge run. It has no ratified family parity envelope. Use the generic <a href="../tri-runtime-parity-gate.html">parity gate</a>.</p>
+<h2 id="consumer-seam"><a class="anchor" href="#consumer-seam" aria-hidden="true">#</a>Consumer seam</h2>
+<p>The propagator dependency is the seam that already works: the module takes its propagator as a plugin rather than compiling one in, which satisfies the pluggable-propagation law. There is no generic conjunction port on the consumer side yet, and the consumer-side rendering integration has open defects.</p>
+<h2 id="guest-c-example"><a class="anchor" href="#guest-c-example" aria-hidden="true">#</a>Guest C++ example</h2>
+<p>None published as a family example. The shipped module is an application module, not a reference harness implementation, and presenting it as one would imply an ABI that has not been frozen.</p>
+<h2 id="what-to-do-today"><a class="anchor" href="#what-to-do-today" aria-hidden="true">#</a>What to do today</h2>
+<p>If you have a screening or probability engine you want to run on the Space Data Network: build a records-in, records-out module through the <a href="../byo-wasm-quickstart.html">BYO-wasm quickstart</a>, consume element-set records, emit <code>$CDM</code>, and take your propagator as a plugin. That works now. The harness freeze is what will later let your engine be substituted behind a consumer's conjunction port without the consumer knowing.</p>
+      <section class="playground" id="playground-slot" data-family="conjunction" data-playground="pending" aria-labelledby="playground-title">
+        <h2 id="playground-title">Playground</h2>
+        <p>
+          An in-browser build-and-run playground for the <code>conjunction</code> harness
+          mounts here. It is being built under the graph task
+          <code>sdk-playground-emception</code>; this slot is its reserved mount
+          point and is intentionally empty until that lands.
+        </p>
+      </section>
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/families/conjunction.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#doctrine">Doctrine</a></li>
+<li><a class="depth-2" href="#capability">Capability</a></li>
+<li><a class="depth-2" href="#import-and-export-set">Import and export set</a></li>
+<li><a class="depth-2" href="#wire-layout">Wire layout</a></li>
+<li><a class="depth-2" href="#units-and-frames">Units and frames</a></li>
+<li><a class="depth-2" href="#sentinels">Sentinels</a></li>
+<li><a class="depth-2" href="#identity">Identity</a></li>
+<li><a class="depth-2" href="#threading">Threading</a></li>
+<li><a class="depth-2" href="#error-codes">Error codes</a></li>
+<li><a class="depth-2" href="#lifetime">Lifetime</a></li>
+<li><a class="depth-2" href="#parity-envelope">Parity envelope</a></li>
+<li><a class="depth-2" href="#consumer-seam">Consumer seam</a></li>
+<li><a class="depth-2" href="#guest-c-example">Guest C++ example</a></li>
+<li><a class="depth-2" href="#what-to-do-today">What to do today</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>

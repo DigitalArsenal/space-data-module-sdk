@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Status: v1 — owner ruling 2026-08-10 ," />
+    <title>Propagator — Space Data Module SDK</title>
+    <link rel="stylesheet" href="../styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="../">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="../byo-wasm-quickstart.html">Quickstart</a>
+        <a href="../conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="../index.html"><span>Harness family matrix</span></a></li>
+<li><a href="../byo-wasm-quickstart.html"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="../conformance.html"><span>Conformance kit</span></a></li>
+<li><a href="../protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="../publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./propagator.html" aria-current="page"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./maneuver.html"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./rf.html"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./conjunction.html"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="../module-publication-standard.html"><span>Module publication standard</span></a></li>
+<li><a href="../browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="../isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
+<li><a href="../tri-runtime-parity.html"><span>Tri-runtime parity</span></a></li>
+<li><a href="../tri-runtime-parity-gate.html"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="../testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="../language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="../flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="../flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="../secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="../protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="../gpu-module-abi.html"><span>GPU module ABI</span></a></li>
+<li><a href="../module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="../isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="../node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+      <p class="breadcrumb"><a href="../index.html">Harness families</a> / Dynamics</p>
+        <h1>Propagator</h1>
+      <p class="doc-meta"><span class="pill pill-shipped">shipped</span><span>Shipped contract. Generated from a ratified .fbs single source, covered by a conformance kit and a reference module.</span></p>
+<p><strong>Status:</strong> v1 — owner ruling 2026-08-10 (&quot;No JS propagator!!!! WASM ONLY&quot;), graph task <code>harness-w1-propagator-abi-and-reference</code>, ratified by <code>graph/findings/official-harness-shapes.md</code> §7 SHIP-1.</p>
+<p>This is <strong>the</strong> official third-party propagator harness. A propagator that touches OrbPro primitives ships as a signed WASM module implementing the exports below. The JavaScript <code>Propagators</code> registry is INTERNAL engine plumbing — how the engine dispatches to compiled modules — and is never offered as a public extension point.</p>
+<p>Nothing in this ABI names Cesium, OrbPro, or a vendor. The same exports serve the browser frame-worker pool, a WasmEdge flow runtime, and a deterministic test fixture.</p>
+<h2 id="doctrine"><a class="anchor" href="#doctrine" aria-hidden="true">#</a>Doctrine</h2>
+<p>Five rules govern every line below.</p>
+<ol>
+<li><strong>One source, generated everywhere.</strong> The structs, enums, size locks and offset locks in this ABI are GENERATED from <code>schemas/orbpro/Propagator.fbs</code>. No hand-written mirror is legitimate anywhere in the stack. Before W1.1 there were five, they disagreed, and the disagreement was a units contradiction inside a single file — kilometres in the field comments, METERS in the layout block three lines below.</li>
+<li><strong>The wire is bytes at offsets, and the offsets are locked.</strong> Every ABI struct carries <code>_Static_assert</code> on its size AND on every field offset. This is not decoration: JavaScript reads these structs out of linear memory at byte offsets, and no runtime check can catch a shifted field — <code>6778</code> and <code>6778000</code> are both finite doubles.</li>
+<li><strong>Refuse rather than approximate.</strong> A propagator that cannot answer returns a documented negative code. It never returns a plausible number it does not stand behind, and it never traps on input it was given the chance to validate. A <code>converged</code> flag is never trusted by a consumer; it is adjudicated by verify-by-propagation.</li>
+<li><strong>Declare what you are.</strong> Frame, validity flags and reserved bytes are WRITTEN, every call. A state vector that leaves <code>reference_frame</code> at its default is unreadable by a host that honours the field, and one that leaves the padding bytes alone is handing back the previous call's data.</li>
+<li><strong>The engine owns the schedule; the module owns one row.</strong> Sharding a batch across workers is the host's decision. A module writes only the rows it was given and holds no cross-row state, which is what makes it safe under any sharding the host chooses.</li>
+</ol>
+<h2 id="capability"><a class="anchor" href="#capability" aria-hidden="true">#</a>Capability</h2>
+<p>A propagator module declares family <code>propagator</code> in its <code>plugin-manifest.json</code>. The family vocabulary is authoritative and fail-closed: <code>normalizePluginFamily</code> throws <code>UnknownPluginFamilyError</code> naming the value and the vocabulary (W0.3). There is no silent <code>ANALYSIS</code> fallback — that fallback silently mislabelled 22 modules.</p>
+<p><strong>The namespace rule.</strong> A <code>$</code>-prefixed four-byte file identifier is ratified SDS. A bare four-byte identifier is a vendor invention, and <strong>a harness MUST refuse it</strong>. A port declaring <code>acceptsAnyFlatbuffer</code> is unconformable and is not admissible on a harnessed family: a wildcard cannot be conformance-tested, and six first-party manifests currently declare one on both faces.</p>
+<p>The reference module's ingest port is the worked example: it declares exactly <code>$OMM</code>, in both its canonical FlatBuffer form and its aligned-binary peer, and nothing else.</p>
+<h2 id="the-export-set"><a class="anchor" href="#the-export-set" aria-hidden="true">#</a>The export set</h2>
+<p>Exports are announced with <code>__attribute__((export_name(...)))</code>. The SDK compiler exports the invoke-surface symbols and every declared <code>methodId</code>; the propagator ABI entry points are not <code>methodId</code>s, so they announce themselves.</p>
+<h3 id="required"><a class="anchor" href="#required" aria-hidden="true">#</a>Required</h3>
+<div class="table-wrap"><table><thead><tr><th>Export</th><th>Signature</th><th>Returns</th></tr></thead><tbody><tr><td><code>plugin_init</code></td><td><code>int32_t(const uint8_t* data, size_t len)</code></td><td>entities initialized (&gt;0), or a negative <a href="#error-codes">error code</a></td></tr><tr><td><code>plugin_propagate</code></td><td><code>int32_t(double julian_date, uint32_t entity_index, OrbProStateVector* out)</code></td><td><code>0</code>, or a negative error code</td></tr><tr><td><code>plugin_destroy</code></td><td><code>void(void)</code></td><td>—</td></tr></tbody></table></div>
+<p>At least one of <code>plugin_propagate</code> or <code>plugin_propagate_batch</code> must exist; shipping both is expected, and they must agree exactly (see <a href="#parity-envelope">parity envelope</a>).</p>
+<h3 id="typed-ingest"><a class="anchor" href="#typed-ingest" aria-hidden="true">#</a>Typed ingest</h3>
+<div class="table-wrap"><table><thead><tr><th>Export</th><th>Signature</th><th>Returns</th></tr></thead><tbody><tr><td><code>plugin_init_omm</code></td><td><code>int32_t(const OrbProOMMRecord* records, uint32_t count)</code></td><td>entities now held, or negative</td></tr><tr><td><code>plugin_ingest_omm_one</code></td><td><code>int32_t(const OrbProOMMRecord* record)</code></td><td><strong>the handle it assigned</strong>, or negative</td></tr><tr><td><code>plugin_init_elements</code></td><td><code>int32_t(const OrbProOrbitalElements* elements, uint32_t count)</code></td><td>entities initialized, or negative</td></tr></tbody></table></div>
+<p><code>plugin_init_omm</code> REPLACES the element set. <code>plugin_ingest_omm_one</code> APPENDS and returns its handle — see <a href="#identity">identity</a>.</p>
+<h3 id="batch-and-introspection"><a class="anchor" href="#batch-and-introspection" aria-hidden="true">#</a>Batch and introspection</h3>
+<div class="table-wrap"><table><thead><tr><th>Export</th><th>Signature</th><th>Returns</th></tr></thead><tbody><tr><td><code>plugin_propagate_batch</code></td><td><code>int32_t(double julian_date, OrbProStateVector* out, uint32_t count)</code></td><td><code>0</code>, or negative</td></tr><tr><td><code>plugin_entity_count</code></td><td><code>int32_t(void)</code></td><td>entities currently held</td></tr></tbody></table></div>
+<p><code>plugin_init</code> must accept a packed array of <code>OrbProOMMRecord</code> and MUST refuse a length that is not a whole multiple of <code>sizeof(OrbProOMMRecord)</code>. A partial trailing record means the caller and the module disagree about the struct size, and the size lock cannot see across the boundary.</p>
+<h2 id="wire-layout"><a class="anchor" href="#wire-layout" aria-hidden="true">#</a>Wire layout</h2>
+<p>Generated header: <code>include/orbpro/orbpro_propagator_abi.h</code>. Generated TS byte offsets: <code>space-data-module-sdk/generated/propagator-abi</code>. <strong>Read offsets from the generated bindings. Never write a literal <code>8</code>.</strong></p>
+<h3 id="orbprostatevector-64-bytes-8-byte-aligned"><a class="anchor" href="#orbprostatevector-64-bytes-8-byte-aligned" aria-hidden="true">#</a><code>OrbProStateVector</code> — 64 bytes, 8-byte aligned</h3>
+<div class="table-wrap"><table><thead><tr><th>Offset</th><th>Size</th><th>Type</th><th>Field</th></tr></thead><tbody><tr><td>0</td><td>8</td><td>float64</td><td><code>epoch</code> — Julian date</td></tr><tr><td>8</td><td>24</td><td>float64×3</td><td><code>position</code> — <strong>METERS</strong></td></tr><tr><td>32</td><td>24</td><td>float64×3</td><td><code>velocity</code> — <strong>METERS/SECOND</strong></td></tr><tr><td>56</td><td>1</td><td>uint8</td><td><code>reference_frame</code></td></tr><tr><td>57</td><td>3</td><td>uint8×3</td><td>padding — <strong>MUST be written as zero</strong></td></tr><tr><td>60</td><td>4</td><td>uint32</td><td><code>flags</code></td></tr></tbody></table></div>
+<p>The one-byte frame plus three reserved bytes is a DECLARED layout, not an accident. The C header formerly declared a <code>uint32_t</code> at offset 56, which is wire-identical only by little-endian accident (W0.2).</p>
+<h3 id="orbproommrecord-88-bytes-8-byte-aligned"><a class="anchor" href="#orbproommrecord-88-bytes-8-byte-aligned" aria-hidden="true">#</a><code>OrbProOMMRecord</code> — 88 bytes, 8-byte aligned</h3>
+<div class="table-wrap"><table><thead><tr><th>Offset</th><th>Size</th><th>Field</th><th>Units</th></tr></thead><tbody><tr><td>0</td><td>8</td><td><code>epoch_jd</code></td><td>Julian date</td></tr><tr><td>8</td><td>8</td><td><code>mean_motion</code></td><td>REV/DAY</td></tr><tr><td>16</td><td>8</td><td><code>eccentricity</code></td><td>—</td></tr><tr><td>24</td><td>8</td><td><code>inclination</code></td><td>DEGREES</td></tr><tr><td>32</td><td>8</td><td><code>ra_of_asc_node</code></td><td>DEGREES</td></tr><tr><td>40</td><td>8</td><td><code>arg_of_pericenter</code></td><td>DEGREES</td></tr><tr><td>48</td><td>8</td><td><code>mean_anomaly</code></td><td>DEGREES</td></tr><tr><td>56</td><td>8</td><td><code>bstar</code></td><td>1/earth-radii</td></tr><tr><td>64</td><td>8</td><td><code>mean_motion_dot</code></td><td>REV/DAY²</td></tr><tr><td>72</td><td>8</td><td><code>mean_motion_ddot</code></td><td>REV/DAY³</td></tr><tr><td>80</td><td>4</td><td><code>norad_cat_id</code></td><td>uint32</td></tr><tr><td>84</td><td>4</td><td>padding</td><td>MUST be zero</td></tr></tbody></table></div>
+<p><strong>This struct is also an on-disk format.</strong> The first-party SGP4 module persists it verbatim as a SQLite BLOB (<code>sqlite3_bind_blob(..., &amp;omm, sizeof(OrbProOMMRecord), ...)</code>). Until W1.1 it carried no size or offset lock anywhere in the stack, so the layout every stored blob depends on was held only by the field order of one hand-written C struct in one module.</p>
+<p>The layout above is that layout, exactly as it has already been written to disk, trailing padding included. Locking it revealed <strong>no ambiguity</strong>: the IDL-derived layout reproduces the hand-written struct byte for byte, so the lock pins the existing wire rather than changing it. Migration is out of scope and would invalidate every stored blob.</p>
+<h3 id="orbproorbitalelements-64-bytes-8-byte-aligned"><a class="anchor" href="#orbproorbitalelements-64-bytes-8-byte-aligned" aria-hidden="true">#</a><code>OrbProOrbitalElements</code> — 64 bytes, 8-byte aligned</h3>
+<p>Eight float64 in declaration order: <code>semi_major_axis</code> (<strong>KILOMETRES</strong>), <code>eccentricity</code>, <code>inclination</code>, <code>raan</code>, <code>arg_periapsis</code>, <code>true_anomaly</code> (all RADIANS), <code>epoch</code> (Julian date), <code>reserved</code> (MUST be 0).</p>
+<h2 id="units"><a class="anchor" href="#units" aria-hidden="true">#</a>Units</h2>
+<blockquote><p><code>OrbProStateVector.position</code> IS IN METERS. <code>OrbProStateVector.velocity</code> IS IN METERS PER SECOND.</p></blockquote>
+<p>There is no km variant, no per-plugin unit flag, and no negotiation. A plugin that writes kilometres here is off by 1000× and its satellites render inside the Earth.</p>
+<p>The ONE place kilometres survive is <code>OrbProOrbitalElements.semi_major_axis</code>, an INPUT struct that is not the state vector. It is kilometres there and stays kilometres. Do not &quot;unify&quot; them.</p>
+<p>Ruling: finding §4.1 / §8.1; landed as W0.1.</p>
+<h2 id="frames"><a class="anchor" href="#frames" aria-hidden="true">#</a>Frames</h2>
+<p><code>reference_frame</code> is <code>OrbProReferenceFrame</code>: <code>TEME=0 J2000=1 ICRF=2 ECEF=3 MCI=4 MCMF=5</code>.</p>
+<p><strong>Plugins output ECEF.</strong> The frame transform happens INSIDE the module. A plugin that emits an inertial frame and expects the host to rotate it is relying on a host path that is still unimplemented — <code>PropagatorPlugin.toICRF</code> carries a live TEME≈ICRF approximation, and an ECEF input there is wrong by up to a full Earth rotation (<code>orbpro-toicrf-frame-transform-unimplemented</code>).</p>
+<p><strong>Never let a raw integer frame value cross a boundary unqualified.</strong> Four incompatible <code>ReferenceFrame</code> vocabularies are live on this seam:</p>
+<div class="table-wrap"><table><thead><tr><th>Vocabulary</th><th>Values</th></tr></thead><tbody><tr><td><code>orbpro.propagator</code> (<strong>this ABI</strong>)</td><td>TEME=0 J2000=1 ICRF=2 ECEF=3 MCI=4 MCMF=5</td></tr><tr><td><code>orbpro.plugins</code> (<code>PropagatorState.fbs</code>)</td><td>ECI=0 ECEF=1 TEME=2 ICRF=3</td></tr><tr><td><code>Cesium.ReferenceFrame</code></td><td>FIXED=0 INERTIAL=1</td></tr><tr><td><code>ConjunctionCommon.fbs</code></td><td>ECI=1</td></tr></tbody></table></div>
+<p><code>ECI==0</code>, <code>TEME==0</code> and <code>FIXED==0</code> all collide, and ECEF is 1 in the second but 3 here. The second vocabulary's values are frozen by compiled WASM artifacts already in the field, so collapsing them is a wire break, tracked as <code>sdk-reference-frame-enum-unification</code>. Until it lands, <strong>translate by named token at every seam</strong>.</p>
+<p>Use the generated setter <code>orbpro_state_set_reference_frame()</code>, never a bare assignment: it clears the three padding bytes a consumer reading offset 56 as a 32-bit word would otherwise see as garbage.</p>
+<h2 id="identity"><a class="anchor" href="#identity" aria-hidden="true">#</a>Identity</h2>
+<p><strong><code>NORAD_CAT_ID</code> is the identity authority.</strong> It is carried through, never invented, never synthesized to make a lookup succeed.</p>
+<p><strong>The entity index is a local handle</strong> into one module instance's own array. It is meaningless outside that instance and must never be persisted as an identity.</p>
+<h3 id="creating-engine-state-returns-its-handle"><a class="anchor" href="#creating-engine-state-returns-its-handle" aria-hidden="true">#</a>Creating engine state RETURNS its handle</h3>
+<p>This is the single highest-value primitive the harness adds.</p>
+<div class="codeblock"><div class="codeblock-head">c</div><pre><code>int32_t handle = plugin_ingest_omm_one(&amp;record);   /* -&gt; the handle assigned */</code></pre></div>
+<p>A caller must never derive &quot;the entity I just created&quot; as <code>count − 1</code>. Three families in this stack independently reinvented that derivation; all three are race-unsafe, undeclared and untested, and it is the root of defect B3 (the maneuver marker renders from a buffer the seam never writes).</p>
+<p>The engine-side implementation of this primitive for the FIRST-PARTY propagators is <strong>W1.5</strong> (<code>graph/tasks/official-harness-shapes-program.md</code>). This document states the contract now; third-party modules are expected to honour it from day one, and the reference module does.</p>
+<h2 id="threading"><a class="anchor" href="#threading" aria-hidden="true">#</a>Threading</h2>
+<p>Modules compile to <code>wasm32-wasip1-threads</code> (clang), per the isomorphic-pthreads law. <strong>Never <code>emcc -pthread</code></strong> — that emits the browser-only Web Worker + postMessage thread model and has no wasi thread-spawn contract, so it cannot thread under WasmEdge.</p>
+<p>Two thread models are legitimate, and both use that same toolchain:</p>
+<ul>
+<li><strong><code>emscripten-pthreads</code></strong> — despite the name, the real wasi-threads contract: the guest imports <code>wasi.thread-spawn</code> and exports <code>wasi_thread_start</code> over an imported shared memory. The post-link artifact guard fails the build if the emitted wasm does not actually carry shared memory and atomics.</li>
+<li><strong><code>wasi-sequential</code></strong> — the module provably never spawns a thread. Requires <code>manifest.sequentialJustification</code> with a <code>kind</code> and a substantive <code>detail</code>; a mirror guard fails the build if the artifact is not what was claimed.</li>
+</ul>
+<p><strong>A propagator is normally <code>wasi-sequential</code>, and that is the strong default.</strong> Propagation is embarrassingly parallel ACROSS entities and strictly sequential WITHIN one, and the sharding belongs to the host. A module that spawns its own pool contends with the pool already scheduling it.</p>
+<blockquote><p><strong>Known defect:</strong> <code>resolveThreadModel</code> reads the compile OPTION, not <code>manifest.threadModel</code>, and otherwise infers the model from <code>runtimeTargets</code> — where <code>&quot;wasmedge&quot;</code> infers pthreads. Pass <code>threadModel: manifest.threadModel</code> explicitly until <code>sdk-manifest-threadmodel-silently-ignored</code> lands, and assert the compiler agreed.</p></blockquote>
+<h3 id="shard-write-discipline"><a class="anchor" href="#shard-write-discipline" aria-hidden="true">#</a>Shard write discipline</h3>
+<p>When the host runs <code>plugin_propagate_batch</code> across a worker pool it hands each worker the SAME output base pointer and a DISJOINT index range.</p>
+<ul>
+<li>Write <strong>only</strong> rows in your own range. Never write outside your stride.</li>
+<li>Never READ a neighbour's row. Your output must not depend on rows you were not given.</li>
+<li>Hold no cross-row state between rows of one batch.</li>
+<li>On failure, zero the offending row before returning, so a host that ignores the return value still reads a state marked not-valid rather than stale bytes. A partially written batch with no signal is the silent-wrong-numbers failure this ABI exists to prevent.</li>
+</ul>
+<p>A module that satisfies these is safe under any sharding the host chooses, which is the property the ABI actually requires — not a particular thread count.</p>
+<h2 id="error-codes"><a class="anchor" href="#error-codes" aria-hidden="true">#</a>Error codes</h2>
+<p>Every failure returns its OWN documented negative code. A propagator that returns <code>-1</code> for everything is unconformable: the host cannot tell a bad entity index from an uninitialized module, so it cannot place the failure on the degradation ladder (transient → skip; fatal → respawn; exhausted → latch).</p>
+<div class="table-wrap"><table><thead><tr><th>Code</th><th>Name</th><th>Meaning</th></tr></thead><tbody><tr><td><code>0</code></td><td>OK</td><td>success</td></tr><tr><td><code>-1</code></td><td>NOT_INITIALIZED</td><td>no elements ingested yet</td></tr><tr><td><code>-2</code></td><td>BAD_ENTITY_INDEX</td><td>index ≥ entity count</td></tr><tr><td><code>-3</code></td><td>NULL_OUTPUT</td><td>caller passed a null output pointer</td></tr><tr><td><code>-4</code></td><td>BAD_INPUT</td><td>malformed or short input buffer</td></tr><tr><td><code>-5</code></td><td>NOT_CONVERGED</td><td>the solve failed to converge</td></tr><tr><td><code>-6</code></td><td>UNPHYSICAL</td><td>the elements describe no closed orbit</td></tr></tbody></table></div>
+<p>Rules that are not negotiable:</p>
+<ul>
+<li><strong>Validated input can never trap.</strong> Malformed input is a code, not a crash.</li>
+<li><strong>NaN is its own failure class.</strong> It is never &quot;a number that happened&quot;.</li>
+<li><strong>A physically impossible result is a refusal</strong>, not an output.</li>
+<li><strong>Error classes are identical across runtimes.</strong> A code that differs between browser and WasmEdge is a P1 SDK defect.</li>
+</ul>
+<h2 id="lifetime"><a class="anchor" href="#lifetime" aria-hidden="true">#</a>Lifetime</h2>
+<p><code>plugin_destroy</code> is <strong>required</strong>, and it must actually release.</p>
+<p>The test is mechanical: N × ingest / propagate / destroy must reach a steady memory baseline. WebAssembly linear memory never shrinks, so &quot;memory went back down&quot; is not available and a test asserting it would assert something impossible. What a non-leaking module gives you is that growth STOPS: after a warm-up that pays for every allocation the cycle will ever need, further identical cycles add ZERO pages.</p>
+<p><code>destroy</code> must also be idempotent, must leave <code>plugin_entity_count()</code> at zero, and must leave the module usable — a destroyed module refuses to propagate (<code>NOT_INITIALIZED</code>) rather than reading freed state, and comes back cleanly on the next ingest.</p>
+<blockquote><p><strong>Historical defect, retired 2026-08-12.</strong> <code>destroySource()</code> was literally <code>{}</code> in BOTH shipped first-party propagators when this ABI was written (finding §4.5), and sgp4's <code>createSourceFromState</code> re-ingested the whole catalogue for a single burn. The maneuver program landed the fix on OrbPro <code>main</code> (<code>2db279766c</code> and <code>97cc38127e</code>): both propagators now recycle post-burn source SLOTS — the entity stays resident so no index above it moves, destroy marks the slot free, and creating a source re-points the recycled entity in place. The reference module remains the leak-test bar, now enforced mechanically by <code>space-data-module conformance propagator</code> (tier4/lifecycle-leak).</p></blockquote>
+<h2 id="versioning"><a class="anchor" href="#versioning" aria-hidden="true">#</a>Versioning</h2>
+<p><code>abi_version</code> gates at register/load. <code>ORBPRO_ABI_VERSION</code> is declared in <code>orbpro_plugin.h</code>; a module declares <code>abiVersion</code> in its manifest, and a mismatch is refused with <code>ORBPRO_ERROR_ABI_MISMATCH</code>, never coerced.</p>
+<p>Shape versions are <code>SHAPE_MAJOR.SHAPE_MINOR</code>, independent of the SDS wave counter.</p>
+<ul>
+<li><strong>Additive-only within a MAJOR.</strong> Enforced by the drift gate, not by prose: <code>npm run check:propagator-abi</code> regenerates every artifact from the IDL and byte-diffs it against what is committed. Any difference fails.</li>
+<li><strong>Consumers declare a FLOOR plus a MAJOR, never exact equality.</strong> Exact-equality resolution caused three build outages and a P1 in one week. Floors only advance.</li>
+<li><strong>Stability promise:</strong> additive-only for two minors; a breaking change requires a one-minor deprecation notice.</li>
+<li><strong>Deprecation, never deletion.</strong></li>
+<li><strong>Refusals are legible.</strong> A mismatch names the shape, what was required and what was offered — never &quot;not found&quot;.</li>
+</ul>
+<h2 id="parity-envelope"><a class="anchor" href="#parity-envelope" aria-hidden="true">#</a>Parity envelope</h2>
+<p><strong>Inside the envelope</strong> — byte-identical across browser, native WasmEdge and Docker WasmEdge, at thread counts 1/2/4/8:</p>
+<ul>
+<li>every byte of every <code>OrbProStateVector</code> a module writes for given inputs</li>
+<li><code>plugin_propagate</code> and <code>plugin_propagate_batch</code> for the same entity and epoch</li>
+<li>every error code, for every malformed and unsatisfiable input</li>
+<li>the handle <code>plugin_ingest_omm_one</code> assigns, for a given ingest order</li>
+<li>the steady-state verdict of the lifecycle leak test</li>
+</ul>
+<p>Determinism is compared as <strong>bytes, not as numbers</strong>, and must survive a destroy / re-ingest cycle: output that changes after a lifecycle round trip is state leaking across it.</p>
+<p><strong>Outside the envelope</strong>, stated so it is never mistaken for a defect: results from a propagator whose physics depends on live external data (space weather, EOP) at different acquisition instants. Their ABI BEHAVIOUR — codes, struct shapes, frame declaration, padding, copy accounting — is fully inside.</p>
+<p><strong>Divergence in anything listed as inside the envelope is a P1 SDK defect.</strong> Not a platform quirk. File, block, fix.</p>
+<p>Run it:</p>
+<div class="codeblock"><pre><code>space-data-module parity-gate --artifact &lt;id&gt;=./dist/isomorphic/module.wasm:module</code></pre></div>
+<h2 id="conformance"><a class="anchor" href="#conformance" aria-hidden="true">#</a>Conformance</h2>
+<p>What &quot;official&quot; buys a third party: one command, family-dispatched, shipped with its own negative control (<a href="../conformance.html">docs/conformance.md</a>):</p>
+<div class="codeblock"><pre><code>space-data-module conformance propagator --artifact ./dist/isomorphic/module.wasm
+space-data-module conformance propagator --self-test    # must exit 0 BY failing</code></pre></div>
+<p>The runner adjudicates everything this document specifies that a single lane can observe — the export set, the corpus anchors, the invariants with no stored expectation, the error-code table, and the leak test — and reports the cross-runtime lane honestly as a gap that only the parity gate above closes. <code>PASS</code> / <code>PASS-WITH-GAPS</code> exit 0; <code>FAIL</code> exits 1 with the offending check named.</p>
+<h2 id="consumer-seam"><a class="anchor" href="#consumer-seam" aria-hidden="true">#</a>Consumer seam</h2>
+<p>Per the pluggable-propagation law (owner, 2026-07-29), <strong>every surface that consumes a propagator takes it as a parameter or port</strong> — never hardwired to SGP4 or any single provider. A Sandcastle demo resolves it once from <code>?propagator=NAME</code> and feeds that single value to every consumer downstream.</p>
+<p>Engine-side, <code>PropagatedPositionProperty</code> accepts a propagator instance OR a registered name/id, and orbits are drawn by the regular path visualizer. Third-party modules reach it through the storefront ADD path — <code>Cesium.registerPlugin(name, source)</code> then <code>initPlugins({ plugins: [name] })</code>. Built-in bundle names are refused there (<code>E92</code>); a third-party module uses its own name.</p>
+<h2 id="guest-usage"><a class="anchor" href="#guest-usage" aria-hidden="true">#</a>Guest usage</h2>
+<p>The complete, buildable reference implementation lives at <code>space-data-network-modules/propagator/keplerian-reference/</code>. Every export in it is annotated with the section of this document it implements, and <code>space-data-module init --family propagator</code> scaffolds its skeleton.</p>
+<div class="codeblock"><div class="codeblock-head">c</div><pre><code>#include &quot;space_data_module_invoke.h&quot;
+#include &quot;orbpro/orbpro_propagator_abi.h&quot;   /* the ONE generated ABI */
+
+#define ORBPRO_ABI_EXPORT(name) __attribute__((export_name(name))) extern &quot;C&quot;
+
+ORBPRO_ABI_EXPORT(&quot;plugin_propagate&quot;)
+int32_t plugin_propagate(double julian_date, uint32_t entity_index,
+                         OrbProStateVector* out) {
+  if (out == NULL)                 return -3;  /* NULL_OUTPUT      */
+  if (entity_count == 0)           return -1;  /* NOT_INITIALIZED  */
+  if (entity_index &gt;= entity_count) return -2; /* BAD_ENTITY_INDEX */
+
+  /* Start from the initializer: it zeroes the WHOLE struct, including the
+   * three reserved bytes the IDL requires to be zero. The host reuses one
+   * scratch buffer across every call, so a partial write hands back the
+   * previous call's bytes. */
+  orbpro_state_init(out);
+  out-&gt;epoch = julian_date;
+  out-&gt;position[0] = x_metres;      /* METERS. Not kilometres. */
+  out-&gt;position[1] = y_metres;
+  out-&gt;position[2] = z_metres;
+  out-&gt;velocity[0] = vx_metres_per_second;
+  out-&gt;velocity[1] = vy_metres_per_second;
+  out-&gt;velocity[2] = vz_metres_per_second;
+
+  /* Use the generated setter — it clears the padding bytes. */
+  orbpro_state_set_reference_frame(out, ORBPRO_FRAME_ECEF);
+  out-&gt;flags |= (uint32_t)ORBPRO_STATE_VALID;
+  return 0;
+}</code></pre></div>
+<p>Reading a state vector from JavaScript, without a single literal offset:</p>
+<div class="codeblock"><div class="codeblock-head">js</div><pre><code>import { ORBPRO_STATE_VECTOR } from &quot;space-data-module-sdk/generated/propagator-abi&quot;;
+
+const { offsets, size } = ORBPRO_STATE_VECTOR;
+const view = new DataView(memory.buffer, pointer, size);
+const epoch = view.getFloat64(offsets.epoch, true);
+const x     = view.getFloat64(offsets.position, true);
+const frame = view.getUint8(offsets.reference_frame);</code></pre></div>
+<h2 id="regenerating"><a class="anchor" href="#regenerating" aria-hidden="true">#</a>Regenerating</h2>
+<div class="codeblock"><pre><code>node scripts/generate-propagator-abi.mjs   # regenerate from the IDL
+node scripts/check-propagator-abi.mjs      # the drift gate (runs in npm test)</code></pre></div>
+<p>The gate ships its own negative control: a test corrupts a copy of the generated tree and requires the gate to name the corruption. A gate never observed to fail is indistinguishable from one that cannot fail.</p>
+      <section class="playground" id="playground-slot" data-family="propagator" data-playground="pending" aria-labelledby="playground-title">
+        <h2 id="playground-title">Playground</h2>
+        <p>
+          An in-browser build-and-run playground for the <code>propagator</code> harness
+          mounts here. It is being built under the graph task
+          <code>sdk-playground-emception</code>; this slot is its reserved mount
+          point and is intentionally empty until that lands.
+        </p>
+      </section>
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/propagator-abi.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#doctrine">Doctrine</a></li>
+<li><a class="depth-2" href="#capability">Capability</a></li>
+<li><a class="depth-2" href="#the-export-set">The export set</a></li>
+<li><a class="depth-3" href="#required">Required</a></li>
+<li><a class="depth-3" href="#typed-ingest">Typed ingest</a></li>
+<li><a class="depth-3" href="#batch-and-introspection">Batch and introspection</a></li>
+<li><a class="depth-2" href="#wire-layout">Wire layout</a></li>
+<li><a class="depth-3" href="#orbprostatevector-64-bytes-8-byte-aligned"><code>OrbProStateVector</code> — 64 bytes, 8-byte aligned</a></li>
+<li><a class="depth-3" href="#orbproommrecord-88-bytes-8-byte-aligned"><code>OrbProOMMRecord</code> — 88 bytes, 8-byte aligned</a></li>
+<li><a class="depth-3" href="#orbproorbitalelements-64-bytes-8-byte-aligned"><code>OrbProOrbitalElements</code> — 64 bytes, 8-byte aligned</a></li>
+<li><a class="depth-2" href="#units">Units</a></li>
+<li><a class="depth-2" href="#frames">Frames</a></li>
+<li><a class="depth-2" href="#identity">Identity</a></li>
+<li><a class="depth-3" href="#creating-engine-state-returns-its-handle">Creating engine state RETURNS its handle</a></li>
+<li><a class="depth-2" href="#threading">Threading</a></li>
+<li><a class="depth-3" href="#shard-write-discipline">Shard write discipline</a></li>
+<li><a class="depth-2" href="#error-codes">Error codes</a></li>
+<li><a class="depth-2" href="#lifetime">Lifetime</a></li>
+<li><a class="depth-2" href="#versioning">Versioning</a></li>
+<li><a class="depth-2" href="#parity-envelope">Parity envelope</a></li>
+<li><a class="depth-2" href="#conformance">Conformance</a></li>
+<li><a class="depth-2" href="#consumer-seam">Consumer seam</a></li>
+<li><a class="depth-2" href="#guest-usage">Guest usage</a></li>
+<li><a class="depth-2" href="#regenerating">Regenerating</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>

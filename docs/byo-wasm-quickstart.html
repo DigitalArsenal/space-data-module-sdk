@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Bring your own WebAssembly. This is the vendor path: you compile your existing" />
+    <title>BYO-wasm quickstart — Space Data Module SDK</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="./">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="./byo-wasm-quickstart.html">Quickstart</a>
+        <a href="./conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="./index.html"><span>Harness family matrix</span></a></li>
+<li><a href="./byo-wasm-quickstart.html" aria-current="page"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="./conformance.html"><span>Conformance kit</span></a></li>
+<li><a href="./protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="./publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./families/propagator.html"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/maneuver.html"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./families/rf.html"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./families/breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/conjunction.html"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./families/estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="./module-publication-standard.html"><span>Module publication standard</span></a></li>
+<li><a href="./browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="./isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
+<li><a href="./tri-runtime-parity.html"><span>Tri-runtime parity</span></a></li>
+<li><a href="./tri-runtime-parity-gate.html"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="./testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="./language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="./flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="./flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="./secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="./protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="./gpu-module-abi.html"><span>GPU module ABI</span></a></li>
+<li><a href="./module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="./isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="./node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+        <h1>BYO-wasm quickstart</h1>
+<p>Bring your own WebAssembly. This is the vendor path: you compile your existing C or C++ with your own build system, against the pinned toolchain and the family ABI header, and hand the SDK a finished <code>module.wasm</code>. You do not need access to any private repository, and you do not have to route your source through the SDK's own compiler.</p>
+<p>If you would rather have the SDK drive the compiler for you, the <code>space-data-module compile</code> command exists and applies the same toolchain resolution described below. The BYO lane is the supported path for a vendor with an established build.</p>
+<h2 id="1-the-toolchain-pin"><a class="anchor" href="#1-the-toolchain-pin" aria-hidden="true">#</a>1. The toolchain pin</h2>
+<p>This is the only sanctioned toolchain for a guest module, and it is not negotiable:</p>
+<blockquote><p>Compile guest modules with <code>clang --target=wasm32-wasip1-threads</code> (WASI SDK, pinned by the repository's CI workflows). This is the ONLY sanctioned toolchain for <code>module.wasm</code>. <code>emcc -pthread</code> is FORBIDDEN for module compilation: Emscripten's pthread model is browser-only and cannot thread under WasmEdge, which breaks tri-runtime isomorphism (see <a href="./isomorphic-pthreads.html">Isomorphic pthreads</a>). Modules must be EH-free. <code>flowcc</code> composes a runtime from prebuilt objects; it is not a WASI rebuild step.</p></blockquote>
+<p>The template headers carry the same one-line doctrine: <code>Build: clang --target=wasm32-wasip1-threads (never emcc -pthread)</code>.</p>
+<h3 id="toolchain-triples"><a class="anchor" href="#toolchain-triples" aria-hidden="true">#</a>Toolchain triples</h3>
+<div class="table-wrap"><table><thead><tr><th>Purpose</th><th>Value</th></tr></thead><tbody><tr><td>Compile target</td><td><code>wasm32-wasip1-threads</code></td></tr><tr><td>Sysroot triple (threads libc / libc++)</td><td><code>wasm32-wasip1-threads</code></td></tr><tr><td>Resource-dir triple (compiler-rt builtins)</td><td><code>wasm32-unknown-wasip1-threads</code></td></tr><tr><td>Default drivers on <code>PATH</code></td><td><code>wasm32-wasi-clang</code>, <code>wasm32-wasi-clang++</code></td></tr></tbody></table></div>
+<p>The SDK resolves the sysroot by looking for <code>lib/wasm32-wasip1-threads/libc.a</code> under, in order, <code>/opt/homebrew/share/wasi-sysroot</code>, <code>/usr/local/share/wasi-sysroot</code>, <code>/opt/wasi-sdk/share/wasi-sysroot</code>, and versioned Homebrew cellar paths. It resolves the resource directory by looking for <code>lib/wasm32-unknown-wasip1-threads/libclang_rt.builtins.a</code> under <code>/opt/homebrew/share/wasi-runtimes</code>, <code>/usr/local/share/wasi-runtimes</code>, and the versioned cellar equivalents.</p>
+<p>If nothing is found the SDK tells you exactly this:</p>
+<blockquote><p>Install a wasi-sdk / wasi-libc+wasi-runtimes toolchain with the wasm32-wasip1-threads target (e.g. <code>brew install wasi-libc wasi-runtimes</code> or a wasi-sdk release), or set the <code>SDN_WASI_*</code> env overrides.</p></blockquote>
+<h3 id="environment-overrides"><a class="anchor" href="#environment-overrides" aria-hidden="true">#</a>Environment overrides</h3>
+<p>Set these when your toolchain lives somewhere else — for example inside your own container image:</p>
+<div class="table-wrap"><table><thead><tr><th>Variable</th><th>Overrides</th></tr></thead><tbody><tr><td><code>SDN_WASI_CLANG</code></td><td>C driver binary</td></tr><tr><td><code>SDN_WASI_CLANGXX</code></td><td>C++ driver binary</td></tr><tr><td><code>SDN_WASI_TARGET</code></td><td>Compile target triple</td></tr><tr><td><code>SDN_WASI_SYSROOT</code></td><td>Sysroot path</td></tr><tr><td><code>SDN_WASI_RESOURCE_DIR</code></td><td>compiler-rt resource directory</td></tr></tbody></table></div>
+<h2 id="2-the-flag-set"><a class="anchor" href="#2-the-flag-set" aria-hidden="true">#</a>2. The flag set</h2>
+<p>Object files are compiled with atomics, no exceptions, and threads:</p>
+<div class="codeblock"><div class="codeblock-head">sh</div><pre><code>wasm32-wasi-clang++ \
+  --target=wasm32-wasip1-threads \
+  --sysroot=&quot;$WASI_SYSROOT&quot; \
+  -resource-dir=&quot;$WASI_RESOURCE_DIR&quot; \
+  -matomics -fno-exceptions -pthread \
+  -O2 -c src/my_module.cpp -o build/my_module.o</code></pre></div>
+<p>The link step adds the shared-memory and imported-memory contract:</p>
+<div class="codeblock"><div class="codeblock-head">sh</div><pre><code>wasm32-wasi-clang++ \
+  --target=wasm32-wasip1-threads \
+  --sysroot=&quot;$WASI_SYSROOT&quot; \
+  -resource-dir=&quot;$WASI_RESOURCE_DIR&quot; \
+  -pthread -matomics -mbulk-memory \
+  -Wl,--import-memory -Wl,--shared-memory -Wl,--max-memory=2147483648 \
+  -O2 build/*.o -o dist/isomorphic/module.wasm</code></pre></div>
+<p><code>-pthread -matomics -mbulk-memory -Wl,--import-memory -Wl,--shared-memory -Wl,--max-memory=2147483648</code> is the enforced flag set. A module linked without it will not satisfy the parity gate.</p>
+<h3 id="multi-translation-unit-builds"><a class="anchor" href="#multi-translation-unit-builds" aria-hidden="true">#</a>Multi-translation-unit builds</h3>
+<p>Nothing about the contract is single-file. Compile every translation unit with the object-file flags above and link them in one step. A minimal <code>Makefile</code>:</p>
+<div class="codeblock"><div class="codeblock-head">make</div><pre><code>WASI_SYSROOT ?= /opt/homebrew/share/wasi-sysroot
+WASI_RESOURCE_DIR ?= /opt/homebrew/share/wasi-runtimes
+CXX := wasm32-wasi-clang++
+
+TARGET_FLAGS := --target=wasm32-wasip1-threads \
+                --sysroot=$(WASI_SYSROOT) \
+                -resource-dir=$(WASI_RESOURCE_DIR)
+CXXFLAGS := $(TARGET_FLAGS) -matomics -fno-exceptions -pthread -O2 -Iinclude
+LDFLAGS  := $(TARGET_FLAGS) -pthread -matomics -mbulk-memory \
+            -Wl,--import-memory -Wl,--shared-memory \
+            -Wl,--max-memory=2147483648 -O2
+
+SRCS := $(wildcard src/*.cpp)
+OBJS := $(SRCS:src/%.cpp=build/%.o)
+
+dist/isomorphic/module.wasm: $(OBJS)
+	@mkdir -p $(dir $@)
+	$(CXX) $(LDFLAGS) $(OBJS) -o $@
+
+build/%.o: src/%.cpp
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) -c $&lt; -o $@
+
+clean:
+	rm -rf build dist</code></pre></div>
+<p>Constraints that bite in practice:</p>
+<ul>
+<li><strong>EH-free.</strong> Compile with <code>-fno-exceptions</code>. Do not throw across the ABI boundary; return a named negative error code instead.</li>
+<li><strong>No <code>emcc</code>.</strong> Not for one translation unit, not for a dependency, not &quot;temporarily for the browser build&quot;. One artifact serves every runtime.</li>
+<li><strong>No host-specific imports.</strong> The parity gate classifies your import set against the declared host contract and fails on a forbidden import class.</li>
+</ul>
+<h2 id="3-implement-the-family-abi"><a class="anchor" href="#3-implement-the-family-abi" aria-hidden="true">#</a>3. Implement the family ABI</h2>
+<p>Pick your family from the <a href="./index.html">harness family matrix</a> and implement exactly the export set that family's page names. Include the family's generated ABI header from the SDK — do not hand-write the struct layouts, because the headers carry <code>_Static_assert</code> size and offset locks that are the whole point of the generated wire contract.</p>
+<div class="codeblock"><div class="codeblock-head">cpp</div><pre><code>#include &lt;orbpro/orbpro_propagator_abi.h&gt;</code></pre></div>
+<p>The SDK ships the headers under <code>include/</code> and exports them through the package (<code>space-data-module-sdk/include/*</code>), so a vendor consuming the SDK from npm gets the same bytes the generator produced.</p>
+<h2 id="4-declare-the-manifest"><a class="anchor" href="#4-declare-the-manifest" aria-hidden="true">#</a>4. Declare the manifest</h2>
+<p>A module carries an embedded manifest declaring its plugin id, family, invoke surface, runtime targets, methods, ports, and the standards record types it consumes and emits. See the <a href="./module-publication-standard.html">module publication standard</a> for the record layout and <a href="./conformance.html">conformance</a> for what is checked.</p>
+<blockquote><p><strong>Status: still being built.</strong> There is no tool today that stamps a manifest onto a binary produced by a foreign toolchain. Manifest normalization and codecs exist for modules authored inside the SDK's own build path, but a <code>manifest inject</code> verb for a BYO binary does not exist yet — it is Sprint 1 of the third-party integration program. Until it lands, a BYO vendor supplies the manifest JSON alongside the artifact and the manifest is attached for them.</p></blockquote>
+<h2 id="5-prove-it-then-ship-it"><a class="anchor" href="#5-prove-it-then-ship-it" aria-hidden="true">#</a>5. Prove it, then ship it</h2>
+<div class="codeblock"><div class="codeblock-head">sh</div><pre><code># ABI conformance for your family
+space-data-module conformance propagator --artifact ./dist/isomorphic/module.wasm
+
+# tri-runtime parity: browser + WasmEdge + Docker WasmEdge, byte-identical
+space-data-module parity \
+  --wasm ./dist/isomorphic/module.wasm \
+  --fixture ./fixtures/parity/basic.json \
+  --lanes browser,wasmedge,docker-wasmedge</code></pre></div>
+<p>Then continue with <a href="./conformance.html">Conformance kit</a>, <a href="./protect-and-sign.html">Protect and sign</a>, and <a href="./publication-submission.html">Publication and listing</a>.</p>
+<h2 id="honest-gaps-in-this-lane"><a class="anchor" href="#honest-gaps-in-this-lane" aria-hidden="true">#</a>Honest gaps in this lane</h2>
+<p>These are checked statements about the SDK today, not future tense for its own sake:</p>
+<ul>
+<li>The toolchain flags and triples above are real and enforced, but they are applied by the SDK's internal compiler resolver. The <code>Makefile</code> on this page is a documented recipe assembled from those enforced values; the repository does not yet ship a <code>Makefile</code>, <code>CMakeLists.txt</code> or <code>build.sh</code> template for a hand-rolled multi-TU build.</li>
+<li><code>conformance --self-test</code> currently accepts only the <code>propagator</code> family. Any other family argument raises an unknown-family error.</li>
+<li>Manifest injection for foreign-compiled binaries does not exist yet.</li>
+<li>There is no self-serve listing submission command yet. See <a href="./publication-submission.html">Publication and listing</a>.</li>
+</ul>
+<p>An escorted pilot is possible today: a vendor delivers a BYO artifact and the gates are run and the module listed by hand. The program above is what makes that self-serve.</p>
+
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/byo-wasm-quickstart.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#1-the-toolchain-pin">1. The toolchain pin</a></li>
+<li><a class="depth-3" href="#toolchain-triples">Toolchain triples</a></li>
+<li><a class="depth-3" href="#environment-overrides">Environment overrides</a></li>
+<li><a class="depth-2" href="#2-the-flag-set">2. The flag set</a></li>
+<li><a class="depth-3" href="#multi-translation-unit-builds">Multi-translation-unit builds</a></li>
+<li><a class="depth-2" href="#3-implement-the-family-abi">3. Implement the family ABI</a></li>
+<li><a class="depth-2" href="#4-declare-the-manifest">4. Declare the manifest</a></li>
+<li><a class="depth-2" href="#5-prove-it-then-ship-it">5. Prove it, then ship it</a></li>
+<li><a class="depth-2" href="#honest-gaps-in-this-lane">Honest gaps in this lane</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>
