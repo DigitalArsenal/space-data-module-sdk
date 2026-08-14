@@ -111,7 +111,10 @@
     "check:propagator-abi": "node scripts/check-propagator-abi.mjs",
     "generate:propagator-abi": "node scripts/generate-propagator-abi.mjs",
     "generate:vectors": "node ./examples/single-file-bundle/generate-vectors.mjs",
-    "prepublishOnly": "npm test && npm run check:compliance"
+    "prepublishOnly": "npm test && npm run check:compliance",
+    "playground:build": "node ./playground/build.mjs",
+    "playground:serve": "node ./playground/build.mjs && node ./playground/server.mjs",
+    "playground:gate": "node ./playground/build.mjs && node ./playground/test/browser-gate.mjs"
   },
   "dependencies": {
     "flatbuffers": "^25.9.23",
