@@ -660,8 +660,8 @@ export function decodePublicationRecordCollection(bytes) {
     const expectedStandard =
       STANDARD_BY_RECORD_TYPE[recordType] ?? null;
     if (standard && expectedStandard && standard !== expectedStandard) {
-      throw new Error(
-        `REC trailer record ${index} standard/type mismatch (${standard} vs ${expectedStandard}).`,
+      console.warn(
+        `REC trailer record ${index} standard/type drift (${standard} from Record.standard vs ${expectedStandard} from local RecordType ${recordType}); decoding by Record.standard.`,
       );
     }
     const valueMeta = assertUnionTableField(

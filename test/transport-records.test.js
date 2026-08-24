@@ -134,7 +134,7 @@ test("corrupted ENC vector lengths invalidate the REC trailer", async () => {
   );
 });
 
-test("REC record standard and union type mismatches are rejected", async () => {
+test("REC Record.standard remains authoritative when the local union ordinal disagrees", async () => {
   const payloadBytes = Uint8Array.of(1, 3, 3, 7);
   const pnm = await createPublicationNotice({
     payloadBytes,
@@ -152,8 +152,19 @@ test("REC record standard and union type mismatches are rejected", async () => {
   const valueTypeFieldOffset = record.bb.__offset(record.bb_pos, 4);
   assert.ok(valueTypeFieldOffset > 0);
   corrupted[record.bb_pos + valueTypeFieldOffset] = RecordType.PNM;
-  assert.throws(
-    () => decodePublicationRecordCollection(corrupted),
-    /mismatch|invalid|payload/i,
-  );
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(message);
+  let decoded;
+  try {
+    decoded = decodePublicationRecordCollection(corrupted);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(decoded.records[0].standard, "ENC");
+  assert.equal(decoded.records[0].recordType, RecordType.PNM);
+  assert.equal(decoded.enc?.context, "transport-records-test");
+  assert.deepEqual(warnings, [
+    `REC trailer record 0 standard/type drift (ENC from Record.standard vs PNM from local RecordType ${RecordType.PNM}); decoding by Record.standard.`,
+  ]);
 });
