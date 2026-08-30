@@ -18,7 +18,10 @@ import assert from "node:assert/strict";
 import * as flatbuffers from "flatbuffers/mjs/flatbuffers.js";
 import { APPT } from "spacedatastandards.org/lib/js/APP/main.js";
 import { BPF, BPFT } from "spacedatastandards.org/lib/js/BPF/BPF.js";
-import { BPFAttestationT } from "spacedatastandards.org/lib/js/BPF/BPFAttestation.js";
+import {
+  BPFAttestation,
+  BPFAttestationT,
+} from "spacedatastandards.org/lib/js/BPF/BPFAttestation.js";
 import { BPFModule, BPFModuleT } from "spacedatastandards.org/lib/js/BPF/BPFModule.js";
 import { BPFPartT } from "spacedatastandards.org/lib/js/BPF/BPFPart.js";
 import {
@@ -47,7 +50,7 @@ import {
   zeroBuildProfileSignaturePayloads,
 } from "../src/transport/records.js";
 import { bytesToHex, hexToBytes } from "../src/utils/encoding.js";
-import { ed25519PublicKey } from "../src/utils/wasmCrypto.js";
+import { ed25519PublicKey, ed25519Sign } from "../src/utils/wasmCrypto.js";
 
 const TEMPLATE_SHA256 =
   "3d2f1a0b5c4e6d7889aabbccddeeff00112233445566778899aabbccddeeff00";
@@ -428,17 +431,92 @@ test("acceptance 4: tampering with a covered field breaks both signatures", asyn
   await assert.rejects(() => verifyBuildProfile(tampered));
 });
 
-test("acceptance 4: an attestation signed by another key REJECTS", async () => {
+test("acceptance 4: an attestation whose published key is not the signer's REJECTS", async () => {
   const otherSeed = hexToBytes(
     "1111111111111111111111111111111111111111111111111111111111111111",
   );
+  // The external-signer shape is the only way to state a key the SDK cannot
+  // check: here it publishes one identity and signs with another.
   const { bytes } = await signBuildProfile(sampleProfile(), {
-    signingSeed: otherSeed,
-    // The published key claims to be someone else's: fail closed.
+    sign: (message) => ed25519Sign(message, otherSeed),
     signingPublicKey: bytesToHex(await ed25519PublicKey(SIGNING_SEED)),
     signedAt: "2026-08-30T06:45:00.000Z",
   });
   await assert.rejects(() => verifyBuildProfile(bytes), /failed to verify/);
+});
+
+test("signing refuses any shape that would publish a key the signer does not hold", async () => {
+  const profile = sampleProfile();
+  // An external signer with no stated key: the SDK must never invent one.
+  await assert.rejects(
+    () => signBuildProfile(profile, { sign: async () => new Uint8Array(64) }),
+    /requires options.signingPublicKey/,
+  );
+  // A seed and a contradicting key.
+  await assert.rejects(
+    () =>
+      signBuildProfile(profile, {
+        signingSeed: SIGNING_SEED,
+        signingPublicKey:
+          "1111111111111111111111111111111111111111111111111111111111111111",
+      }),
+    /does not belong to options.signingSeed/,
+  );
+  // Both signer shapes at once.
+  await assert.rejects(
+    () =>
+      signBuildProfile(profile, {
+        signingSeed: SIGNING_SEED,
+        sign: async () => new Uint8Array(64),
+      }),
+    /never both/,
+  );
+  // Neither.
+  await assert.rejects(() => signBuildProfile(profile, {}), /requires either/);
+});
+
+test("an external signer that states its own key produces a record that verifies", async () => {
+  const { bytes, profile } = await signBuildProfile(sampleProfile(), {
+    sign: (message) => ed25519Sign(message, SIGNING_SEED),
+    signingPublicKey: bytesToHex(await ed25519PublicKey(SIGNING_SEED)),
+    signedAt: "2026-08-30T06:45:00.000Z",
+  });
+  const verified = await verifyBuildProfile(bytes);
+  assert.equal(verified.signed, true);
+  assert.deepEqual(verified.profile, profile);
+});
+
+test("acceptance 4: an attestation missing a signature payload is refused at decode", () => {
+  // Hand-built: flatc's own builder cannot omit a required field, but an
+  // attacker's encoder can, and "one signature stripped" must not decode.
+  const builder = new flatbuffers.Builder(1024);
+  const publicKey = builder.createString(
+    "aa11bb22cc33dd44ee55ff6600778899aabbccddeeff00112233445566778899",
+  );
+  const onlySignature = BPFAttestation.createSignatureVector(
+    builder,
+    new Uint8Array(BUILD_PROFILE_SIGNATURE_LENGTH),
+  );
+  BPFAttestation.startBPFAttestation(builder);
+  BPFAttestation.addSigningPublicKey(builder, publicKey);
+  BPFAttestation.addSignature(builder, onlySignature);
+  const attestation = builder.endObject();
+  BPFRuntimeLock.startBPFRuntimeLock(builder);
+  const lock = BPFRuntimeLock.endBPFRuntimeLock(builder);
+  const profileId = builder.createString("p");
+  const profileName = builder.createString("n");
+  const templateSha256 = builder.createString(TEMPLATE_SHA256);
+  BPF.startBPF(builder);
+  BPF.addProfileId(builder, profileId);
+  BPF.addName(builder, profileName);
+  BPF.addTemplateSha256(builder, templateSha256);
+  BPF.addRuntimeLock(builder, lock);
+  BPF.addAttestation(builder, attestation);
+  BPF.finishSizePrefixedBPFBuffer(builder, BPF.endBPF(builder));
+  assert.throws(
+    () => decodeBuildProfile(builder.asUint8Array()),
+    /canonicalJsonSignature must be exactly 64 bytes/,
+  );
 });
 
 test("acceptance 4: a short signature payload is refused at decode", () => {

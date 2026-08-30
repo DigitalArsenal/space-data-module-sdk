@@ -1420,8 +1420,20 @@ function decodeBuildProfileAttestation(table) {
     // There is no `SIGNED` boolean to consult and none is synthesized.
     return null;
   }
-  const signature = table.signatureArray();
-  const canonicalJsonSignature = table.canonicalJsonSignatureArray();
+  // FAIL CLOSED on an incomplete attestation. The lengths are read BEFORE the
+  // array views are taken: an absent vector reports offset 0, and asking the
+  // generated accessor for a view at that offset would read wherever the
+  // vtable pointer happens to aim rather than refusing the record.
+  for (const [length, field] of [
+    [table.signatureLength(), "signature"],
+    [table.canonicalJsonSignatureLength(), "canonicalJsonSignature"],
+  ]) {
+    if (length !== BUILD_PROFILE_SIGNATURE_LENGTH) {
+      throw new TypeError(
+        `BPF profile attestation.${field} must be exactly ${BUILD_PROFILE_SIGNATURE_LENGTH} bytes; an attestation missing either payload is REJECTED, never read as unsigned.`,
+      );
+    }
+  }
   return {
     signingPublicKey: requireLowercaseSha256(
       table.SIGNING_PUBLIC_KEY(),
@@ -1432,11 +1444,11 @@ function decodeBuildProfileAttestation(table) {
       "BPF profile attestation.signedAt",
     ),
     signature: normalizeSignaturePayload(
-      signature,
+      table.signatureArray(),
       "BPF profile attestation.signature",
     ),
     canonicalJsonSignature: normalizeSignaturePayload(
-      canonicalJsonSignature,
+      table.canonicalJsonSignatureArray(),
       "BPF profile attestation.canonicalJsonSignature",
     ),
   };
@@ -1597,17 +1609,61 @@ export function zeroBuildProfileSignaturePayloads(bytes) {
   return clone;
 }
 
-function resolveBuildProfileSigner(options) {
-  if (typeof options.sign === "function") {
-    return async (message) => toUint8Array(await options.sign(message));
-  }
-  if (options.signingSeed === undefined || options.signingSeed === null) {
+/**
+ * Resolve the signer AND the key it publishes together, because publishing a
+ * `SIGNING_PUBLIC_KEY` that does not belong to the signer produces a record
+ * whose signatures can never verify — a silent authoring failure that only
+ * surfaces at the importer. There are exactly two shapes and neither can
+ * guess the other's half:
+ *   - `signingSeed` — the SDK signs and derives the published key itself.
+ *   - `sign`        — an external signer (a wallet, a keyslot); the caller
+ *                     MUST state the `signingPublicKey` that signer holds.
+ */
+async function resolveBuildProfileSigner(options) {
+  const declaredPublicKey = optionalTrimmedString(
+    options.signingPublicKey,
+    "signBuildProfile signingPublicKey",
+  );
+  const hasSeed = options.signingSeed !== undefined && options.signingSeed !== null;
+  const hasSignFunction = typeof options.sign === "function";
+  if (hasSeed && hasSignFunction) {
     throw new TypeError(
-      "signBuildProfile requires either options.signingSeed (an Ed25519 seed) or options.sign.",
+      "signBuildProfile takes options.signingSeed OR options.sign, never both: the published key must belong to the signer that produced the signatures.",
+    );
+  }
+  if (hasSignFunction) {
+    if (!declaredPublicKey) {
+      throw new TypeError(
+        "signBuildProfile with options.sign requires options.signingPublicKey: the SDK cannot derive an external signer's public key, and publishing the wrong one yields a record that never verifies.",
+      );
+    }
+    return {
+      sign: async (message) => toUint8Array(await options.sign(message)),
+      signingPublicKey: requireLowercaseSha256(
+        declaredPublicKey,
+        "signBuildProfile signingPublicKey",
+      ),
+    };
+  }
+  if (!hasSeed) {
+    throw new TypeError(
+      "signBuildProfile requires either options.signingSeed (an Ed25519 seed) or options.sign with options.signingPublicKey.",
     );
   }
   const seed = toUint8Array(options.signingSeed);
-  return async (message) => toUint8Array(await ed25519Sign(message, seed));
+  const derivedPublicKey = bytesToHex(await ed25519PublicKey(seed));
+  if (declaredPublicKey && declaredPublicKey !== derivedPublicKey) {
+    throw new Error(
+      "signBuildProfile signingPublicKey does not belong to options.signingSeed; the attestation would publish a key that cannot verify its own signatures.",
+    );
+  }
+  return {
+    sign: async (message) => toUint8Array(await ed25519Sign(message, seed)),
+    signingPublicKey: requireLowercaseSha256(
+      derivedPublicKey,
+      "signBuildProfile signingPublicKey",
+    ),
+  };
 }
 
 /**
@@ -1615,12 +1671,7 @@ function resolveBuildProfileSigner(options) {
  * plus its canonical size-prefixed `$BPF` bytes.
  */
 export async function signBuildProfile(profile, options = {}) {
-  const sign = resolveBuildProfileSigner(options);
-  const signingPublicKey = requireLowercaseSha256(
-    optionalTrimmedString(options.signingPublicKey, "signBuildProfile signingPublicKey") ??
-      bytesToHex(await ed25519PublicKey(toUint8Array(options.signingSeed ?? new Uint8Array(0)))),
-    "signBuildProfile signingPublicKey",
-  );
+  const { sign, signingPublicKey } = await resolveBuildProfileSigner(options);
   const signedAt =
     optionalFixedMillisecondTimestamp(options.signedAt, "signBuildProfile signedAt") ??
     new Date().toISOString();
