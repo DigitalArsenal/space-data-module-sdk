@@ -62,9 +62,43 @@ be replaced, not as a contract.
 ## Units and frames
 
 SI end-to-end at the frozen consumer seam: metres, metres per second, seconds,
-radians. Frames must be named explicitly on every delta-v; the future typed wire
-makes the frame field mandatory precisely because the current envelope allows it
-to be implied.
+radians. Frames must be named explicitly on every delta-v, and the reference
+module now does so unconditionally: every response carrying a delta-v emits a
+`frame` key, and there is no default to fall back on.
+
+### The canonical RIC triad
+
+    R = unit(r)      C = unit(r x v)      I = C x R
+
+Built from the **inertial** state — never an Earth-fixed one — with components
+ordered `[radial, in-track, cross-track]`, SI metres per second, signed.
+
+This is the ONE convention the family names. It is what
+`space-data-network-modules/analysis/maneuver/src/cpp/src/rendezvous.cpp`
+implements (`lvlhBasis()`) and what the engine's
+`OrbPro/packages/engine/Source/DataSources/ManeuverFrames.js` calls
+`ManeuverFrame.RIC`; those two already agreed, and this page is where the
+agreement is written down. A consuming seam MUST NOT infer the triad from a
+key spelling, and a producing module MUST NOT rely on a consumer's alias
+tolerance: alias key sets that exist on the consumer side are legacy
+tolerance, never a producer contract.
+
+Lambert-family operations are the one place a different frame is correct: their
+velocities are stated in the same inertial frame as the `r1` / `r2` they were
+given, so they declare `frame: "ECI"` rather than `RIC`. Declared, not assumed
+— that distinction is the whole point.
+
+The reference module also exposes the rotation itself, so a consumer never has
+to re-derive a triad: `transformDeltaV` takes
+`{position, velocity, deltaV, from: "RIC" | "ECI"}` and returns the rotated
+vector, the resulting frame name, and the basis. An unrecognised `from` is an
+`invalid-parameter` refusal; a purely radial state, which has no orbit normal
+and therefore no RIC frame, is `singular-configuration`.
+
+Historically this was the family's worst defect: no frame was declared and none
+was applied — r/t/n components were written onto x/y/z raw while three distinct
+RTN triads were live across the stack (D1 in
+`graph/findings/official-harness-shapes.md`).
 
 ## Sentinels
 
@@ -130,14 +164,43 @@ command-envelope handling until the invoke freeze lands.
 
 ## Known defects, stated plainly
 
-The invoke surface is not frozen because of specific, reproduced defects:
+The three defects that held this surface unfrozen are **closed** as of
+`maneuver-planner` 0.5.0 (`gmat-01-defect-burn-down`). Each is recorded here
+with what closed it and what proves it, because "we fixed it" without an
+assertion is how they came back the first time:
 
-- A dead error path that cannot be reached.
-- Delta-v scalars that lose their sign — magnitudes are returned where signed
-  values are required.
-- Lambert solutions that report a converged flag which is not true, for the
-  large majority of the tested geometries.
+- ~~A dead error path that cannot be reached.~~ **Closed.** Every refusal is a
+  structured result carrying an `errorCode` and a message; `tests/error_path.test.mjs`
+  drives malformed, hostile and impossible inputs and distinguishes "returned a
+  refusal" from "trapped" — a helper that throws on a non-zero status cannot
+  tell those apart, which is why that file invokes raw bytes.
+- ~~Delta-v scalars that lose their sign.~~ **Closed.** Single-axis scalars are
+  signed and equal the in-track component of their RIC array. `totalDeltaV`
+  stays a magnitude because it is the propellant budget, and
+  `combinedManeuver`'s `dv2` stays a magnitude because it is the norm of a
+  two-component burn. The negative control is a GEO-to-LEO descent whose burns
+  both brake; under 0.4.0 it was numerically indistinguishable from the
+  ascent.
+- ~~Lambert solutions that report a converged flag which is not true.~~
+  **Closed.** `converged` is a measured residual against a stated budget, not a
+  literal; the root is bracketed and found by Newton safeguarded with
+  bisection, so "no solution" is a reportable answer. A 72-geometry LEO sweep
+  re-propagates every claimed departure velocity and measures the arrival miss,
+  on browser and WasmEdge alike.
 
-These are tracked under `harness-w2-maneuver-invoke-freeze`. The seam contract
-publication, the invoke freeze, and the `$MVW` record mint are the three
-gates between this page and a Shipped status.
+Two gaps remain open and are NOT closed by the above:
+
+- **No independent-solver cross-check runs yet.** The intended reference,
+  `space-data-network-modules/analysis/lambert-izzo` (Izzo's revisited
+  algorithm, Householder), exits with WASI code 1 on every `solve_lambert`
+  invoke — that package ships manifest tests only and has never had a
+  functional invoke test. The cross-check is written and armed in
+  `analysis/maneuver/tests/lambert_izzo_crosscheck.test.mjs`; it SKIPS with
+  that diagnosis rather than voting, and turns on by itself once the reference
+  artifact answers.
+- **The `$MVW` record is not minted**, so delta-v still travels as the reviewed
+  JSON envelope rather than a typed wire.
+
+The seam contract publication, the invoke freeze, and the `$MVW` record mint
+remain the three gates between this page and a Shipped status
+(`harness-w2-maneuver-invoke-freeze`).
