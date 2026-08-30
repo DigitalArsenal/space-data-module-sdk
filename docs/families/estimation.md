@@ -95,6 +95,11 @@ result includes convergence, iteration, accepted and rejected counts, RMS,
 recovered noise sigma, and covariance. A sequential result includes every
 filtered covariance and, for the smoother kind, every smoothed covariance.
 
+Batch result wires also carry `iteration_covariances` as consecutive row-major
+6-by-6 blocks. Each block is the normal-matrix covariance from that exact
+outer iteration, so a convergence visualization uses solver output rather
+than an interpolated uncertainty.
+
 The public status vocabulary is:
 
 | Status | Meaning |

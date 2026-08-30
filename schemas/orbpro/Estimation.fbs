@@ -221,6 +221,9 @@ table EstimationResult {
   estimate:EstimationState;
   filter_history:[FilterEpoch];
   residuals:[double];
+  /// Row-major 6x6 covariance blocks, one per batch iteration, in iteration
+  /// order. Empty for sequential estimators.
+  iteration_covariances:[double];
   rejected_observation_indices:[uint];
   odr_record:[ubyte];
   ocm_record:[ubyte];
