@@ -54,6 +54,30 @@ export enum StateFlags {
 }
 
 /**
+ * The negative return codes every propagator export shares.
+ *
+ * These were documented in docs/propagator-abi.md and declared NOWHERE, so
+ * every module hand-typed them as literals and the contract lived only in
+ * prose. A propagator that returns -1 for everything is unconformable — the
+ * host cannot tell a bad entity index from an uninitialized module, so it
+ * cannot place the failure on the degradation ladder — and the cheapest way
+ * to end up there is having no names to return.
+ *
+ * VALUES ARE FROZEN. New classes are appended downward.
+ */
+export enum ErrorCode {
+  OK = 0,
+  NOT_INITIALIZED = -1,
+  BAD_ENTITY_INDEX = -2,
+  NULL_OUTPUT = -3,
+  BAD_INPUT = -4,
+  NOT_CONVERGED = -5,
+  UNPHYSICAL = -6,
+  UNSUPPORTED_FORMAT = -7,
+  EPOCH_OUT_OF_RANGE = -8,
+}
+
+/**
  * The container an ephemeris-driven propagator was handed on
  * `plugin_init_ephemeris`. A format is DATA, not identity: one ephemeris
  * provider reads every member below behind this discriminator rather than

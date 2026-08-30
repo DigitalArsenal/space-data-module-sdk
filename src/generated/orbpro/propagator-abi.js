@@ -47,6 +47,18 @@ export const StateFlags = Object.freeze({
   HAS_COVARIANCE: 32,
 });
 
+export const ErrorCode = Object.freeze({
+  OK: 0,
+  NOT_INITIALIZED: -1,
+  BAD_ENTITY_INDEX: -2,
+  NULL_OUTPUT: -3,
+  BAD_INPUT: -4,
+  NOT_CONVERGED: -5,
+  UNPHYSICAL: -6,
+  UNSUPPORTED_FORMAT: -7,
+  EPOCH_OUT_OF_RANGE: -8,
+});
+
 export const EphemerisFormat = Object.freeze({
   AUTO: 0,
   CCSDS_OEM_KVN: 1,

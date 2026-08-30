@@ -83,6 +83,34 @@ typedef enum {
 } OrbProStateFlags;
 
 /* ========================================================================= */
+/* ErrorCode */
+/* ========================================================================= */
+
+/**
+ * The negative return codes every propagator export shares.
+ *
+ * These were documented in docs/propagator-abi.md and declared NOWHERE, so
+ * every module hand-typed them as literals and the contract lived only in
+ * prose. A propagator that returns -1 for everything is unconformable — the
+ * host cannot tell a bad entity index from an uninitialized module, so it
+ * cannot place the failure on the degradation ladder — and the cheapest way
+ * to end up there is having no names to return.
+ *
+ * VALUES ARE FROZEN. New classes are appended downward.
+ */
+typedef enum {
+    ORBPRO_PROP_OK = 0,
+    ORBPRO_PROP_NOT_INITIALIZED = -1,    /**< No elements or ephemeris ingested yet. */
+    ORBPRO_PROP_BAD_ENTITY_INDEX = -2,    /**< Entity index at or beyond the entity count. */
+    ORBPRO_PROP_NULL_OUTPUT = -3,    /**< The caller passed a null output pointer. */
+    ORBPRO_PROP_BAD_INPUT = -4,    /**< Malformed or short input buffer. */
+    ORBPRO_PROP_NOT_CONVERGED = -5,    /**< The solve failed to converge. */
+    ORBPRO_PROP_UNPHYSICAL = -6,    /**< The elements describe no closed orbit, or the result is not a number. */
+    ORBPRO_PROP_UNSUPPORTED_FORMAT = -7,    /**< The ephemeris container is not one this module reads, or AUTO could not identify it, or its declared frame has no member on the ReferenceFrame roster. */
+    ORBPRO_PROP_EPOCH_OUT_OF_RANGE = -8,    /**< The requested epoch lies outside every segment the loaded ephemeris covers. A refusal, never a silent extrapolation: a caller cannot detect an extrapolated state from the value alone. */
+} OrbProPropagatorError;
+
+/* ========================================================================= */
 /* EphemerisFormat */
 /* ========================================================================= */
 
