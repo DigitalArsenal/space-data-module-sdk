@@ -1,5 +1,5 @@
 /* ===========================================================================
- * GENERATED FILE — DO NOT EDIT.
+ * SCHEMA-DERIVED ABI CONTRACT.
  *
  * Source of truth : schemas/orbpro/Solver.fbs
  * Contract        : pull/supply maneuver-family solver ABI
@@ -77,6 +77,12 @@ typedef struct {
 
 ORBPRO_SOLVER_STATIC_ASSERT(sizeof(OrbProSolverSettings) == 64,
                             "OrbProSolverSettings must be 64 bytes");
+ORBPRO_SOLVER_STATIC_ASSERT(offsetof(OrbProSolverSettings, variable_count) == 12,
+                            "OrbProSolverSettings.variable_count offset");
+ORBPRO_SOLVER_STATIC_ASSERT(offsetof(OrbProSolverSettings, equality_constraint_count) == 20,
+                            "OrbProSolverSettings.equality_constraint_count offset");
+ORBPRO_SOLVER_STATIC_ASSERT(offsetof(OrbProSolverSettings, residual_tolerance) == 32,
+                            "OrbProSolverSettings.residual_tolerance offset");
 
 typedef struct {
   uint64_t request_id;
@@ -105,6 +111,12 @@ typedef struct {
 
 ORBPRO_SOLVER_STATIC_ASSERT(sizeof(OrbProSolverEvaluation) == 2344,
                             "OrbProSolverEvaluation must be 2344 bytes");
+ORBPRO_SOLVER_STATIC_ASSERT(offsetof(OrbProSolverEvaluation, goals) == 32,
+                            "OrbProSolverEvaluation.goals offset");
+ORBPRO_SOLVER_STATIC_ASSERT(offsetof(OrbProSolverEvaluation, objective) == 160,
+                            "OrbProSolverEvaluation.objective offset");
+ORBPRO_SOLVER_STATIC_ASSERT(offsetof(OrbProSolverEvaluation, constraints) == 168,
+                            "OrbProSolverEvaluation.constraints offset");
 
 typedef struct {
   uint32_t iteration;
@@ -142,6 +154,10 @@ typedef struct {
 
 ORBPRO_SOLVER_STATIC_ASSERT(sizeof(OrbProSolverResult) == 312,
                             "OrbProSolverResult must be 312 bytes");
+ORBPRO_SOLVER_STATIC_ASSERT(offsetof(OrbProSolverResult, variables) == 24,
+                            "OrbProSolverResult.variables offset");
+ORBPRO_SOLVER_STATIC_ASSERT(offsetof(OrbProSolverResult, objective) == 280,
+                            "OrbProSolverResult.objective offset");
 
 static inline void orbpro_solver_zero(void* value, size_t size) {
   size_t index;
