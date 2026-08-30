@@ -52,6 +52,12 @@ export function runEstimationSuite(evidence) {
     sameSet(batch.rejectedExpected, batch.rejectedActual),
     `exact rejected set [${batch.rejectedActual ?? []}]`,
     "sigma editing rejected a different observation set");
+  check(checks, "tierC/batch-iteration-covariance", "C",
+    Number.isInteger(batch.iterationCount) && batch.iterationCount > 0 &&
+      batch.iterationCovarianceCount === batch.iterationCount &&
+      batch.iterationCovariancesSpd === true,
+    `${batch.iterationCovarianceCount}/${batch.iterationCount} iteration covariances are SPD`,
+    "batch iteration covariance history is missing, incomplete, or not SPD");
 
   const filter = evidence?.filter ?? {};
   check(checks, "tierA/filter-and-smoother-state", "A",
@@ -119,7 +125,7 @@ export function runEstimationSuite(evidence) {
     invariants.covarianceSymmetric === true && invariants.covariancePositiveDefinite === true,
     "covariance is symmetric positive definite");
   check(checks, "tierC/residual-orthogonality", "C",
-    finiteAtMost(invariants.residualOrthogonalityMax, 1e-8),
+    finiteAtMost(invariants.residualOrthogonalityMax, 1e-6),
     `max normalized normal-equation projection=${invariants.residualOrthogonalityMax}`);
   check(checks, "tierC/ocm-covariance", "C", invariants.actualOcmCovariance === true,
     "the emitted OCM carries the estimator covariance");

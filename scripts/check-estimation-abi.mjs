@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { renderAbiArtifacts } from "./generate-propagator-abi.mjs";
+import { generateAbi, renderAbiArtifacts } from "./generate-propagator-abi.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const header = "include/orbpro/orbpro_estimation_abi.h";
@@ -22,6 +22,12 @@ const spec = Object.freeze({
   tsForeignModule: "./propagator-abi.js",
   cLanguageNote: ["/* Fixed-layout estimation ABI; valid in C and C++. */"],
 });
+
+if (process.argv.includes("--write")) {
+  await generateAbi(spec, { outputRoot: root });
+  console.log(`generated ${header} from schemas/orbpro/Estimation.fbs`);
+  process.exit(0);
+}
 
 const generated = (await renderAbiArtifacts(spec)).get(header);
 const committed = await fs.readFile(path.join(root, header), "utf8");

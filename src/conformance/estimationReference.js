@@ -27,6 +27,9 @@ const reference = {
     residualRmsRelativeError: 2e-8,
     rejectedExpected: [7, 19],
     rejectedActual: [7, 19],
+    iterationCount: 4,
+    iterationCovarianceCount: 4,
+    iterationCovariancesSpd: true,
   },
   filter: {
     positionErrorM: 0.65,
