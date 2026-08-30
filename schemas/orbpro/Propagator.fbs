@@ -41,31 +41,94 @@ attribute "abi_c_prefix";
 /// enum field. Writing these by hand is how padding bytes go stale.
 attribute "abi_c_helper_prefix";
 
-// !! FOUR INCOMPATIBLE `ReferenceFrame` VOCABULARIES CROSS THIS SEAM !!
-// This is the `orbpro.propagator` one. Its NUMERIC values are NOT
-// interchangeable with the others; translate by NAMED TOKEN at every seam.
+// !! FIVE INCOMPATIBLE `ReferenceFrame` VOCABULARIES CROSS THIS SEAM, PLUS AN
+// !! AXIS-TYPE VOCABULARY THAT IS NOT A ReferenceFrame AT ALL !!
+// This is the `orbpro.propagator` one, and it is the ONE that crosses the ABI.
+// The NUMERIC values below are NOT interchangeable with any of the others;
+// translate by NAMED TOKEN at every seam.
 //
-//   (A) orbpro.propagator (THIS)  TEME=0 J2000=1 ICRF=2 ECEF=3 MCI=4 MCMF=5
+//   (A) orbpro.propagator (THIS)  TEME=0 J2000=1 ICRF=2 ECEF=3 MCI=4 MCMF=5,
+//                                 then the appended axis roster at 6+
 //   (B) orbpro.plugins            ECI=0  ECEF=1  TEME=2 ICRF=3
 //       (PropagatorState.fbs / "PRST" — the wire the compiled sgp4, hpop,
 //        conjunction-assessment and sensor-shader modules already emit)
-//   (C) Cesium.ReferenceFrame     FIXED=0 INERTIAL=1
+//   (C) OrbPro engine ReferenceFrame.js — NINE members, not two:
+//       FIXED=0 INERTIAL=1 TEME=2 VVLH=3 ENU=4 NED=5 NEU=6 RIC=7 LVLH=8
+//       (verified on OrbPro 417320c5c5. The long-standing claim in this block
+//        that it was "Cesium.ReferenceFrame FIXED=0 INERTIAL=1" was stale, and
+//        stale in the direction that mattered: it hid seven live members.)
 //   (D) ConjunctionCommon.fbs     ECI=1
+//   (E) foundation/frames `AxisType` (space-data-network-modules) — an
+//       ORIENTATION RULE roster, mirroring SDS `rfmAxisType`. It is not a
+//       ReferenceFrame and must never be numerically equated with one: a
+//       coordinate system is an axis set AND an origin, and this enum carries
+//       no origin.
 //
 // ECI==0, TEME==0 and FIXED==0 all collide, and ECEF is 1 in (B) but 3 here.
 // (B)'s values are frozen by compiled WASM artifacts in the field, so
 // collapsing (A) and (B) is a wire break, not a Wave-0 edit — see
-// graph/tasks/sdk-reference-frame-enum-unification.md. The reference pattern
-// for a correct seam is propagator.hpop/index.js createSourceFromState.
+// graph/tasks/sdk-reference-frame-enum-unification.md, which also owns the
+// (A)-vs-(C) inversion at 0/1. The reference pattern for a correct seam is
+// propagator.hpop/index.js createSourceFromState.
 //
-// Ruling: graph/findings/official-harness-shapes.md §4.2 / §8.2
+// The crosswalk between all of these is DATA, in
+// schemas/orbpro/reference-frame-crosswalk.json, and
+// scripts/check-reference-frame-uniqueness.mjs holds it to this enum.
+//
+// Ruling: graph/findings/official-harness-shapes.md §4.2 / §8.2; Janus consult
+// 2026-08-30 (gmat-08-frames-and-state-representations).
+//
+// VALUES 0-5 ARE FROZEN AND ARE NEVER RENUMBERED. New members are APPENDED.
+// ECEF/MCI/MCMF are body-bound legacy instances of the generic pair at 11/12 —
+// ECEF is BODY_FIXED about the Earth, MCI is BODY_INERTIAL about Mars, MCMF is
+// BODY_FIXED about Mars. They are retained, and the generic members are NOT a
+// second spelling of them.
 enum ReferenceFrame : ubyte (abi, abi_c_name: "OrbProReferenceFrame", abi_c_prefix: "ORBPRO_FRAME_") {
   TEME = 0,
   J2000 = 1,
   ICRF = 2,
   ECEF = 3,
   MCI = 4,
-  MCMF = 5
+  MCMF = 5,
+  /// Mean ecliptic and equinox of J2000. (The mean EQUATOR and equinox of
+  /// J2000 is J2000 = 1 and is not repeated here.)
+  MJ2000EC = 6,
+  /// Mean equator of date.
+  MOD = 7,
+  /// True equator of date.
+  TOD = 8,
+  /// Mean ecliptic of date.
+  MOE = 9,
+  /// True ecliptic of date.
+  TOE = 10,
+  /// Axes rotating with a named body, per its published rotation elements.
+  BODY_FIXED = 11,
+  /// Non-rotating axes on a named body's equator and prime meridian.
+  BODY_INERTIAL = 12,
+  /// Axes built from the relative geometry of two named objects. The three
+  /// live RTN triads — RIC, RSW and RTN — are THIS member with an axes spec,
+  /// not three members; so are LVLH and VVLH.
+  OBJECT_REFERENCED = 13,
+  /// Axes built by aligning one vector and constraining a second.
+  LOCAL_ALIGNED_CONSTRAINED = 14,
+  /// A named body's equatorial plane at the epoch.
+  EQUATOR = 15,
+  /// Solar-ecliptic magnetospheric (GSE).
+  GSE = 16,
+  /// Solar magnetospheric (GSM).
+  GSM = 17,
+  /// Local horizon axes at a surface site.
+  TOPOCENTRIC = 18,
+  /// Axes fixed by a body's spin axis and its direction to the Sun.
+  BODY_SPIN_SUN = 19,
+  /// Axes declared by a loaded ephemeris/orientation kernel.
+  SPICE_DEFINED = 20,
+  /// LEGACY, retained and NAMED rather than left implicit: mean equator of
+  /// date on the IAU-76/FK5 theory. Differs from MOD at the milliarcsecond
+  /// level; the two are not interchangeable.
+  MOD_FK5 = 21,
+  /// LEGACY, retained and NAMED: true equator of date on IAU-76/FK5.
+  TOD_FK5 = 22
 }
 
 /// StateVector.flags is a BITFIELD carrying any OR-combination of these, so it

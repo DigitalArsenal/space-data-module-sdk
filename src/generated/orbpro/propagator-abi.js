@@ -18,6 +18,23 @@ export const ReferenceFrame = Object.freeze({
   ECEF: 3,
   MCI: 4,
   MCMF: 5,
+  MJ2000EC: 6,
+  MOD: 7,
+  TOD: 8,
+  MOE: 9,
+  TOE: 10,
+  BODY_FIXED: 11,
+  BODY_INERTIAL: 12,
+  OBJECT_REFERENCED: 13,
+  LOCAL_ALIGNED_CONSTRAINED: 14,
+  EQUATOR: 15,
+  GSE: 16,
+  GSM: 17,
+  TOPOCENTRIC: 18,
+  BODY_SPIN_SUN: 19,
+  SPICE_DEFINED: 20,
+  MOD_FK5: 21,
+  TOD_FK5: 22,
 });
 
 export const StateFlags = Object.freeze({

@@ -1,0 +1,98 @@
+{
+  "note": "The committed numbering of the ONE ReferenceFrame enum that crosses the ABI seam. scripts/check-reference-frame-uniqueness.mjs holds schemas/orbpro/Propagator.fbs to this file: values 0-5 are FROZEN and no member may ever be renamed, renumbered or removed. Appending a member means appending a row here in the same commit.",
+  "frozenThrough": 5,
+  "members": [
+    {
+      "name": "TEME",
+      "value": 0
+    },
+    {
+      "name": "J2000",
+      "value": 1
+    },
+    {
+      "name": "ICRF",
+      "value": 2
+    },
+    {
+      "name": "ECEF",
+      "value": 3
+    },
+    {
+      "name": "MCI",
+      "value": 4
+    },
+    {
+      "name": "MCMF",
+      "value": 5
+    },
+    {
+      "name": "MJ2000EC",
+      "value": 6
+    },
+    {
+      "name": "MOD",
+      "value": 7
+    },
+    {
+      "name": "TOD",
+      "value": 8
+    },
+    {
+      "name": "MOE",
+      "value": 9
+    },
+    {
+      "name": "TOE",
+      "value": 10
+    },
+    {
+      "name": "BODY_FIXED",
+      "value": 11
+    },
+    {
+      "name": "BODY_INERTIAL",
+      "value": 12
+    },
+    {
+      "name": "OBJECT_REFERENCED",
+      "value": 13
+    },
+    {
+      "name": "LOCAL_ALIGNED_CONSTRAINED",
+      "value": 14
+    },
+    {
+      "name": "EQUATOR",
+      "value": 15
+    },
+    {
+      "name": "GSE",
+      "value": 16
+    },
+    {
+      "name": "GSM",
+      "value": 17
+    },
+    {
+      "name": "TOPOCENTRIC",
+      "value": 18
+    },
+    {
+      "name": "BODY_SPIN_SUN",
+      "value": 19
+    },
+    {
+      "name": "SPICE_DEFINED",
+      "value": 20
+    },
+    {
+      "name": "MOD_FK5",
+      "value": 21
+    },
+    {
+      "name": "TOD_FK5",
+      "value": 22
+    }
+  ]
+}

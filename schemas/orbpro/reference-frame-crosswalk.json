@@ -1,0 +1,108 @@
+{
+  "note": "Every ReferenceFrame-shaped vocabulary that crosses a seam with the orbpro.propagator ABI enum, and how each of its members maps ONTO that enum BY NAMED TOKEN. Numeric identity is never asserted across repositories: ECI==0, TEME==0 and FIXED==0 all collide, and ECEF is 1 in orbpro.plugins but 3 in the ABI. scripts/check-reference-frame-uniqueness.mjs holds this file and schemas/orbpro/Propagator.fbs to each other, and re-reads any listed source that is present on disk.",
+  "authority": "schemas/orbpro/Propagator.fbs :: enum ReferenceFrame",
+  "vocabularies": [
+    {
+      "id": "orbpro.plugins",
+      "description": "PropagatorState.fbs / \"PRST\" \u2014 the wire the compiled sgp4, hpop, conjunction-assessment and sensor-shader modules already emit. Its values are FROZEN by artifacts in the field; collapsing it into the ABI enum is a wire break, tracked as sdk-reference-frame-enum-unification.",
+      "repo": "space-data-network-modules",
+      "source": "propagator/sgp4/schemas/PropagatorState.fbs",
+      "members": {
+        "ECI": "ICRF",
+        "ECEF": "ECEF",
+        "TEME": "TEME",
+        "ICRF": "ICRF"
+      }
+    },
+    {
+      "id": "orbpro.engine",
+      "description": "The OrbPro engine's ReferenceFrame.js. NINE members, not the two this SDK's comment block claimed until 2026-08-30. FIXED/INERTIAL are INVERTED against the ABI's 0/1 \u2014 a live semantic difference, not a numbering accident \u2014 and reconciling that is sdk-reference-frame-enum-unification's job, not this crosswalk's. The four local orbital triads collapse onto OBJECT_REFERENCED with an axes spec.",
+      "repo": "OrbPro",
+      "source": "packages/engine/Source/Core/ReferenceFrame.js",
+      "members": {
+        "FIXED": "ECEF",
+        "INERTIAL": "ICRF",
+        "TEME": "TEME",
+        "VVLH": "OBJECT_REFERENCED",
+        "ENU": "TOPOCENTRIC",
+        "NED": "TOPOCENTRIC",
+        "NEU": "TOPOCENTRIC",
+        "RIC": "OBJECT_REFERENCED",
+        "LVLH": "OBJECT_REFERENCED"
+      }
+    },
+    {
+      "id": "orbpro.conjunction",
+      "description": "ConjunctionCommon.fbs, carried by the conjunction module.",
+      "repo": "space-data-network-modules",
+      "source": "analysis/conjunction-assessment/schemas/ConjunctionCommon.fbs",
+      "members": {
+        "UNKNOWN": null,
+        "ECI": "ICRF",
+        "ECEF": "ECEF",
+        "TEME": "TEME",
+        "ICRF": "ICRF"
+      }
+    },
+    {
+      "id": "modules.foundation.frames",
+      "description": "foundation/frames AxisType, mirroring SDS rfmAxisType. It is an ORIENTATION RULE roster and carries no origin, so it is not a ReferenceFrame; the mapping below is the axis half only, and a consumer still needs the RFMOrigin to have a coordinate system.",
+      "repo": "space-data-network-modules",
+      "source": "foundation/frames/src/axis_engine.hpp",
+      "members": {
+        "UNSPECIFIED": null,
+        "MJ2000EQ": "J2000",
+        "MJ2000EC": "MJ2000EC",
+        "ICRF": "ICRF",
+        "TEME": "TEME",
+        "MOD": "MOD",
+        "TOD": "TOD",
+        "MOE": "MOE",
+        "TOE": "TOE",
+        "BODY_FIXED": "BODY_FIXED",
+        "BODY_INERTIAL": "BODY_INERTIAL",
+        "OBJECT_REFERENCED": "OBJECT_REFERENCED",
+        "LOCAL_ALIGNED_CONSTRAINED": "LOCAL_ALIGNED_CONSTRAINED",
+        "EQUATOR": "EQUATOR",
+        "GSE": "GSE",
+        "GSM": "GSM",
+        "TOPOCENTRIC": "TOPOCENTRIC",
+        "BODY_SPIN_SUN": "BODY_SPIN_SUN",
+        "SPICE_DEFINED": "SPICE_DEFINED",
+        "MOD_FK5": "MOD_FK5",
+        "TOD_FK5": "TOD_FK5",
+        "ITRF": "ECEF"
+      }
+    },
+    {
+      "id": "modules.hpop.coords",
+      "description": "The HPOP propagator's internal chain vocabulary.",
+      "repo": "space-data-network-modules",
+      "source": "propagator/hpop/lib/coords_types.h",
+      "members": {
+        "TEME": "TEME",
+        "GCRF": "ICRF",
+        "ITRF": "ECEF",
+        "J2000": "J2000",
+        "ECEF": "ECEF",
+        "TOD": "TOD",
+        "MOD": "MOD"
+      }
+    }
+  ],
+  "rtnConvention": {
+    "abiMember": "OBJECT_REFERENCED",
+    "note": "The three live RTN triads collapse to ONE ABI member plus an axes spec. RIC, RSW and RTN name the SAME triad (x radial, z orbit normal, y completing); LVLH and VVLH are relabellings of it produced by naming a different primary. None of them is a separate ReferenceFrame, and adding a second RTN-named ABI member is a defect this check refuses.",
+    "aliases": [
+      "RIC",
+      "RSW",
+      "RTN",
+      "LVLH",
+      "VVLH",
+      "QSW",
+      "NTW",
+      "TNW",
+      "UVW"
+    ]
+  }
+}

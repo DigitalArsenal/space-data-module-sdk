@@ -196,8 +196,22 @@ Ruling: finding §4.1 / §8.1; landed as W0.1.
 
 ## Frames
 
-`reference_frame` is `OrbProReferenceFrame`:
-`TEME=0 J2000=1 ICRF=2 ECEF=3 MCI=4 MCMF=5`.
+`reference_frame` is `OrbProReferenceFrame`. Values **0-5 are frozen and are
+never renumbered**; the GMAT axis roster is appended at 6+:
+
+`TEME=0 J2000=1 ICRF=2 ECEF=3 MCI=4 MCMF=5 MJ2000EC=6 MOD=7 TOD=8 MOE=9 TOE=10
+BODY_FIXED=11 BODY_INERTIAL=12 OBJECT_REFERENCED=13 LOCAL_ALIGNED_CONSTRAINED=14
+EQUATOR=15 GSE=16 GSM=17 TOPOCENTRIC=18 BODY_SPIN_SUN=19 SPICE_DEFINED=20
+MOD_FK5=21 TOD_FK5=22`
+
+`ECEF`, `MCI` and `MCMF` are body-bound legacy instances of the generic pair at
+11/12 — ECEF is `BODY_FIXED` about the Earth, MCI is `BODY_INERTIAL` about Mars,
+MCMF is `BODY_FIXED` about Mars. They are retained; the generic members are not
+a second spelling of them.
+
+`MOD_FK5` and `TOD_FK5` are the IAU-76/FK5 route, retained under a NAME rather
+than left as an undocumented second answer. They differ from `MOD`/`TOD` at the
+milliarcsecond level and are not interchangeable with them.
 
 **Plugins output ECEF.** The frame transform happens INSIDE the module. A
 plugin that emits an inertial frame and expects the host to rotate it is
@@ -205,21 +219,40 @@ relying on a host path that is still unimplemented — `PropagatorPlugin.toICRF`
 carries a live TEME≈ICRF approximation, and an ECEF input there is wrong by up
 to a full Earth rotation (`orbpro-toicrf-frame-transform-unimplemented`).
 
-**Never let a raw integer frame value cross a boundary unqualified.** Four
-incompatible `ReferenceFrame` vocabularies are live on this seam:
+**Never let a raw integer frame value cross a boundary unqualified.** Five
+incompatible `ReferenceFrame` vocabularies are live on this seam, plus an
+axis-type roster that is not a `ReferenceFrame` at all:
 
 | Vocabulary | Values |
 |---|---|
-| `orbpro.propagator` (**this ABI**) | TEME=0 J2000=1 ICRF=2 ECEF=3 MCI=4 MCMF=5 |
+| `orbpro.propagator` (**this ABI**) | TEME=0 J2000=1 ICRF=2 ECEF=3 MCI=4 MCMF=5, then the roster at 6+ |
 | `orbpro.plugins` (`PropagatorState.fbs`) | ECI=0 ECEF=1 TEME=2 ICRF=3 |
-| `Cesium.ReferenceFrame` | FIXED=0 INERTIAL=1 |
+| OrbPro engine `ReferenceFrame.js` | FIXED=0 INERTIAL=1 TEME=2 VVLH=3 ENU=4 NED=5 NEU=6 RIC=7 LVLH=8 |
 | `ConjunctionCommon.fbs` | ECI=1 |
+| `foundation/frames` `AxisType` | an ORIENTATION rule, no origin — never numerically equated with a frame |
 
-`ECI==0`, `TEME==0` and `FIXED==0` all collide, and ECEF is 1 in the second
-but 3 here. The second vocabulary's values are frozen by compiled WASM
-artifacts already in the field, so collapsing them is a wire break, tracked as
-`sdk-reference-frame-enum-unification`. Until it lands, **translate by named
-token at every seam**.
+The engine row is the one this document got wrong for a long time: it said
+"`Cesium.ReferenceFrame` FIXED=0 INERTIAL=1", and it was stale in the direction
+that mattered — it hid seven live members. Verified against OrbPro `417320c5c5`
+on 2026-08-30.
+
+`ECI==0`, `TEME==0` and `FIXED==0` all collide, and ECEF is 1 in `orbpro.plugins`
+but 3 here. Those values are frozen by compiled WASM artifacts already in the
+field, so collapsing them is a wire break, tracked as
+`sdk-reference-frame-enum-unification` — which also owns the ABI-vs-engine
+inversion at 0/1. Until it lands, **translate by named token at every seam**.
+
+The crosswalk between all of them is DATA, in
+`schemas/orbpro/reference-frame-crosswalk.json`, and
+`npm run check:reference-frame` (wired into `npm test` as
+`test/reference-frame-uniqueness.test.js`) holds four things at once: exactly
+one definition crosses the ABI; its numbering is append-only against
+`schemas/orbpro/reference-frame.lock.json`; every foreign vocabulary maps onto
+it by NAMED TOKEN and totally, re-read from source when that repo is on disk and
+skipped-with-a-note when it is not; and the three live RTN triads (RIC, RSW,
+RTN, plus the LVLH/VVLH relabellings) collapse to the single
+`OBJECT_REFERENCED` member with an axes spec rather than becoming members of
+their own.
 
 Use the generated setter `orbpro_state_set_reference_frame()`, never a bare
 assignment: it clears the three padding bytes a consumer reading offset 56 as

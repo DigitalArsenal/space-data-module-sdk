@@ -44,6 +44,23 @@ typedef enum {
     ORBPRO_FRAME_ECEF = 3,
     ORBPRO_FRAME_MCI = 4,
     ORBPRO_FRAME_MCMF = 5,
+    ORBPRO_FRAME_MJ2000EC = 6,    /**< Mean ecliptic and equinox of J2000. (The mean EQUATOR and equinox of J2000 is J2000 = 1 and is not repeated here.) */
+    ORBPRO_FRAME_MOD = 7,    /**< Mean equator of date. */
+    ORBPRO_FRAME_TOD = 8,    /**< True equator of date. */
+    ORBPRO_FRAME_MOE = 9,    /**< Mean ecliptic of date. */
+    ORBPRO_FRAME_TOE = 10,    /**< True ecliptic of date. */
+    ORBPRO_FRAME_BODY_FIXED = 11,    /**< Axes rotating with a named body, per its published rotation elements. */
+    ORBPRO_FRAME_BODY_INERTIAL = 12,    /**< Non-rotating axes on a named body's equator and prime meridian. */
+    ORBPRO_FRAME_OBJECT_REFERENCED = 13,    /**< Axes built from the relative geometry of two named objects. The three live RTN triads — RIC, RSW and RTN — are THIS member with an axes spec, not three members; so are LVLH and VVLH. */
+    ORBPRO_FRAME_LOCAL_ALIGNED_CONSTRAINED = 14,    /**< Axes built by aligning one vector and constraining a second. */
+    ORBPRO_FRAME_EQUATOR = 15,    /**< A named body's equatorial plane at the epoch. */
+    ORBPRO_FRAME_GSE = 16,    /**< Solar-ecliptic magnetospheric (GSE). */
+    ORBPRO_FRAME_GSM = 17,    /**< Solar magnetospheric (GSM). */
+    ORBPRO_FRAME_TOPOCENTRIC = 18,    /**< Local horizon axes at a surface site. */
+    ORBPRO_FRAME_BODY_SPIN_SUN = 19,    /**< Axes fixed by a body's spin axis and its direction to the Sun. */
+    ORBPRO_FRAME_SPICE_DEFINED = 20,    /**< Axes declared by a loaded ephemeris/orientation kernel. */
+    ORBPRO_FRAME_MOD_FK5 = 21,    /**< LEGACY, retained and NAMED rather than left implicit: mean equator of date on the IAU-76/FK5 theory. Differs from MOD at the milliarcsecond level; the two are not interchangeable. */
+    ORBPRO_FRAME_TOD_FK5 = 22,    /**< LEGACY, retained and NAMED: true equator of date on IAU-76/FK5. */
 } OrbProReferenceFrame;
 
 /* ========================================================================= */

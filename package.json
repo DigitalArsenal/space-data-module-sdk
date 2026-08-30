@@ -109,6 +109,7 @@
     "check:compliance": "node ./bin/space-data-module.js check --repo-root .",
     "check:generated-bindings": "node scripts/check-generated-bindings.mjs",
     "check:propagator-abi": "node scripts/check-propagator-abi.mjs",
+    "check:reference-frame": "node scripts/check-reference-frame-uniqueness.mjs",
     "generate:propagator-abi": "node scripts/generate-propagator-abi.mjs",
     "generate:vectors": "node ./examples/single-file-bundle/generate-vectors.mjs",
     "prepublishOnly": "npm test && npm run check:compliance",
