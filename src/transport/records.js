@@ -1,5 +1,13 @@
 import * as flatbuffers from "flatbuffers/mjs/flatbuffers.js";
 
+import { BPF, BPFT } from "spacedatastandards.org/lib/js/BPF/BPF.js";
+import { BPFAttestationT } from "spacedatastandards.org/lib/js/BPF/BPFAttestation.js";
+import { BPFModuleT } from "spacedatastandards.org/lib/js/BPF/BPFModule.js";
+import { BPFPartT } from "spacedatastandards.org/lib/js/BPF/BPFPart.js";
+import { BPFRuntimeLockT } from "spacedatastandards.org/lib/js/BPF/BPFRuntimeLock.js";
+import { bpfLicenseMode } from "spacedatastandards.org/lib/js/BPF/bpfLicenseMode.js";
+import { bpfPartKind } from "spacedatastandards.org/lib/js/BPF/bpfPartKind.js";
+import { bpfProtectionTier } from "spacedatastandards.org/lib/js/BPF/bpfProtectionTier.js";
 import {
   ENC,
   ENCT,
@@ -22,9 +30,15 @@ import {
   base64ToBytes,
   bytesToBase64,
   bytesToHex,
+  hexToBytes,
   toUint8Array,
 } from "../utils/encoding.js";
-import { sha256Bytes } from "../utils/wasmCrypto.js";
+import {
+  ed25519PublicKey,
+  ed25519Sign,
+  ed25519Verify,
+  sha256Bytes,
+} from "../utils/wasmCrypto.js";
 
 const TRAILER_MAGIC_TEXT = "$REC";
 const TRAILER_MAGIC_BYTES = new TextEncoder().encode(TRAILER_MAGIC_TEXT);
@@ -875,3 +889,950 @@ export function decodeProtectedBlobBase64(base64) {
 }
 
 export { TRAILER_MAGIC_TEXT, TRAILER_FOOTER_LENGTH };
+
+/* ------------------------------------------------------------------------ *
+ * $BPF — Build Profile (SDS ordinal 227, published in
+ * spacedatastandards.org 1.200.0).
+ *
+ * A build profile is the authoring-time CONFIGURATION of one composed build.
+ * It names no licensee, carries no key material, and confers no rights — it
+ * is not a grant ($LGR), not a license key ($PLK), and not a module manifest
+ * ($PLG). Per-module references here are the identity triple MODULE_ID /
+ * MODULE_VERSION / CONTENT_HASH; a descriptor is resolved through the
+ * module's own published manifest (see `extractGrantModuleDescriptor` and
+ * `decodePlgManifest`), never restated inside a profile.
+ *
+ * This route deliberately does NOT join `RECORD_TYPE_BY_STANDARD` above:
+ * that trio is the $REC publication trailer appended to a protected module
+ * artifact, which is a different transport than a portable profile export.
+ * Profile containment is `encodeBuildProfileRecordCollection` /
+ * `decodeBuildProfileRecordCollection`.
+ *
+ * SIGNING (owner dual-format signing law 2026-08-22; Themis 2026-08-30). A
+ * signed profile carries BOTH ratified signatures in one `BPFAttestation`,
+ * each verifying INDEPENDENTLY against the same literal Ed25519
+ * `SIGNING_PUBLIC_KEY`:
+ *   - `SIGNATURE`                — over the size-prefixed $BPF FlatBuffer
+ *                                  with BOTH 64-byte signature payloads
+ *                                  zeroed, vectors and offsets preserved.
+ *   - `CANONICAL_JSON_SIGNATURE` — over canonical JSON in IDL field order and
+ *                                  capitalization, no insignificant
+ *                                  whitespace, with ONLY the two signature
+ *                                  fields omitted (`SIGNING_PUBLIC_KEY` and
+ *                                  `SIGNED_AT` are covered).
+ * Presence of the attestation table IS the statement that a profile is
+ * signed; there is no `SIGNED` boolean, because a self-asserted flag is
+ * attacker-controlled. Verification FAILS CLOSED: a profile whose
+ * attestation is incomplete, or either of whose signatures fails, is
+ * REJECTED and is never downgraded to "unsigned and therefore acceptable" —
+ * that downgrade is the laundering path.
+ * ------------------------------------------------------------------------ */
+
+const BUILD_PROFILE_FILE_IDENTIFIER = "$BPF";
+const BUILD_PROFILE_SIGNATURE_LENGTH = 64;
+const DEFAULT_RUNTIME_LOCK_TTL_DAYS = 180;
+const MIN_RUNTIME_LOCK_TTL_DAYS = 1;
+const MAX_RUNTIME_LOCK_TTL_DAYS = 365;
+const UINT64_MAX = 18446744073709551615n;
+const UINT32_MAX = 4294967295;
+const LOWERCASE_SHA256_HEX = /^[a-f0-9]{64}$/;
+const RFC3339_FIXED_MILLISECONDS =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const DECIMAL_UINT = /^(?:0|[1-9][0-9]*)$/;
+
+function buildEnumMaps(enumObject) {
+  const byName = {};
+  const byValue = {};
+  for (const [name, value] of Object.entries(enumObject)) {
+    if (typeof value !== "number") continue;
+    byName[name] = value;
+    byValue[value] = name;
+  }
+  return Object.freeze({
+    byName: Object.freeze(byName),
+    byValue: Object.freeze(byValue),
+    names: Object.freeze(Object.keys(byName)),
+  });
+}
+
+const BPF_PART_KIND = buildEnumMaps(bpfPartKind);
+const BPF_PROTECTION_TIER = buildEnumMaps(bpfProtectionTier);
+const BPF_LICENSE_MODE = buildEnumMaps(bpfLicenseMode);
+
+function normalizeEnumName(value, maps, label, fallbackName) {
+  if (value === undefined || value === null || value === "") {
+    return fallbackName;
+  }
+  if (typeof value === "number") {
+    const name = maps.byValue[value];
+    if (name === undefined) {
+      throw new TypeError(
+        `${label} must be one of ${maps.names.join(", ")} (received ${value}).`,
+      );
+    }
+    return name;
+  }
+  const name = String(value).trim();
+  if (!Object.hasOwn(maps.byName, name)) {
+    throw new TypeError(
+      `${label} must be one of ${maps.names.join(", ")} (received ${JSON.stringify(String(value))}).`,
+    );
+  }
+  return name;
+}
+
+function requireNonEmptyString(value, label) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+  return value.trim();
+}
+
+function optionalTrimmedString(value, label) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a string when present.`);
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function requireLowercaseSha256(value, label) {
+  if (typeof value !== "string" || !LOWERCASE_SHA256_HEX.test(value)) {
+    throw new TypeError(`${label} must be 64 lowercase hexadecimal characters.`);
+  }
+  return value;
+}
+
+function optionalLowercaseSha256(value, label) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  return requireLowercaseSha256(value, label);
+}
+
+function optionalFixedMillisecondTimestamp(value, label) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  if (typeof value !== "string" || !RFC3339_FIXED_MILLISECONDS.test(value)) {
+    throw new TypeError(
+      `${label} must be an RFC 3339 UTC timestamp with fixed milliseconds.`,
+    );
+  }
+  return value;
+}
+
+function requireBoolean(value, label) {
+  if (value === undefined || value === null) {
+    return false;
+  }
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${label} must be a boolean.`);
+  }
+  return value;
+}
+
+function normalizeUint64(value, label) {
+  if (value === undefined || value === null || value === "") {
+    return 0n;
+  }
+  let normalized;
+  if (typeof value === "bigint") {
+    normalized = value;
+  } else if (typeof value === "number") {
+    if (!Number.isSafeInteger(value)) {
+      throw new TypeError(
+        `${label} must be a safe integer, a bigint, or a decimal string.`,
+      );
+    }
+    normalized = BigInt(value);
+  } else if (typeof value === "string" && DECIMAL_UINT.test(value)) {
+    normalized = BigInt(value);
+  } else {
+    throw new TypeError(
+      `${label} must be a safe integer, a bigint, or a decimal string.`,
+    );
+  }
+  if (normalized < 0n || normalized > UINT64_MAX) {
+    throw new RangeError(`${label} must fit in uint64.`);
+  }
+  return normalized;
+}
+
+function normalizeStringVector(value, label, { requireLeadingDot = false } = {}) {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array of strings.`);
+  }
+  const seen = new Set();
+  const out = [];
+  for (const [index, entry] of value.entries()) {
+    const normalized = requireNonEmptyString(entry, `${label}[${index}]`);
+    if (requireLeadingDot && !normalized.startsWith(".")) {
+      throw new TypeError(
+        `${label}[${index}] must be a dot-anchored suffix rule written with its leading dot.`,
+      );
+    }
+    if (seen.has(normalized)) {
+      throw new Error(`${label} contains the duplicate entry ${JSON.stringify(normalized)}.`);
+    }
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function normalizeSignaturePayload(value, label) {
+  const bytes = toUint8Array(value ?? new Uint8Array(0));
+  if (bytes.length !== BUILD_PROFILE_SIGNATURE_LENGTH) {
+    throw new TypeError(
+      `${label} must be exactly ${BUILD_PROFILE_SIGNATURE_LENGTH} bytes.`,
+    );
+  }
+  return new Uint8Array(bytes);
+}
+
+function normalizeBuildProfilePart(part, index, seen) {
+  if (part === null || typeof part !== "object" || Array.isArray(part)) {
+    throw new TypeError(`BPF profile parts[${index}] must be an object.`);
+  }
+  const label = `BPF profile parts[${index}]`;
+  const partId = requireNonEmptyString(part.partId, `${label}.partId`);
+  if (seen.has(partId)) {
+    throw new Error(
+      `BPF profile contains the duplicate part id ${JSON.stringify(partId)}.`,
+    );
+  }
+  seen.add(partId);
+  return {
+    partId,
+    kind: normalizeEnumName(part.kind, BPF_PART_KIND, `${label}.kind`, "UNSPECIFIED"),
+    included: requireBoolean(part.included, `${label}.included`),
+    contentSha256: optionalLowercaseSha256(part.contentSha256, `${label}.contentSha256`),
+    byteLength: normalizeUint64(part.byteLength, `${label}.byteLength`),
+    description: optionalTrimmedString(part.description, `${label}.description`),
+  };
+}
+
+function normalizeBuildProfileModule(module, index, seen) {
+  if (module === null || typeof module !== "object" || Array.isArray(module)) {
+    throw new TypeError(`BPF profile modules[${index}] must be an object.`);
+  }
+  const label = `BPF profile modules[${index}]`;
+  const moduleId = requireNonEmptyString(module.moduleId, `${label}.moduleId`);
+  if (seen.has(moduleId)) {
+    throw new Error(
+      `BPF profile contains the duplicate module id ${JSON.stringify(moduleId)}.`,
+    );
+  }
+  seen.add(moduleId);
+  return {
+    moduleId,
+    moduleVersion: optionalTrimmedString(module.moduleVersion, `${label}.moduleVersion`),
+    included: requireBoolean(module.included, `${label}.included`),
+    protection: normalizeEnumName(
+      module.protection,
+      BPF_PROTECTION_TIER,
+      `${label}.protection`,
+      "UNSPECIFIED",
+    ),
+    contentHash: optionalLowercaseSha256(module.contentHash, `${label}.contentHash`),
+  };
+}
+
+function normalizeBuildProfileRuntimeLock(lock) {
+  if (lock === undefined || lock === null) {
+    throw new TypeError(
+      "BPF profile runtimeLock is required: an absent lock is never read as an unlocked one.",
+    );
+  }
+  if (typeof lock !== "object" || Array.isArray(lock)) {
+    throw new TypeError("BPF profile runtimeLock must be an object.");
+  }
+  const ttlDays =
+    lock.ttlDays === undefined || lock.ttlDays === null || lock.ttlDays === ""
+      ? DEFAULT_RUNTIME_LOCK_TTL_DAYS
+      : lock.ttlDays;
+  if (
+    !Number.isSafeInteger(ttlDays) ||
+    ttlDays < MIN_RUNTIME_LOCK_TTL_DAYS ||
+    ttlDays > MAX_RUNTIME_LOCK_TTL_DAYS ||
+    ttlDays > UINT32_MAX
+  ) {
+    throw new RangeError(
+      `BPF profile runtimeLock.ttlDays must be an integer ${MIN_RUNTIME_LOCK_TTL_DAYS} through ${MAX_RUNTIME_LOCK_TTL_DAYS} inclusive; an out-of-range lifetime is rejected, never clamped.`,
+    );
+  }
+  return {
+    allowedDomains: normalizeStringVector(
+      lock.allowedDomains,
+      "BPF profile runtimeLock.allowedDomains",
+    ),
+    allowedTlds: normalizeStringVector(
+      lock.allowedTlds,
+      "BPF profile runtimeLock.allowedTlds",
+      { requireLeadingDot: true },
+    ),
+    devDomains: normalizeStringVector(
+      lock.devDomains,
+      "BPF profile runtimeLock.devDomains",
+    ),
+    ttlDays,
+    compiledAtMs: normalizeUint64(
+      lock.compiledAtMs,
+      "BPF profile runtimeLock.compiledAtMs",
+    ),
+  };
+}
+
+function normalizeBuildProfileAttestation(attestation) {
+  if (attestation === undefined || attestation === null) {
+    return null;
+  }
+  if (typeof attestation !== "object" || Array.isArray(attestation)) {
+    throw new TypeError("BPF profile attestation must be an object when present.");
+  }
+  return {
+    signingPublicKey: requireLowercaseSha256(
+      attestation.signingPublicKey,
+      "BPF profile attestation.signingPublicKey",
+    ),
+    signedAt: optionalFixedMillisecondTimestamp(
+      attestation.signedAt,
+      "BPF profile attestation.signedAt",
+    ),
+    signature: normalizeSignaturePayload(
+      attestation.signature,
+      "BPF profile attestation.signature",
+    ),
+    canonicalJsonSignature: normalizeSignaturePayload(
+      attestation.canonicalJsonSignature,
+      "BPF profile attestation.canonicalJsonSignature",
+    ),
+  };
+}
+
+/**
+ * Validate a build profile and return its NORMALIZED canonical JS shape:
+ * every default applied, every uint64 a BigInt, absent optional strings
+ * `null`, and the keyed `PARTS`/`MODULES` vectors sorted by their IDL key so
+ * that one field set always encodes to one byte sequence.
+ */
+export function validateBuildProfile(profile) {
+  if (profile === null || typeof profile !== "object" || Array.isArray(profile)) {
+    throw new TypeError("BPF profile must be an object.");
+  }
+  const parts = profile.parts ?? [];
+  const modules = profile.modules ?? [];
+  if (!Array.isArray(parts)) {
+    throw new TypeError("BPF profile parts must be an array.");
+  }
+  if (!Array.isArray(modules)) {
+    throw new TypeError("BPF profile modules must be an array.");
+  }
+  const partIds = new Set();
+  const moduleIds = new Set();
+  return {
+    profileId: requireNonEmptyString(profile.profileId, "BPF profile profileId"),
+    name: requireNonEmptyString(profile.name, "BPF profile name"),
+    description: optionalTrimmedString(profile.description, "BPF profile description"),
+    createdAt: optionalFixedMillisecondTimestamp(
+      profile.createdAt,
+      "BPF profile createdAt",
+    ),
+    updatedAt: optionalFixedMillisecondTimestamp(
+      profile.updatedAt,
+      "BPF profile updatedAt",
+    ),
+    templateSha256: requireLowercaseSha256(
+      profile.templateSha256,
+      "BPF profile templateSha256",
+    ),
+    parts: parts
+      .map((part, index) => normalizeBuildProfilePart(part, index, partIds))
+      .sort((left, right) => (left.partId < right.partId ? -1 : left.partId > right.partId ? 1 : 0)),
+    modules: modules
+      .map((module, index) => normalizeBuildProfileModule(module, index, moduleIds))
+      .sort((left, right) =>
+        left.moduleId < right.moduleId ? -1 : left.moduleId > right.moduleId ? 1 : 0,
+      ),
+    runtimeLock: normalizeBuildProfileRuntimeLock(profile.runtimeLock),
+    licenseMode: normalizeEnumName(
+      profile.licenseMode,
+      BPF_LICENSE_MODE,
+      "BPF profile licenseMode",
+      "UNSPECIFIED",
+    ),
+    attestation: normalizeBuildProfileAttestation(profile.attestation),
+  };
+}
+
+function buildProfileTableFromObject(profile) {
+  return new BPFT(
+    profile.profileId,
+    profile.name,
+    profile.description,
+    profile.createdAt,
+    profile.updatedAt,
+    profile.templateSha256,
+    profile.parts.map(
+      (part) =>
+        new BPFPartT(
+          part.partId,
+          BPF_PART_KIND.byName[part.kind],
+          part.included,
+          part.contentSha256,
+          part.byteLength,
+          part.description,
+        ),
+    ),
+    profile.modules.map(
+      (module) =>
+        new BPFModuleT(
+          module.moduleId,
+          module.moduleVersion,
+          module.included,
+          BPF_PROTECTION_TIER.byName[module.protection],
+          module.contentHash,
+          // MODULE_DESCRIPTOR is never written: a per-module reference is the
+          // identity triple, and a profile never restates a module manifest.
+          null,
+        ),
+    ),
+    new BPFRuntimeLockT(
+      profile.runtimeLock.allowedDomains,
+      profile.runtimeLock.allowedTlds,
+      profile.runtimeLock.devDomains,
+      profile.runtimeLock.ttlDays,
+      profile.runtimeLock.compiledAtMs,
+    ),
+    BPF_LICENSE_MODE.byName[profile.licenseMode],
+    profile.attestation
+      ? new BPFAttestationT(
+          profile.attestation.signingPublicKey,
+          profile.attestation.signedAt,
+          Array.from(profile.attestation.signature),
+          Array.from(profile.attestation.canonicalJsonSignature),
+        )
+      : null,
+  );
+}
+
+/** Encode a validated build profile as canonical size-prefixed SDS `$BPF` bytes. */
+export function encodeBuildProfile(profile) {
+  const normalized = validateBuildProfile(profile);
+  const builder = new flatbuffers.Builder(1024);
+  const root = buildProfileTableFromObject(normalized).pack(builder);
+  BPF.finishSizePrefixedBPFBuffer(builder, root);
+  return new Uint8Array(builder.asUint8Array());
+}
+
+function decodeBuildProfilePart(table, index) {
+  return {
+    partId: table.PART_ID(),
+    kind:
+      BPF_PART_KIND.byValue[table.KIND()] ??
+      (() => {
+        throw new Error(`BPF profile parts[${index}] KIND ${table.KIND()} is unknown.`);
+      })(),
+    included: table.INCLUDED(),
+    contentSha256: optionalLowercaseSha256(
+      table.CONTENT_SHA256(),
+      `BPF profile parts[${index}].contentSha256`,
+    ),
+    byteLength: normalizeUint64(
+      table.BYTE_LENGTH(),
+      `BPF profile parts[${index}].byteLength`,
+    ),
+    description: optionalTrimmedString(
+      table.DESCRIPTION(),
+      `BPF profile parts[${index}].description`,
+    ),
+  };
+}
+
+function decodeBuildProfileModule(table, index) {
+  if (table.MODULE_DESCRIPTOR()) {
+    throw new Error(
+      `BPF profile modules[${index}] carries an embedded MODULE_DESCRIPTOR. This route models a ` +
+        "module reference as the identity triple MODULE_ID / MODULE_VERSION / CONTENT_HASH and " +
+        "cannot canonically project a descriptor it does not model, so it refuses the record " +
+        "rather than silently dropping signed bytes. Resolve the descriptor from the module's " +
+        "own published manifest.",
+    );
+  }
+  return {
+    moduleId: table.MODULE_ID(),
+    moduleVersion: optionalTrimmedString(
+      table.MODULE_VERSION(),
+      `BPF profile modules[${index}].moduleVersion`,
+    ),
+    included: table.INCLUDED(),
+    protection:
+      BPF_PROTECTION_TIER.byValue[table.PROTECTION()] ??
+      (() => {
+        throw new Error(
+          `BPF profile modules[${index}] PROTECTION ${table.PROTECTION()} is unknown.`,
+        );
+      })(),
+    contentHash: optionalLowercaseSha256(
+      table.CONTENT_HASH(),
+      `BPF profile modules[${index}].contentHash`,
+    ),
+  };
+}
+
+function decodeBuildProfileRuntimeLock(table) {
+  if (!table) {
+    throw new Error(
+      "BPF record is missing RUNTIME_LOCK: an absent lock is never read as an unlocked one.",
+    );
+  }
+  const readVector = (length, read) => {
+    const out = [];
+    for (let index = 0; index < length; index += 1) {
+      out.push(read(index));
+    }
+    return out;
+  };
+  return {
+    allowedDomains: readVector(table.allowedDomainsLength(), (index) =>
+      table.ALLOWED_DOMAINS(index),
+    ),
+    allowedTlds: readVector(table.allowedTldsLength(), (index) => table.ALLOWED_TLDS(index)),
+    devDomains: readVector(table.devDomainsLength(), (index) => table.DEV_DOMAINS(index)),
+    ttlDays: table.TTL_DAYS(),
+    compiledAtMs: normalizeUint64(
+      table.COMPILED_AT_MS(),
+      "BPF profile runtimeLock.compiledAtMs",
+    ),
+  };
+}
+
+function decodeBuildProfileAttestation(table) {
+  if (!table) {
+    // PRESENCE IS THE STATEMENT: an absent attestation table means unsigned.
+    // There is no `SIGNED` boolean to consult and none is synthesized.
+    return null;
+  }
+  const signature = table.signatureArray();
+  const canonicalJsonSignature = table.canonicalJsonSignatureArray();
+  return {
+    signingPublicKey: requireLowercaseSha256(
+      table.SIGNING_PUBLIC_KEY(),
+      "BPF profile attestation.signingPublicKey",
+    ),
+    signedAt: optionalFixedMillisecondTimestamp(
+      table.SIGNED_AT(),
+      "BPF profile attestation.signedAt",
+    ),
+    signature: normalizeSignaturePayload(
+      signature,
+      "BPF profile attestation.signature",
+    ),
+    canonicalJsonSignature: normalizeSignaturePayload(
+      canonicalJsonSignature,
+      "BPF profile attestation.canonicalJsonSignature",
+    ),
+  };
+}
+
+function decodeBuildProfileTable(table) {
+  const parts = [];
+  for (let index = 0; index < table.partsLength(); index += 1) {
+    parts.push(decodeBuildProfilePart(table.PARTS(index), index));
+  }
+  const modules = [];
+  for (let index = 0; index < table.modulesLength(); index += 1) {
+    modules.push(decodeBuildProfileModule(table.MODULES(index), index));
+  }
+  return validateBuildProfile({
+    profileId: table.PROFILE_ID(),
+    name: table.NAME(),
+    description: table.DESCRIPTION(),
+    createdAt: table.CREATED_AT(),
+    updatedAt: table.UPDATED_AT(),
+    templateSha256: table.TEMPLATE_SHA256(),
+    parts,
+    modules,
+    runtimeLock: decodeBuildProfileRuntimeLock(table.RUNTIME_LOCK()),
+    licenseMode: normalizeEnumName(
+      table.LICENSE_MODE(),
+      BPF_LICENSE_MODE,
+      "BPF profile licenseMode",
+      "UNSPECIFIED",
+    ),
+    attestation: decodeBuildProfileAttestation(table.ATTESTATION()),
+  });
+}
+
+function assertSizePrefixedBuildProfileBuffer(bytes) {
+  const buffer = toUint8Array(bytes);
+  if (buffer.length < flatbuffers.SIZE_PREFIX_LENGTH + 12) {
+    throw new TypeError("BPF record expects non-truncated size-prefixed FlatBuffer bytes.");
+  }
+  const declaredLength = readUint32LE(buffer, 0, "BPF record size prefix");
+  if (declaredLength !== buffer.length - flatbuffers.SIZE_PREFIX_LENGTH) {
+    throw new Error("BPF record size prefix does not match the buffer length.");
+  }
+  // Past the 4-byte size prefix the layout is an ordinary root FlatBuffer, so
+  // the existing structural hardening applies verbatim to the subarray.
+  assertRootFlatbufferTable(
+    buffer.subarray(flatbuffers.SIZE_PREFIX_LENGTH),
+    BUILD_PROFILE_FILE_IDENTIFIER,
+    "BPF record",
+  );
+  return buffer;
+}
+
+/** Decode and revalidate canonical size-prefixed SDS `$BPF` bytes. */
+export function decodeBuildProfile(bytes) {
+  const buffer = assertSizePrefixedBuildProfileBuffer(bytes);
+  const table = BPF.getSizePrefixedRootAsBPF(new flatbuffers.ByteBuffer(buffer));
+  return decodeBuildProfileTable(table);
+}
+
+function canonicalJsonObject(entries) {
+  const fields = [];
+  for (const [key, serialized] of entries) {
+    if (serialized === undefined) continue;
+    fields.push(`${JSON.stringify(key)}:${serialized}`);
+  }
+  return `{${fields.join(",")}}`;
+}
+
+function canonicalJsonStringVector(values) {
+  return `[${values.map((value) => JSON.stringify(value)).join(",")}]`;
+}
+
+function canonicalJsonOptionalString(value) {
+  return value === null || value === undefined ? undefined : JSON.stringify(value);
+}
+
+/**
+ * Project a build profile to its canonical JSON signing form: IDL field
+ * order, IDL capitalization, no insignificant whitespace, uint64 fields as
+ * decimal strings, and ONLY the two signature payloads omitted —
+ * `SIGNING_PUBLIC_KEY` and `SIGNED_AT` are covered by the signature.
+ */
+export function canonicalBuildProfileJson(profile) {
+  const normalized = validateBuildProfile(profile);
+  return canonicalJsonObject([
+    ["PROFILE_ID", JSON.stringify(normalized.profileId)],
+    ["NAME", JSON.stringify(normalized.name)],
+    ["DESCRIPTION", canonicalJsonOptionalString(normalized.description)],
+    ["CREATED_AT", canonicalJsonOptionalString(normalized.createdAt)],
+    ["UPDATED_AT", canonicalJsonOptionalString(normalized.updatedAt)],
+    ["TEMPLATE_SHA256", JSON.stringify(normalized.templateSha256)],
+    [
+      "PARTS",
+      `[${normalized.parts
+        .map((part) =>
+          canonicalJsonObject([
+            ["PART_ID", JSON.stringify(part.partId)],
+            ["KIND", JSON.stringify(part.kind)],
+            ["INCLUDED", part.included ? "true" : "false"],
+            ["CONTENT_SHA256", canonicalJsonOptionalString(part.contentSha256)],
+            ["BYTE_LENGTH", JSON.stringify(part.byteLength.toString())],
+            ["DESCRIPTION", canonicalJsonOptionalString(part.description)],
+          ]),
+        )
+        .join(",")}]`,
+    ],
+    [
+      "MODULES",
+      `[${normalized.modules
+        .map((module) =>
+          canonicalJsonObject([
+            ["MODULE_ID", JSON.stringify(module.moduleId)],
+            ["MODULE_VERSION", canonicalJsonOptionalString(module.moduleVersion)],
+            ["INCLUDED", module.included ? "true" : "false"],
+            ["PROTECTION", JSON.stringify(module.protection)],
+            ["CONTENT_HASH", canonicalJsonOptionalString(module.contentHash)],
+          ]),
+        )
+        .join(",")}]`,
+    ],
+    [
+      "RUNTIME_LOCK",
+      canonicalJsonObject([
+        ["ALLOWED_DOMAINS", canonicalJsonStringVector(normalized.runtimeLock.allowedDomains)],
+        ["ALLOWED_TLDS", canonicalJsonStringVector(normalized.runtimeLock.allowedTlds)],
+        ["DEV_DOMAINS", canonicalJsonStringVector(normalized.runtimeLock.devDomains)],
+        ["TTL_DAYS", String(normalized.runtimeLock.ttlDays)],
+        ["COMPILED_AT_MS", JSON.stringify(normalized.runtimeLock.compiledAtMs.toString())],
+      ]),
+    ],
+    ["LICENSE_MODE", JSON.stringify(normalized.licenseMode)],
+    [
+      "ATTESTATION",
+      normalized.attestation === null
+        ? undefined
+        : canonicalJsonObject([
+            ["SIGNING_PUBLIC_KEY", JSON.stringify(normalized.attestation.signingPublicKey)],
+            ["SIGNED_AT", canonicalJsonOptionalString(normalized.attestation.signedAt)],
+          ]),
+    ],
+  ]);
+}
+
+/**
+ * Build the `SIGNATURE` preimage: a COPY of the size-prefixed `$BPF` bytes
+ * with both 64-byte signature payloads zeroed, vectors and offsets preserved.
+ */
+export function zeroBuildProfileSignaturePayloads(bytes) {
+  const clone = new Uint8Array(assertSizePrefixedBuildProfileBuffer(bytes));
+  const attestation = BPF.getSizePrefixedRootAsBPF(
+    new flatbuffers.ByteBuffer(clone),
+  ).ATTESTATION();
+  if (attestation) {
+    attestation.signatureArray().fill(0);
+    attestation.canonicalJsonSignatureArray().fill(0);
+  }
+  return clone;
+}
+
+function resolveBuildProfileSigner(options) {
+  if (typeof options.sign === "function") {
+    return async (message) => toUint8Array(await options.sign(message));
+  }
+  if (options.signingSeed === undefined || options.signingSeed === null) {
+    throw new TypeError(
+      "signBuildProfile requires either options.signingSeed (an Ed25519 seed) or options.sign.",
+    );
+  }
+  const seed = toUint8Array(options.signingSeed);
+  return async (message) => toUint8Array(await ed25519Sign(message, seed));
+}
+
+/**
+ * Sign a build profile in BOTH ratified forms and return the signed profile
+ * plus its canonical size-prefixed `$BPF` bytes.
+ */
+export async function signBuildProfile(profile, options = {}) {
+  const sign = resolveBuildProfileSigner(options);
+  const signingPublicKey = requireLowercaseSha256(
+    optionalTrimmedString(options.signingPublicKey, "signBuildProfile signingPublicKey") ??
+      bytesToHex(await ed25519PublicKey(toUint8Array(options.signingSeed ?? new Uint8Array(0)))),
+    "signBuildProfile signingPublicKey",
+  );
+  const signedAt =
+    optionalFixedMillisecondTimestamp(options.signedAt, "signBuildProfile signedAt") ??
+    new Date().toISOString();
+  const zeroSignature = new Uint8Array(BUILD_PROFILE_SIGNATURE_LENGTH);
+  const unsignedProfile = validateBuildProfile({
+    ...validateBuildProfile(profile),
+    attestation: {
+      signingPublicKey,
+      signedAt,
+      signature: zeroSignature,
+      canonicalJsonSignature: zeroSignature,
+    },
+  });
+
+  const canonicalJson = canonicalBuildProfileJson(unsignedProfile);
+  const canonicalJsonSignature = normalizeSignaturePayload(
+    await sign(textEncoder.encode(canonicalJson)),
+    "signBuildProfile canonical JSON signature",
+  );
+
+  const bytes = encodeBuildProfile(unsignedProfile);
+  const signature = normalizeSignaturePayload(
+    await sign(zeroBuildProfileSignaturePayloads(bytes)),
+    "signBuildProfile FlatBuffer signature",
+  );
+
+  // Write both payloads into the existing 64-byte vectors: the layout the
+  // signature was taken over is preserved byte for byte.
+  const attestation = BPF.getSizePrefixedRootAsBPF(
+    new flatbuffers.ByteBuffer(bytes),
+  ).ATTESTATION();
+  attestation.signatureArray().set(signature);
+  attestation.canonicalJsonSignatureArray().set(canonicalJsonSignature);
+
+  return { profile: decodeBuildProfile(bytes), bytes, canonicalJson };
+}
+
+function resolveBuildProfileVerifier(options) {
+  if (typeof options.verify === "function") {
+    return options.verify;
+  }
+  return (message, signature, publicKey) => ed25519Verify(message, signature, publicKey);
+}
+
+/**
+ * Verify the FlatBuffer form on its own: the size-prefixed `$BPF` bytes with
+ * both signature payloads zeroed, against the record's literal
+ * `SIGNING_PUBLIC_KEY`.
+ */
+export async function verifyBuildProfileFlatbufferSignature(bytes, options = {}) {
+  const profile = decodeBuildProfile(bytes);
+  if (!profile.attestation) {
+    return false;
+  }
+  const verify = resolveBuildProfileVerifier(options);
+  return (
+    (await verify(
+      zeroBuildProfileSignaturePayloads(bytes),
+      profile.attestation.signature,
+      hexToBytes(profile.attestation.signingPublicKey),
+    )) === true
+  );
+}
+
+/**
+ * Verify the canonical-JSON form on its own — a holder of the JSON projection
+ * and the signature needs no FlatBuffer to check it.
+ */
+export async function verifyBuildProfileCanonicalJsonSignature(profile, options = {}) {
+  const normalized = validateBuildProfile(profile);
+  if (!normalized.attestation) {
+    return false;
+  }
+  const verify = resolveBuildProfileVerifier(options);
+  return (
+    (await verify(
+      textEncoder.encode(canonicalBuildProfileJson(normalized)),
+      normalized.attestation.canonicalJsonSignature,
+      hexToBytes(normalized.attestation.signingPublicKey),
+    )) === true
+  );
+}
+
+/**
+ * Fail-closed verification of a `$BPF` buffer. An unsigned profile decodes as
+ * `{ signed: false }`; a SIGNED profile whose either signature fails to
+ * verify THROWS — it is never downgraded to unsigned and therefore
+ * acceptable.
+ */
+export async function verifyBuildProfile(bytes, options = {}) {
+  const profile = decodeBuildProfile(bytes);
+  if (!profile.attestation) {
+    return { profile, signed: false };
+  }
+  if (!(await verifyBuildProfileFlatbufferSignature(bytes, options))) {
+    throw new Error(
+      "BPF attestation SIGNATURE failed to verify against SIGNING_PUBLIC_KEY; the record is REJECTED, never read as unsigned.",
+    );
+  }
+  if (!(await verifyBuildProfileCanonicalJsonSignature(profile, options))) {
+    throw new Error(
+      "BPF attestation CANONICAL_JSON_SIGNATURE failed to verify against SIGNING_PUBLIC_KEY; the record is REJECTED, never read as unsigned.",
+    );
+  }
+  return { profile, signed: true };
+}
+
+/**
+ * Encode the portable export unit: a `$REC` collection carrying exactly one
+ * `$BPF` record.
+ */
+export function encodeBuildProfileRecordCollection(profile, options = {}) {
+  const normalized = validateBuildProfile(profile);
+  const builder = new flatbuffers.Builder(2048);
+  const root = new RECT(
+    normalizeStringField(options.version) ?? DEFAULT_RECORD_COLLECTION_VERSION,
+    [new RecordT(RecordType.BPF, buildProfileTableFromObject(normalized), "BPF")],
+  ).pack(builder);
+  REC.finishRECBuffer(builder, root);
+  return builder.asUint8Array();
+}
+
+/**
+ * Decode a `$REC` collection carrying a build profile. EXACTLY ONE `$BPF`
+ * record is admitted: zero and two-or-more are both REJECTED. Any other
+ * record travelling with it — an `$APP` launcher manifest, for example — is
+ * advisory metadata carrying no authority, so its presence is recorded and
+ * its absence is not an error.
+ */
+export function decodeBuildProfileRecordCollection(bytes) {
+  const buffer = toUint8Array(bytes);
+  assertRootFlatbufferTable(buffer, TRAILER_MAGIC_TEXT, "BPF record collection");
+  const bb = new flatbuffers.ByteBuffer(buffer);
+  const collectionTable = REC.getRootAsREC(bb);
+  const collectionMeta = assertFlatbufferTable(
+    buffer,
+    collectionTable.bb_pos,
+    "BPF record collection",
+  );
+  assertOptionalStringField(buffer, collectionMeta, 4, "BPF record collection version");
+  const recordTables = assertTableVectorField(
+    buffer,
+    collectionMeta,
+    6,
+    "BPF record collection records",
+  );
+  if (recordTables.length === 0) {
+    throw new Error("BPF record collection does not contain any records.");
+  }
+  const records = [];
+  let profile = null;
+  for (let index = 0; index < recordTables.length; index += 1) {
+    const recordTable = collectionTable.RECORDS(index, new Record()) ?? null;
+    if (!recordTable) {
+      throw new Error(`BPF record collection record ${index} could not be loaded.`);
+    }
+    const recordMeta = assertFlatbufferTable(
+      buffer,
+      recordTable.bb_pos,
+      `BPF record collection record ${index}`,
+    );
+    assertOptionalStringField(
+      buffer,
+      recordMeta,
+      8,
+      `BPF record collection record ${index} standard`,
+    );
+    const recordType = getRecordValueType(recordTable);
+    const standard = normalizeStringField(recordTable.standard()) ?? null;
+    if (
+      !assertUnionTableField(
+        buffer,
+        recordMeta,
+        6,
+        `BPF record collection record ${index} value`,
+      )
+    ) {
+      throw new Error(`BPF record collection record ${index} is missing a value.`);
+    }
+    if (recordType === RecordType.BPF) {
+      if (profile) {
+        throw new Error(
+          "BPF record collection contains more than one BPF record; exactly one is admitted.",
+        );
+      }
+      const table = recordTable.value(new BPF());
+      if (!table) {
+        throw new Error(`BPF record collection record ${index} BPF payload is missing.`);
+      }
+      profile = decodeBuildProfileTable(table);
+    }
+    records.push({ standard, recordType });
+  }
+  if (!profile) {
+    throw new Error(
+      "BPF record collection contains no BPF record; exactly one is admitted.",
+    );
+  }
+  return {
+    version:
+      normalizeStringField(collectionTable.version()) ?? DEFAULT_RECORD_COLLECTION_VERSION,
+    profile,
+    profileBytes: encodeBuildProfile(profile),
+    records,
+    recordCollectionBytes: buffer,
+  };
+}
+
+export {
+  BUILD_PROFILE_FILE_IDENTIFIER,
+  BUILD_PROFILE_SIGNATURE_LENGTH,
+  DEFAULT_RUNTIME_LOCK_TTL_DAYS,
+  MAX_RUNTIME_LOCK_TTL_DAYS,
+  MIN_RUNTIME_LOCK_TTL_DAYS,
+};
