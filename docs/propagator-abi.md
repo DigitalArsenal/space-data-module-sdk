@@ -110,6 +110,46 @@ shipping both is expected, and they must agree exactly (see
 `plugin_init_omm` REPLACES the element set. `plugin_ingest_omm_one` APPENDS
 and returns its handle — see [identity](#identity).
 
+### Ephemeris ingest
+
+| Export | Signature | Returns |
+|---|---|---|
+| `plugin_init_ephemeris` | `int32_t(const uint8_t* bytes, size_t len, uint32_t format)` | entities initialized (>0), or a negative [error code](#error-codes) |
+
+`format` is an `OrbProEphemerisFormat` member (`AUTO` = identify from the
+bytes). This is the ONLY legal door for an ephemeris container. It exists
+because `plugin_init` is bound to packed `OrbProOMMRecord` and MUST refuse a
+length that is not a whole multiple of that struct — so a DAF, a Code-500
+record stream or an STK `.e` body has no entry point through it, and passing
+one anyway is a size-lock violation dressed as an ingest. Do not smuggle
+ephemeris bytes through `plugin_init` as fake OMM records.
+
+An ephemeris provider is a propagator like any other. It exports
+`plugin_init_ephemeris` INSTEAD of the OMM/element ingest verbs, and is
+otherwise held to every rule on this page: `plugin_propagate` and
+`plugin_propagate_batch` agree exactly, output is **ECEF metres** (§[Frames](#frames)),
+padding bytes are zero, `plugin_destroy` really releases, and every failure
+carries its own code. The consumer seam does not change — the host still
+resolves it by name and drives it through `PropagatedPositionProperty`.
+
+Three obligations are specific to this verb:
+
+- **The frame rotation is the module's.** Ephemeris containers are natively
+  inertial or body-fixed by their own declaration (a `REF_FRAME` keyword, a DAF
+  frame code, an STK `CoordinateSystem`, SP3's terrestrial frame). The ABI has
+  no inertial exit, so the module rotates to ECEF internally through the
+  ratified frames chain. It never emits a native frame integer across the seam:
+  five incompatible `ReferenceFrame` vocabularies cross here and their numeric
+  values are not interchangeable.
+- **Interpolation is declared, not implied.** A container that states its own
+  interpolation rule (SPK segment type, OEM `INTERPOLATION`/`INTERPOLATION_DEGREE`,
+  STK `InterpolationMethod`) is evaluated by THAT rule. A module that silently
+  substitutes its own is not reading the file, it is fitting one.
+- **Ingest is streamed, not slurped.** A multi-hundred-megabyte kernel that
+  loads on native WasmEdge and dies in the browser is a runtime-shaped branch.
+  Read the container by record and declare `initialMemoryBytes` /
+  `maximumMemoryBytes` rather than inheriting a per-lane default.
+
 ### Batch and introspection
 
 | Export | Signature | Returns |
@@ -348,6 +388,8 @@ the degradation ladder (transient → skip; fatal → respawn; exhausted → lat
 | `-4` | BAD_INPUT | malformed or short input buffer |
 | `-5` | NOT_CONVERGED | the solve failed to converge |
 | `-6` | UNPHYSICAL | the elements describe no closed orbit |
+| `-7` | UNSUPPORTED_FORMAT | the ephemeris container is not one this module reads, or `AUTO` could not identify it |
+| `-8` | EPOCH_OUT_OF_RANGE | the requested epoch lies outside every segment the loaded ephemeris covers |
 
 Rules that are not negotiable:
 

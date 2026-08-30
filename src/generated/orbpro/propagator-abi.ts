@@ -53,6 +53,32 @@ export enum StateFlags {
   HAS_COVARIANCE = 32,
 }
 
+/**
+ * The container an ephemeris-driven propagator was handed on
+ * `plugin_init_ephemeris`. A format is DATA, not identity: one ephemeris
+ * provider reads every member below behind this discriminator rather than
+ * shipping one artifact per container, because the interpolation, the time
+ * scale handling and the frame rotation are shared and splitting them
+ * re-creates the five-mirror drift this file exists to end.
+ *
+ * AUTO is the honest default: every container here is self-identifying in its
+ * first bytes (`DAF/SPK ` / `NAIF/DAF`, the OEM version keyword, the STK
+ * `stk.v.` banner, the SP3 `#d` line, the Code-500 fixed header block), so a
+ * caller that does not know what it fetched says so rather than guessing. A
+ * module that cannot identify the bytes returns UNSUPPORTED_FORMAT; it never
+ * falls back to a default container.
+ *
+ * VALUES ARE FROZEN AND ARE NEVER RENUMBERED. New containers are APPENDED.
+ */
+export enum EphemerisFormat {
+  AUTO = 0,
+  CCSDS_OEM_KVN = 1,
+  SPK_DAF = 2,
+  CODE500 = 3,
+  STK_EPHEMERIS = 4,
+  SP3_D = 5,
+}
+
 /** One field's placement inside an ABI struct. */
 export interface AbiField {
   readonly offset: number;

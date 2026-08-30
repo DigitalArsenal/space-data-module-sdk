@@ -12,8 +12,33 @@ Nothing in the guest ABI names an engine, a tile scheme, or a vendor. The same
 three imports serve a browser engine's live quadtree cache, a host-side tile
 store, and a deterministic test fixture.
 
+## What this port is NOT
+
+Stated because it was read the other way and a consumer nearly built on it:
+this is a **raster tile** port. `sdm_provider_tile_desc_t.kind` has exactly two
+members — terrain and imagery — and every `acquire` operation (`tile`,
+`profile`, `region`) is geospatial. There is no `kind`, no `encoding` and no
+operation that describes a DAF record, an ephemeris block, a tracking-data
+message or any other non-raster container.
+
+A module that reads bytes which are not tiles does **not** use this port. It
+takes those bytes on a declared input port of its own method surface, as
+`data-source/oem-source-iss` does (`pluginFamily: "data_source"`,
+`capabilities: []`, `externalInterfaces: []`), and an ephemeris container
+reaches a propagator through `plugin_init_ephemeris` — see
+[the propagator ABI](./propagator-abi.md#ephemeris-ingest). Stretching a tile
+descriptor over a record stream would be an ABI-shaped lie, which is the exact
+failure this SDK exists to prevent.
+
+Scope note on the family matrix: `docs/harness-family-matrix.md` lists
+data-source as covered by "a conformance kit and a reference module". No
+data-source conformance kit exists — `src/conformance/index.js` freezes
+`CONFORMANCE_FAMILIES` to `["propagator"]`, which is today the only harnessed
+family with a kit. Read the matrix row as the reference-module claim only.
+
 ## Table of contents
 
+- [What this port is NOT](#what-this-port-is-not)
 - [Doctrine](#doctrine)
 - [Capability](#capability)
 - [The import set](#the-import-set)

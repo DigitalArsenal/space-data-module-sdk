@@ -47,6 +47,15 @@ export const StateFlags = Object.freeze({
   HAS_COVARIANCE: 32,
 });
 
+export const EphemerisFormat = Object.freeze({
+  AUTO: 0,
+  CCSDS_OEM_KVN: 1,
+  SPK_DAF: 2,
+  CODE500: 3,
+  STK_EPHEMERIS: 4,
+  SP3_D: 5,
+});
+
 export const ORBPRO_STATE_VECTOR = Object.freeze({
   name: "StateVector",
   cName: "OrbProStateVector",
