@@ -120,46 +120,162 @@ test("the generated TS bindings agree with the same layout", () => {
   }
 });
 
+/**
+ * THE FROZEN PREFIX — hard-coded, ordinal-pinned, and correct to hard-code.
+ *
+ * ReferenceFrame 0-5 are burned into compiled WASM artifacts already in the
+ * field. See graph/tasks/sdk-reference-frame-enum-unification.md: collapsing
+ * the four live ReferenceFrame vocabularies is a wire break, not a refactor.
+ * These six may never be renamed, renumbered or reordered, so they are stated
+ * here by hand — exactly like ABI_TRUTH above, and for the same reason.
+ */
+const FROZEN_FRAMES = [
+  ["TEME", 0],
+  ["J2000", 1],
+  ["ICRF", 2],
+  ["ECEF", 3],
+  ["MCI", 4],
+  ["MCMF", 5],
+];
+
+/**
+ * THE WITNESS FOR THE APPENDED TAIL — schemas/orbpro/reference-frame.lock.json.
+ *
+ * 6-22 are the GMAT axis roster appended by gmat-08 (cb53733), and the roster
+ * is append-only BY DESIGN: it will grow again. Restating all of it by hand is
+ * what froze npm at 0.8.15 — cb53733 appended to Propagator.fbs and left this
+ * assertion behind, `npm test` went red on origin/main, and
+ * .github/workflows/publish.yml runs `npm test` BEFORE `npm publish`, so every
+ * v* tag failed and published nothing.
+ *
+ * The lock file is the right witness for the tail and the generator's own
+ * outputs are not (Janus ruling, consult 2026-08-30):
+ *
+ *   - It is HAND-COMMITTED, not generator output, so this assertion still
+ *     catches the generator-bug class the drift gate exists for. Deriving the
+ *     expectation from Propagator.fbs or from orbpro_propagator_abi.h would
+ *     make this a gate that cannot fail, which is precisely what the ABI_TRUTH
+ *     comment above forbids.
+ *   - scripts/check-reference-frame-uniqueness.mjs C2 already REFUSES any
+ *     append that does not add the same row to this lock in the same commit,
+ *     so a lawful append arrives here green and an unlawful one cannot.
+ *
+ * The generated binding is the SUBJECT of this test, never its witness.
+ */
+const REFERENCE_FRAME_LOCK = path.join(
+  packageRoot,
+  "schemas",
+  "orbpro",
+  "reference-frame.lock.json",
+);
+
+/**
+ * Pure, so the negative control below can drill it on corrupted rosters in
+ * memory rather than by editing files in the repository. Returns the list of
+ * complaints; empty means the binding and the committed baseline agree.
+ */
+function compareFrameRoster(binding, lock) {
+  const complaints = [];
+  const members = Array.isArray(lock?.members) ? lock.members : [];
+  const lockPath = path.relative(packageRoot, REFERENCE_FRAME_LOCK);
+
+  if (lock?.frozenThrough !== 5) {
+    complaints.push(
+      `the lock declares frozenThrough ${JSON.stringify(lock?.frozenThrough)}; the freeze boundary is 5 and raising it is a wire break, not a refactor`,
+    );
+  }
+
+  // 1. The frozen prefix, by hand, at its exact index — in the lock AND in the
+  //    binding. A renumber inside 0-5 fails here even when every generated
+  //    artifact and the lock agree with each other.
+  FROZEN_FRAMES.forEach(([name, value], index) => {
+    const locked = members[index];
+    if (locked?.name !== name || locked?.value !== value) {
+      complaints.push(
+        `${lockPath} member ${index} is ${JSON.stringify(locked?.name)} = ${locked?.value}; 0-5 are frozen as ${name} = ${value}`,
+      );
+    }
+    if (binding[name] !== value) {
+      complaints.push(
+        `ReferenceFrame.${name} is ${binding[name]}; 0-5 are frozen and ${name} is ${value}`,
+      );
+    }
+  });
+
+  // 2. The binding and the committed baseline are the same roster, in the same
+  //    order, name-for-name and value-for-value.
+  const bound = Object.entries(binding);
+  if (bound.length !== members.length) {
+    complaints.push(
+      `the binding declares ${bound.length} frames, ${lockPath} carries ${members.length}`,
+    );
+  }
+  const span = Math.max(bound.length, members.length);
+  for (let index = 0; index < span; index += 1) {
+    const [boundName, boundValue] = bound[index] ?? [];
+    const locked = members[index];
+    if (boundName !== locked?.name || boundValue !== locked?.value) {
+      complaints.push(
+        `member ${index}: the binding says ${JSON.stringify(boundName)} = ${boundValue}, ${lockPath} says ${JSON.stringify(locked?.name)} = ${locked?.value}`,
+      );
+    }
+  }
+
+  // 3. Ascending, contiguous, gap-free and declared exactly once — the
+  //    structural half of the append-only rule, asserted on the binding itself
+  //    so a gap cannot hide behind an equally-gapped lock.
+  const seenNames = new Set();
+  const seenValues = new Map();
+  bound.forEach(([name, value], index) => {
+    if (value !== index) {
+      complaints.push(
+        `ReferenceFrame.${name} = ${value} breaks the contiguous ascending numbering at index ${index}`,
+      );
+    }
+    if (seenNames.has(name)) {
+      complaints.push(`ReferenceFrame.${name} is declared twice`);
+    }
+    seenNames.add(name);
+    if (seenValues.has(value)) {
+      complaints.push(
+        `ReferenceFrame.${name} and ReferenceFrame.${seenValues.get(value)} are both ${value}`,
+      );
+    }
+    seenValues.set(value, name);
+  });
+
+  return complaints;
+}
+
+function readFrameLock() {
+  return JSON.parse(fs.readFileSync(REFERENCE_FRAME_LOCK, "utf8"));
+}
+
 test("the frame and flag vocabularies keep their ordinals", () => {
-  // 0-5 are frozen by compiled WASM artifacts already in the field. See
-  // graph/tasks/sdk-reference-frame-enum-unification.md — collapsing the four
-  // live ReferenceFrame vocabularies is a wire break, not a refactor. 6-22 are
-  // the appended GMAT axis roster (coordinator ruling, gmat-08, cb53733).
-  //
-  // THIS TEST WAS RED ON `cb53733` ITSELF: the roster was appended to
-  // Propagator.fbs and this map was not, so `npm test` failed on origin/main
-  // for every consumer between that landing and this one. Appending to the
-  // frozen prefix is exactly what the freeze permits; leaving the assertion
-  // behind is what the freeze cannot survive, because a red gate teaches
-  // everyone to ignore it.
+  const complaints = compareFrameRoster({ ...ReferenceFrame }, readFrameLock());
   assert.deepEqual(
-    { ...ReferenceFrame },
-    {
-      TEME: 0,
-      J2000: 1,
-      ICRF: 2,
-      ECEF: 3,
-      MCI: 4,
-      MCMF: 5,
-      MJ2000EC: 6,
-      MOD: 7,
-      TOD: 8,
-      MOE: 9,
-      TOE: 10,
-      BODY_FIXED: 11,
-      BODY_INERTIAL: 12,
-      OBJECT_REFERENCED: 13,
-      LOCAL_ALIGNED_CONSTRAINED: 14,
-      EQUATOR: 15,
-      GSE: 16,
-      GSM: 17,
-      TOPOCENTRIC: 18,
-      BODY_SPIN_SUN: 19,
-      SPICE_DEFINED: 20,
-      MOD_FK5: 21,
-      TOD_FK5: 22,
-    },
+    complaints,
+    [],
+    [
+      "The ReferenceFrame roster and its committed baseline disagree:",
+      ...complaints.map((line) => `  - ${line}`),
+      "",
+      "Appending a frame is lawful. Leaving one half of the append behind is",
+      "not: an append lands in ONE commit — schemas/orbpro/Propagator.fbs AND",
+      "schemas/orbpro/reference-frame.lock.json — followed by",
+      "`node scripts/generate-propagator-abi.mjs` to regenerate the header and",
+      "the bindings. Values 0-5 are frozen forever and are restated by hand in",
+      "FROZEN_FRAMES above; never edit those to make this pass.",
+      "",
+      "AND DO NOT LEAVE THIS RED. .github/workflows/publish.yml runs",
+      "`npm test` before `npm publish`, so while this fails every v* tag",
+      "publishes nothing and leaves a dangling tag behind. That is exactly how",
+      "npm sat frozen at 0.8.15 from 2026-08-13 to 2026-08-30.",
+    ].join("\n"),
   );
+
+  // StateFlags is a closed bitfield with no append pressure and no lock file,
+  // so it stays a flat hand-written statement.
   assert.deepEqual(
     { ...StateFlags },
     {
@@ -172,6 +288,70 @@ test("the frame and flag vocabularies keep their ordinals", () => {
       HAS_COVARIANCE: 32,
     },
   );
+});
+
+/**
+ * A gate never observed to fail is indistinguishable from one that cannot fail
+ * (official-harness-shapes finding §5) — and this particular gate spent the
+ * window between cb53733 and its repair guarding nothing while blocking every
+ * release. Drill it in memory, on the corruptions it exists to catch, without
+ * touching a file in the repository.
+ */
+test("the frame-roster comparison FAILS on each corruption it guards (negative control)", () => {
+  const lock = readFrameLock();
+  assert.deepEqual(
+    compareFrameRoster({ ...ReferenceFrame }, lock),
+    [],
+    "the committed roster must be this control's clean baseline",
+  );
+
+  const corruptions = [
+    [
+      "a renumber inside the frozen 0-5 prefix that the lock agrees with",
+      { ...ReferenceFrame, J2000: 2, ICRF: 1 },
+      (l) => {
+        l.members[1] = { name: "J2000", value: 2 };
+        l.members[2] = { name: "ICRF", value: 1 };
+      },
+    ],
+    [
+      "a gap in the appended tail that the lock agrees with",
+      { ...ReferenceFrame, TOD_FK5: 23 },
+      (l) => {
+        l.members[22] = { name: "TOD_FK5", value: 23 };
+      },
+    ],
+    [
+      "a member dropped from the binding",
+      Object.fromEntries(
+        Object.entries(ReferenceFrame).filter(([name]) => name !== "TOD_FK5"),
+      ),
+      () => {},
+    ],
+    [
+      "a duplicate value that the lock agrees with",
+      { ...ReferenceFrame, TOD_FK5: 21 },
+      (l) => {
+        l.members[22] = { name: "TOD_FK5", value: 21 };
+      },
+    ],
+    [
+      "the freeze boundary quietly raised past 5",
+      { ...ReferenceFrame },
+      (l) => {
+        l.frozenThrough = 22;
+      },
+    ],
+  ];
+
+  for (const [label, binding, corruptLock] of corruptions) {
+    const corrupted = JSON.parse(JSON.stringify(lock));
+    corruptLock(corrupted);
+    assert.ok(
+      compareFrameRoster(binding, corrupted).length > 0,
+      `the frame-roster comparison passed ${label} — it is not wired to anything`,
+    );
+  }
 });
 
 test("the generated header states the locks it claims to state", () => {
