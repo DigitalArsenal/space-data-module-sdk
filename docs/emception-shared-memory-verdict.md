@@ -168,8 +168,8 @@ vendor time (brotli q11, lgwin 24) and serves those. Measured:
 | --- | ---: |
 | Packs, upstream uncompressed lane | 143,151,779 |
 | Packs, this lane | **25,851,077** |
-| Cold page load + first compile, total served | **27,431,647** |
-| Second page load + second compile, total served | **26,989** (0 pack bytes) |
+| Cold page load + first compile, total served | **27,431,314** |
+| Second page load + second compile, total served | **26,919** (0 pack bytes) |
 | External-origin requests | **0** |
 
 A 5.2× reduction on the wire, and the second compile costs nothing because the
