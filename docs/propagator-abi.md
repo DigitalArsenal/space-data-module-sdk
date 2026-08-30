@@ -134,13 +134,23 @@ resolves it by name and drives it through `PropagatedPositionProperty`.
 
 Three obligations are specific to this verb:
 
-- **The frame rotation is the module's.** Ephemeris containers are natively
-  inertial or body-fixed by their own declaration (a `REF_FRAME` keyword, a DAF
-  frame code, an STK `CoordinateSystem`, SP3's terrestrial frame). The ABI has
-  no inertial exit, so the module rotates to ECEF internally through the
-  ratified frames chain. It never emits a native frame integer across the seam:
-  five incompatible `ReferenceFrame` vocabularies cross here and their numeric
-  values are not interchangeable.
+- **The frame is DECLARED, and this is the one family that may exit
+  non-ECEF.** Every other provider outputs ECEF because it computes in a frame
+  of its own choosing and the host cannot know which. An ephemeris container is
+  different: it states its frame outright (a `REF_FRAME` keyword, a DAF frame
+  code, an STK `CoordinateSystem`, SP3's terrestrial frame), and rotating a
+  J2000 kernel to ECEF so the consumer can rotate it straight back is two
+  interpolated rotations added to an answer that was already exact. So an
+  ephemeris provider emits the container's own frame and SAYS SO in
+  `StateVector.reference_frame`, set through
+  `orbpro_state_set_reference_frame()` — never by assigning the field, which
+  leaves the padding bytes stale.
+
+  The frame it names must be a member of the ABI's own `ReferenceFrame` roster,
+  translated by NAMED TOKEN. A native frame integer never crosses this seam:
+  five incompatible `ReferenceFrame` vocabularies meet here and `ECI == 0`,
+  `TEME == 0` and `FIXED == 0` all collide. A container whose declared frame
+  has no member on the roster is `UNSUPPORTED_FORMAT`, not a guess.
 - **Interpolation is declared, not implied.** A container that states its own
   interpolation rule (SPK segment type, OEM `INTERPOLATION`/`INTERPOLATION_DEGREE`,
   STK `InterpolationMethod`) is evaluated by THAT rule. A module that silently
