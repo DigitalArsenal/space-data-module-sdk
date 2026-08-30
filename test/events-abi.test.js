@@ -340,6 +340,25 @@ test("the runner is byte-identical native vs wasm32-wasip1-threads, and reproduc
     );
   }
 
+  // ---- max_events is the first N IN SCAN ORDER, and it says so -------------
+  // A cap that returned a different SET depending on the scan step would undo
+  // the ordering fix above; a cap that returned N events without saying more
+  // existed would be reported as "these are the events".
+  {
+    const m = nativeOut.match(/^cap hits (\d+) truncated (\d+)$/m);
+    assert.ok(m, "the max_events scan did not report");
+    assert.equal(Number(m[1]), 3, "max_events = 3 must return exactly 3 hits");
+    assert.equal(Number(m[2]), 1, "a capped scan must report truncated");
+    const capped = [...nativeOut.matchAll(/^ {2}cap ([0-9a-f]{16})$/gm)].map((x) =>
+      bitsToDouble(x[1]),
+    );
+    assert.deepEqual(
+      capped,
+      a.slice(0, 3),
+      "the capped hits must be the first three of the uncapped scan, bit for bit",
+    );
+  }
+
   // ---- typed refusals ------------------------------------------------------
   // Every refusal has its OWN code. A locator that answers -1 for everything
   // is unconformable: the consumer cannot place the failure on the

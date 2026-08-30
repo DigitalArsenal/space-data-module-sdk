@@ -657,6 +657,14 @@ static inline int32_t orbpro_event_runner_next(OrbProEventRunner* r,
     }
 
     if (r->phase == ORBPRO_EVENT_PHASE_DONE) {
+        /* Brackets still queued when the scan stopped ARE dropped events, and
+         * `max_events` is the usual reason. Saying so is the difference
+         * between "these are the events" and "these are the first N events";
+         * a consumer that cannot tell them apart will publish the second as
+         * the first. Unscanned samples are the same story. */
+        if (orbpro_event_pending_count(r) > 0u || r->next_sample < r->sample_count) {
+            r->truncated = 1u;
+        }
         request->epoch_count = 0u;
         return 0;
     }

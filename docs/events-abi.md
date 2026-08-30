@@ -219,7 +219,7 @@ call.
 | Value | Meaning |
 | --- | --- |
 | `EventInterval.component == 0xFFFFFFFF` | every component |
-| `EventInterval.max_events == 0` | unbounded (still bounded by `max_evaluations` and the caller's buffer) |
+| `EventInterval.max_events == 0` | unbounded (still bounded by `max_evaluations` and the caller's buffer). A nonzero cap returns the first N IN SCAN ORDER and sets `truncated`, so "these are the events" and "these are the first N" are distinguishable |
 | `EventInterval.max_evaluations == 0` | unbounded |
 | `EventInterval.occurrence == 0` | report every qualifying crossing |
 | `RootPolicy.value_tolerance == 0` | converge on the bracket width alone |

@@ -259,6 +259,47 @@ int main(void) {
      * deliver 1e-9 s, and the runner says so instead of pretending. */
     if (run_scan("G", 60.0, HARNESS_ARC0, HARNESS_PERIOD, 1.0e-9, ORBPRO_ROOT_BRENT, 4.0233e-5)) return 1;
 
+    /* `max_events` stops on the first N IN SCAN ORDER and says it truncated. */
+    {
+        static OrbProEventRunner r;
+        static OrbProStateVector states[ORBPRO_EVENT_SCAN_BATCH];
+        static double epochs[2 * ORBPRO_EVENT_SCAN_BATCH];
+        static OrbProEventHit hits[ORBPRO_EVENT_MAX_HITS];
+        OrbProEventInterval interval;
+        OrbProRootPolicy policy;
+        OrbProEventStateRequest request;
+        orbpro_event_runner_init(&r, harness_eval, NULL);
+        (void)orbpro_event_runner_configure(&r, 2u, 1u, (uint8_t)ORBPRO_FRAME_J2000, 0.0);
+        orbpro_event_interval_init(&interval);
+        interval.start_jd_day = HARNESS_START_JD_DAY;
+        interval.start_seconds = HARNESS_START_SECONDS + HARNESS_ARC0;
+        interval.stop_jd_day = HARNESS_START_JD_DAY;
+        interval.stop_seconds = HARNESS_START_SECONDS + HARNESS_ARC0 + 2.0 * HARNESS_PERIOD;
+        interval.max_events = 3u;
+        interval.component = ORBPRO_EVENT_ALL_COMPONENTS;
+        orbpro_event_interval_set_direction(&interval, ORBPRO_CROSSING_ANY);
+        orbpro_root_policy_init(&policy);
+        policy.scan_step_seconds = 60.0;
+        policy.epoch_tolerance_seconds = 1.0e-9;
+        policy.max_iterations = 100u;
+        orbpro_root_policy_set_method(&policy, ORBPRO_ROOT_BRENT);
+        (void)orbpro_event_runner_begin(&r, &interval, &policy);
+        for (;;) {
+            int32_t n = orbpro_event_runner_next(&r, &request, epochs, ORBPRO_EVENT_SCAN_BATCH);
+            if (n <= 0) break;
+            for (int32_t e = 0; e < n; ++e) {
+                double t = (epochs[2 * e] - HARNESS_START_JD_DAY) * 86400.0 +
+                           (epochs[2 * e + 1] - HARNESS_START_SECONDS);
+                harness_propagate(t, &states[e]);
+            }
+            if (orbpro_event_runner_supply(&r, states, (uint32_t)n) < 0) break;
+        }
+        printf("cap hits %d truncated %d\n",
+               (int)orbpro_event_runner_hits(&r, hits, ORBPRO_EVENT_MAX_HITS),
+               orbpro_event_runner_truncated(&r));
+        for (int i = 0; i < 3; ++i) print_double("  cap", hits[i].epoch_seconds);
+    }
+
     /* Refusals are typed, and each has its own code. */
     {
         static OrbProEventRunner r;
