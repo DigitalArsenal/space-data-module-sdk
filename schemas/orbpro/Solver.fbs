@@ -1,0 +1,113 @@
+include "Propagator.fbs";
+
+namespace orbpro.solver;
+
+// Pull/supply solver protocol. The solver never imports a propagator or an
+// objective function: it asks the host for one evaluation at a candidate
+// control vector, and the host routes that request to the selected ports.
+
+enum SolverAlgorithm : ubyte (abi, abi_c_name: "OrbProSolverAlgorithm", abi_c_prefix: "ORBPRO_SOLVER_") {
+  NEWTON_RAPHSON = 0,
+  BROYDEN = 1,
+  MODIFIED_BROYDEN = 2,
+  SQP = 3
+}
+
+enum DifferenceMode : ubyte (abi, abi_c_name: "OrbProSolverDifferenceMode", abi_c_prefix: "ORBPRO_SOLVER_DIFFERENCE_") {
+  FORWARD = 0,
+  CENTRAL = 1,
+  ANALYTIC_STM = 2
+}
+
+enum SolverStatus : ubyte (abi, abi_c_name: "OrbProSolverStatus", abi_c_prefix: "ORBPRO_SOLVER_STATUS_") {
+  IDLE = 0,
+  NEEDS_EVALUATION = 1,
+  CONVERGED = 2,
+  INVALID_PROBLEM = 3,
+  EVALUATION_FAILED = 4,
+  SINGULAR_JACOBIAN = 5,
+  BUDGET_EXCEEDED = 6,
+  STALLED = 7,
+  INFEASIBLE = 8
+}
+
+enum EvaluationKind : ubyte (abi, abi_c_name: "OrbProSolverEvaluationKind", abi_c_prefix: "ORBPRO_SOLVER_EVALUATE_") {
+  VALUES = 0,
+  VALUES_AND_JACOBIAN = 1
+}
+
+/// Fixed ABI limit. A larger search problem travels as $SLP through the
+/// command surface; the direct pull/supply surface intentionally stays small.
+struct SolverSettings (abi, abi_c_name: "OrbProSolverSettings", abi_c_helper_prefix: "orbpro_solver_settings_") {
+  algorithm: SolverAlgorithm;
+  difference_mode: DifferenceMode;
+  _reserved0: ushort;
+  maximum_iterations: uint;
+  maximum_evaluations: uint;
+  variable_count: uint;
+  goal_count: uint;
+  residual_tolerance: double;
+  step_tolerance: double;
+  constraint_tolerance: double;
+  kkt_tolerance: double;
+}
+
+/// Candidate that must be evaluated by the consumer-selected propagator and
+/// objective ports.
+struct SolverEvaluationRequest (abi, abi_c_name: "OrbProSolverEvaluationRequest", abi_c_helper_prefix: "orbpro_solver_request_") {
+  request_id: ulong;
+  kind: EvaluationKind;
+  _reserved0: [ubyte:3];
+  variable_count: uint;
+  variables: [double:16];
+}
+
+/// Values supplied after one request. Goals are the achieved values for a
+/// target problem. For an optimization problem, objective and constraints are
+/// also populated. The Jacobian is row-major with at most 16 by 16 entries.
+struct SolverEvaluation (abi, abi_c_name: "OrbProSolverEvaluation", abi_c_helper_prefix: "orbpro_solver_evaluation_") {
+  request_id: ulong;
+  valid: ubyte;
+  _reserved0: [ubyte:3];
+  goal_count: uint;
+  constraint_count: uint;
+  jacobian_rows: uint;
+  jacobian_columns: uint;
+  goals: [double:16];
+  objective: double;
+  constraints: [double:16];
+  jacobian: [double:256];
+}
+
+struct SolverIteration (abi, abi_c_name: "OrbProSolverIteration", abi_c_helper_prefix: "orbpro_solver_iteration_") {
+  iteration: uint;
+  evaluation_count: uint;
+  variable_count: uint;
+  goal_count: uint;
+  variables: [double:16];
+  values: [double:16];
+  residual_norm: double;
+  step_norm: double;
+  jacobian_condition: double;
+  maximum_constraint_violation: double;
+  kkt_residual: double;
+  accepted: ubyte;
+  _reserved0: [ubyte:7];
+}
+
+struct SolverResult (abi, abi_c_name: "OrbProSolverResult", abi_c_helper_prefix: "orbpro_solver_result_") {
+  status: SolverStatus;
+  _reserved0: [ubyte:3];
+  iteration_count: uint;
+  evaluation_count: uint;
+  variable_count: uint;
+  value_count: uint;
+  variables: [double:16];
+  values: [double:16];
+  objective: double;
+  residual_norm: double;
+  maximum_constraint_violation: double;
+  kkt_residual: double;
+}
+
+root_type SolverResult;
