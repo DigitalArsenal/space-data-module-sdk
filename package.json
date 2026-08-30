@@ -123,7 +123,7 @@
     "flatsql": "^2.0.0",
     "hd-wallet-wasm": "2.0.28",
     "sdn-emception": "1.0.0",
-    "spacedatastandards.org": "1.200.0"
+    "spacedatastandards.org": "1.202.0"
   },
   "devDependencies": {
     "esbuild": "^0.28.0",
