@@ -87,7 +87,7 @@ const NAV = [
   {
     heading: "Estimation, data and logic",
     items: [
-      { out: "families/estimation.html", src: "families/estimation.md", title: "Estimation", family: "estimation", status: "experimental" },
+      { out: "families/estimation.html", src: "families/estimation.md", title: "Estimation", family: "estimation", status: "shipped" },
       { out: "families/data-source.html", src: "provider-access-abi.md", title: "Data source", family: "data-source", status: "shipped" },
       { out: "families/analytics.html", src: "families/analytics.md", title: "Analytics", family: "analytics", status: "experimental" },
       { out: "families/scheduler.html", src: "families/scheduler.md", title: "Scheduler", family: "scheduler", status: "planned" },

@@ -130,7 +130,7 @@
         <p>Turning observations into state, bringing data in, and deciding what happens next.</p>
         <div class="card-grid">
           <a class="card" href="./families/estimation.html">
-            <div class="card-head"><h4>Estimation</h4><span class="pill pill-experimental">experimental</span></div>
+            <div class="card-head"><h4>Estimation</h4><span class="pill pill-shipped">shipped</span></div>
             <p>Orbit determination and filtering: observations in, estimated state and covariance out.</p>
           </a>
           <a class="card" href="./families/data-source.html">
@@ -177,7 +177,7 @@
 <h2 id="status-vocabulary"><a class="anchor" href="#status-vocabulary" aria-hidden="true">#</a>Status vocabulary</h2>
 <p>Status on this site is literal, and is taken from the ratified harness-family taxonomy of 2026-08-14. It is not aspirational.</p>
 <div class="table-wrap"><table><thead><tr><th>Status</th><th>Meaning</th></tr></thead><tbody><tr><td>Shipped</td><td>Ratified <code>.fbs</code> single source, generated header with a drift gate, conformance kit, reference module. Build against it.</td></tr><tr><td>Experimental</td><td>Real code exists and the shape is taking form, but it is not frozen and known defects are open. Do not ship a commercial module against it.</td></tr><tr><td>Designed</td><td>An ABI has been drafted against a real consumer. No generated header, no conformance kit, no reference module has landed.</td></tr><tr><td>Planned</td><td>A ratified entry in the taxonomy whose individual shape has not been ratified. Nothing is implemented.</td></tr></tbody></table></div>
-<p>Only <strong>propagator</strong> and <strong>data-source</strong> are Shipped. <strong>maneuver</strong>, <strong>estimation</strong> and <strong>analytics</strong> are Experimental — analytics on the strength of ONE sub-harness, <a href="./events-abi.html">event location</a>, whose <code>.fbs</code>, generated header, drift gate, shared runner and measured parity envelope have landed and whose conformance kit has not. Only <strong>rf</strong>, <strong>obstruction</strong> and <strong>conjunction</strong> are Designed. Every other family is Planned, and its status has not been ratified individually — a Planned page states scope and nothing more.</p>
+<p><strong>Propagator</strong>, <strong>estimation</strong>, and <strong>data-source</strong> are Shipped. <strong>Maneuver</strong> and <strong>analytics</strong> are Experimental — analytics on the strength of ONE sub-harness, <a href="./events-abi.html">event location</a>, whose <code>.fbs</code>, generated header, drift gate, shared runner and measured parity envelope have landed and whose conformance kit has not. Only <strong>rf</strong>, <strong>obstruction</strong> and <strong>conjunction</strong> are Designed. Every other family is Planned, and its status has not been ratified individually — a Planned page states scope and nothing more.</p>
 <p>A sub-harness is not a twentieth family. The nineteen-family taxonomy above is owner-ratified: a capability that fits inside a ratified family arrives as a sub-harness with its own contract document, and the family page states exactly which part of it is shaped.</p>
 <p>Where a family page says a thing does not exist, that is a checked statement about the tree today, not a placeholder.</p>
 <h2 id="vehicle-domains-are-not-a-harness-family"><a class="anchor" href="#vehicle-domains-are-not-a-harness-family" aria-hidden="true">#</a>Vehicle domains are not a harness family</h2>

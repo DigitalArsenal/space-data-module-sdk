@@ -54,7 +54,7 @@
 <li><a href="./effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
 </ul>
 <h2>Estimation, data and logic</h2><ul>
-<li><a href="./estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./estimation.html"><span>Estimation</span><span class="tag tag-shipped">shipped</span></a></li>
 <li><a href="./data-source.html" aria-current="page"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
 <li><a href="./analytics.html"><span>Analytics</span><span class="tag tag-experimental">experimental</span></a></li>
 <li><a href="./scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
@@ -88,6 +88,10 @@
 <p><strong>Status:</strong> v1 — owner directive 2026-08-07, graph task <code>sdk-provider-access-abi</code>.</p>
 <p>One generalized port that lets a WASM module <strong>control</strong> imagery and terrain providers and <strong>read the already-decoded bytes</strong> those providers hold in memory — identical import names and signatures in the browser, in native WasmEdge, and in the Docker WasmEdge container.</p>
 <p>This is a <em>provider access</em> port, not a <em>Cesium</em> port and not an <em>OrbPro</em> port. Nothing in the guest ABI names an engine, a tile scheme, or a vendor. The same three imports serve a browser engine's live quadtree cache, a host-side tile store, and a deterministic test fixture.</p>
+<h2 id="what-this-port-is-not"><a class="anchor" href="#what-this-port-is-not" aria-hidden="true">#</a>What this port is NOT</h2>
+<p>Stated because it was read the other way and a consumer nearly built on it: this is a <strong>raster tile</strong> port. <code>sdm_provider_tile_desc_t.kind</code> has exactly two members — terrain and imagery — and every <code>acquire</code> operation (<code>tile</code>, <code>profile</code>, <code>region</code>) is geospatial. There is no <code>kind</code>, no <code>encoding</code> and no operation that describes a DAF record, an ephemeris block, a tracking-data message or any other non-raster container.</p>
+<p>A module that reads bytes which are not tiles does <strong>not</strong> use this port. It takes those bytes on a declared input port of its own method surface, as <code>data-source/oem-source-iss</code> does (<code>pluginFamily: &quot;data_source&quot;</code>, <code>capabilities: []</code>, <code>externalInterfaces: []</code>), and an ephemeris container reaches a propagator through <code>plugin_init_ephemeris</code> — see <a href="./propagator.html#ephemeris-ingest">the propagator ABI</a>. Stretching a tile descriptor over a record stream would be an ABI-shaped lie, which is the exact failure this SDK exists to prevent.</p>
+<p>Scope note on the family matrix: <code>docs/harness-family-matrix.md</code> lists data-source as covered by &quot;a conformance kit and a reference module&quot;. No data-source conformance kit exists — <code>src/conformance/index.js</code> freezes <code>CONFORMANCE_FAMILIES</code> to <code>[&quot;propagator&quot;]</code>, which is today the only harnessed family with a kit. Read the matrix row as the reference-module claim only.</p>
 <h2 id="doctrine"><a class="anchor" href="#doctrine" aria-hidden="true">#</a>Doctrine</h2>
 <p>Four rules govern every line below.</p>
 <ol>
@@ -266,7 +270,8 @@ sdm_provider_release(h);</code></pre></div>
           <code>npm run build:docs</code>.
         </p>
       </main>
-<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#doctrine">Doctrine</a></li>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#what-this-port-is-not">What this port is NOT</a></li>
+<li><a class="depth-2" href="#doctrine">Doctrine</a></li>
 <li><a class="depth-2" href="#capability">Capability</a></li>
 <li><a class="depth-2" href="#the-import-set">The import set</a></li>
 <li><a class="depth-2" href="#tile-descriptor">Tile descriptor</a></li>

@@ -246,6 +246,9 @@ function printUsage() {
   space-data-module conformance propagator --artifact ./dist/isomorphic/module.wasm             (official-harness conformance: WASM artifacts only)
   space-data-module conformance propagator --artifact ./dist/isomorphic/module.wasm --vectors ./vectors/vectors.json --json
   space-data-module conformance propagator --self-test                                          (must exit 0 BY failing: planted defects all caught)
+  space-data-module conformance estimation --evidence ./conformance/estimation-evidence.json    (evaluates Tier 0/A/B/C evidence and exact edit sets)
+  space-data-module conformance estimation --evidence ./conformance/estimation-evidence.json --json
+  space-data-module conformance estimation --self-test                                          (proves EKF/UKF alias, runtime divergence, and placeholder OCM are caught)
   space-data-module flow check ./flows/my.flow.json --deps ./modules-root
   space-data-module flow compile ./flows/my.flow.json --deps ./modules-root [--out ./flows/my/dist]
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
@@ -435,6 +438,9 @@ async function runConformanceCommand(argv) {
       case "--vectors":
         options.vectorsPath = path.resolve(requireValue(rest, ++index, value));
         break;
+      case "--evidence":
+        options.evidencePath = path.resolve(requireValue(rest, ++index, value));
+        break;
       case "--json":
         options.json = true;
         break;
@@ -458,25 +464,37 @@ async function runConformanceCommand(argv) {
   const conformance = await import("../src/conformance/index.js");
 
   if (options.selfTest) {
-    if (family !== "propagator") {
-      throw new conformance.UnknownConformanceFamilyError(family);
-    }
-    const outcome = await conformance.runPropagatorSelfTest();
+    const outcome = family === "propagator"
+      ? await conformance.runPropagatorSelfTest()
+      : family === "estimation"
+        ? await conformance.runEstimationSelfTest()
+        : (() => { throw new conformance.UnknownConformanceFamilyError(family); })();
     if (options.json) {
       console.log(JSON.stringify(outcome, null, 2));
     } else {
-      console.log(conformance.formatSelfTestReport(outcome));
+      if (family === "propagator") {
+        console.log(conformance.formatSelfTestReport(outcome));
+      } else {
+        console.log(`estimation conformance self-test — ${outcome.ok ? "PASS" : "FAIL"}`);
+        for (const control of outcome.controls) {
+          console.log(`  [${control.caught ? "PASS" : "FAIL"}] ${control.id}`);
+        }
+      }
     }
     return outcome.ok ? 0 : 1;
   }
 
-  if (!options.artifactPath) {
+  if (family === "estimation" && !options.evidencePath) {
+    throw new Error("estimation conformance requires --evidence <receipt.json>.");
+  }
+  if (family !== "estimation" && !options.artifactPath) {
     throw new Error("conformance requires --artifact <module.wasm> (or --self-test).");
   }
   const report = await conformance.runConformance({
     family,
     artifactPath: options.artifactPath,
     vectorsPath: options.vectorsPath,
+    evidencePath: options.evidencePath,
     leak: options.leak,
   });
   if (options.json) {

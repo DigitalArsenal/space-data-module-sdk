@@ -1,6 +1,6 @@
 {
   "name": "space-data-module-sdk",
-  "version": "0.8.16",
+  "version": "0.8.17",
   "license": "Apache-2.0",
   "description": "Module SDK for building, validating, signing, and deploying WebAssembly modules on the Space Data Network.",
   "type": "module",
@@ -97,6 +97,7 @@
     "gate:parity": "node ./bin/space-data-module.js parity-gate",
     "gate:parity-negative-control": "node ./bin/space-data-module.js parity-gate --gate-manifest ./parity/negative-control.json --expect-fail",
     "conformance:self-test": "node ./bin/space-data-module.js conformance propagator --self-test",
+    "conformance:estimation:self-test": "node ./bin/space-data-module.js conformance estimation --self-test",
     "test:stream-ingest": "node --test test/runtime-host-stream-ingest.test.js",
     "test:module-stream": "node --test test/module-flatbuffer-stream-pump.test.js",
     "benchmark:stream-1gib": "SPACE_DATA_MODULE_SDK_ENABLE_1GB_STREAM_TEST=1 node --test test/runtime-host-stream-ingest.test.js",
@@ -109,6 +110,7 @@
     "check:compliance": "node ./bin/space-data-module.js check --repo-root .",
     "check:generated-bindings": "node scripts/check-generated-bindings.mjs",
     "check:propagator-abi": "node scripts/check-propagator-abi.mjs",
+    "check:estimation-abi": "node scripts/check-estimation-abi.mjs",
     "check:reference-frame": "node scripts/check-reference-frame-uniqueness.mjs",
     "generate:propagator-abi": "node scripts/generate-propagator-abi.mjs",
     "generate:vectors": "node ./examples/single-file-bundle/generate-vectors.mjs",
@@ -123,7 +125,7 @@
     "flatsql": "^2.0.0",
     "hd-wallet-wasm": "2.0.28",
     "sdn-emception": "1.0.0",
-    "spacedatastandards.org": "1.202.0"
+    "spacedatastandards.org": "1.203.0"
   },
   "devDependencies": {
     "esbuild": "^0.28.0",

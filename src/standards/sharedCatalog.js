@@ -220,6 +220,13 @@ const sharedModuleCatalogEntries = [
     source: "orbpro-propagator",
   },
   {
+    schemaCode: "ESTIMATION",
+    schemaName: "Estimation.fbs",
+    fileIdentifier: "$EST",
+    rootTypeName: "EstimationEnvelope",
+    source: "orbpro-estimation",
+  },
+  {
     schemaCode: "ACCESSWINDOWREQUEST",
     schemaName: "AccessWindowRequest.fbs",
     fileIdentifier: "AWRQ",

@@ -1,0 +1,34 @@
+{
+  "pluginId": "com.orbpro.estimation.reference",
+  "name": "Estimation ABI Reference",
+  "version": "0.1.0",
+  "description": "Force-model-blind covariance update reference for the ratified estimation ABI.",
+  "pluginFamily": "analysis",
+  "capabilities": [],
+  "externalInterfaces": [],
+  "invokeSurfaces": ["direct"],
+  "runtimeTargets": ["browser", "wasmedge"],
+  "threadModel": "wasi-sequential",
+  "sequentialJustification": {
+    "kind": "inherently-sequential-algorithm",
+    "detail": "One six-state covariance update is order-dependent and small; callers parallelize independent tracks. The artifact still uses the sanctioned wasm32-wasip1-threads compiler lane."
+  },
+  "methods": [
+    {
+      "methodId": "abi_probe",
+      "displayName": "ABI Probe",
+      "description": "Returns success after the artifact has instantiated; estimation data uses the fixed direct export documented in README.md.",
+      "inputPorts": [],
+      "outputPorts": [],
+      "maxBatch": 1,
+      "drainPolicy": "single-shot"
+    }
+  ],
+  "schemasUsed": [
+    {"schemaName": "Estimation.fbs", "fileIdentifier": "$EST", "rootTypeName": "EstimationEnvelope"}
+  ],
+  "buildArtifacts": [
+    {"artifactId": "estimation-reference-isomorphic", "kind": "wasm", "path": "dist/isomorphic/module.wasm", "target": "browser,wasmedge"}
+  ],
+  "abiVersion": 1
+}

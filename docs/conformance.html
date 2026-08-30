@@ -54,7 +54,7 @@
 <li><a href="./families/effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
 </ul>
 <h2>Estimation, data and logic</h2><ul>
-<li><a href="./families/estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/estimation.html"><span>Estimation</span><span class="tag tag-shipped">shipped</span></a></li>
 <li><a href="./families/data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
 <li><a href="./families/analytics.html"><span>Analytics</span><span class="tag tag-experimental">experimental</span></a></li>
 <li><a href="./families/scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
@@ -83,20 +83,24 @@
       </nav>
       <main class="doc" id="main">
         <h1>Conformance kit</h1>
-<p><strong>Status:</strong> v1 — W1.4 of <code>graph/tasks/official-harness-shapes-program.md</code>, implementing <code>graph/findings/official-harness-shapes.md</code> §5. Family kits: <code>propagator</code> (SHIP 1). Maneuver is Wave 2 (EXPERIMENTAL, fix-then-freeze); OD is deferred by ruling. <strong>A family with no kit can never be <code>CORE</code>.</strong></p>
+<p><strong>Status:</strong> v1 — W1.4 of <code>graph/tasks/official-harness-shapes-program.md</code>, implementing <code>graph/findings/official-harness-shapes.md</code> §5. Shipped family kits: <code>propagator</code> and <code>estimation</code>. Maneuver is Wave 2 (EXPERIMENTAL, fix-then-freeze). <strong>A family with no kit can never be <code>CORE</code>.</strong></p>
 <p>WASM artifacts ONLY (owner ruling 2026-08-10: &quot;No JS propagator!!!! WASM ONLY&quot;). The runner instantiates a compiled <code>dist/isomorphic/module.wasm</code> and drives the family's ABI directly; there is no path that certifies a JavaScript object, because JS registries are internal engine plumbing, never a public contract.</p>
 <h2 id="commands"><a class="anchor" href="#commands" aria-hidden="true">#</a>Commands</h2>
 <div class="codeblock"><pre><code>space-data-module conformance propagator --artifact ./dist/isomorphic/module.wasm
 space-data-module conformance propagator --artifact ./dist/isomorphic/module.wasm \
     --vectors ./vectors/vectors.json --json
-space-data-module conformance propagator --self-test    # must exit 0 BY failing</code></pre></div>
+space-data-module conformance propagator --self-test    # must exit 0 BY failing
+space-data-module conformance estimation --artifact ./dist/isomorphic/module.wasm \
+    --evidence ./conformance/estimation-receipt.json
+space-data-module conformance estimation --self-test    # planted failures</code></pre></div>
 <ul>
 <li><code>--artifact</code> — the compiled module. Its sha256 goes in the report; a conformance claim binds to CONTENT, not to a name.</li>
 <li><code>--vectors</code> — the module's corpus (<code>vectors.json</code> + <code>PROVENANCE.md</code>, the format proven by the reference module's <code>vectors/</code> suite). Default: the runner walks up from the artifact to the package root and takes <code>vectors/vectors.json</code>. <strong>The corpus is the module's own</strong>: Tier B anchors are model-specific, so a two-body corpus is never forced onto an SGP4 module, and a missing corpus is a NAMED GAP, never a silent pass.</li>
 <li><code>--leak-warmup / --leak-cycles / --leak-entities</code> — lifecycle-leak window overrides (defaults 20 / 200 / 256, the reference module's proven numbers).</li>
+<li><code>--evidence</code> — an estimation receipt binding the artifact hash to browser/WasmEdge/thread-width byte digests and the named Orekit, Vallado, media, Monte-Carlo and invariant outcomes. The evaluator contains no JS estimator; it adjudicates results produced by the compiled artifact.</li>
 <li>Exit codes: <code>PASS</code> and <code>PASS-WITH-GAPS</code> exit 0 (gaps are listed in the report); <code>FAIL</code> exits 1 with the offending check and case named.</li>
 </ul>
-<p>Library surface: <code>space-data-module-sdk/conformance</code> exports <code>runConformance</code>, <code>runPropagatorSuite</code>, <code>runPropagatorSelfTest</code>, <code>computeVerdict</code>, the ABI driver and the error-code table.</p>
+<p>Library surface: <code>space-data-module-sdk/conformance</code> exports <code>runConformance</code>, <code>runPropagatorSuite</code>, <code>runPropagatorSelfTest</code>, <code>runEstimationSuite</code>, <code>runEstimationSelfTest</code>, <code>computeVerdict</code>, the ABI driver and the error-code table.</p>
 <h2 id="what-is-checked"><a class="anchor" href="#what-is-checked" aria-hidden="true">#</a>What is checked</h2>
 <div class="table-wrap"><table><thead><tr><th>Tier</th><th>Check</th><th>Source of authority</th></tr></thead><tbody><tr><td>0</td><td>real instantiation + required export set</td><td><a href="./families/propagator.html">propagator-abi.md</a> §The export set</td></tr><tr><td>0</td><td>cross-runtime byte-identity</td><td><strong>GAP here by design</strong> — the parity gate (<code>space-data-module parity-gate</code>) is the Tier 0 authority; this runner never re-certifies half of it</td></tr><tr><td>B</td><td>corpus anchors reproduced within band</td><td>the module's <code>vectors.json</code> (tolerance policy `abs + rel *</td><td>expected</td><td>`); NaN is its own failure class</td></tr><tr><td>C</td><td>vis-viva closure, period closure</td><td>corpus-declared invariants (<code>conformance.mu</code> from the corpus; ECEF un-rotation when the module declares frame 3) — run only where the corpus declares them applicable to the model</td></tr><tr><td>C</td><td>determinism as BYTES, surviving destroy/re-ingest</td><td>ABI §Parity envelope</td></tr><tr><td>C</td><td>frame/flags/reserved declared, corpus-consistent</td><td>ABI §Frames — a frame declaration that contradicts the module's own corpus is the silently-wrong-numbers defect</td></tr><tr><td>C</td><td>batch and single agree exactly</td><td>ABI §Threading — the batch path is the same physics</td></tr><tr><td>C</td><td>typed refusals (NOT_INITIALIZED / BAD_ENTITY_INDEX / unphysical ingest)</td><td>ABI §Error codes — the degradation ladder needs distinguishable codes</td></tr><tr><td>C</td><td>create RETURNS its handle</td><td>ABI §Identity — &quot;the entity I just created is count−1&quot; is the race the harness exists to kill (finding §4.4)</td></tr><tr><td>4</td><td>lifecycle leak: zero page growth after warm-up</td><td>ABI §Lifetime</td></tr><tr><td>4</td><td>destroy idempotent, refuses typed, comes back cleanly</td><td>ABI §Lifetime</td></tr><tr><td>4</td><td>leak-metric negative control</td><td>a gate never observed to fail is indistinguishable from one that cannot fail</td></tr></tbody></table></div>
 <h2 id="the-self-test"><a class="anchor" href="#the-self-test" aria-hidden="true">#</a>The self-test</h2>
@@ -105,8 +109,10 @@ space-data-module conformance propagator --self-test    # must exit 0 BY failing
 <p>The self-test exits 0 only when the conformant baseline mock is clean AND every planted defect is caught by the check that owns it. It needs no toolchain, no artifact and no network — <code>npm run conformance:self-test</code>.</p>
 <h2 id="receipt-trust-wave-4-not-yet-wired"><a class="anchor" href="#receipt-trust-wave-4-not-yet-wired" aria-hidden="true">#</a>Receipt &amp; trust (Wave 4, not yet wired)</h2>
 <p>The conformance receipt travels as a bundle <code>ATTESTATION</code> entry (publisher-signed under bundle scope); the graduated listing requirement (receipt REQUIRED for <code>CORE</code>+<code>ANONYMOUS</code>, badge for <code>RECOMMENDED</code>) and the <code>SDN-CONFORMANCE-RECEIPT-V1</code> third-party attestor domain are W4.1/W4.2 of the program — see the finding §5 &quot;Receipt &amp; trust&quot;.</p>
+<p>The estimation self-test plants runtime-byte divergence, the historical EKF/UKF covariance alias, and a placeholder <code>$OCM</code>. All three must be caught.</p>
 <h2 id="reference-implementation"><a class="anchor" href="#reference-implementation" aria-hidden="true">#</a>Reference implementation</h2>
 <p><code>space-data-network-modules propagator/keplerian-reference</code> is the exemplar the kit was generalized from: its <code>tests/</code> are the original expression of these checks, its <code>vectors/</code> suite is the corpus format, and <code>tests/sdk-conformance-runner.test.mjs</code> proves the runner reaches the same verdict on the same artifact — including the corrupted-corpus negative control.</p>
+<p><code>templates/estimation-module</code> is the force-model-blind estimation reference. Its compiled direct export performs a covariance-form position update against a caller-supplied propagator sample; it contains no propagator and no JS physics.</p>
 
         <p class="doc-footer">
           Source of truth for this page:

@@ -1,9 +1,9 @@
 # Conformance runner
 
 **Status:** v1 — W1.4 of `graph/tasks/official-harness-shapes-program.md`,
-implementing `graph/findings/official-harness-shapes.md` §5. Family kits:
-`propagator` (SHIP 1). Maneuver is Wave 2 (EXPERIMENTAL, fix-then-freeze); OD
-is deferred by ruling. **A family with no kit can never be `CORE`.**
+implementing `graph/findings/official-harness-shapes.md` §5. Shipped family
+kits: `propagator` and `estimation`. Maneuver is Wave 2 (EXPERIMENTAL,
+fix-then-freeze). **A family with no kit can never be `CORE`.**
 
 WASM artifacts ONLY (owner ruling 2026-08-10: "No JS propagator!!!! WASM
 ONLY"). The runner instantiates a compiled `dist/isomorphic/module.wasm` and
@@ -18,6 +18,9 @@ space-data-module conformance propagator --artifact ./dist/isomorphic/module.was
 space-data-module conformance propagator --artifact ./dist/isomorphic/module.wasm \
     --vectors ./vectors/vectors.json --json
 space-data-module conformance propagator --self-test    # must exit 0 BY failing
+space-data-module conformance estimation --artifact ./dist/isomorphic/module.wasm \
+    --evidence ./conformance/estimation-receipt.json
+space-data-module conformance estimation --self-test    # planted failures
 ```
 
 - `--artifact` — the compiled module. Its sha256 goes in the report; a
@@ -30,12 +33,17 @@ space-data-module conformance propagator --self-test    # must exit 0 BY failing
   module, and a missing corpus is a NAMED GAP, never a silent pass.
 - `--leak-warmup / --leak-cycles / --leak-entities` — lifecycle-leak window
   overrides (defaults 20 / 200 / 256, the reference module's proven numbers).
+- `--evidence` — an estimation receipt binding the artifact hash to
+  browser/WasmEdge/thread-width byte digests and the named Orekit, Vallado,
+  media, Monte-Carlo and invariant outcomes. The evaluator contains no JS
+  estimator; it adjudicates results produced by the compiled artifact.
 - Exit codes: `PASS` and `PASS-WITH-GAPS` exit 0 (gaps are listed in the
   report); `FAIL` exits 1 with the offending check and case named.
 
 Library surface: `space-data-module-sdk/conformance` exports
 `runConformance`, `runPropagatorSuite`, `runPropagatorSelfTest`,
-`computeVerdict`, the ABI driver and the error-code table.
+`runEstimationSuite`, `runEstimationSelfTest`, `computeVerdict`, the ABI driver
+and the error-code table.
 
 ## What is checked
 
@@ -82,6 +90,9 @@ The conformance receipt travels as a bundle `ATTESTATION` entry
 `SDN-CONFORMANCE-RECEIPT-V1` third-party attestor domain are W4.1/W4.2 of the
 program — see the finding §5 "Receipt & trust".
 
+The estimation self-test plants runtime-byte divergence, the historical
+EKF/UKF covariance alias, and a placeholder `$OCM`. All three must be caught.
+
 ## Reference implementation
 
 `space-data-network-modules propagator/keplerian-reference` is the exemplar
@@ -90,3 +101,8 @@ these checks, its `vectors/` suite is the corpus format, and
 `tests/sdk-conformance-runner.test.mjs` proves the runner reaches the same
 verdict on the same artifact — including the corrupted-corpus negative
 control.
+
+`templates/estimation-module` is the force-model-blind estimation reference.
+Its compiled direct export performs a covariance-form position update against
+a caller-supplied propagator sample; it contains no propagator and no JS
+physics.

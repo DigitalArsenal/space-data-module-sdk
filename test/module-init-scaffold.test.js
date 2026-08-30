@@ -74,8 +74,8 @@ async function assertNoLeftoverTokens(root) {
   return files;
 }
 
-test("templates/propagator-module is the one family with a shipped init template", () => {
-  assert.deepEqual(listScaffoldFamilies(), ["propagator"]);
+test("ratified propagator and estimation families ship init templates", () => {
+  assert.deepEqual(listScaffoldFamilies(), ["estimation", "propagator"]);
 });
 
 test("init --family propagator --name <name> scaffolds a complete, token-clean tree", async () => {
@@ -203,7 +203,7 @@ test("a real plugin family with no init template fails loudly and lists what DOE
     (error) => {
       assert.ok(error instanceof ScaffoldFamilyTemplateError);
       assert.equal(error.value, "sensor");
-      assert.deepEqual(error.availableFamilies, ["propagator"]);
+      assert.deepEqual(error.availableFamilies, ["estimation", "propagator"]);
       assert.match(error.message, /sensor/);
       assert.match(error.message, /propagator/);
       return true;

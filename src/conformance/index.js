@@ -19,6 +19,8 @@ import path from "node:path";
 
 import { loadPropagatorArtifact } from "./abiDriver.js";
 import { computeVerdict, runPropagatorSuite } from "./propagatorSuite.js";
+import { runEstimationSuite } from "./estimationSuite.js";
+import { makeEstimationReferenceEvidence } from "./estimationReference.js";
 
 export { ErrorCode, REQUIRED_ABI_EXPORTS } from "./abiDriver.js";
 export {
@@ -34,14 +36,14 @@ export { runPropagatorSelfTest, formatSelfTestReport } from "./selfTest.js";
  * never coerced — the ANALYSIS fallback was the namespace corruption the
  * finding killed.
  */
-export const CONFORMANCE_FAMILIES = Object.freeze(["propagator"]);
+export const CONFORMANCE_FAMILIES = Object.freeze(["estimation", "propagator"]);
 
 export class UnknownConformanceFamilyError extends Error {
   constructor(family) {
     super(
       `no conformance kit for family "${family}" — kits exist for: ` +
         `${CONFORMANCE_FAMILIES.join(", ")}. A family with no kit can never be CORE ` +
-        "(finding §5); maneuver is Wave 2 (EXPERIMENTAL), OD is deferred by ruling.",
+        "(finding §5); maneuver remains Wave 2.",
     );
     this.name = "UnknownConformanceFamilyError";
     this.family = family;
@@ -93,6 +95,23 @@ export async function runConformance(options) {
   if (!CONFORMANCE_FAMILIES.includes(family)) {
     throw new UnknownConformanceFamilyError(options.family);
   }
+  if (family === "estimation") {
+    const evidence = options.evidence ?? JSON.parse(
+      await fs.readFile(path.resolve(options.evidencePath), "utf8"),
+    );
+    const evaluated = runEstimationSuite(evidence);
+    let artifact = evidence.artifact ?? null;
+    if (options.artifactPath) {
+      const artifactPath = path.resolve(options.artifactPath);
+      const artifactBytes = await fs.readFile(artifactPath);
+      artifact = {
+        path: artifactPath,
+        sha256: crypto.createHash("sha256").update(artifactBytes).digest("hex"),
+      };
+    }
+    return { family, artifact, corpus: null, evidence: options.evidencePath ?? null, ...evaluated };
+  }
+
   const artifactPath = path.resolve(options.artifactPath);
   const artifactBytes = await fs.readFile(artifactPath);
   const artifactSha256 = crypto
@@ -127,6 +146,24 @@ export async function runConformance(options) {
     checks,
     verdict: computeVerdict(checks),
   };
+}
+
+export { runEstimationSuite } from "./estimationSuite.js";
+export { makeEstimationReferenceEvidence } from "./estimationReference.js";
+
+export async function runEstimationSelfTest() {
+  const controls = [];
+  for (const [id, mutate] of [
+    ["runtime-divergence", (e) => { e.runtime.threads["8"] = "different"; }],
+    ["ekf-ukf-alias", (e) => { e.filter.ekfUkfCovarianceDifference = 0; }],
+    ["covariance-placeholder", (e) => { e.invariants.actualOcmCovariance = false; }],
+  ]) {
+    const evidence = makeEstimationReferenceEvidence();
+    mutate(evidence);
+    const report = runEstimationSuite(evidence);
+    controls.push({ id, caught: report.verdict === "FAIL" });
+  }
+  return { ok: controls.every((control) => control.caught), controls };
 }
 
 export function formatConformanceReport(report) {
