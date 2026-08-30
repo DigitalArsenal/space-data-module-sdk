@@ -46,6 +46,8 @@ struct SolverSettings (abi, abi_c_name: "OrbProSolverSettings", abi_c_helper_pre
   maximum_evaluations: uint;
   variable_count: uint;
   goal_count: uint;
+  equality_constraint_count: uint;
+  inequality_constraint_count: uint;
   residual_tolerance: double;
   step_tolerance: double;
   constraint_tolerance: double;

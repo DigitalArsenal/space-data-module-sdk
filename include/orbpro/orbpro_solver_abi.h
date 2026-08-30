@@ -67,14 +67,16 @@ typedef struct {
   uint32_t maximum_evaluations;
   uint32_t variable_count;
   uint32_t goal_count;
+  uint32_t equality_constraint_count;
+  uint32_t inequality_constraint_count;
   double residual_tolerance;
   double step_tolerance;
   double constraint_tolerance;
   double kkt_tolerance;
 } OrbProSolverSettings;
 
-ORBPRO_SOLVER_STATIC_ASSERT(sizeof(OrbProSolverSettings) == 56,
-                            "OrbProSolverSettings must be 56 bytes");
+ORBPRO_SOLVER_STATIC_ASSERT(sizeof(OrbProSolverSettings) == 64,
+                            "OrbProSolverSettings must be 64 bytes");
 
 typedef struct {
   uint64_t request_id;
