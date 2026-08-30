@@ -996,13 +996,30 @@ export interface GuestLinkArtifact {
   objectBytes: Uint8Array;
 }
 
+/**
+ * The three legitimate thread models.
+ *
+ * `"wasi-sequential"` was missing here while `src/compiler/compileModule.js`
+ * has accepted it since the model was introduced, so every TypeScript consumer
+ * that declared the model the propagator and event-locator families call for
+ * failed to typecheck against a compiler that would have accepted it. Adding
+ * it is a declaration repair, not a new capability.
+ *
+ * `"single-thread"` is the LEGACY EMSCRIPTEN profile and routes to `em++`. It
+ * is not a synonym for "this guest does not thread" — a guest that provably
+ * never spawns declares `"wasi-sequential"`, which is built by the sanctioned
+ * clang `wasm32-wasip1-threads` toolchain and requires
+ * `manifest.sequentialJustification`.
+ */
 export type ModuleThreadModelName =
   | "single-thread"
-  | "emscripten-pthreads";
+  | "emscripten-pthreads"
+  | "wasi-sequential";
 
 export const ModuleThreadModel: {
   readonly SINGLE_THREAD: "single-thread";
   readonly EMSCRIPTEN_PTHREADS: "emscripten-pthreads";
+  readonly WASI_SEQUENTIAL: "wasi-sequential";
 };
 
 export interface ProtectedArtifact {

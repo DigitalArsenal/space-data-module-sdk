@@ -89,7 +89,7 @@ const NAV = [
     items: [
       { out: "families/estimation.html", src: "families/estimation.md", title: "Estimation", family: "estimation", status: "experimental" },
       { out: "families/data-source.html", src: "provider-access-abi.md", title: "Data source", family: "data-source", status: "shipped" },
-      { out: "families/analytics.html", src: "families/analytics.md", title: "Analytics", family: "analytics", status: "planned" },
+      { out: "families/analytics.html", src: "families/analytics.md", title: "Analytics", family: "analytics", status: "experimental" },
       { out: "families/scheduler.html", src: "families/scheduler.md", title: "Scheduler", family: "scheduler", status: "planned" },
       { out: "families/behavior.html", src: "families/behavior.md", title: "Behavior", family: "behavior", status: "planned" },
     ],
@@ -97,6 +97,7 @@ const NAV = [
   {
     heading: "Runtime contract",
     items: [
+      { out: "events-abi.html", src: "events-abi.md", title: "Event locator ABI" },
       { out: "module-publication-standard.html", src: "module-publication-standard.md", title: "Module publication standard" },
       { out: "browser-wasmedge-isomorphic.html", src: "browser-wasmedge-isomorphic.md", title: "Browser / WasmEdge isomorphism" },
       { out: "isomorphic-pthreads.html", src: "isomorphic-pthreads.md", title: "Isomorphic pthreads" },
@@ -609,7 +610,7 @@ const FAMILY_BLURB = {
   effects: "Visual and volumetric effects driven by an event physics family.",
   estimation: "Orbit determination and filtering: observations in, estimated state and covariance out.",
   "data-source": "Fetch, parse and normalize external provider data into standards records inside the module.",
-  analytics: "Derived figures of merit computed over a scenario.",
+  analytics: "Derived figures of merit computed over a scenario. The event-location sub-harness is shaped and measured; the rest is planned.",
   scheduler: "Ordering and tasking of activities across a scenario timeline.",
   behavior: "Scripted or reactive decision logic that drives other families.",
 };
@@ -675,6 +676,7 @@ for (const group of NAV) {
   if (!group.items.some((it) => it.status)) continue;
   llms.push(`### ${group.heading}`, "");
   for (const item of group.items) {
+    if (!item.status) continue;
     llms.push(`- [${item.title}](${SITE}/${item.out}) — ${item.status.toUpperCase()}. ${FAMILY_BLURB[item.family] || ""}`);
   }
   llms.push("");

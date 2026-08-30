@@ -1,0 +1,501 @@
+include "Propagator.fbs";
+
+namespace orbpro.events;
+
+// =============================================================================
+// THE EVENT-LOCATOR ABI LIVES HERE. THIS FILE IS THE SINGLE SOURCE OF TRUTH.
+// =============================================================================
+//
+// Every struct below marked `(abi)` is a BINARY CONTRACT that crosses the WASM
+// boundary between a third-party event-locator module and its consumer. The C
+// header, the TypeScript byte-offset bindings and the size/offset locks are all
+// GENERATED from these declarations:
+//
+//   node scripts/generate-events-abi.mjs   # regenerate
+//   node scripts/check-events-abi.mjs      # the drift gate (runs in npm test)
+//
+// The `abi`, `abi_c_name`, `abi_c_prefix` and `abi_c_helper_prefix` attributes
+// are declared in Propagator.fbs, which this file includes. `ReferenceFrame`
+// and `StateVector` come from there too, and are NOT redeclared: five
+// hand-vendored copies of one struct is the drift the generated-ABI lane
+// exists to end.
+//
+// Contract document: docs/events-abi.md
+// Family page:       docs/families/analytics.md (event-location sub-harness)
+// Ruling:            Janus AMEND 2026-08-30 (gmat-06-parameter-catalog-and-event-locators)
+//
+// -----------------------------------------------------------------------------
+// ONE ABI, N LOCATORS
+// -----------------------------------------------------------------------------
+// Eclipse, station contact, sensor intrusion, apsides, node crossings and a
+// propagate-to-condition stop are the SAME thing: a vector of scalar event
+// functions g_i(t) whose sign changes are refined to roots. A locator supplies
+// the g vector and its description. It does NOT supply the root finder, the
+// bracketing scan, the occurrence counting or the interval pairing — those are
+// the RUNNER (include/orbpro/orbpro_event_runner.h), which is identical in
+// every locator and is what makes "adding a locator needs no runner change"
+// a structural fact rather than an aspiration.
+//
+// -----------------------------------------------------------------------------
+// THE STATE SOURCE IS PULLED, NEVER IMPORTED
+// -----------------------------------------------------------------------------
+// A locator needs states at epochs only it can choose (Brent picks the next
+// abscissa from the last three). It does NOT import a host function to get
+// them. The runner INVERTS the call: `plugin_event_next` reports the epochs it
+// wants, the consumer evaluates them through whatever propagator is wired to
+// the port, and `plugin_event_supply` feeds the states back.
+//
+// This is deliberate and it is the whole reason no new host capability is
+// needed for this family:
+//
+//   * The propagator stays a PORT. Any module implementing the propagator ABI
+//     serves any locator, with no name of a provider anywhere in this schema.
+//   * There is no runtime detection and no new import, so the browser,
+//     native-WasmEdge and Docker-WasmEdge lanes are byte-identical by
+//     construction — the consumer shuttles buffers and decides nothing.
+//   * The refinement stays INSIDE the guest. A host-side root finder would be
+//     physics in JavaScript, and its arithmetic would differ per lane.
+//
+// -----------------------------------------------------------------------------
+// EPOCHS ARE SPLIT, AND THAT IS NOT DECORATION
+// -----------------------------------------------------------------------------
+// Every epoch in this ABI is a PAIR: an exactly-representable Julian day plus
+// an offset in SECONDS. A Julian date carried in one float64 resolves to
+// ulp(2460000.5) = 2^-31 d = 4.02e-5 s — forty microseconds — so a single-double
+// JD CANNOT express a stop epoch to 1e-6 s, and a locator that reported one
+// would be reporting rounding noise. The split pair resolves 1.5e-11 s.
+//
+// `OrbProStateVector.epoch` is a single float64 and is FROZEN (64 bytes, on the
+// wire, in the field). It is therefore the state SOURCE's resolution that
+// bounds a stop epoch, not this ABI's. That resolution is DECLARED
+// (`EventLocatorConfig.stateEpochResolutionSeconds`), the runner clamps its
+// tolerance to it, and a root that hit the clamp is reported
+// `EPOCH_RESOLUTION_LIMITED` rather than claiming a precision nothing measured.
+
+/// The refinement algorithm the runner uses on a bracketed root. All three are
+/// bracketing methods: a root that is bracketed stays bracketed, so a locator
+/// can never report a root outside the interval that produced it.
+enum RootMethod : ubyte (abi, abi_c_name: "OrbProRootMethod", abi_c_prefix: "ORBPRO_ROOT_") {
+  /// Brent's method (inverse quadratic interpolation with bisection fallback).
+  /// The default: superlinear on smooth g, and it cannot diverge.
+  BRENT = 0,
+  /// Plain bisection. Slower, and chosen only when g is known to be noisy or
+  /// piecewise — it is the one method whose iteration count is a function of
+  /// the bracket width alone, which makes it the reproducibility fallback.
+  BISECTION = 1,
+  /// Illinois (modified regula falsi). Retained because it is the method the
+  /// legacy JavaScript eclipse scan used, so a like-for-like comparison
+  /// against the pre-module answer is possible without changing the method.
+  ILLINOIS = 2
+}
+
+/// Which way g crosses zero. SIGNED on purpose: a crossing qualifies when
+/// `direction * (g_after - g_before) > 0`, so the filter is arithmetic rather
+/// than a branch table, and ANY = 0 falls out of the same expression.
+enum CrossingDirection : byte (abi, abi_c_name: "OrbProCrossingDirection", abi_c_prefix: "ORBPRO_CROSSING_") {
+  /// g decreasing through zero — an interval OPENS for the usual
+  /// "g > 0 means outside" convention (eclipse entry, AOS, FOV entry).
+  FALLING = -1,
+  /// Either direction.
+  ANY = 0,
+  /// g increasing through zero — an interval CLOSES (eclipse exit, LOS).
+  RISING = 1
+}
+
+/// The sign of a scalar at an interval endpoint. Its only job is to make an
+/// interval that is ALREADY OPEN at the scan start representable: a
+/// crossing-only report loses that interval entirely, which is the classic
+/// event-scan defect (the pass you were already inside when the scan began).
+enum Sign : byte (abi, abi_c_name: "OrbProSign", abi_c_prefix: "ORBPRO_SIGN_") {
+  NEGATIVE = -1,
+  ZERO = 0,
+  POSITIVE = 1
+}
+
+/// How a refinement ended. NEVER folded into the returned root: a root that
+/// stopped on the iteration cap and a root that converged are different
+/// answers, and a consumer that cannot tell them apart will publish the first
+/// as if it were the second.
+enum RootStatus : ubyte (abi, abi_c_name: "OrbProRootStatus", abi_c_prefix: "ORBPRO_ROOT_STATUS_") {
+  /// |g| <= value_tolerance, or the bracket narrowed below epoch_tolerance.
+  CONVERGED = 0,
+  /// The iteration cap was reached with the bracket still wider than the
+  /// tolerance. The returned epoch is the best bracket midpoint.
+  MAX_ITERATIONS = 1,
+  /// g did not change sign across a bracket that the scan said it did — the
+  /// state source returned inconsistent values for the same epoch, or g is
+  /// not a function of epoch alone.
+  FLAT_BRACKET = 2,
+  /// g jumped across zero without passing through it within the epoch
+  /// tolerance: a discontinuity, not a root. Reported, never refined away.
+  DISCONTINUOUS = 3,
+  /// The scan hit `EventInterval.max_events` or `max_evaluations` and stopped
+  /// early. Everything reported is real; the list is not complete.
+  TRUNCATED = 4,
+  /// The bracket narrowed to the state source's declared epoch resolution
+  /// before it reached `epoch_tolerance_seconds`. The root is correct to that
+  /// resolution and NO FINER, and this is how the ABI says so instead of
+  /// reporting the tolerance it was asked for.
+  EPOCH_RESOLUTION_LIMITED = 5
+}
+
+/// EventHit.flags and EventInterval.flags are BITFIELDS carrying any
+/// OR-combination of these, so both are declared `uint` on their structs
+/// rather than typed to this enum. The C enumerators are generated from here
+/// anyway — they are the contract.
+enum EventFlags : uint (abi, abi_c_name: "OrbProEventFlags", abi_c_prefix: "ORBPRO_EVENT_") {
+  NONE = 0,
+  /// The component's interval was already open at the interval start, so this
+  /// hit is a CLOSING crossing whose opening epoch is before the scan.
+  INTERVAL_OPEN_AT_START = 1,
+  /// The component's interval is still open at the interval end.
+  INTERVAL_OPEN_AT_END = 2,
+  /// g touched zero and returned on the same side — a grazing event. Reported
+  /// as a hit with this flag rather than silently dropped, because a grazing
+  /// eclipse and no eclipse are different answers.
+  TANGENTIAL = 4,
+  /// The root sits within one epoch tolerance of an interval endpoint, so the
+  /// bracket is one-sided and the consumer should widen the interval to
+  /// confirm it.
+  ON_SCAN_BOUNDARY = 8,
+  /// The scan ran backward in time (`stop` earlier than `start`). Hits are
+  /// still reported in SCAN order, which is decreasing epoch.
+  BACKWARD = 16,
+  /// This hit satisfied a component declared `isStopCondition` — it is the
+  /// propagate-to-condition answer, not merely an observed crossing.
+  STOP_CONDITION = 32
+}
+
+/// Named negative return codes for every export in this family. A locator that
+/// answers -1 for everything is unconformable: the consumer cannot place the
+/// failure on the degradation ladder, so it cannot decide between retrying,
+/// widening the interval, and refusing. Codes -1..-6 are deliberately the SAME
+/// numbers and the same meanings as the propagator family's
+/// (docs/propagator-abi.md §Error codes); the events-specific codes start at
+/// -20 so no consumer can confuse the two tables by value.
+enum EventError : int (abi, abi_c_name: "OrbProEventError", abi_c_prefix: "ORBPRO_EVENT_E_") {
+  /// The runner asked for a phase that does not exist. Internal; never
+  /// returned by a conformant locator.
+  INTERNAL = -25,
+  /// `plugin_event_supply` was called with a count that is not
+  /// `epoch_count * object_count` from the last `plugin_event_next`.
+  SUPPLY_COUNT_MISMATCH = -24,
+  /// `plugin_event_supply` was called when no request was outstanding, or
+  /// `plugin_event_next` twice without an intervening supply.
+  PROTOCOL_ORDER = -23,
+  /// A caller buffer was too small for the answer. The required element count
+  /// is available from the matching `*_count` export; nothing is truncated
+  /// silently.
+  BUFFER_TOO_SMALL = -22,
+  /// The configuration named a component, parameter or object this locator
+  /// does not implement. The name is reported through the description, never
+  /// coerced to a neighbour.
+  UNKNOWN_COMPONENT = -21,
+  /// `plugin_event_begin` has not been called, or the previous scan finished.
+  NOT_STARTED = -20,
+  /// A state, epoch or parameter is outside the domain where this locator's
+  /// geometry is defined (a station below the surface, e < 0, a cone
+  /// half-angle outside (0, pi)).
+  UNPHYSICAL = -6,
+  /// A refinement ended without converging AND the caller asked for strict
+  /// convergence. Ordinarily non-convergence is reported per hit in
+  /// `EventHit.status`, not as a call failure.
+  NOT_CONVERGED = -5,
+  /// A pointer, count or policy value is malformed (NaN tolerance, zero scan
+  /// step, `max_iterations` of 0).
+  BAD_INPUT = -4,
+  /// A required output pointer was null.
+  NULL_OUTPUT = -3,
+  /// An object index is outside `[0, object_count)`.
+  BAD_OBJECT_INDEX = -2,
+  /// `plugin_event_configure` has not been called, or it failed.
+  NOT_CONFIGURED = -1,
+  OK = 0
+}
+
+/// Whether a component's g is safe to refine, and with which method. A locator
+/// that lies here produces roots that look converged and are not, which is why
+/// it is declared per component rather than assumed for the family.
+enum ComponentContinuity : ubyte (abi, abi_c_name: "OrbProComponentContinuity", abi_c_prefix: "ORBPRO_CONTINUITY_") {
+  /// g is C1 in epoch. Brent is valid.
+  SMOOTH = 0,
+  /// g is continuous but its derivative jumps (a piecewise mask, a
+  /// multi-body minimum). Bracketing methods are valid; interpolation is not
+  /// guaranteed to help, and the runner falls back to bisection.
+  PIECEWISE = 1,
+  /// g steps between levels and has no root in the analytic sense (a discrete
+  /// count, an enumerated state). The runner reports the STEP epoch to within
+  /// the scan step and marks it DISCONTINUOUS; it never refines it.
+  DISCRETE = 2
+}
+
+// =============================================================================
+// THE ABI STRUCTS
+// =============================================================================
+
+/// The root-refinement policy — the SAME parameters for every locator, which
+/// is what makes two locators' epochs comparable. 32 bytes, 8-byte aligned.
+///
+/// A zeroed policy is NOT a default: `orbpro_root_policy_init` zeroes it and
+/// `plugin_event_begin` refuses a zero `scan_step_seconds` with `BAD_INPUT`.
+/// A silent default step is how a scan misses every event shorter than it.
+struct RootPolicy (abi, abi_c_name: "OrbProRootPolicy", abi_c_helper_prefix: "orbpro_root_policy_") {
+  /// Coarse bracketing step, SECONDS, always positive. The runner applies the
+  /// interval's direction. This is the ONLY thing that decides which events
+  /// are found; the refinement decides only how precisely.
+  scan_step_seconds:double;
+  /// Convergence bar on the bracket width, SECONDS. Clamped up to the state
+  /// source's declared epoch resolution — see `EPOCH_RESOLUTION_LIMITED`.
+  epoch_tolerance_seconds:double;
+  /// Convergence bar on |g|, in the component's own declared unit. 0 disables
+  /// the value test and converges on the bracket alone.
+  value_tolerance:double;
+  /// Hard cap on refinement iterations for ONE root. Reaching it is reported
+  /// as `MAX_ITERATIONS`, never as a converged root.
+  max_iterations:uint;
+  /// Refinement algorithm.
+  method:RootMethod;
+}
+
+/// The interval to scan, and the filter applied to what is found. 56 bytes,
+/// 8-byte aligned.
+///
+/// EPOCHS ARE SPLIT PAIRS: `*_jd_day` is an exactly-representable Julian day
+/// (an integer, or an integer + 0.5) and `*_seconds` is the offset from it in
+/// seconds. Do not collapse them into one double before comparing — that is
+/// the forty-microsecond quantization this pair exists to avoid.
+///
+/// BACKWARD PROPAGATION IS NOT A MODE. It is `stop` earlier than `start`. The
+/// runner steps negatively, the consumer's propagator is asked for earlier
+/// epochs, and every hit carries `BACKWARD`. There is no second code path to
+/// keep in agreement with the first.
+struct EventInterval (abi, abi_c_name: "OrbProEventInterval", abi_c_helper_prefix: "orbpro_event_interval_") {
+  /// Scan start: exactly-representable Julian day.
+  start_jd_day:double;
+  /// Scan start: seconds from `start_jd_day`.
+  start_seconds:double;
+  /// Scan end: exactly-representable Julian day. May be EARLIER than the
+  /// start — that is backward propagation.
+  stop_jd_day:double;
+  /// Scan end: seconds from `stop_jd_day`.
+  stop_seconds:double;
+  /// Stop after this many qualifying hits. 0 = unbounded (bounded only by the
+  /// caller's hit buffer and by `max_evaluations`).
+  max_events:uint;
+  /// Hard cap on g evaluations for the whole scan, so a pathological
+  /// configuration terminates with `TRUNCATED` instead of running forever.
+  /// 0 = unbounded.
+  max_evaluations:uint;
+  /// Report only the Nth qualifying crossing, 1-based. 0 = report all. This is
+  /// GMAT's "which occurrence" on a stopping condition, and it counts
+  /// crossings that pass the direction filter, not raw sign changes.
+  occurrence:uint;
+  /// Restrict the scan to one component index. 0xFFFFFFFF = every component.
+  component:uint;
+  /// EventFlags bitfield. Input flags are advisory; the runner ORs its own
+  /// findings into each hit's flags.
+  flags:uint;
+  /// Crossing-direction filter applied to every component.
+  direction:CrossingDirection;
+}
+
+/// One refined crossing. 48 bytes, 8-byte aligned.
+///
+/// A HIT IS A CROSSING, NOT AN INTERVAL. Apsides and node crossings are
+/// instants; eclipse and contact are intervals. Emitting crossings and pairing
+/// them by direction is total over both, whereas an interval-shaped hit puts a
+/// sentinel in half the family. Pairing is deterministic and is specified in
+/// docs/events-abi.md §Interval pairing; `EventScanSummary` carries the
+/// endpoint signs that make the pairing total.
+struct EventHit (abi, abi_c_name: "OrbProEventHit", abi_c_helper_prefix: "orbpro_event_hit_") {
+  /// Refined root: exactly-representable Julian day.
+  epoch_jd_day:double;
+  /// Refined root: seconds from `epoch_jd_day`.
+  epoch_seconds:double;
+  /// g at the reported root, in the component's declared unit. This is the
+  /// RESIDUAL and it is evidence: a "converged" root with a residual far
+  /// outside `value_tolerance` is a defect the consumer can see.
+  value:double;
+  /// Which component crossed.
+  component:uint;
+  /// Refinement iterations actually taken.
+  iterations:uint;
+  /// g evaluations spent on this root, scan samples included.
+  evaluations:uint;
+  /// EventFlags bitfield.
+  flags:uint;
+  /// The direction g crossed in.
+  direction:CrossingDirection;
+  /// How the refinement ended.
+  status:RootStatus;
+}
+
+/// What one component did across the whole interval. 32 bytes, 8-byte aligned.
+///
+/// This is what makes a crossing list interpretable. Without the endpoint
+/// signs, "no hits" is ambiguous between "never in eclipse" and "in eclipse the
+/// entire time", and those are opposite answers.
+struct EventScanSummary (abi, abi_c_name: "OrbProEventScanSummary", abi_c_helper_prefix: "orbpro_event_scan_summary_") {
+  /// g at the interval start, in the component's declared unit.
+  initial_value:double;
+  /// g at the interval end.
+  final_value:double;
+  /// Which component this summarizes.
+  component:uint;
+  /// Qualifying crossings found for this component.
+  crossing_count:uint;
+  /// g evaluations spent on this component.
+  evaluation_count:uint;
+  /// Sign of g at the interval start.
+  initial_sign:Sign;
+  /// Sign of g at the interval end.
+  final_sign:Sign;
+}
+
+/// What the locator wants evaluated next — the guest-to-consumer half of the
+/// pull protocol. 16 bytes, 4-byte aligned.
+///
+/// The consumer reads this, propagates the requested epochs through whatever
+/// module is wired to the propagator port, and returns the states through
+/// `plugin_event_supply`. The consumer chooses NOTHING: not the epochs, not
+/// the order, not when the scan ends.
+struct EventStateRequest (abi, abi_c_name: "OrbProEventStateRequest", abi_c_helper_prefix: "orbpro_event_state_request_") {
+  /// How many epochs were written to the caller's epoch buffer. The buffer
+  /// holds `2 * epoch_count` doubles: (jd_day, seconds) pairs, in scan order.
+  epoch_count:uint;
+  /// How many objects each epoch must be evaluated for. Every configured
+  /// object is evaluated at EVERY requested epoch — that is what makes a
+  /// multi-spacecraft (Formation) stop synchronized by construction rather
+  /// than by the consumer remembering to keep the epochs aligned.
+  object_count:uint;
+  /// The frame the returned states must be expressed in. An
+  /// `OrbProReferenceFrame` value; the consumer converts through the frames
+  /// port if its propagator emits another frame, and a consumer that cannot
+  /// must fail loudly rather than supply a differently-framed state.
+  reference_frame:orbpro.propagator.ReferenceFrame;
+  /// EventFlags bitfield describing the phase this request belongs to
+  /// (a coarse scan batch versus a single refinement abscissa).
+  flags:uint;
+}
+
+// =============================================================================
+// THE WIRE TABLES
+// =============================================================================
+// Tables are messages, not ABI. Anything with a string or a variable-length
+// vector lives here and crosses as a FlatBuffer through `plugin_event_describe`
+// and `plugin_event_configure`, never as a raw struct.
+
+/// One scalar event function the locator offers. `name` is the key a consumer
+/// resolves through the SDS parameter-catalog record; this schema deliberately
+/// does NOT carry a parameter roster of its own, because a second roster is a
+/// second source of truth.
+table EventComponent {
+  /// Index used by every ABI struct in this file. Dense, 0-based, stable for
+  /// the lifetime of one configuration.
+  componentId:uint = 0;
+  /// The catalog parameter or locator-defined component name.
+  name:string;
+  /// The unit `value`, `goalValue` and `valueTolerance` are expressed in.
+  unit:string;
+  /// Capability-class description. Never a vendor or organization name.
+  description:string;
+  /// For a stop condition, g = parameter - goalValue. For a pure locator
+  /// component (an eclipse shadow function) the goal is 0 and g is the
+  /// geometry itself.
+  goalValue:double = 0.0;
+  /// Direction filter for this component, ANDed with the interval's.
+  direction:orbpro.events.CrossingDirection = ANY;
+  /// 1-based occurrence for this component. 0 = every occurrence.
+  occurrence:uint = 0;
+  /// True when this component is a propagate-to-condition stop rather than an
+  /// observation. Hits from it carry `STOP_CONDITION`.
+  isStopCondition:bool = false;
+  /// Which configured object this component is about.
+  objectIndex:uint = 0;
+  /// The second object for a relative component (the station, the occulting
+  /// body, the observed body). Meaningful only when `usesTargetObject`.
+  targetObjectIndex:uint = 0;
+  /// Whether `targetObjectIndex` is used at all.
+  usesTargetObject:bool = false;
+  /// The frame this component's geometry is evaluated in.
+  referenceFrame:orbpro.propagator.ReferenceFrame = TEME;
+  /// Continuity class, which decides whether interpolation is admissible.
+  continuity:orbpro.events.ComponentContinuity = SMOOTH;
+}
+
+/// A named scalar or string the locator declares it accepts. This is how a
+/// locator is configured WITHOUT a schema per locator: the keys are published
+/// in the description, so the configuration is self-describing rather than
+/// free-form.
+table EventParameter {
+  key:string;
+  value:double = 0.0;
+  text:string;
+}
+
+/// What `plugin_event_describe` returns. A consumer reads this BEFORE
+/// configuring, so a generic runner can present any locator's controls without
+/// knowing the locator.
+table EventLocatorDescription {
+  /// Capability class of the locator (shadow-crossing, station-access,
+  /// field-of-view-intrusion, orbit-apsis, node-crossing, parameter-stop).
+  /// Capability classes only; never a vendor or organization name.
+  locatorClass:string;
+  /// The locator module's own version string.
+  locatorVersion:string;
+  /// Objects this locator needs states for, in the order
+  /// `plugin_event_supply` expects them.
+  objectCount:uint = 0;
+  /// Every component this locator can offer, before configuration narrows it.
+  components:[EventComponent];
+  /// The parameter keys this locator accepts, with their defaults.
+  acceptedParameters:[EventParameter];
+  /// The policy the locator recommends for its own geometry. A consumer may
+  /// override it; a consumer that does NOT set one gets this.
+  defaultPolicy:orbpro.events.RootPolicy;
+  /// The largest scan step, SECONDS, at which this locator claims not to miss
+  /// an event. 0 means the locator declines to bound it, which a conformance
+  /// kit records as a named gap.
+  maxSafeScanStepSeconds:double = 0.0;
+}
+
+/// What `plugin_event_configure` accepts.
+table EventLocatorConfig {
+  /// Must match the description's `locatorClass`, so a configuration written
+  /// for one locator cannot be silently accepted by another.
+  locatorClass:string;
+  /// Objects the consumer will supply states for.
+  objectCount:uint = 0;
+  /// The components to evaluate, in the order their indices will be used.
+  components:[EventComponent];
+  /// Locator-specific settings, keyed by names from `acceptedParameters`. An
+  /// unrecognized key is `UNKNOWN_COMPONENT`, never ignored.
+  parameters:[EventParameter];
+  /// The refinement policy for this scan.
+  policy:orbpro.events.RootPolicy;
+  /// The state source's epoch resolution in SECONDS — the smallest epoch
+  /// difference at which the consumer's propagator returns a different state.
+  /// For a propagator whose ABI takes a single float64 Julian date this is
+  /// ulp(jd) * 86400, about 4.02e-5 s at a 2026 epoch. The runner clamps
+  /// `epoch_tolerance_seconds` up to it and reports
+  /// `EPOCH_RESOLUTION_LIMITED`. 0 means "not declared", and the runner then
+  /// trusts the tolerance it was given — which is the only case where a
+  /// reported epoch can be finer than anything that was measured.
+  stateEpochResolutionSeconds:double = 0.0;
+}
+
+/// The scan result as a record, for a consumer that wants the answer as a
+/// message rather than through the struct exports. The struct exports remain
+/// authoritative; this is a projection of them, and the conformance kit asserts
+/// the two agree exactly.
+table EventScanResult {
+  hits:[orbpro.events.EventHit];
+  summaries:[orbpro.events.EventScanSummary];
+  evaluationCount:uint = 0;
+  /// The worst status of any hit, so a consumer can gate on one field.
+  status:orbpro.events.RootStatus = CONVERGED;
+  /// The clamped tolerance actually used, SECONDS.
+  effectiveEpochToleranceSeconds:double = 0.0;
+}
+
+root_type EventLocatorDescription;

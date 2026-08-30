@@ -121,12 +121,44 @@ test("the generated TS bindings agree with the same layout", () => {
 });
 
 test("the frame and flag vocabularies keep their ordinals", () => {
-  // These ordinals are frozen by compiled WASM artifacts already in the field.
-  // See graph/tasks/sdk-reference-frame-enum-unification.md — collapsing the
-  // four live ReferenceFrame vocabularies is a wire break, not a refactor.
+  // 0-5 are frozen by compiled WASM artifacts already in the field. See
+  // graph/tasks/sdk-reference-frame-enum-unification.md — collapsing the four
+  // live ReferenceFrame vocabularies is a wire break, not a refactor. 6-22 are
+  // the appended GMAT axis roster (coordinator ruling, gmat-08, cb53733).
+  //
+  // THIS TEST WAS RED ON `cb53733` ITSELF: the roster was appended to
+  // Propagator.fbs and this map was not, so `npm test` failed on origin/main
+  // for every consumer between that landing and this one. Appending to the
+  // frozen prefix is exactly what the freeze permits; leaving the assertion
+  // behind is what the freeze cannot survive, because a red gate teaches
+  // everyone to ignore it.
   assert.deepEqual(
     { ...ReferenceFrame },
-    { TEME: 0, J2000: 1, ICRF: 2, ECEF: 3, MCI: 4, MCMF: 5 },
+    {
+      TEME: 0,
+      J2000: 1,
+      ICRF: 2,
+      ECEF: 3,
+      MCI: 4,
+      MCMF: 5,
+      MJ2000EC: 6,
+      MOD: 7,
+      TOD: 8,
+      MOE: 9,
+      TOE: 10,
+      BODY_FIXED: 11,
+      BODY_INERTIAL: 12,
+      OBJECT_REFERENCED: 13,
+      LOCAL_ALIGNED_CONSTRAINED: 14,
+      EQUATOR: 15,
+      GSE: 16,
+      GSM: 17,
+      TOPOCENTRIC: 18,
+      BODY_SPIN_SUN: 19,
+      SPICE_DEFINED: 20,
+      MOD_FK5: 21,
+      TOD_FK5: 22,
+    },
   );
   assert.deepEqual(
     { ...StateFlags },

@@ -48,12 +48,13 @@ WasmEdge, which breaks tri-runtime isomorphism. Modules must be EH-free.
 
 - [Estimation](https://digitalarsenal.github.io/space-data-module-sdk/families/estimation.html) — EXPERIMENTAL. Orbit determination and filtering: observations in, estimated state and covariance out.
 - [Data source](https://digitalarsenal.github.io/space-data-module-sdk/families/data-source.html) — SHIPPED. Fetch, parse and normalize external provider data into standards records inside the module.
-- [Analytics](https://digitalarsenal.github.io/space-data-module-sdk/families/analytics.html) — PLANNED. Derived figures of merit computed over a scenario.
+- [Analytics](https://digitalarsenal.github.io/space-data-module-sdk/families/analytics.html) — EXPERIMENTAL. Derived figures of merit computed over a scenario. The event-location sub-harness is shaped and measured; the rest is planned.
 - [Scheduler](https://digitalarsenal.github.io/space-data-module-sdk/families/scheduler.html) — PLANNED. Ordering and tasking of activities across a scenario timeline.
 - [Behavior](https://digitalarsenal.github.io/space-data-module-sdk/families/behavior.html) — PLANNED. Scripted or reactive decision logic that drives other families.
 
 ## Runtime contract
 
+- [Event locator ABI](https://digitalarsenal.github.io/space-data-module-sdk/events-abi.html)
 - [Module publication standard](https://digitalarsenal.github.io/space-data-module-sdk/module-publication-standard.html)
 - [Browser / WasmEdge isomorphism](https://digitalarsenal.github.io/space-data-module-sdk/browser-wasmedge-isomorphic.html)
 - [Isomorphic pthreads](https://digitalarsenal.github.io/space-data-module-sdk/isomorphic-pthreads.html)

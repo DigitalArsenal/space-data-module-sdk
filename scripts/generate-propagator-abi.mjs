@@ -30,13 +30,13 @@ export const headerRelativePath = path.join("include", "orbpro", "orbpro_propaga
 export const tsRelativePath = path.join("src", "generated", "orbpro", "propagator-abi.ts");
 export const jsRelativePath = path.join("src", "generated", "orbpro", "propagator-abi.js");
 
-const BANNER_C = (schemaFile) => `/* ===========================================================================
+const BANNER_C = (schemaFile, spec) => `/* ===========================================================================
  * GENERATED FILE — DO NOT EDIT.
  *
  * Source of truth : ${schemaFile}
- * Generator       : scripts/generate-propagator-abi.mjs
- * Drift gate      : scripts/check-propagator-abi.mjs  (runs in \`npm test\`)
- * Contract        : docs/propagator-abi.md
+ * Generator       : ${spec.generatorScript}
+ * Drift gate      : ${spec.checkScript}  (runs in \`npm test\`)
+ * Contract        : ${spec.contractDoc}
  *
  * Edit the .fbs and regenerate. A hand edit here is erased by the next run and
  * failed by the gate in between — which is the point: this file existing in
@@ -46,19 +46,45 @@ const BANNER_C = (schemaFile) => `/* ===========================================
  */
 `;
 
-const BANNER_TS = (schemaFile) => `// ===========================================================================
+const BANNER_TS = (schemaFile, spec) => `// ===========================================================================
 // GENERATED FILE — DO NOT EDIT.
 //
 // Source of truth : ${schemaFile}
-// Generator       : scripts/generate-propagator-abi.mjs
-// Drift gate      : scripts/check-propagator-abi.mjs  (runs in \`npm test\`)
-// Contract        : docs/propagator-abi.md
+// Generator       : ${spec.generatorScript}
+// Drift gate      : ${spec.checkScript}  (runs in \`npm test\`)
+// Contract        : ${spec.contractDoc}
 //
 // These constants exist so that no JavaScript consumer ever hard-codes a byte
 // offset again. Read a state vector with ORBPRO_STATE_VECTOR.offsets.position,
 // never with the literal 8.
 // ===========================================================================
 `;
+
+/**
+ * A family's generation spec. Everything in a generated artifact that is NOT
+ * derived from the IDL lives here, so a second family cannot fork the
+ * renderer: one renderer, N specs. The propagator spec reproduces the
+ * committed artifacts byte for byte, which is what check-propagator-abi.mjs
+ * proves on every `npm test`.
+ */
+export const PROPAGATOR_ABI_SPEC = Object.freeze({
+  schemaFileName: "Propagator.fbs",
+  generatorScript: "scripts/generate-propagator-abi.mjs",
+  checkScript: "scripts/check-propagator-abi.mjs",
+  contractDoc: "docs/propagator-abi.md",
+  headerGuard: "ORBPRO_PROPAGATOR_ABI_H",
+  headerRelativePath: path.join("include", "orbpro", "orbpro_propagator_abi.h"),
+  tsRelativePath: path.join("src", "generated", "orbpro", "propagator-abi.ts"),
+  jsRelativePath: path.join("src", "generated", "orbpro", "propagator-abi.js"),
+  bundleConstName: "ORBPRO_PROPAGATOR_ABI",
+  cIncludes: [],
+  tsForeignModule: null,
+  cLanguageNote: [
+    `/* The ABI locks below must compile in both C and C++ — first-party`,
+    ` * modules are C++ (sgp4_plugin.cpp, poly_coverage_module.cpp) while the`,
+    ` * reference module and the header's own examples are C. */`,
+  ],
+});
 
 function docBlock(lines, indent = "") {
   if (!lines || lines.length === 0) return "";
@@ -95,18 +121,19 @@ function cFieldDeclaration(entry) {
   return arrayLength > 0 ? `${cType} ${name}[${arrayLength}]` : `${cType} ${name}`;
 }
 
-function renderHeader(model) {
+function renderHeader(model, spec) {
   const out = [];
-  out.push(BANNER_C(model.schemaFile));
-  out.push(`#ifndef ORBPRO_PROPAGATOR_ABI_H`);
-  out.push(`#define ORBPRO_PROPAGATOR_ABI_H`);
+  out.push(BANNER_C(model.schemaFile, spec));
+  out.push(`#ifndef ${spec.headerGuard}`);
+  out.push(`#define ${spec.headerGuard}`);
   out.push(``);
   out.push(`#include <stdint.h>`);
   out.push(`#include <stddef.h> /* offsetof */`);
+  for (const include of spec.cIncludes) {
+    out.push(`#include "${include}"`);
+  }
   out.push(``);
-  out.push(`/* The ABI locks below must compile in both C and C++ — first-party`);
-  out.push(` * modules are C++ (sgp4_plugin.cpp, poly_coverage_module.cpp) while the`);
-  out.push(` * reference module and the header's own examples are C. */`);
+  for (const line of spec.cLanguageNote) out.push(line);
   out.push(`#if defined(__cplusplus)`);
   out.push(`#define ORBPRO_ABI_STATIC_ASSERT(cond, msg) static_assert(cond, msg)`);
   out.push(`#else`);
@@ -234,7 +261,7 @@ function renderHeader(model) {
   out.push(`} /* extern "C" */`);
   out.push(`#endif`);
   out.push(``);
-  out.push(`#endif /* ORBPRO_PROPAGATOR_ABI_H */`);
+  out.push(`#endif /* ${spec.headerGuard} */`);
   out.push(``);
   return out.join("\n");
 }
@@ -250,9 +277,18 @@ function tsIdentifier(name) {
     .toUpperCase();
 }
 
-function renderTs(model) {
+function renderTs(model, spec) {
   const out = [];
-  out.push(BANNER_TS(model.schemaFile));
+  out.push(BANNER_TS(model.schemaFile, spec));
+
+  if (model.foreignEnums.length > 0) {
+    out.push(
+      `import { ${model.foreignEnums.map((e) => e.name).join(", ")} } from ${JSON.stringify(spec.tsForeignModule)};`,
+    );
+    out.push(``);
+    out.push(`export { ${model.foreignEnums.map((e) => e.name).join(", ")} };`);
+    out.push(``);
+  }
 
   for (const e of model.enums) {
     out.push(docBlock(e.doc).trimEnd());
@@ -320,7 +356,7 @@ function renderTs(model) {
   }
 
   out.push(`/** Every ABI struct, keyed by its IDL name. */`);
-  out.push(`export const ORBPRO_PROPAGATOR_ABI: Readonly<Record<string, AbiStruct>> = {`);
+  out.push(`export const ${spec.bundleConstName}: Readonly<Record<string, AbiStruct>> = {`);
   for (const s of model.structs) {
     out.push(`  ${s.name}: ORBPRO_${tsIdentifier(s.name)},`);
   }
@@ -330,9 +366,15 @@ function renderTs(model) {
 }
 
 /** TS -> JS by erasure. The enum shape is emitted explicitly so the JS is real ESM. */
-function renderJs(model) {
+function renderJs(model, spec) {
   const out = [];
-  out.push(BANNER_TS(model.schemaFile).replace(/^\/\/ GENERATED FILE/m, "// GENERATED FILE"));
+  out.push(BANNER_TS(model.schemaFile, spec).replace(/^\/\/ GENERATED FILE/m, "// GENERATED FILE"));
+  if (model.foreignEnums.length > 0) {
+    out.push(
+      `export { ${model.foreignEnums.map((e) => e.name).join(", ")} } from ${JSON.stringify(spec.tsForeignModule)};`,
+    );
+    out.push(``);
+  }
   for (const e of model.enums) {
     out.push(`export const ${e.name} = Object.freeze({`);
     for (const m of e.members) out.push(`  ${m.name}: ${m.value},`);
@@ -371,21 +413,58 @@ function renderJs(model) {
     out.push(`});`);
     out.push(``);
   }
-  out.push(`export const ORBPRO_PROPAGATOR_ABI = Object.freeze({`);
+  out.push(`export const ${spec.bundleConstName} = Object.freeze({`);
   for (const s of model.structs) out.push(`  ${s.name}: ORBPRO_${tsIdentifier(s.name)},`);
   out.push(`});`);
   out.push(``);
   return out.join("\n");
 }
 
+/**
+ * Render every generated artifact for ONE family into a
+ * {relativePath -> text} map. The renderer is shared; only the spec differs.
+ */
+export async function renderAbiArtifacts(spec) {
+  const model = await buildAbiModel({ schemaFileName: spec.schemaFileName });
+  if (model.foreignEnums.length > 0) {
+    const unsatisfied = model.foreignEnums.filter(
+      (e) => !spec.cIncludes.some((include) => include.length > 0),
+    );
+    if (unsatisfied.length > 0) {
+      throw new Error(
+        `ABI generator: ${spec.schemaFileName} references enum(s) ` +
+          `${unsatisfied.map((e) => e.cName).join(", ")} declared in another schema, but the ` +
+          `spec declares no cIncludes. A foreign enum is satisfied by an #include, never by a ` +
+          `second typedef — see scripts/check-reference-frame-uniqueness.mjs C1.`,
+      );
+    }
+    if (!spec.tsForeignModule) {
+      throw new Error(
+        `ABI generator: ${spec.schemaFileName} references a foreign enum but the spec declares ` +
+          `no tsForeignModule, so the TypeScript bindings would silently drop it.`,
+      );
+    }
+  }
+  return new Map([
+    [spec.headerRelativePath, renderHeader(model, spec)],
+    [spec.tsRelativePath, renderTs(model, spec)],
+    [spec.jsRelativePath, renderJs(model, spec)],
+  ]);
+}
+
 /** Render every generated artifact into a {relativePath -> text} map. */
 export async function renderPropagatorAbiArtifacts() {
-  const model = await buildAbiModel();
-  return new Map([
-    [headerRelativePath, renderHeader(model)],
-    [tsRelativePath, renderTs(model)],
-    [jsRelativePath, renderJs(model)],
-  ]);
+  return renderAbiArtifacts(PROPAGATOR_ABI_SPEC);
+}
+
+export async function generateAbi(spec, { outputRoot = packageRoot } = {}) {
+  const artifacts = await renderAbiArtifacts(spec);
+  for (const [relativePath, text] of artifacts) {
+    const target = path.join(outputRoot, relativePath);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, text, "utf8");
+  }
+  return artifacts;
 }
 
 export async function generatePropagatorAbi({ outputRoot = packageRoot } = {}) {

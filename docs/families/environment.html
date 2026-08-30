@@ -56,11 +56,12 @@
 <h2>Estimation, data and logic</h2><ul>
 <li><a href="./estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
 <li><a href="./data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
-<li><a href="./analytics.html"><span>Analytics</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./analytics.html"><span>Analytics</span><span class="tag tag-experimental">experimental</span></a></li>
 <li><a href="./scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
 <li><a href="./behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
 </ul>
 <h2>Runtime contract</h2><ul>
+<li><a href="../events-abi.html"><span>Event locator ABI</span></a></li>
 <li><a href="../module-publication-standard.html"><span>Module publication standard</span></a></li>
 <li><a href="../browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
 <li><a href="../isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
@@ -84,12 +85,19 @@
       <p class="breadcrumb"><a href="../index.html">Harness families</a> / Environment and interaction</p>
         <h1>Environment</h1>
       <p class="doc-meta"><span class="pill pill-planned">planned</span><span>Planned. This family is a ratified entry in the harness-family taxonomy; its individual shape has not been ratified and nothing is implemented.</span></p>
-<p><strong>Status: PLANNED.</strong> This family is a ratified entry in the harness-family taxonomy. Its individual shape has not been ratified, and nothing is implemented. This page states scope and status; it is not a contract, and it does not imply parity with the Designed tier.</p>
+<p><strong>Status: PLANNED.</strong> This family is a ratified entry in the harness-family taxonomy. Its individual shape has not been ratified, and no family ABI is implemented. This page states scope and status; it is not a contract, and it does not imply parity with the Designed tier.</p>
 <h2 id="scope"><a class="anchor" href="#scope" aria-hidden="true">#</a>Scope</h2>
 <p>Ambient models that other families query rather than invoke directly: atmospheric density, gravity field, magnetic field, solar and radiation environment, and space weather indices. A propagator asks the environment for density; it does not carry its own atmosphere.</p>
 <h2 id="what-exists-today"><a class="anchor" href="#what-exists-today" aria-hidden="true">#</a>What exists today</h2>
 <p>Nothing as a family contract.</p>
 <p>This family is the clearest case for a query-shaped ABI rather than a compute-shaped one: many callers, small requests, high call frequency, and a strong requirement that two callers asking the same question at the same epoch get bit-identical answers.</p>
+<p>The <strong>propagator</strong> family (SHIPPED) now carries provisional, propagator-scoped versions of three of the ports this family will eventually own. They are named here so the family ABI is drafted against a real consumer rather than a guess, and so nobody mistakes them for the family contract:</p>
+<div class="table-wrap"><table><thead><tr><th>Provisional port</th><th>Where it lives today</th><th>What it must teach the family ABI</th></tr></thead><tbody><tr><td>Atmosphere selection</td><td><code>plugin_set_atmosphere_model(int) -&gt; int</code>, <code>plugin_get_atmosphere_model_count/name/status/provenance</code></td><td><strong>A label must refuse rather than substitute.</strong> Every label the ABI names declares whether a published implementation stands behind it; selecting one that has none returns a negative status and leaves the configuration untouched. The roster and its provenance strings are read FROM the module, so a caller's list can never drift ahead of the build.</td></tr><tr><td>Gravity field</td><td><code>plugin_load_gravity_field(ptr, len, maxDeg, maxOrd) -&gt; int</code>, <code>plugin_get_gravity_field_error/name</code></td><td><strong>A field is data, not a build-time blob.</strong> The module has no filesystem: the host supplies bytes and the module parses them. Loading and selecting are two decisions — a loaded field is flown only when the force model asks for it by name.</td></tr><tr><td>Force contribution</td><td><code>plugin_register_force_contribution(slot, kind, params) -&gt; int</code>, <code>plugin_clear_force_contributions</code>, <code>plugin_get_force_contribution_slots</code>, and the extended <code>plugin_get_acceleration_breakdown_v2(jd, ptr, len)</code> lane</td><td><strong>Contributions are PARAMETERS, not code.</strong> Hosting foreign code inside a module is a new host capability and is not granted by any family surface. A parameterized slot table covers what a force list is actually asked for, is allocation-free in the derivative's inner loop, and is exact: a zonal registered through the port is evaluated by an independent Legendre-gradient recursion and reproduces the built-in closed form to 5e-15.</td></tr></tbody></table></div>
+<p>Two ABI-shape lessons came out of building those, and both belong in the family ABI when it is drafted:</p>
+<ul>
+<li><strong>A packed array must carry its own length.</strong> <code>plugin_set_force_model</code> takes exactly fifteen doubles and its callers allocate exactly <code>15 * 8</code> bytes, so a sixteenth element is an out-of-bounds heap read, not an additive field. The extension is a separate <code>plugin_set_force_model_v2(double*, int len)</code> that is told how much room it has; the same applies to <code>plugin_get_acceleration_breakdown_v2</code>. Appending to a fixed-length packed array is never additive.</li>
+<li><strong>A cast between two enums is a coincidence, not a conversion.</strong> A drag setting was being turned into an atmosphere selection with <code>static_cast</code>, and the two enumerations had stopped sharing an ordering: four of six values named a different model than the caller asked for. Every cross-enum mapping in the family ABI is written out one member at a time.</li>
+</ul>
 <h2 id="what-ratification-requires"><a class="anchor" href="#what-ratification-requires" aria-hidden="true">#</a>What ratification requires</h2>
 <p>A family reaches Designed when an ABI has been drafted against a real consumer, and Shipped only when all of the following exist:</p>
 <ul>
@@ -99,6 +107,12 @@
 <li>A conformance kit carrying its own negative control, and a reference module.</li>
 <li>A stated tri-runtime parity envelope.</li>
 <li>Exactly one generic consumer port.</li>
+</ul>
+<p>Conformance additions this family will carry, from the provisional ports above:</p>
+<ul>
+<li>A registered contribution reproduces the built-in model it stands in for, exactly, on the acceleration breakdown.</li>
+<li>A label with no implementation behind it returns a typed refusal and does not change the configuration — asserted by measuring the model's output before and after the refused call, not by reading the return code alone.</li>
+<li>A malformed potential file is refused with a reason, never answered with an empty field.</li>
 </ul>
 <p>Until then, do not build against this family. If your work falls in this scope and cannot wait, build a records-in, records-out module through the <a href="../byo-wasm-quickstart.html">BYO-wasm quickstart</a> — that path needs no harness and is available now — and expect to migrate to the family ABI when it is ratified.</p>
       <section class="playground" id="playground-slot" data-family="environment" data-playground="pending" aria-labelledby="playground-title">

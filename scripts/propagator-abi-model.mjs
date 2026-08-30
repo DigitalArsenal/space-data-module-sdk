@@ -280,14 +280,24 @@ export function layoutStruct(structDecl, ctx) {
 }
 
 /**
- * Build the ABI model: every struct in the `orbpro.propagator` namespace that
- * is marked as ABI-bearing, plus the enums they reference.
+ * Build the ABI model: every struct in the target schema that is marked as
+ * ABI-bearing, plus the enums they reference.
  *
  * A struct opts in with the `abi` attribute in the IDL. That is deliberate:
  * "which structs are the ABI" is itself part of the contract and belongs in
  * the source of truth, not in a list inside a script that can drift from it.
+ *
+ * `schemaFileName` selects WHICH schema is the ABI being modelled. Every .fbs
+ * in schemas/orbpro is parsed for type resolution, so one family's structs may
+ * reference another family's enums — but only the target file's declarations
+ * are EMITTED. An enum declared in another file is returned in
+ * `foreignEnums` instead, and the generator must satisfy it with an #include
+ * rather than a second typedef: a duplicate `OrbProReferenceFrame` is exactly
+ * what scripts/check-reference-frame-uniqueness.mjs C1 refuses, and it would
+ * also fail to compile the moment two family headers meet in one translation
+ * unit.
  */
-export async function buildAbiModel() {
+export async function buildAbiModel({ schemaFileName = "Propagator.fbs" } = {}) {
   layoutCache.clear();
   const schemas = await loadSchemas();
 
@@ -297,15 +307,15 @@ export async function buildAbiModel() {
     for (const s of schema.structs) ctx.structs.set(s.name, s);
   }
 
-  const propagatorSchema = schemas.find((s) => s.fileName === "Propagator.fbs");
-  if (!propagatorSchema) {
-    throw new Error(`propagator ABI: schemas/orbpro/Propagator.fbs not found under ${schemaRoot}`);
+  const targetSchema = schemas.find((s) => s.fileName === schemaFileName);
+  if (!targetSchema) {
+    throw new Error(`ABI model: schemas/orbpro/${schemaFileName} not found under ${schemaRoot}`);
   }
 
-  const abiStructs = propagatorSchema.structs.filter((s) => s.attrs.abi);
+  const abiStructs = targetSchema.structs.filter((s) => s.attrs.abi);
   if (abiStructs.length === 0) {
     throw new Error(
-      `propagator ABI: no struct in Propagator.fbs carries the \`abi\` attribute. ` +
+      `ABI model: no struct in ${schemaFileName} carries the \`abi\` attribute. ` +
         `The ABI-bearing structs must opt in IN THE IDL — see scripts/propagator-abi-model.mjs.`,
     );
   }
@@ -315,41 +325,54 @@ export async function buildAbiModel() {
     const cName = decl.attrs.abi_c_name;
     if (!cName) {
       throw new Error(
-        `propagator ABI: struct ${decl.name} is marked \`abi\` but has no \`abi_c_name\` attribute; ` +
+        `ABI model: struct ${decl.name} is marked \`abi\` but has no \`abi_c_name\` attribute; ` +
           `the C type name is part of the contract and must be declared in the IDL.`,
       );
     }
     return { ...layout, cName };
   });
 
-  // Every enum actually referenced by an ABI struct, in schema order.
+  // Every enum actually referenced by an ABI struct, in schema order. An enum
+  // declared in ANOTHER .fbs is a foreign reference: it is satisfied by an
+  // #include, never re-typedef'd here.
   const usedEnums = new Map();
+  const foreignEnums = new Map();
   for (const struct of structs) {
     for (const entry of struct.entries) {
-      if (entry.kind === "field" && entry.resolved.kind === "enum") {
-        usedEnums.set(entry.resolved.enumDecl.name, entry.resolved.enumDecl);
-      }
+      if (entry.kind !== "field" || entry.resolved.kind !== "enum") continue;
+      const decl = entry.resolved.enumDecl;
+      if (decl.fileName === schemaFileName) usedEnums.set(decl.name, decl);
+      else foreignEnums.set(decl.name, decl);
     }
   }
-  // StateFlags is carried as a plain `uint` field (it is a bitfield, not a
-  // single enumerator), so it is referenced by NAME from the IDL instead.
-  for (const decl of propagatorSchema.enums) {
+  // A bitfield enum is carried as a plain `uint`/`int` field (it is an
+  // OR-combination, not a single enumerator), so it is never reached by the
+  // field walk above and is referenced by its `abi` attribute in the IDL
+  // instead — StateFlags and EventFlags are both this case.
+  for (const decl of targetSchema.enums) {
     if (decl.attrs.abi) usedEnums.set(decl.name, decl);
   }
 
-  const enums = [...usedEnums.values()].map((decl) => {
+  const nameEnum = (decl) => {
     const prefix = decl.attrs.abi_c_prefix;
     if (!prefix) {
       throw new Error(
-        `propagator ABI: enum ${decl.name} is part of the ABI but has no \`abi_c_prefix\` attribute; ` +
+        `ABI model: enum ${decl.name} is part of the ABI but has no \`abi_c_prefix\` attribute; ` +
           `the C enumerator prefix is part of the contract and must be declared in the IDL.`,
       );
     }
     const cName = decl.attrs.abi_c_name ?? `OrbPro${decl.name}`;
     return { ...decl, cName, prefix };
-  });
+  };
 
-  return { enums, structs, schemaFile: "schemas/orbpro/Propagator.fbs" };
+  const enums = [...usedEnums.values()].map(nameEnum);
+
+  return {
+    enums,
+    structs,
+    foreignEnums: [...foreignEnums.values()].map(nameEnum),
+    schemaFile: `schemas/orbpro/${schemaFileName}`,
+  };
 }
 
 export { SCALARS };

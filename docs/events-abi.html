@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Status: EXPERIMENTAL. The schema, the generated header, the drift gate and" />
+    <title>Event locator ABI — Space Data Module SDK</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <!-- SDN_CONSUMER_ASSETS_START -->
+<link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
+<script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
+<script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
+<!-- SDN_CONSUMER_ASSETS_END -->
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
+    <header class="site-header">
+      <a class="site-brand" href="./">Space Data Module SDK</a>
+      <nav class="header-links" aria-label="Site">
+        <a href="./byo-wasm-quickstart.html">Quickstart</a>
+        <a href="./conformance.html">Conformance</a>
+        <a href="https://github.com/DigitalArsenal/space-data-module-sdk">GitHub</a>
+        <a class="stack-button" href="#stack">Stack</a>
+      </nav>
+    </header>
+    <div class="shell">
+      <nav class="sidebar" id="sidebar" aria-label="Documentation">
+<h2>Start here</h2><ul>
+<li><a href="./index.html"><span>Harness family matrix</span></a></li>
+<li><a href="./byo-wasm-quickstart.html"><span>BYO-wasm quickstart</span></a></li>
+<li><a href="./conformance.html"><span>Conformance kit</span></a></li>
+<li><a href="./protect-and-sign.html"><span>Protect and sign</span></a></li>
+<li><a href="./publication-submission.html"><span>Publication and listing</span></a></li>
+</ul>
+<h2>Dynamics</h2><ul>
+<li><a href="./families/propagator.html"><span>Propagator</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/maneuver.html"><span>Maneuver</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/propulsion.html"><span>Propulsion</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/attitude.html"><span>Attitude</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/gnc.html"><span>GNC</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Environment and interaction</h2><ul>
+<li><a href="./families/rf.html"><span>RF</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/sensor.html"><span>Sensor</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/signature.html"><span>Signature</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/environment.html"><span>Environment</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/obstruction.html"><span>Obstruction</span><span class="tag tag-designed">designed</span></a></li>
+</ul>
+<h2>Event physics</h2><ul>
+<li><a href="./families/breakup.html"><span>Breakup</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/reentry.html"><span>Reentry</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/conjunction.html"><span>Conjunction</span><span class="tag tag-designed">designed</span></a></li>
+<li><a href="./families/effects.html"><span>Effects</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Estimation, data and logic</h2><ul>
+<li><a href="./families/estimation.html"><span>Estimation</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/data-source.html"><span>Data source</span><span class="tag tag-shipped">shipped</span></a></li>
+<li><a href="./families/analytics.html"><span>Analytics</span><span class="tag tag-experimental">experimental</span></a></li>
+<li><a href="./families/scheduler.html"><span>Scheduler</span><span class="tag tag-planned">planned</span></a></li>
+<li><a href="./families/behavior.html"><span>Behavior</span><span class="tag tag-planned">planned</span></a></li>
+</ul>
+<h2>Runtime contract</h2><ul>
+<li><a href="./events-abi.html" aria-current="page"><span>Event locator ABI</span></a></li>
+<li><a href="./module-publication-standard.html"><span>Module publication standard</span></a></li>
+<li><a href="./browser-wasmedge-isomorphic.html"><span>Browser / WasmEdge isomorphism</span></a></li>
+<li><a href="./isomorphic-pthreads.html"><span>Isomorphic pthreads</span></a></li>
+<li><a href="./tri-runtime-parity.html"><span>Tri-runtime parity</span></a></li>
+<li><a href="./tri-runtime-parity-gate.html"><span>Tri-runtime parity gate</span></a></li>
+<li><a href="./testing-harness.html"><span>Testing harness</span></a></li>
+<li><a href="./language-runtime-matrix.html"><span>Language and runtime matrix</span></a></li>
+</ul>
+<h2>Host surfaces</h2><ul>
+<li><a href="./flatsql-host-contract.html"><span>FlatSQL host contract</span></a></li>
+<li><a href="./flatsql-streaming-standard.html"><span>FlatSQL streaming standard</span></a></li>
+<li><a href="./secrets-capability.html"><span>Credential lanes</span></a></li>
+<li><a href="./protocol-installation.html"><span>Protocol installation</span></a></li>
+<li><a href="./gpu-module-abi.html"><span>GPU module ABI</span></a></li>
+<li><a href="./module-bundle-runtime-plan.html"><span>Module bundle runtime</span></a></li>
+<li><a href="./isomorphic-sdn-runtime-plan.html"><span>Isomorphic SDN runtime</span></a></li>
+<li><a href="./node-red-default-node-parity.html"><span>Node-RED node parity</span></a></li>
+</ul>
+      </nav>
+      <main class="doc" id="main">
+        <h1>Event locator ABI</h1>
+<p><strong>Status: EXPERIMENTAL.</strong> The schema, the generated header, the drift gate and the runner have landed and are measured. There is no conformance kit and no reference module yet, so this is not <code>Shipped</code> and a commercial module should not be sold against it. It is the <strong>event-location sub-harness of the <a href="./families/analytics.html">Analytics</a> family</strong> — not a twentieth harness family. The nineteen-family taxonomy is owner-ratified and this ABI does not amend it.</p>
+<h2 id="doctrine"><a class="anchor" href="#doctrine" aria-hidden="true">#</a>Doctrine</h2>
+<p><strong>One ABI, N locators.</strong> Eclipse (umbra / penumbra / antumbra, any number of occulting bodies), station contact with masks and light time, sensor-FOV intrusion, apsides, node crossings and a propagate-to-condition stop are the SAME computation: a vector of scalar event functions <code>g_i(t)</code> whose sign changes are refined to roots. They differ only in <code>g</code>.</p>
+<p><strong>The locator supplies <code>g</code>. It supplies nothing else.</strong> The bracketing scan, the root refinement, the direction filtering, the occurrence counting, the endpoint bookkeeping and the epoch ordering live in <code>include/orbpro/orbpro_event_runner.h</code>, which every locator compiles in unchanged. &quot;Adding a new locator requires no change to the runner&quot; is therefore a structural fact and not a promise: there is no runner to change, only a <code>g</code> to write. A locator that needed the runner to change would be evidence that this ABI is wrong.</p>
+<p><strong>The state source is PULLED, never imported.</strong> A locator needs states at epochs only it can choose — Brent picks the next abscissa from the last three. It does not import a host function to fetch them. <code>plugin_event_next</code> reports the epochs it wants, the consumer evaluates them through whatever module is wired to the propagator port, and <code>plugin_event_supply</code> feeds the states back. Three consequences, and they are the reason the design is this way:</p>
+<ul>
+<li>The propagator stays a <strong>port</strong>, per the pluggable-propagation law (owner, 2026-07-29). No provider is named anywhere in this ABI.</li>
+<li><strong>No new host capability and no new import.</strong> The browser, native-WasmEdge and Docker-WasmEdge lanes are byte-identical by construction, because the consumer shuttles buffers and decides nothing.</li>
+<li>The refinement stays <strong>inside the guest</strong>. A host-side root finder would be physics in JavaScript and its arithmetic would differ per lane.</li>
+</ul>
+<p><strong>A hit is a crossing, not an interval.</strong> Apsides and node crossings are instants; eclipse and contact are intervals. Emitting crossings and pairing them is total over both; an interval-shaped hit would put a sentinel in half the family. See <a href="#interval-pairing">Interval pairing</a>.</p>
+<h2 id="capability"><a class="anchor" href="#capability" aria-hidden="true">#</a>Capability</h2>
+<p><strong>None.</strong> An event locator declares no capability at all: it computes, and every byte it consumes arrives through its own exports. This is not an oversight to be corrected later — the pull protocol exists precisely so that locating an eclipse does not require a module to reach outside itself.</p>
+<p>A locator that also wants to <em>emit</em> an SDS <code>$EVL</code> record through the invoke surface declares whatever that surface already requires, and nothing new.</p>
+<h2 id="the-export-set"><a class="anchor" href="#the-export-set" aria-hidden="true">#</a>The export set</h2>
+<p>Three exports are the locator's. Seven are the runner's, and <code>ORBPRO_EVENT_RUNNER_EXPORTS(runner)</code> emits all seven.</p>
+<h3 id="the-locator-writes-these"><a class="anchor" href="#the-locator-writes-these" aria-hidden="true">#</a>The locator writes these</h3>
+<div class="table-wrap"><table><thead><tr><th>Export</th><th>Signature</th><th>Returns</th></tr></thead><tbody><tr><td><code>plugin_event_describe</code></td><td><code>int32_t(uint8_t* out, uint32_t capacity)</code></td><td>bytes of the <code>EventLocatorDescription</code> FlatBuffer written, the required size if <code>capacity</code> is short, or a negative <a href="#error-codes">error code</a></td></tr><tr><td><code>plugin_event_configure</code></td><td><code>int32_t(const uint8_t* config, uint32_t len)</code></td><td>components configured (&gt;0), or negative</td></tr><tr><td><code>plugin_event_eval</code></td><td><code>int32_t(double epoch_jd_day, double epoch_seconds, const OrbProStateVector* states, uint32_t object_count, double* g_out, uint32_t component_count)</code></td><td><code>0</code>, or negative</td></tr></tbody></table></div>
+<p><code>plugin_event_eval</code> <strong>must be a pure function of its arguments.</strong> A <code>g</code> that depends on call order or on a cached previous epoch breaks bracketing: Brent evaluates epochs out of chronological order by design. The conformance obligation is that <code>plugin_event_eval</code> at an epoch and the <code>g</code> the runner used to find a root at that epoch agree exactly.</p>
+<p>It is vector-valued on purpose: one state fetch feeds every component, so a ten-component locator costs one propagation per epoch rather than ten. That is what makes &quot;eclipse against three occulting bodies&quot; and &quot;contact with eight stations&quot; ordinary rather than special.</p>
+<h3 id="the-runner-provides-these"><a class="anchor" href="#the-runner-provides-these" aria-hidden="true">#</a>The runner provides these</h3>
+<div class="table-wrap"><table><thead><tr><th>Export</th><th>Signature</th><th>Returns</th></tr></thead><tbody><tr><td><code>plugin_event_begin</code></td><td><code>int32_t(const OrbProEventInterval*, const OrbProRootPolicy*)</code></td><td><code>0</code>, or negative</td></tr><tr><td><code>plugin_event_next</code></td><td><code>int32_t(OrbProEventStateRequest*, double* epochs, uint32_t epoch_capacity)</code></td><td>epochs written (<code>2 * n</code> doubles), <code>0</code> when finished, or negative</td></tr><tr><td><code>plugin_event_supply</code></td><td><code>int32_t(const OrbProStateVector*, uint32_t count)</code></td><td><code>0</code>, or negative</td></tr><tr><td><code>plugin_event_hit_count</code></td><td><code>int32_t(void)</code></td><td>hits held</td></tr><tr><td><code>plugin_event_hits</code></td><td><code>int32_t(OrbProEventHit*, uint32_t capacity)</code></td><td>hits written, or negative</td></tr><tr><td><code>plugin_event_summaries</code></td><td><code>int32_t(OrbProEventScanSummary*, uint32_t capacity)</code></td><td>summaries written, or negative</td></tr><tr><td><code>plugin_event_destroy</code></td><td><code>void(void)</code></td><td>—</td></tr></tbody></table></div>
+<p>Plus <code>memory</code>, <code>plugin_alloc</code> and <code>plugin_free</code>, as every family requires.</p>
+<h2 id="the-pull-protocol"><a class="anchor" href="#the-pull-protocol" aria-hidden="true">#</a>The pull protocol</h2>
+<div class="codeblock"><pre><code>  configure ──► begin ──► next ──┬──► (n &gt; 0) consumer propagates ──► supply ──┐
+                                 │                                             │
+                                 └──► (n == 0) ──► hits / summaries            │
+                                 ▲                                             │
+                                 └─────────────────────────────────────────────┘</code></pre></div>
+<ul>
+<li><code>next</code> writes <code>2 * n</code> doubles: <code>(jd_day, seconds)</code> <strong>pairs</strong>, in scan order, and fills the <code>OrbProEventStateRequest</code> with the object count and the frame the states must be in.</li>
+<li>The consumer evaluates <strong>every</strong> requested epoch for <strong>every</strong> object.</li>
+<li><code>supply</code> takes <code>epoch_count * object_count</code> states, ordered <strong>epoch-major</strong>: <code>states[e * object_count + o]</code> is object <code>o</code> at epoch <code>e</code>. A count that is not exactly that is <code>SUPPLY_COUNT_MISMATCH</code> — never a partial evaluation, because a locator that accepted a short supply would report events computed from another object's trajectory.</li>
+<li>The <strong>coarse scan</strong> batches (up to <code>ORBPRO_EVENT_SCAN_BATCH</code>, default 64), so a consumer drives it through <code>plugin_propagate_batch</code>. The <strong>refinement</strong> asks for exactly one epoch: it is inherently sequential.</li>
+<li>Brackets found in a scan batch are refined <strong>before</strong> the scan advances, so occurrence counting is chronological and a <code>max_events</code> stop lands on the right event.</li>
+</ul>
+<p>Calling <code>next</code> twice without an intervening <code>supply</code>, or <code>supply</code> with nothing outstanding, is <code>PROTOCOL_ORDER</code>.</p>
+<h2 id="wire-layout"><a class="anchor" href="#wire-layout" aria-hidden="true">#</a>Wire layout</h2>
+<p>Generated header: <code>include/orbpro/orbpro_events_abi.h</code>. Source of truth: <code>schemas/orbpro/Events.fbs</code>. Drift gate: <code>node scripts/check-events-abi.mjs</code>.</p>
+<div class="table-wrap"><table><thead><tr><th>Struct</th><th>Size</th><th>Align</th></tr></thead><tbody><tr><td><code>OrbProRootPolicy</code></td><td>32</td><td>8</td></tr><tr><td><code>OrbProEventInterval</code></td><td>56</td><td>8</td></tr><tr><td><code>OrbProEventHit</code></td><td>48</td><td>8</td></tr><tr><td><code>OrbProEventScanSummary</code></td><td>32</td><td>8</td></tr><tr><td><code>OrbProEventStateRequest</code></td><td>16</td><td>4</td></tr></tbody></table></div>
+<p><code>OrbProStateVector</code> (64 bytes) and <code>OrbProReferenceFrame</code> are <strong>not</strong> redeclared here — they come from <code>orbpro/orbpro_propagator_abi.h</code>, which the generated header includes. A second <code>ReferenceFrame</code> typedef is refused by <code>scripts/check-reference-frame-uniqueness.mjs</code> C1, and it would fail to compile the moment both headers met in one translation unit, which they always do.</p>
+<p>Every struct has a generated <code>_init</code> that zeroes the padding, and a generated <code>_set_&lt;field&gt;</code> for every enum field that clears the padding behind it. Use them. A partial write leaves the previous call's bytes in the padding the IDL requires to be zero.</p>
+<h2 id="units-frames-and-epochs"><a class="anchor" href="#units-frames-and-epochs" aria-hidden="true">#</a>Units, frames and epochs</h2>
+<ul>
+<li><code>scan_step_seconds</code>, <code>epoch_tolerance_seconds</code>, <code>state_epoch_resolution_seconds</code> and <code>epoch_seconds</code>: <strong>SECONDS</strong>.</li>
+<li><code>value</code>, <code>goalValue</code>, <code>value_tolerance</code>, <code>initial_value</code>, <code>final_value</code>: the component's own declared <code>unit</code> string. The ABI does not convert.</li>
+<li><code>reference_frame</code>: an <code>OrbProReferenceFrame</code> value. A consumer whose propagator emits another frame converts through the frames port; a consumer that cannot <strong>fails loudly</strong> rather than supplying a differently-framed state.</li>
+</ul>
+<h3 id="epochs-are-split-pairs-and-that-is-not-decoration"><a class="anchor" href="#epochs-are-split-pairs-and-that-is-not-decoration" aria-hidden="true">#</a>Epochs are split pairs, and that is not decoration</h3>
+<p>Every epoch here is <code>(jd_day, seconds)</code>: an exactly-representable Julian day plus an offset in seconds.</p>
+<p>A Julian date carried in one <code>float64</code> resolves to <code>ulp(2460000.5) = 2^-31 d =</code> <strong>4.02e-5 s</strong> — forty microseconds. A single-double JD therefore <em>cannot</em> express a stop epoch to 1e-6 s, and a locator that reported one would be reporting rounding noise. The split pair resolves 1.5e-11 s. Internally the runner works in seconds from the interval start, and never collapses the pair.</p>
+<p><code>epoch_seconds</code> may exceed 86400 and is <strong>not normalized</strong>. The fine coordinate stays fine and two epochs from one scan stay directly comparable.</p>
+<h3 id="the-state-source-bounds-the-answer-and-says-so"><a class="anchor" href="#the-state-source-bounds-the-answer-and-says-so" aria-hidden="true">#</a>The state source bounds the answer, and says so</h3>
+<p><code>OrbProStateVector.epoch</code> is a single <code>float64</code> and is <strong>frozen</strong> — 64 bytes, on the wire, in the field. So a propagator whose ABI takes a single Julian date quantizes <code>g</code> at about 4.02e-5 s, and no refinement can resolve a root below that no matter what tolerance it is handed.</p>
+<p>This is declared, not assumed. <code>EventLocatorConfig.stateEpochResolutionSeconds</code> carries the source's resolution; the runner clamps <code>epoch_tolerance_seconds</code> up to it and reports <code>ORBPRO_ROOT_STATUS_EPOCH_RESOLUTION_LIMITED</code> on every root that hit the clamp. <code>orbpro_event_runner_effective_tolerance()</code> reports the tolerance actually used.</p>
+<p><strong>Consequence for acceptance criteria.</strong> A &quot;stop epoch reproducible to 1e-6 s&quot; claim is only meaningful against a state source that resolves better than 1e-6 s. Against a single-double-JD propagator the honest bar is <code>max(requested, source resolution)</code>, and the receipt must record the resolution. Extending the propagator ABI to a split epoch would be a breaking change to a frozen 64-byte struct and is an <strong>owner</strong> decision, not an oracle call.</p>
+<h2 id="sentinels"><a class="anchor" href="#sentinels" aria-hidden="true">#</a>Sentinels</h2>
+<div class="table-wrap"><table><thead><tr><th>Value</th><th>Meaning</th></tr></thead><tbody><tr><td><code>EventInterval.component == 0xFFFFFFFF</code></td><td>every component</td></tr><tr><td><code>EventInterval.max_events == 0</code></td><td>unbounded (still bounded by <code>max_evaluations</code> and the caller's buffer)</td></tr><tr><td><code>EventInterval.max_evaluations == 0</code></td><td>unbounded</td></tr><tr><td><code>EventInterval.occurrence == 0</code></td><td>report every qualifying crossing</td></tr><tr><td><code>RootPolicy.value_tolerance == 0</code></td><td>converge on the bracket width alone</td></tr><tr><td><code>EventLocatorConfig.stateEpochResolutionSeconds == 0</code></td><td>not declared; the runner trusts the tolerance it was given</td></tr><tr><td><code>EventLocatorDescription.maxSafeScanStepSeconds == 0</code></td><td>the locator declines to bound it — a NAMED GAP, never a pass</td></tr></tbody></table></div>
+<p><code>RootPolicy.scan_step_seconds == 0</code> is <strong>not</strong> a sentinel. It is refused with <code>BAD_INPUT</code>: a silent default step is how a scan misses every event shorter than it, and the miss looks exactly like &quot;there was no event&quot;.</p>
+<h3 id="the-scan-start-is-not-a-bracket"><a class="anchor" href="#the-scan-start-is-not-a-bracket" aria-hidden="true">#</a>The scan start is not a bracket</h3>
+<p>An event exactly at the interval <strong>start</strong> has no preceding sample to bracket it and is therefore not a crossing. One exactly at the interval <strong>end</strong> is. The asymmetry is real and deliberate; <code>EventScanSummary.initial_sign == ZERO</code> is how a consumer learns an event sits on the start.</p>
+<h2 id="identity"><a class="anchor" href="#identity" aria-hidden="true">#</a>Identity</h2>
+<p>A component is a dense 0-based index, stable for the lifetime of one configuration, and it is the ONLY handle the ABI structs carry. Names live in <code>EventComponent.name</code> and resolve through the SDS parameter-catalog record — this schema deliberately carries no parameter roster of its own, because a second roster is a second source of truth.</p>
+<p>Objects are positional: object <code>o</code> is the <code>o</code>-th object the consumer supplies states for, in the order <code>EventLocatorDescription.objectCount</code> declares.</p>
+<h2 id="threading"><a class="anchor" href="#threading" aria-hidden="true">#</a>Threading</h2>
+<p>Locators compile <code>clang --target=wasm32-wasip1-threads</code>, per the isomorphic-pthreads law. <strong>Never <code>emcc -pthread</code>.</strong></p>
+<p><strong>Declare <code>wasi-sequential</code>, with <code>sequentialJustification.kind = &quot;inherently-sequential-algorithm&quot;</code>.</strong> Root refinement carries state from iteration <code>k-1</code> into iteration <code>k</code> — that is the literal definition of that justification kind, and it is also the strongest available guarantee of the step-independence and byte-identity properties above: a threaded refinement would evaluate abscissae in a nondeterministic order and would not be reproducible.</p>
+<p>A <strong>parameter-catalog</strong> module, which evaluates named quantities from a state and has nothing to fan out inside one call, declares <code>wasi-sequential</code> with <code>kind = &quot;caller-level-parallelism&quot;</code> when it exposes a batch export the host shards, or <code>&quot;pure-transform&quot;</code> when it does not.</p>
+<blockquote><p><strong>Known defect, still live:</strong> <code>resolveThreadModel</code> reads the compile OPTION, not <code>manifest.threadModel</code>, and otherwise infers the model from <code>runtimeTargets</code>. Pass <code>threadModel</code> explicitly to <code>compileModuleFromSource</code> and assert <code>result.threadModel</code> came back as declared, until <code>sdk-manifest-threadmodel-silently-ignored</code> lands. <code>threadModel: &quot;single-thread&quot;</code> is the <strong>legacy Emscripten</strong> model and routes to <code>em++</code>, not to the sanctioned clang toolchain — it is not a synonym for &quot;does not thread&quot;.</p></blockquote>
+<p>The runner never allocates, never reads a clock and never spawns. Its state is a fixed arena sized by <code>ORBPRO_EVENT_MAX_COMPONENTS</code>, <code>ORBPRO_EVENT_MAX_OBJECTS</code>, <code>ORBPRO_EVENT_MAX_HITS</code>, <code>ORBPRO_EVENT_SCAN_BATCH</code> and <code>ORBPRO_EVENT_MAX_PENDING</code>, each overridable by the locator before the include.</p>
+<h2 id="error-codes"><a class="anchor" href="#error-codes" aria-hidden="true">#</a>Error codes</h2>
+<p>Every failure returns its OWN code. A locator that answers <code>-1</code> for everything is unconformable: the consumer cannot place the failure on the degradation ladder, so it cannot decide between retrying, widening the interval and refusing. Codes <code>-1..-6</code> are deliberately the same numbers and meanings as the propagator family's; the events-specific codes start at <code>-20</code> so no consumer can confuse the two tables by value.</p>
+<div class="table-wrap"><table><thead><tr><th>Code</th><th>Name</th><th>When</th></tr></thead><tbody><tr><td><code>-1</code></td><td><code>NOT_CONFIGURED</code></td><td><code>plugin_event_configure</code> has not been called, or it failed</td></tr><tr><td><code>-2</code></td><td><code>BAD_OBJECT_INDEX</code></td><td>an object index outside <code>[0, object_count)</code></td></tr><tr><td><code>-3</code></td><td><code>NULL_OUTPUT</code></td><td>a required output pointer was null</td></tr><tr><td><code>-4</code></td><td><code>BAD_INPUT</code></td><td>malformed policy or interval (zero step, zero span, NaN tolerance, zero <code>max_iterations</code>)</td></tr><tr><td><code>-5</code></td><td><code>NOT_CONVERGED</code></td><td>strict convergence was demanded and not reached</td></tr><tr><td><code>-6</code></td><td><code>UNPHYSICAL</code></td><td>geometry outside the locator's domain</td></tr><tr><td><code>-20</code></td><td><code>NOT_STARTED</code></td><td><code>plugin_event_begin</code> has not been called</td></tr><tr><td><code>-21</code></td><td><code>UNKNOWN_COMPONENT</code></td><td>a component, parameter or object this locator does not implement</td></tr><tr><td><code>-22</code></td><td><code>BUFFER_TOO_SMALL</code></td><td>a caller buffer was short; nothing is truncated silently</td></tr><tr><td><code>-23</code></td><td><code>PROTOCOL_ORDER</code></td><td><code>next</code>/<code>supply</code> out of order</td></tr><tr><td><code>-24</code></td><td><code>SUPPLY_COUNT_MISMATCH</code></td><td><code>count != epoch_count * object_count</code></td></tr><tr><td><code>-25</code></td><td><code>INTERNAL</code></td><td>never returned by a conformant locator</td></tr></tbody></table></div>
+<p>Non-convergence of one root is normally reported per hit in <code>EventHit.status</code>, not as a call failure. The statuses are <code>CONVERGED</code>, <code>MAX_ITERATIONS</code>, <code>FLAT_BRACKET</code>, <code>DISCONTINUOUS</code>, <code>TRUNCATED</code> and <code>EPOCH_RESOLUTION_LIMITED</code>, and they are distinct because a root that stopped on the iteration cap and a root that converged are different answers.</p>
+<h2 id="interval-pairing"><a class="anchor" href="#interval-pairing" aria-hidden="true">#</a>Interval pairing</h2>
+<p>Hits are crossings. An interval is a <code>FALLING</code> hit followed by the next <code>RISING</code> hit on the same component (for the usual &quot;<code>g &gt; 0</code> means outside&quot; convention). The pairing is total because <code>EventScanSummary</code> carries the endpoint signs:</p>
+<div class="table-wrap"><table><thead><tr><th><code>initial_sign</code></th><th><code>final_sign</code></th><th>Reading</th></tr></thead><tbody><tr><td><code>POSITIVE</code></td><td><code>POSITIVE</code></td><td>intervals fully inside the scan; pair <code>FALLING</code>→<code>RISING</code></td></tr><tr><td><code>NEGATIVE</code></td><td>…</td><td>the first interval was <strong>already open</strong> at the scan start; its opening epoch is before the interval, and the first <code>RISING</code> hit closes it (<code>INTERVAL_OPEN_AT_START</code>)</td></tr><tr><td>…</td><td><code>NEGATIVE</code></td><td>the last interval is still open at the scan end (<code>INTERVAL_OPEN_AT_END</code>)</td></tr></tbody></table></div>
+<p>Without the endpoint signs, &quot;no hits&quot; is ambiguous between &quot;never in eclipse&quot; and &quot;in eclipse the entire time&quot;, and those are opposite answers. This is the classic event-scan defect and the summary struct exists to make it unrepresentable.</p>
+<p>Hits are reported in <strong>scan order</strong> — increasing epoch forward, decreasing backward — regardless of the order refinement completed them.</p>
+<h2 id="propagate-to-condition"><a class="anchor" href="#propagate-to-condition" aria-hidden="true">#</a>Propagate-to-condition</h2>
+<p>A GMAT-style <code>Propagate ... {Sat.Altitude = 400}</code> is this ABI with one component whose <code>isStopCondition</code> is true and whose <code>g = parameter - goalValue</code>. Nothing is added to the propagator ABI, and that is an engineering decision, not a scoping convenience:</p>
+<ol>
+<li><strong>It is the same algorithm.</strong> A stop condition is <code>(event function, root refinement)</code>. Putting a second copy of Brent behind <code>plugin_propagate</code> would be two implementations of one algorithm that must agree — exactly the drift the generated-ABI lane exists to end.</li>
+<li><strong>It would break every shipped propagator.</strong> The propagator export set is a per-epoch state evaluation. Adding stop conditions to it makes root refinement a family-wide obligation on <code>sgp4</code>, <code>hpop</code> and <code>keplerian-reference</code>, all in the field. That is a breaking ABI change and an owner decision.</li>
+<li><strong>A propagator is a state SOURCE.</strong> It has no opinion about what is interesting, and giving it one couples every propagator to the parameter catalog.</li>
+</ol>
+<p><strong>Backward propagation is not a mode.</strong> It is <code>stop</code> earlier than <code>start</code>. The runner steps negatively, the consumer's propagator is asked for earlier epochs, and every hit carries <code>BACKWARD</code>. There is no second code path to keep in agreement with the first.</p>
+<p><strong>Synchronized multi-spacecraft (<code>Formation</code>) stops</strong> are <code>object_count &gt; 1</code>. Every configured object is evaluated at <strong>every</strong> requested epoch, so the states are aligned by construction rather than by the consumer remembering to align them.</p>
+<h2 id="lifetime"><a class="anchor" href="#lifetime" aria-hidden="true">#</a>Lifetime</h2>
+<p><code>plugin_event_destroy</code> is <strong>required</strong> and must actually release: it resets the runner to its post-<code>init</code> state while keeping the <code>eval</code> wiring, so a second <code>configure</code>/<code>begin</code> cycle starts clean. It is idempotent, and after it <code>plugin_event_hit_count()</code> is <code>0</code>.</p>
+<p>Because the runner's arena is static and fixed, a locator's page count after N scan cycles must equal its page count after one. That is the leak invariant, and it is free here by construction.</p>
+<h2 id="versioning"><a class="anchor" href="#versioning" aria-hidden="true">#</a>Versioning</h2>
+<p>Additive-only within a MAJOR. New enum members are <strong>appended</strong>; existing values are never renumbered. New struct fields are appended only where they do not move an existing offset — in practice that means a new struct, because every struct in this ABI is packed to its alignment. The size and offset locks in the generated header are what make a violation a compile error rather than a silently-wrong-numbers defect.</p>
+<h2 id="parity-envelope"><a class="anchor" href="#parity-envelope" aria-hidden="true">#</a>Parity envelope</h2>
+<p>Byte-identical across browser, native WasmEdge and Docker WasmEdge, for identical inputs:</p>
+<ul>
+<li>the hit list: every <code>epoch_jd_day</code>, <code>epoch_seconds</code>, <code>value</code>, <code>component</code>, <code>direction</code>, <code>status</code>, <code>iterations</code>, <code>evaluations</code> and <code>flags</code>;</li>
+<li>the summaries: every endpoint value, sign and count;</li>
+<li>the epoch sequence <code>plugin_event_next</code> produces, and the evaluation count;</li>
+<li>the trap class of every refusal.</li>
+</ul>
+<p>This is not a hope. The runner's arithmetic is IEEE-754 <code>+ - * /</code> and comparison, which WebAssembly specifies exactly and which has no fused-multiply-add form in the MVP. There is nothing for the lanes to disagree about, and a divergence is a <strong>P1 SDK defect</strong>.</p>
+<p><strong>A native reference build must use <code>-ffp-contract=off</code>.</strong> On arm64, clang contracts <code>a*b + c</code> into a single fused multiply-add; wasm has no <code>fma</code>, so the same source computes a different (both correct) double. Measured on this ABI: the Illinois regula-falsi step diverged by 1 ulp in the root epoch, which is 2.6e-10 s — inside every tolerance, and still a byte difference. A native build that leaves contraction on is not comparing the same arithmetic.</p>
+<h3 id="measured-on-this-candidate"><a class="anchor" href="#measured-on-this-candidate" aria-hidden="true">#</a>Measured, on this candidate</h3>
+<p><code>test/events-abi.test.js</code> compiles <code>test/fixtures/event-runner-harness.c</code> twice — natively and to <code>wasm32-wasip1-threads</code> — and diffs the raw IEEE-754 bit patterns of every reported number. Result: <strong>identical</strong>.</p>
+<p>Against the closed form (<code>g0 = z</code>, roots at <code>kT/2</code>; <code>g1 = x</code>, roots at <code>T/4 + kT/2</code>), worst <code>|root - analytic|</code> over two orbits:</p>
+<div class="table-wrap"><table><thead><tr><th>Scan</th><th>Method / step</th><th>Worst residual</th><th>g evaluations</th></tr></thead><tbody><tr><td>A</td><td>Brent, 60 s</td><td><strong>7.3e-12 s</strong></td><td>227</td></tr><tr><td>B</td><td>Brent, 137 s</td><td><strong>5.5e-12 s</strong></td><td>118</td></tr><tr><td>C</td><td>Brent, 300 s</td><td><strong>2.4e-11 s</strong></td><td>70</td></tr><tr><td>D</td><td>Brent, 60 s, BACKWARD over the same arc</td><td><strong>4.5e-12 s</strong></td><td>226</td></tr><tr><td>E</td><td>Bisection, 60 s</td><td><strong>8.2e-10 s</strong></td><td>484</td></tr><tr><td>F</td><td>Illinois, 60 s</td><td><strong>3.3e-10 s</strong></td><td>388</td></tr><tr><td>G</td><td>Brent, source resolution 4.0233e-5 s</td><td><strong>2.1e-7 s</strong></td><td>111</td></tr></tbody></table></div>
+<p>All eight events, in the same order, at all three scan steps; the backward scan returns the same eight; the three methods agree to better than 1e-6 s while costing 227 / 484 / 388 evaluations. Scan G is the clamp working: it reports <code>EPOCH_RESOLUTION_LIMITED</code> and its residual is bounded by the source resolution it was told about, not by the 1e-9 s it was asked for.</p>
+<p><strong>The ordering defect this measurement caught.</strong> Hits were originally reported in <em>discovery</em> order, which is chronological per component but interleaved across components. With a 60 s step two components' events fell in separate scan samples and came out in epoch order; with a 137 s step they fell in the same sample and came out in component order — the same eight events, two of them transposed by half an orbit. Step-independence is a property of the LIST, not only of each epoch, so the runner now inserts in scan order.</p>
+<h2 id="conformance"><a class="anchor" href="#conformance" aria-hidden="true">#</a>Conformance</h2>
+<p>There is <strong>no events conformance kit yet</strong>, and <code>space-data-module conformance</code> refuses the family by name rather than coercing it — a family with no kit can never be <code>CORE</code>. What exists today and is wired into <code>npm test</code>:</p>
+<div class="codeblock"><pre><code>node scripts/check-events-abi.mjs          # the drift gate
+node --test test/events-abi.test.js   # the both-harness proof</code></pre></div>
+<p>The kit that would make this family <code>Shipped</code> owes: Tier 0 (the export set), Tier C (<code>plugin_event_eval</code> agrees exactly with the <code>g</code> the runner used; determinism as bytes across destroy/reconfigure; typed refusals; step-independence; forward-backward closure; root convergence on a known-analytic event), Tier 4 (lifecycle), and a self-test with planted defects — including a locator whose <code>g</code> is impure, which is the failure mode this ABI is most exposed to.</p>
+<h2 id="consumer-seam"><a class="anchor" href="#consumer-seam" aria-hidden="true">#</a>Consumer seam</h2>
+<p>Per the pluggable-propagation law, the consumer resolves the propagator ONCE and feeds it to the locator's supply loop. The locator never learns which propagator it was. Concretely:</p>
+<div class="codeblock"><div class="codeblock-head">js</div><pre><code>const request = new OrbProEventStateRequest();       // from events-abi.js offsets
+for (;;) {
+  const n = wasm.plugin_event_next(requestPtr, epochsPtr, capacity);
+  if (n &lt; 0) throw new Error(eventErrorName(n));
+  if (n === 0) break;
+  for (let e = 0; e &lt; n; e += 1) {
+    const jd = epochs[2 * e] + epochs[2 * e + 1] / 86400.0;
+    for (let o = 0; o &lt; objectCount; o += 1) {
+      propagator.propagate(jd, o, statesPtr + (e * objectCount + o) * 64);
+    }
+  }
+  const rc = wasm.plugin_event_supply(statesPtr, n * objectCount);
+  if (rc &lt; 0) throw new Error(eventErrorName(rc));
+}</code></pre></div>
+<p>That loop is the whole host obligation. It contains no physics, no tolerance, no decision about which epochs matter, and it is identical in all three runtimes.</p>
+<h2 id="guest-usage"><a class="anchor" href="#guest-usage" aria-hidden="true">#</a>Guest usage</h2>
+<div class="codeblock"><div class="codeblock-head">c</div><pre><code>#include &quot;orbpro/orbpro_event_runner.h&quot;   /* pulls in the generated ABI */
+
+static OrbProEventRunner g_runner;
+
+/* THE locator. Everything else is the runner. */
+static int32_t eclipse_g(double jd_day, double seconds,
+                         const OrbProStateVector* states, uint32_t objects,
+                         double* g, uint32_t components, void* user) {
+  (void)jd_day; (void)seconds; (void)user;
+  if (objects &lt; 1u || components &lt; 1u) return ORBPRO_EVENT_E_BAD_INPUT;
+  /* g &gt; 0 outside the shadow, g &lt; 0 inside. A FALLING crossing is entry. */
+  g[0] = shadow_function(&amp;states[0]);
+  return 0;
+}
+
+ORBPRO_EVENT_EXPORT(&quot;plugin_event_eval&quot;)
+int32_t plugin_event_eval(double jd_day, double seconds,
+                          const OrbProStateVector* states, uint32_t objects,
+                          double* g, uint32_t components) {
+  return eclipse_g(jd_day, seconds, states, objects, g, components, NULL);
+}
+
+/* plugin_event_begin / next / supply / hit_count / hits / summaries / destroy */
+ORBPRO_EVENT_RUNNER_EXPORTS(g_runner)</code></pre></div>
+<p><code>plugin_event_describe</code> and <code>plugin_event_configure</code> are the locator's too: they encode and decode the <code>EventLocatorDescription</code> / <code>EventLocatorConfig</code> FlatBuffers and end in <code>orbpro_event_runner_configure</code> plus one <code>orbpro_event_runner_set_component</code> per component.</p>
+<h2 id="regenerating"><a class="anchor" href="#regenerating" aria-hidden="true">#</a>Regenerating</h2>
+<div class="codeblock"><pre><code>node scripts/generate-events-abi.mjs   # regenerate the header + bindings
+node scripts/check-events-abi.mjs      # the drift gate, wired into npm test</code></pre></div>
+<p>Edit <code>schemas/orbpro/Events.fbs</code> — it is the single source of truth. A hand edit to the generated header is erased by the next run and failed by the gate in between. <code>include/orbpro/orbpro_event_runner.h</code> is <strong>not</strong> generated: it is algorithm, not layout, and there is exactly one copy of it.</p>
+
+        <p class="doc-footer">
+          Source of truth for this page:
+          <code>docs/events-abi.md</code>. Regenerate with
+          <code>npm run build:docs</code>.
+        </p>
+      </main>
+<nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#doctrine">Doctrine</a></li>
+<li><a class="depth-2" href="#capability">Capability</a></li>
+<li><a class="depth-2" href="#the-export-set">The export set</a></li>
+<li><a class="depth-3" href="#the-locator-writes-these">The locator writes these</a></li>
+<li><a class="depth-3" href="#the-runner-provides-these">The runner provides these</a></li>
+<li><a class="depth-2" href="#the-pull-protocol">The pull protocol</a></li>
+<li><a class="depth-2" href="#wire-layout">Wire layout</a></li>
+<li><a class="depth-2" href="#units-frames-and-epochs">Units, frames and epochs</a></li>
+<li><a class="depth-3" href="#epochs-are-split-pairs-and-that-is-not-decoration">Epochs are split pairs, and that is not decoration</a></li>
+<li><a class="depth-3" href="#the-state-source-bounds-the-answer-and-says-so">The state source bounds the answer, and says so</a></li>
+<li><a class="depth-2" href="#sentinels">Sentinels</a></li>
+<li><a class="depth-3" href="#the-scan-start-is-not-a-bracket">The scan start is not a bracket</a></li>
+<li><a class="depth-2" href="#identity">Identity</a></li>
+<li><a class="depth-2" href="#threading">Threading</a></li>
+<li><a class="depth-2" href="#error-codes">Error codes</a></li>
+<li><a class="depth-2" href="#interval-pairing">Interval pairing</a></li>
+<li><a class="depth-2" href="#propagate-to-condition">Propagate-to-condition</a></li>
+<li><a class="depth-2" href="#lifetime">Lifetime</a></li>
+<li><a class="depth-2" href="#versioning">Versioning</a></li>
+<li><a class="depth-2" href="#parity-envelope">Parity envelope</a></li>
+<li><a class="depth-3" href="#measured-on-this-candidate">Measured, on this candidate</a></li>
+<li><a class="depth-2" href="#conformance">Conformance</a></li>
+<li><a class="depth-2" href="#consumer-seam">Consumer seam</a></li>
+<li><a class="depth-2" href="#guest-usage">Guest usage</a></li>
+<li><a class="depth-2" href="#regenerating">Regenerating</a></li></ul></nav>
+    </div>
+    <section id="stack" class="section" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow">SDN Stack</p>
+        <h2 id="stack-title">Connected sites</h2>
+      </div>
+      <div class="link-list">
+        <a href="https://spacedatastandards.org/">
+          <span>Standards</span>
+          <small>Canonical schemas, record contracts, and generated bindings.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatbuffers/">
+          <span>FlatBuffers</span>
+          <small>Binary encoding, schema tooling, and runtime documentation.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/flatsql/">
+          <span>FlatSQL</span>
+          <small>SQL-style queries over FlatBuffer-backed datasets and streams.</small>
+        </a>
+        <a href="https://spacedatanetwork.org/">
+          <span>SDN</span>
+          <small>Distributed publication, discovery, delivery, and marketplace infrastructure.</small>
+        </a>
+        <a href="https://digitalarsenal.github.io/space-data-module-sdk/" class="active">
+          <span>Module SDK</span>
+          <small>WASM module packaging, validation, and host compatibility tooling.</small>
+        </a>
+      </div>
+    </section>
+    <footer class="site-footer">
+      Space Data Module SDK — Apache-2.0. Every ABI page renders a Markdown
+      source in <code>docs/</code>; edit the Markdown, never the HTML.
+    </footer>
+  </body>
+</html>

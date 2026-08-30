@@ -63,10 +63,18 @@ taxonomy of 2026-08-14. It is not aspirational.
 | Designed | An ABI has been drafted against a real consumer. No generated header, no conformance kit, no reference module has landed. |
 | Planned | A ratified entry in the taxonomy whose individual shape has not been ratified. Nothing is implemented. |
 
-Only **propagator** and **data-source** are Shipped. Only **maneuver** and
-**estimation** are Experimental. Only **rf**, **obstruction** and
-**conjunction** are Designed. Every other family is Planned, and its status has
-not been ratified individually — a Planned page states scope and nothing more.
+Only **propagator** and **data-source** are Shipped. **maneuver**,
+**estimation** and **analytics** are Experimental — analytics on the strength
+of ONE sub-harness, [event location](events-abi.html), whose `.fbs`, generated
+header, drift gate, shared runner and measured parity envelope have landed and
+whose conformance kit has not. Only **rf**, **obstruction** and **conjunction**
+are Designed. Every other family is Planned, and its status has not been
+ratified individually — a Planned page states scope and nothing more.
+
+A sub-harness is not a twentieth family. The nineteen-family taxonomy above is
+owner-ratified: a capability that fits inside a ratified family arrives as a
+sub-harness with its own contract document, and the family page states exactly
+which part of it is shaped.
 
 Where a family page says a thing does not exist, that is a checked statement
 about the tree today, not a placeholder.
