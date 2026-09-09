@@ -52,6 +52,8 @@ import { runWithEmceptionLock } from "../compiler/emceptionNode.js";
 import {
   assertPthreadArtifact,
   assertPthreadFlagsPresent,
+  assertSequentialArtifact,
+  assertSequentialFlagsAbsent,
   PTHREAD_FINAL_LINK_FLAGS,
 } from "../compiler/pthreadArtifactGuard.js";
 import { resolveWasiThreadsToolchain } from "../compiler/wasiThreadsToolchain.js";
@@ -96,12 +98,11 @@ const execFileAsync = promisify(execFile);
 const FLOW_THREAD_MODEL = Object.freeze({
   SINGLE_THREAD: "single-thread",
   WASI_THREADS: "wasi-threads",
+  WASI_SEQUENTIAL: "wasi-sequential",
 });
 const HISTORICAL_PTHREAD_THREAD_MODEL = "emscripten-pthreads";
-// A guest built by the clang wasi toolchain that provably never spawns a
-// thread. For LINKING purposes it is a wasi-threads object — same target, same
-// object format, same ABI — so it unions with wasi-threads rather than
-// conflicting with it. See normalizeGuestThreadModel.
+// Sequential and threaded WASI objects can link together. Preserve the
+// distinction until composition: an all-sequential flow must own its memory and not claim thread spawning.
 const WASI_SEQUENTIAL_THREAD_MODEL = "wasi-sequential";
 
 const RUNTIME_ABI_EXPORTS = [
@@ -762,18 +763,12 @@ function normalizeGuestThreadModel(value) {
   if (normalized === FLOW_THREAD_MODEL.SINGLE_THREAD) {
     return FLOW_THREAD_MODEL.SINGLE_THREAD;
   }
+  if (normalized === WASI_SEQUENTIAL_THREAD_MODEL) {
+    return FLOW_THREAD_MODEL.WASI_SEQUENTIAL;
+  }
   if (
     normalized === FLOW_THREAD_MODEL.WASI_THREADS ||
-    normalized === HISTORICAL_PTHREAD_THREAD_MODEL ||
-    // wasi-sequential collapses to wasi-threads HERE, at the linking layer,
-    // and only here. The distinction is a property of a guest (may it spawn?),
-    // not of the object format: both are clang wasm32-wasip1-threads objects
-    // and link together cleanly. Keeping them separate at this layer would
-    // make a flow of one sequential node fall through to the emception branch
-    // and be linked by emcc — exactly the toolchain drift this model exists to
-    // prevent. The per-guest guarantee is enforced where it belongs: on each
-    // MODULE artifact, by assertSequentialArtifact.
-    normalized === WASI_SEQUENTIAL_THREAD_MODEL
+    normalized === HISTORICAL_PTHREAD_THREAD_MODEL
   ) {
     return FLOW_THREAD_MODEL.WASI_THREADS;
   }
@@ -1941,6 +1936,9 @@ export function checkFlowProgram({ flow, dependencies = new Map() } = {}) {
     }
   }
 
+  if (threadModels.has(FLOW_THREAD_MODEL.WASI_THREADS)) {
+    threadModels.delete(FLOW_THREAD_MODEL.WASI_SEQUENTIAL);
+  }
   let threadModel =
     threadModels.size === 1
       ? [...threadModels][0]
@@ -2245,6 +2243,12 @@ export function buildFlowModuleManifest({ flow, check, dependencies }) {
     name: flow.name ?? flow.programId,
     version: flow.version ?? "0.0.0",
     pluginFamily: "flow",
+    ...(check.threadModel === FLOW_THREAD_MODEL.WASI_SEQUENTIAL
+      ? { sequentialJustification: {
+          kind: "caller-level-parallelism",
+          detail: "Every linked guest is wasi-sequential; the flow dispatches them serially and delegates external concurrency to its host.",
+        } }
+      : {}),
     description:
       flow.description ??
       `Compiled SDN flow "${flow.programId}" (linked-direct monolithic artifact).`,
@@ -2941,6 +2945,7 @@ async function linkFlowArtifactWithWasiThreads({
   programSource,
   dependencyObjects,
   engineLinked = false,
+  sequential = false,
 }) {
   const toolchain = resolveWasiThreadsToolchain();
   const workDir = await mkdtemp(
@@ -2975,9 +2980,8 @@ async function linkFlowArtifactWithWasiThreads({
       "-std=c++17",
       `-I${workDir}`,
       "-O3",
-      "-matomics",
+      ...(sequential ? [] : ["-matomics", "-pthread"]),
       "-mbulk-memory",
-      "-pthread",
       "-fno-exceptions",
       "-DNDEBUG",
     ];
@@ -3010,16 +3014,20 @@ async function linkFlowArtifactWithWasiThreads({
       ...dependencyObjectPaths,
       "-O3",
       "-mexec-model=reactor",
-      ...PTHREAD_FINAL_LINK_FLAGS,
+      ...(sequential
+        ? ["-mbulk-memory", "-Wl,--initial-memory=16777216", "-Wl,--max-memory=2147483648"]
+        : PTHREAD_FINAL_LINK_FLAGS),
       "-Wl,--export-memory",
       "-Wl,--allow-undefined",
       ...exportSymbols.map((symbol) => `-Wl,--export=${symbol}`),
       "-o",
       outputPath,
     ];
-    assertPthreadFlagsPresent(linkArgs, {
-      threadModel: HISTORICAL_PTHREAD_THREAD_MODEL,
-    });
+    if (sequential) {
+      assertSequentialFlagsAbsent(linkArgs, { threadModel: WASI_SEQUENTIAL_THREAD_MODEL });
+    } else {
+      assertPthreadFlagsPresent(linkArgs, { threadModel: HISTORICAL_PTHREAD_THREAD_MODEL });
+    }
     await runWasiThreadsCompiler(toolchain.clangxx, linkArgs, workDir);
     return new Uint8Array(await readFile(outputPath));
   } finally {
@@ -3118,7 +3126,7 @@ export async function compileFlowProgram({
   });
 
   const linkFlowArtifact =
-    check.threadModel === FLOW_THREAD_MODEL.WASI_THREADS
+    check.threadModel !== FLOW_THREAD_MODEL.SINGLE_THREAD
       ? linkFlowArtifactWithWasiThreads
       : linkFlowArtifactWithEmception;
   let wasmBytes = await linkFlowArtifact({
@@ -3129,6 +3137,7 @@ export async function compileFlowProgram({
     programSource,
     dependencyObjects: linkedDependencies.map((dependency) => dependency.guestLink.objectBytes),
     engineLinked: Boolean(check.engineLinkage),
+    sequential: check.threadModel === FLOW_THREAD_MODEL.WASI_SEQUENTIAL,
   });
   wasmBytes = appendWasmCustomSection(
     wasmBytes,
@@ -3137,6 +3146,8 @@ export async function compileFlowProgram({
   );
   if (check.threadModel === FLOW_THREAD_MODEL.WASI_THREADS) {
     assertPthreadArtifact(wasmBytes, { source: sourceName });
+  } else if (check.threadModel === FLOW_THREAD_MODEL.WASI_SEQUENTIAL) {
+    assertSequentialArtifact(wasmBytes, { source: sourceName });
   }
 
   const report = await validateArtifactWithStandards({
@@ -3193,8 +3204,8 @@ export async function compileFlowProgram({
     name: flow.name ?? null,
     version: flow.version ?? null,
     compiler:
-      check.threadModel === FLOW_THREAD_MODEL.WASI_THREADS
-        ? "space-data-module flow compile (isomorphic, wasi-threads)"
+      check.threadModel !== FLOW_THREAD_MODEL.SINGLE_THREAD
+        ? `space-data-module flow compile (isomorphic, ${check.threadModel})`
         : "space-data-module flow compile (isomorphic, emception)",
     threadModel: check.threadModel,
     nodes: (flow.nodes ?? []).length,

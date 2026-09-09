@@ -17,6 +17,7 @@ import {
 import {
   analyzeWasmThreadFeatures,
   assertPthreadArtifact,
+  assertSequentialArtifact,
 } from "../src/compiler/pthreadArtifactGuard.js";
 import { resolveWasiThreadsToolchain } from "../src/compiler/wasiThreadsToolchain.js";
 import {
@@ -3667,4 +3668,38 @@ test("a plugin that targets no runtime a flow can reach empties the set on purpo
     ),
     JSON.stringify(check.errors),
   );
+});
+
+test('flow check preserves sequential WASI and promotes only an actual threaded guest', () => {
+  const model=(dependency,threadModel)=>({...dependency,guestLink:{...dependency.guestLink,metadata:{...dependency.guestLink.metadata,threadModel}}});
+  for(const [left,right,expected] of [
+    ['wasi-sequential','wasi-sequential','wasi-sequential'],
+    ['wasi-sequential','wasi-threads','wasi-threads'],
+    ['wasi-threads','wasi-sequential','wasi-threads'],
+    ['wasi-sequential','single-thread',null],
+  ]) {
+    const check=checkFlowProgram({flow:makeFlow(),dependencies:dependencyMap(model(producerDependency,left),model(consumerDependency,right))});
+    assert.equal(check.ok,expected!==null,JSON.stringify(check.issues));
+    assert.equal(check.threadModel,expected);
+  }
+});
+
+test('flow compile keeps an all-sequential WASI artifact self-contained and runnable', async t=> {
+  if(!wasiThreadsAvailable()) {t.skip('WASI compiler unavailable');return;}
+  const manifest={...producerDependency.manifest,pluginId:'test.flow.sequential-guest',
+    sequentialJustification:{kind:'pure-transform',detail:'This fixture returns without spawning a worker or accessing shared state.'},
+    methods:[{methodId:'sequential_tick',displayName:'Sequential tick',inputPorts:[port('request',{typeSets:[typedTypeSet('request','Request.fbs','RQST')]})],outputPorts:[],maxBatch:1,drainPolicy:'single-shot'}],schemasUsed:[],abiVersion:1};
+  const compilation=await compileModuleFromSource({manifest,sourceCode:'extern "C" int sequential_tick(void) { return 0; }',language:'c++',threadModel:ModuleThreadModel.WASI_SEQUENTIAL,catalog:catalogForManifests(manifest)});
+  t.after(()=>cleanupCompilation(compilation));
+  const dependency={pluginId:manifest.pluginId,manifest,normalized:normalizeManifestForSdnFlow(manifest),guestLink:{objectBytes:compilation.guestLink.objectBytes,metadata:{symbolPrefix:compilation.guestLink.symbolPrefix,methodSymbols:compilation.guestLink.methodSymbols,threadModel:compilation.guestLink.threadModel,capabilities:[]}},wasmPath:compilation.outputPath};
+  const result=await compileFlowProgram({flow:singleNodeFlow(dependency,{capabilities:[]}),dependencies:dependencyMap(dependency),catalog:catalogForManifests(manifest)});
+  assert.equal(result.check.threadModel,'wasi-sequential');
+  assert.equal(result.artifact.threadModel,'wasi-sequential');
+  assert.match(result.artifact.compiler,/wasi-sequential/);
+  assertSequentialArtifact(result.wasmBytes,{source:'sequential-flow-regression'});
+  const host=await createFlowRuntimeHost({wasmSource:result.wasmBytes});
+  assert.ok(!WebAssembly.Module.imports(new WebAssembly.Module(result.wasmBytes)).some(entry=>entry.kind==='memory'));
+  const before=host.memory.buffer.byteLength;host.memory.grow(1);
+  assert.equal(host.memory.buffer.byteLength,before+65536);
+  assert.equal(host.dependencyCount,1);
 });
