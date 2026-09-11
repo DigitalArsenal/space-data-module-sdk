@@ -3,6 +3,7 @@ export * from "./codec.js";
 export * from "./wasm.js";
 export * from "./artifactBytes.js";
 export * from "./signing.js";
+export * from "./attestation.js";
 // Re-exported under explicit names rather than `export *`: sigdomain's own
 // names (`statement`, `domains`, `describe`, `registered`) are deliberately
 // terse for callers that import the module directly, and far too generic to

@@ -23,6 +23,17 @@ This repository is the source of truth for module-level concerns:
   <img src="docs/architecture.svg" alt="Module architecture overview" width="820" />
 </p>
 
+## The LLM integrator contract
+
+Point a coding agent at your codebase and at this SDK and it can build a
+module. The machine-readable entry point is
+[`docs/llms.txt`](docs/llms.txt); the published
+[harness family matrix](https://digitalarsenal.github.io/space-data-module-sdk/)
+lists every family, its status, and the spine every ABI follows. Statuses
+are literal — only SHIPPED families have a generated header, a conformance
+kit and a reference module. All guest modules compile
+`wasm32-wasip1-threads`; `emcc -pthread` is forbidden.
+
 ## Shared Harness Ownership
 
 This repo owns the generic module-side runtime harnesses used across the stack:

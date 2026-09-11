@@ -8,6 +8,7 @@ import {
   compileModuleFromSource,
   protectModuleArtifact,
 } from "../src/compiler/index.js";
+import { injectPluginManifest } from "../src/manifest/index.js";
 import {
   loadComplianceConfig,
   loadManifestFromFile,
@@ -44,6 +45,8 @@ async function main(argv) {
       return runParityGateCommand(rest);
     case "conformance":
       return runConformanceCommand(rest);
+    case "inject-manifest":
+      return runInjectManifest(rest);
     case "protect":
       return runProtect(rest);
     case "sign":
@@ -248,6 +251,11 @@ function printUsage() {
   space-data-module conformance propagator --self-test                                          (must exit 0 BY failing: planted defects all caught)
   space-data-module flow check ./flows/my.flow.json --deps ./modules-root
   space-data-module flow compile ./flows/my.flow.json --deps ./modules-root [--out ./flows/my/dist]
+  space-data-module inject-manifest --manifest ./manifest.json --wasm ./dist/vendor-module.wasm --out ./dist/module.wasm
+      (BYO-wasm lane: embed the PLG manifest custom section into a foreign-compiled artifact, e.g. from a
+      CMake/wasi-sdk multi-TU C++ build that never ran compileModuleFromSource. Re-validates the result.)
+  space-data-module inject-manifest --manifest ./manifest.json --wasm ./dist/module.wasm --out ./dist/module.wasm --force
+      (overwrite an already-embedded sds.manifest section instead of erroring)
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --recipient-public-key <hex> --out ./dist/module.wasm.enc
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --single-file-bundle --out ./dist/module.bundle.wasm
@@ -673,6 +681,49 @@ async function runInit(argv) {
     }
   }
   return result.ok ? 0 : 1;
+}
+
+// space-data-module inject-manifest --manifest <manifest.json> --wasm <artifact.wasm> --out <out.wasm> [--force] [--json]
+//
+// The BYO-wasm-lane injection verb (graph task module-sdk-byo-wasm-lane).
+// compileModuleFromSource embeds the sds.manifest custom section as a side
+// effect of compiling from source; a vendor-compiled artifact (CMake +
+// wasi-sdk, no compileModule invocation) has no equivalent and previously
+// had no supported way to become a valid module. This appends (or replaces,
+// with --force) that section on an already-built wasm binary and then
+// re-runs the same standards validation `check --wasm` runs, so the emitted
+// artifact is proven, not just stamped.
+async function runInjectManifest(argv) {
+  const options = parseArgs(argv);
+  if (!options.manifestPath || !options.wasmPath) {
+    throw new Error("inject-manifest requires --manifest and --wasm.");
+  }
+  const outputPath = options.outputPath ?? options.wasmPath;
+  const manifest = await loadManifestFromFile(options.manifestPath);
+  const wasmBytes = await readFile(options.wasmPath);
+  const { wasmBytes: injectedBytes, replacedExisting } = injectPluginManifest({
+    wasmBytes,
+    manifest,
+    replace: options.force === true,
+  });
+  await writeFile(outputPath, injectedBytes);
+
+  const report = await validateArtifactWithStandards({
+    manifest,
+    manifestPath: options.manifestPath,
+    wasmPath: outputPath,
+  });
+  if (options.json) {
+    console.log(
+      JSON.stringify({ outputPath, replacedExisting, report }, null, 2),
+    );
+  } else {
+    console.log(
+      `Wrote ${outputPath}${replacedExisting ? " (replaced existing sds.manifest section)" : ""}`,
+    );
+    printReport(report);
+  }
+  return report.ok ? 0 : 1;
 }
 
 async function runProtect(argv) {

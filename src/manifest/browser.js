@@ -13,6 +13,7 @@ export {
 } from "./plgCodec.js";
 export { legacyManifestToPlg } from "./legacyToPlg.js";
 export { toEmbeddedPluginManifest } from "./normalize.js";
+export { injectPluginManifest } from "./inject.js";
 export {
   clonePayloadTypeRef,
   getPayloadTypeWireFormat,

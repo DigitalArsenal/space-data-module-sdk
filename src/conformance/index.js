@@ -28,6 +28,36 @@ export {
 } from "./propagatorSuite.js";
 export { runPropagatorSelfTest, formatSelfTestReport } from "./selfTest.js";
 
+// Wave 4 — the conformance RECEIPT (W4.1, harness-w4-conformance-receipt-
+// attestation): the settled receipt document format and the bundle
+// ATTESTATION encoding + client verify-chain extension. Exporting both from
+// the conformance surface means one import gives a publisher everything from
+// "run the kit" to "attach a signed, verifiable receipt to the artifact".
+export {
+  ConformanceReceiptError,
+  RECEIPT_CHECK_STATUSES,
+  RECEIPT_DEFAULT_TOOL_NAME,
+  RECEIPT_DOCUMENT_KEY,
+  RECEIPT_SCHEMA_VERSION,
+  RECEIPT_VERDICTS,
+  buildConformanceReceipt,
+  canonicalReceiptBytes,
+  formatConformanceReceipt,
+  parseConformanceReceipt,
+  portableArtifactDigest,
+  receiptFingerprint,
+} from "./receipt.js";
+export {
+  RECEIPT_ATTESTATION_ENTRY_ID,
+  RECEIPT_ATTESTATION_MEDIA_TYPE,
+  RECEIPT_ATTESTATION_SECTION_NAME,
+  ReceiptAttestationError,
+  decodeConformanceReceiptAttestation,
+  encodeConformanceReceiptAttestation,
+  findConformanceReceiptAttestation,
+  verifyBundleConformanceReceipt,
+} from "../bundle/attestation.js";
+
 /**
  * Families with a conformance kit. The vocabulary is the SDS pluginCategory
  * projection (W0.3): unknown families are refused BY NAME with the known set,
