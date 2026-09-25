@@ -164,9 +164,27 @@
     timer = setTimeout(function () { layout(); if (still) draw(performance.now()); }, 150);
   });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { readTheme(); if (still) draw(performance.now()); });
+  window.addEventListener('sdn-theme', function () { readTheme(); if (still) draw(performance.now()); });
   document.addEventListener('visibilitychange', function () {
     visible = !document.hidden;
     if (visible && !still) { last = performance.now(); requestAnimationFrame(draw); }
   });
   requestAnimationFrame(draw);
+})();
+
+// Light / dark switcher. Follows the system until the reader picks.
+(function () {
+  function current() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'light' || t === 'dark') return t;
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  document.querySelectorAll('.theme-toggle').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var next = current() === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('sdn-theme', next); } catch (e) {}
+      window.dispatchEvent(new Event('sdn-theme'));
+    });
+  });
 })();

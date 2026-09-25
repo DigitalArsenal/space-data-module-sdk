@@ -999,3 +999,15 @@ a.card:hover {
 body:not([data-assembly="scroll"]) #assembly {
   opacity: 0.45;
 }
+
+/* Theme switcher: follows the system until the reader picks; the choice is remembered. */
+.theme-toggle { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--hairline-strong); background: transparent; color: var(--ink); cursor: pointer; }
+.theme-toggle:hover { background: var(--surface-hover); }
+.theme-toggle svg { width: 16px; height: 16px; }
+.theme-toggle .moon { display: none; }
+:root[data-theme="light"] .theme-toggle .moon { display: block; }
+:root[data-theme="light"] .theme-toggle .sun { display: none; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .theme-toggle .moon { display: block; }
+  :root:not([data-theme]) .theme-toggle .sun { display: none; }
+}
