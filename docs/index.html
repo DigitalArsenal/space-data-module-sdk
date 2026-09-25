@@ -3,16 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="The nineteen harness families of the Space Data Module SDK — uniform WASM plugin contracts for every kind of scenario behavior." />
-    <title>Harness family matrix — Space Data Module SDK</title>
+    <meta name="description" content="Build once, run on every node. The Space Data Module SDK packages space software as digitally signed WebAssembly modules that run in browsers, on servers and on every Space Data Network node." />
+    <title>Space Data Module SDK — Build once. Run on every node.</title>
     <link rel="stylesheet" href="./styles.css" />
+    <script src="./assembly.js" defer></script>
     <!-- SDN_CONSUMER_ASSETS_START -->
 <link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
 <script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
 <script defer src="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.52fde607eee38ffa116188201f50258ed50bd18c9f06c1af9678f763147a8fe5.js" integrity="sha384-dgeojhJ8vTszHXIbv7O7nZcEzqD10oUYYJjBmPrV7+kLQEUlXLQD4ek5Q7HOFiO5" crossorigin="anonymous" data-nav-style-url="https://static.spacedatanetwork.org/assets/sdn-stack-nav/1.0.0/sdn-stack-nav.36a36359ce18322185e9ff179f88175bab67d5ad84a14d9c08a54f2ff27267e7.css" data-nav-style-integrity="sha384-c4M8Fg+kYaeOYYtJVr7jJsde24IhSWkWaRyAOHEZU9jozhRck089aw+mnHwxymds" data-wallet-client-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" data-wallet-client-integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" data-wallet-style-url="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" data-wallet-style-integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" data-wallet-client-id="sdn-module-sdk-pages-v1" data-wallet-callback-uri="https://digitalarsenal.github.io/space-data-module-sdk/wallet-callback.html" data-wallet-registry-sha256="e1ce6fe903c9700484a8a87d96581c8cad97063dabf63030b4518a31a3bdaa93"></script>
 <!-- SDN_CONSUMER_ASSETS_END -->
   </head>
-  <body>
+  <body data-assembly="scroll">
+    <canvas id="assembly" aria-hidden="true"></canvas>
     <a class="skip-link" href="#main">Skip to content</a>
     <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
     <header class="site-header">
@@ -26,13 +28,13 @@
     </header>
     <main id="main">
       <section class="hero">
-        <p class="eyebrow">Space Data Network</p>
-        <h1>Harness families</h1>
+        <p class="eyebrow">Space Data Module SDK</p>
+        <h1>Build once. Run on every node.</h1>
         <p class="lede">
-          One uniform WASM plugin contract per kind of scenario behavior. Point
-          an LLM at your codebase and at this site, build a module, host it on
-          the SDN, and any consumer loads it — with no modification to the
-          rendering engine.
+          Package propagators, sensor models, data connectors and analytics as
+          digitally signed WebAssembly modules. The same file runs in a browser,
+          on a server and on every Space Data Network node, and any app loads it
+          without changes.
         </p>
         <div class="actions">
           <a class="button primary" href="./byo-wasm-quickstart.html">Build a module</a>
@@ -43,12 +45,14 @@
 
       <section class="section" aria-labelledby="families-title">
         <div class="section-head">
-          <p class="eyebrow">The matrix</p>
-          <h2 id="families-title">Nineteen families, one spine</h2>
+          <p class="eyebrow">Module types</p>
+          <h2 id="families-title">Nineteen module types, one interface each</h2>
           <p>
-            Every family is documented against the same thirteen-section spine.
-            Status is stated honestly: only families marked Shipped have a
-            ratified generated header, a conformance kit, and a reference module.
+            Each kind of module, from a propagator to a sensor to a data
+            connector, has one standard interface. The specifications call these
+            harness families. Every one is documented against the same
+            thirteen-section outline, and only those marked Shipped have a
+            ratified generated header, a conformance kit and a reference module.
           </p>
         </div>
       <div class="family-group">

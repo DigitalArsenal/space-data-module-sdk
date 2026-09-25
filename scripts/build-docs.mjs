@@ -48,7 +48,7 @@ const NAV = [
   {
     heading: "Start here",
     items: [
-      { out: "index.html", src: "harness-family-matrix.md", title: "Harness family matrix", layout: "landing" },
+      { out: "index.html", src: "harness-family-matrix.md", title: "Module types", layout: "landing" },
       { out: "byo-wasm-quickstart.html", src: "byo-wasm-quickstart.md", title: "BYO-wasm quickstart" },
       { out: "conformance.html", src: "conformance.md", title: "Conformance kit" },
       { out: "protect-and-sign.html", src: "protect-and-sign.md", title: "Protect and sign" },
@@ -397,11 +397,13 @@ function pageHead(page, description) {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="${esc(description)}" />
-    <title>${esc(page.title)} — Space Data Module SDK</title>
+    <title>${page.layout === "landing" ? "Space Data Module SDK — Build once. Run on every node." : `${esc(page.title)} — Space Data Module SDK`}</title>
     <link rel="stylesheet" href="${depth}styles.css" />
+    <script src="${depth}assembly.js" defer></script>
 ${CONSUMER_ASSETS}
   </head>
-  <body>
+  <body${page.layout === "landing" ? ' data-assembly="scroll"' : ""}>
+    <canvas id="assembly" aria-hidden="true"></canvas>
     <a class="skip-link" href="#main">Skip to content</a>
     <sdn-stack-nav active="module-sdk"></sdn-stack-nav>
     <header class="site-header">
@@ -457,7 +459,7 @@ function renderDocPage(page, md) {
     ? `      <p class="doc-meta">${statusPill(page.status)}<span>${esc(STATUS_BLURB[page.status])}</span></p>\n`
     : "";
   const crumb = page.family
-    ? `      <p class="breadcrumb"><a href="${relativeLink(page.out, "index.html")}">Harness families</a> / ${esc(page.group)}</p>\n`
+    ? `      <p class="breadcrumb"><a href="${relativeLink(page.out, "index.html")}">Module types</a> / ${esc(page.group)}</p>\n`
     : "";
   return `${pageHead(page, description)}
     <div class="shell">
@@ -521,16 +523,16 @@ ${items}
     })
     .join("\n");
 
-  return `${pageHead(page, "The nineteen harness families of the Space Data Module SDK — uniform WASM plugin contracts for every kind of scenario behavior.")}
+  return `${pageHead(page, "Build once, run on every node. The Space Data Module SDK packages space software as digitally signed WebAssembly modules that run in browsers, on servers and on every Space Data Network node.")}
     <main id="main">
       <section class="hero">
-        <p class="eyebrow">Space Data Network</p>
-        <h1>Harness families</h1>
+        <p class="eyebrow">Space Data Module SDK</p>
+        <h1>Build once. Run on every node.</h1>
         <p class="lede">
-          One uniform WASM plugin contract per kind of scenario behavior. Point
-          an LLM at your codebase and at this site, build a module, host it on
-          the SDN, and any consumer loads it — with no modification to the
-          rendering engine.
+          Package propagators, sensor models, data connectors and analytics as
+          digitally signed WebAssembly modules. The same file runs in a browser,
+          on a server and on every Space Data Network node, and any app loads it
+          without changes.
         </p>
         <div class="actions">
           <a class="button primary" href="./byo-wasm-quickstart.html">Build a module</a>
@@ -541,12 +543,14 @@ ${items}
 
       <section class="section" aria-labelledby="families-title">
         <div class="section-head">
-          <p class="eyebrow">The matrix</p>
-          <h2 id="families-title">Nineteen families, one spine</h2>
+          <p class="eyebrow">Module types</p>
+          <h2 id="families-title">Nineteen module types, one interface each</h2>
           <p>
-            Every family is documented against the same thirteen-section spine.
-            Status is stated honestly: only families marked Shipped have a
-            ratified generated header, a conformance kit, and a reference module.
+            Each kind of module, from a propagator to a sensor to a data
+            connector, has one standard interface. The specifications call these
+            harness families. Every one is documented against the same
+            thirteen-section outline, and only those marked Shipped have a
+            ratified generated header, a conformance kit and a reference module.
           </p>
         </div>
 ${cards}
@@ -663,7 +667,7 @@ const llms = [
   "",
   "## Start here",
   "",
-  `- [Harness family matrix](${SITE}/): every family and its status.`,
+  `- [Module types](${SITE}/): every harness family and its status.`,
   `- [BYO-wasm quickstart](${SITE}/byo-wasm-quickstart.html): multi-TU C++ to a loadable artifact.`,
   `- [Conformance kit](${SITE}/conformance.html): self-test commands and what each asserts.`,
   `- [Protect and sign](${SITE}/protect-and-sign.html): artifact protection and signing.`,

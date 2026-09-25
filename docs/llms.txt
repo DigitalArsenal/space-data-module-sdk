@@ -13,7 +13,7 @@ WasmEdge, which breaks tri-runtime isomorphism. Modules must be EH-free.
 
 ## Start here
 
-- [Harness family matrix](https://digitalarsenal.github.io/space-data-module-sdk/): every family and its status.
+- [Module types](https://digitalarsenal.github.io/space-data-module-sdk/): every harness family and its status.
 - [BYO-wasm quickstart](https://digitalarsenal.github.io/space-data-module-sdk/byo-wasm-quickstart.html): multi-TU C++ to a loadable artifact.
 - [Conformance kit](https://digitalarsenal.github.io/space-data-module-sdk/conformance.html): self-test commands and what each asserts.
 - [Protect and sign](https://digitalarsenal.github.io/space-data-module-sdk/protect-and-sign.html): artifact protection and signing.
