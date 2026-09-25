@@ -122,7 +122,7 @@ Two consequences for anyone reading this floor:
 
 - **Every pre-2.0.0 `flatsql` is withdrawn from npm.** A pin below `^2.0.0`
   resolves to nothing. There is no supported lower floor.
-- **Commercial use of the engine needs a licence** from DigitalArsenal.io, Inc.
+- **Commercial use of the engine needs a licence** from Edgesource Corporation
   ([tj@edgesource.com](mailto:tj@edgesource.com)). The SDK stays MIT and
   consumes flatsql through its JS API only, but installing the SDK installs the
   engine, so the obligation reaches the SDK's consumers.

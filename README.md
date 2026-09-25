@@ -828,7 +828,7 @@ no longer permissive: as of `flatsql` **2.0.0** the FlatSQL engine is licensed
 under the [PolyForm Noncommercial License
 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/) — source-available
 and free for any noncommercial purpose, with commercial use requiring a separate
-license from DigitalArsenal.io, Inc.
+license from Edgesource Corporation
 ([tj@edgesource.com](mailto:tj@edgesource.com)). Installing this package
 installs `flatsql`, so a commercial deployment of anything built on the SDK's
 FlatSQL-backed runtime-host storage needs that license. Every `flatsql` release
