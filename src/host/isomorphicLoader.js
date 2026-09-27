@@ -84,9 +84,14 @@ async function createWasmEdgeCommandHarness(options = {}) {
     await writeFile(launchWasmPath, loadableBytes);
   }
 
-  const command = options.wasmEdgeBinary ?? "wasmedge";
+  const threaded = inspection.imports.some((entry) =>
+    entry.module === "wasi" && entry.name === "thread-spawn");
+  const command = threaded
+    ? await (await import("../testing/buildWasmEdgeRunner.js")).resolveWasmEdgeWasiThreadsRunner(options)
+    : options.wasmEdgeBinary ?? "wasmedge";
   const args = [
     ...(options.enableThreads === false ? [] : ["--enable-threads"]),
+    ...Object.entries(options.env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
     launchWasmPath,
     ...(Array.isArray(options.args) ? options.args : []),
   ];
@@ -225,8 +230,7 @@ export async function loadModule(options = {}) {
   // byte-level question.
   const needsCompiledModule =
     runtimeKind === "wasmedge" &&
-    !runtimeHostRequested &&
-    !options.wasmEdgeRunnerBinary;
+    !runtimeHostRequested;
   const needsBytes = Boolean(signaturePolicy) || runtimeKind === "wasmedge";
   let artifactBytes = null;
   let wasmModule = null;
@@ -266,7 +270,9 @@ export async function loadModule(options = {}) {
       const inspection = await inspectModule(wasmModule);
       if (
         (inspection.profile === "standalone" || inspection.profile === "module-host-abi") &&
-        inspection.exports.includes("_start")
+        inspection.exports.includes("_start") &&
+        (!options.wasmEdgeRunnerBinary || options.surface === "command" ||
+          inspection.imports.some((entry) => entry.module === "wasi" && entry.name === "thread-spawn"))
       ) {
         return attachHostDispatch(
           await createWasmEdgeCommandHarness(options),

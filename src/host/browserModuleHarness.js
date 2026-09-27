@@ -20,7 +20,7 @@
  *      stdout for the response bytes.
  */
 
-import { createBrowserWasiShim, WasiExitError } from "./wasiShim.js";
+import { createBrowserWasiShim, createSharedWasiProcess, WasiExitError } from "./wasiShim.js";
 import {
   createWasiThreadSpawn,
   isWasiThreadsModule,
@@ -307,7 +307,10 @@ async function instantiateBrowserModule(options = {}) {
       "Browser module harness memory must be a WebAssembly.Memory.",
     );
   }
+  const isThreaded = isWasiThreadsModule(options.wasmModule);
+  const processState = isThreaded ? createSharedWasiProcess(options) : null;
   const wasi = createBrowserWasiShim({
+    processState,
     args: options.args ?? [],
     env: options.env ?? {},
     stdinBytes: options.stdinBytes ?? new Uint8Array(),
@@ -323,7 +326,6 @@ async function instantiateBrowserModule(options = {}) {
   // `wasi.thread-spawn` over a SHARED imported memory. Such a module can only be
   // instantiated with shared memory, so force it here regardless of the caller's
   // sharedMemory flag; single-thread artifacts are unaffected.
-  const isThreaded = isWasiThreadsModule(options.wasmModule);
   const memoryImports = moduleImports.filter((entry) => entry.kind === "memory");
   if (!providedMemory && memoryImports.length > 0) {
     providedMemory = createImportedMemory(
@@ -356,6 +358,7 @@ async function instantiateBrowserModule(options = {}) {
     threadHost = await createWasiThreadSpawn({
       wasmModule: options.wasmModule,
       memory: providedMemory,
+      processState,
       // Browser warm-pool sizing: cap pooled workers at how many guest threads
       // the module will actually ask for. Ignored by the Node lazy path.
       requestedThreads: options.maxThreads,
@@ -550,7 +553,7 @@ export async function createBrowserModuleHarness(options = {}) {
 
   const activeContext = await instantiateBrowserModule({
     wasmModule,
-    initializeCommand: surface !== "command",
+    initializeCommand: false,
     host,
     hostcallDispatch: options.hostcallDispatch,
     args: options.args,

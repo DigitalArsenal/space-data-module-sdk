@@ -30,6 +30,8 @@ import { promisify } from "node:util";
 
 import { ExitClass, assertWasmEdgeVersionMatchesPin } from "./parityHarness.js";
 import { normalizeWasmEdgeOutcome } from "./wasmedgeOutput.js";
+import { isWasiThreadsModule } from "../host/wasiThreadHost.js";
+import { resolveWasmEdgeWasiThreadsRunner } from "./buildWasmEdgeRunner.js";
 
 const execFile = promisify(execFileCallback);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -162,7 +164,10 @@ export async function resolveWasmEdgeBinary(context = {}) {
 }
 
 export async function runNativeWasmEdgeLane(context) {
-  const binary = await resolveWasmEdgeBinary(context);
+  const threaded = isWasiThreadsModule(await WebAssembly.compile(context.loadableBytes ?? context.wasmBytes));
+  const binary = threaded
+    ? await resolveWasmEdgeWasiThreadsRunner(context)
+    : await resolveWasmEdgeBinary(context);
   let versionOutput;
   try {
     versionOutput = (await execFile(binary, ["--version"])).stdout;
@@ -185,7 +190,8 @@ export async function runNativeWasmEdgeLane(context) {
       for (const threadCount of planCase.threadCounts) {
         const outcome = await spawnWithStdin(
           binary,
-          wasmedgeInvocationArgs(planCase, context.plan, threadCount),
+          [...(threaded ? ["--sdm-thread-stats"] : []),
+            ...wasmedgeInvocationArgs(planCase, context.plan, threadCount)],
           {
             cwd: workdir,
             env: { PATH: process.env.PATH ?? "" },
@@ -271,6 +277,8 @@ export async function ensureDockerParityImage(context) {
 }
 
 export async function runDockerWasmEdgeLane(context) {
+  const threaded = isWasiThreadsModule(await WebAssembly.compile(context.loadableBytes ?? context.wasmBytes));
+  if (threaded) context = { ...context, pin: { ...context.pin, dockerImage: context.pin.dockerRunnerImage } };
   const dockerBinary = context.dockerBinary ?? "docker";
   try {
     await execFile(dockerBinary, ["--version"]);
@@ -300,8 +308,10 @@ export async function runDockerWasmEdgeLane(context) {
         if (context.dockerPlatform) {
           dockerArgs.push("--platform", String(context.dockerPlatform));
         }
+        if (threaded) dockerArgs.push("--entrypoint", "/opt/wasmedge/bin/sdm-wasi-threads-runner");
         dockerArgs.push(
           image,
+          ...(threaded ? ["--sdm-thread-stats"] : []),
           ...wasmedgeInvocationArgs(planCase, context.plan, threadCount),
         );
         const outcome = await spawnWithStdin(dockerBinary, dockerArgs, {
@@ -373,11 +383,17 @@ async function buildBrowserRunnerBundle() {
     external: ["node:*", "hd-wallet-wasm"],
     logLevel: "silent",
   });
-  return result.outputFiles[0].text;
+  const threadWorker = await esbuild.build({
+    entryPoints: [path.join(__dirname, "../host/wasiThreadBrowserWorker.mjs")],
+    bundle: true, write: false, format: "esm", platform: "browser", target: ["chrome110"],
+    external: ["node:*", "hd-wallet-wasm"], logLevel: "silent",
+  });
+  return { runner: result.outputFiles[0].text, threadWorker: threadWorker.outputFiles[0].text };
 }
 
 function browserPlanPayload(context) {
   return JSON.stringify({
+    surface: context.browserSurface ?? "command",
     threadEnvVar: context.plan.threadEnvVar,
     cases: context.plan.cases.map((planCase) => ({
       id: planCase.id,
@@ -393,7 +409,7 @@ const RUNNER_HTML = `<!doctype html>
 <html>
   <head><meta charset="utf-8"><title>sdm parity runner</title></head>
   <body><pre id="status">parity runner booting…</pre>
-  <script type="module" src="/runner.js"></script></body>
+  <script type="module">new Worker("/runner.js", { type: "module" });</script></body>
 </html>`;
 
 export async function runBrowserLane(context) {
@@ -447,7 +463,12 @@ export async function runBrowserLane(context) {
         ...securityHeaders,
         "Content-Type": "text/javascript; charset=utf-8",
       });
-      response.end(runnerBundle);
+      response.end(runnerBundle.runner);
+      return;
+    }
+    if (url.pathname === "/wasi-thread-worker.js") {
+      response.writeHead(200, { ...securityHeaders, "Content-Type": "text/javascript; charset=utf-8" });
+      response.end(runnerBundle.threadWorker);
       return;
     }
     if (url.pathname === "/plan") {

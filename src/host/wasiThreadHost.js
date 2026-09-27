@@ -202,7 +202,7 @@ const BROWSER_POOL_PROBE_TIMEOUT_MS = 1500;
 // surfacing) for the life of the pool.
 function armBrowserPool(
   created,
-  { wasmModule, memory, hostcallChannel, timeoutMs, onExit },
+  { wasmModule, memory, hostcallChannel, processState, timeoutMs, onExit },
 ) {
   return new Promise((resolve) => {
     let remaining = created.length;
@@ -266,6 +266,7 @@ function armBrowserPool(
         wasmModule,
         memory,
         hostcallChannel: hostcallChannel ?? null,
+        processState,
       });
     }
   });
@@ -333,6 +334,7 @@ export async function createWasiThreadSpawn({
   memory,
   requestedThreads,
   hostcallChannel,
+  processState,
   requiresHostcalls = false,
   enableBrowserThreads,
   browserWorkerBaseUrl,
@@ -378,6 +380,7 @@ export async function createWasiThreadSpawn({
             tid,
             startArg,
             hostcallChannel: hostcallChannel ?? null,
+        processState,
           },
         });
         // Node exposes the OS-thread id per Worker — distinct ids are direct
@@ -491,6 +494,7 @@ export async function createWasiThreadSpawn({
       wasmModule,
       memory,
       hostcallChannel,
+      processState,
       timeoutMs: BROWSER_POOL_PROBE_TIMEOUT_MS,
       onExit: returnWorkerToIdle,
     });

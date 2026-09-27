@@ -101,7 +101,10 @@ export async function runParityPlanInBrowser({ baseUrl = "" } = {}) {
         // would only add a fresh, unzeroed plaintext copy per run.
         harness = await createBrowserModuleHarness({
           wasmSource: moduleBytes,
-          surface: "command",
+          surface: plan.surface ?? "command",
+          enableBrowserWasiThreads: true,
+          maxThreads: threadCount,
+          wasiThreadWorkerUrl: new URL("/wasi-thread-worker.js", globalThis.location.href).href,
           args: planCase.args,
           env: {
             ...planCase.env,
@@ -113,6 +116,7 @@ export async function runParityPlanInBrowser({ baseUrl = "" } = {}) {
       } catch (error) {
         ({ exitClass, exitDetail } = classifyBrowserError(error));
       } finally {
+        stderr = harness?.wasi?.stderr ?? stderr;
         try {
           harness?.destroy?.();
         } catch {
@@ -144,8 +148,8 @@ async function postDone(body) {
 // Auto-run only inside a real browser page (the served runner). Node imports
 // of this module (tests, bundlers) never auto-run.
 if (
-  typeof globalThis.document !== "undefined" &&
-  typeof globalThis.window !== "undefined" &&
+  typeof globalThis.self !== "undefined" &&
+  typeof globalThis.location !== "undefined" &&
   globalThis.__SDM_PARITY_AUTORUN__ !== false
 ) {
   runParityPlanInBrowser({})

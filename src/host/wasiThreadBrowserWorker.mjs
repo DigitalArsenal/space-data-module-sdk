@@ -16,6 +16,7 @@ self.onmessage = (event) => {
         wasmModule,
         memory,
         hostcallChannel,
+        processState: message.processState,
       });
       runtime.instantiate();
       self.postMessage({ t: "ready", ok: true });

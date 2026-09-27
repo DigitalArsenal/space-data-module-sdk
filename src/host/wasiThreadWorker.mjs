@@ -12,11 +12,12 @@ import { workerData } from "node:worker_threads";
 
 import { createWasiThreadWorkerRuntime } from "./wasiThreadWorkerRuntime.js";
 
-const { wasmModule, memory, tid, startArg, hostcallChannel } = workerData;
+const { wasmModule, memory, tid, startArg, hostcallChannel, processState } = workerData;
 const runtime = createWasiThreadWorkerRuntime({
   wasmModule,
   memory,
   hostcallChannel,
+  processState,
 });
 const instance = runtime.instantiate();
 

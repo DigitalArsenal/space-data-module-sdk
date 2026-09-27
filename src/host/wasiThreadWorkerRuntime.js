@@ -58,8 +58,9 @@ export function createWasiThreadWorkerRuntime({
   wasmModule,
   memory,
   hostcallChannel,
+  processState,
 } = {}) {
-  const wasi = createBrowserWasiShim({});
+  const wasi = createBrowserWasiShim({ processState });
   wasi.setMemory(memory);
   let instance = null;
   let hostcalls = null;

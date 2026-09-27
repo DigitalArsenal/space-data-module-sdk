@@ -71,14 +71,17 @@ export function loadWasmEdgePin() {
   if (!repository) {
     throw new Error("wasmedgePin.json dockerImageRepository is required.");
   }
+  const runnerIdentity = createHash("sha256")
+    .update(readFileSync(path.join(__dirname, "native/wasmedge_wasi_threads_runner.c")))
+    .update(readFileSync(path.join(__dirname, String(pin.dockerfile))))
+    .digest("hex").slice(0, 16);
   return Object.freeze({
     wasmedgeVersion: version,
     dockerImageRepository: repository,
     dockerImage: `${repository}:${version}`,
+    dockerRunnerImage: `${repository}:${version}-threads-${runnerIdentity}`,
     dockerfilePath: path.join(__dirname, String(pin.dockerfile)),
-    dockerfileContextDir: path.dirname(
-      path.join(__dirname, String(pin.dockerfile)),
-    ),
+    dockerfileContextDir: __dirname,
     pinPath,
   });
 }
@@ -550,6 +553,8 @@ export async function runParityHarness(options = {}) {
     log: options.log ?? (() => {}),
     chromeBinary: options.chromeBinary,
     wasmedgeBinary: options.wasmedgeBinary,
+    wasmEdgeRunnerBinary: options.wasmEdgeRunnerBinary,
+    browserSurface: options.browserSurface ?? "command",
     dockerBinary: options.dockerBinary,
     dockerPlatform: options.dockerPlatform,
     autoBuildDockerImage: options.autoBuildDockerImage !== false,

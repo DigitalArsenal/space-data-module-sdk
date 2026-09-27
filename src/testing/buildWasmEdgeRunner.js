@@ -5,6 +5,8 @@ import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, stat, rename, rm } from "node:fs/promises";
 
 const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
@@ -56,11 +58,13 @@ function resolveGeneratedIncludeDir(requestedIncludeDir) {
   );
 }
 
-export function resolveWasmEdgeRunnerSourcePath() {
+export function resolveWasmEdgeRunnerSourcePath(options = {}) {
   return path.resolve(
     __dirname,
     "native",
-    "wasmedge_emscripten_pthread_runner.c",
+    options.runnerKind === "wasi-threads"
+      ? "wasmedge_wasi_threads_runner.c"
+      : "wasmedge_emscripten_pthread_runner.c",
   );
 }
 
@@ -127,7 +131,7 @@ export function resolveWasmEdgeRunnerBuildPlan(options = {}) {
     throw new Error("Missing runner outputPath.");
   }
 
-  const runnerSourcePath = resolveWasmEdgeRunnerSourcePath();
+  const runnerSourcePath = resolveWasmEdgeRunnerSourcePath(options);
   const wasmedgeSharedLibraryPath = path.join(
     wasmedgeLibDir,
     resolveWasmEdgeSharedLibraryFilename(),
@@ -250,4 +254,49 @@ export async function buildWasmEdgeEmscriptenPthreadRunner(options = {}) {
     ]);
   }
   return plan.outputPath;
+}
+
+export function buildWasmEdgeWasiThreadsRunner(options = {}) {
+  return buildWasmEdgeEmscriptenPthreadRunner({ ...options, runnerKind: "wasi-threads" });
+}
+
+const builds = new Map();
+
+// The command runner is separate from the legacy resident Emscripten host.
+// Invalidate cached binaries when either the source or linked library changes.
+export async function resolveWasmEdgeWasiThreadsRunner(options = {}) {
+  const explicit = options.wasmEdgeRunnerBinary ?? options.wasmedgeRunnerBinary ??
+    process.env.SDM_WASMEDGE_RUNNER_BINARY;
+  if (explicit) return path.resolve(String(explicit));
+  const plan = resolveWasmEdgeRunnerBuildPlan({
+    ...options, runnerKind: "wasi-threads", outputPath: path.join(os.tmpdir(), "sdm-runner"),
+  });
+  const library = await stat(plan.wasmedgeSharedLibraryPath);
+  const digest = createHash("sha256")
+    .update(await readFile(plan.runnerSourcePath))
+    .update(JSON.stringify([process.platform, process.arch, plan.wasmedgeIncludeDir,
+      plan.wasmedgeSharedLibraryPath, library.size, library.mtimeMs]))
+    .digest("hex");
+  if (!builds.has(digest)) {
+    const build = (async () => {
+      const dir = path.join(os.tmpdir(), "sdm-wasmedge-runners");
+      await mkdir(dir, { recursive: true, mode: 0o700 });
+      const outputPath = path.join(dir, `wasi-threads-${digest}`);
+      if (!existsSync(outputPath)) {
+        const staging = `${outputPath}.${process.pid}`;
+        try {
+          await buildWasmEdgeWasiThreadsRunner({ ...options, outputPath: staging });
+          await rename(staging, outputPath);
+        } finally {
+          await rm(staging, { force: true });
+        }
+      }
+      // This executes the linked library's version check, including on cache hits.
+      await execFileAsync(outputPath, ["--version"]);
+      return outputPath;
+    })();
+    builds.set(digest, build);
+    build.catch(() => builds.delete(digest));
+  }
+  return builds.get(digest);
 }

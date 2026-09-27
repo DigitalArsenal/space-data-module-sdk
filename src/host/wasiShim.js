@@ -34,10 +34,33 @@ export class WasiExitError extends Error {
   }
 }
 
+// One process owns its descriptors, even when libc executes main on a pthread.
+// Offsets are atomically reserved so concurrent readers/writers never duplicate
+// input or overwrite another thread's output. Overflow is an explicit WASI error.
+export function createSharedWasiProcess({ args = [], env = {}, stdinBytes = [], maxOutputBytes = 16 * 1024 * 1024 } = {}) {
+  const input = new Uint8Array(new SharedArrayBuffer(stdinBytes.length));
+  input.set(stdinBytes);
+  return {
+    args, env, input,
+    control: new Int32Array(new SharedArrayBuffer(5 * 4)),
+    stdout: new Uint8Array(new SharedArrayBuffer(maxOutputBytes)),
+    stderr: new Uint8Array(new SharedArrayBuffer(maxOutputBytes)),
+  };
+}
+
+function reserve(control, index, length, capacity) {
+  for (;;) {
+    const offset = Atomics.load(control, index);
+    if (length > capacity - offset) return -1;
+    if (Atomics.compareExchange(control, index, offset, offset + length) === offset) return offset;
+  }
+}
+
 export function createBrowserWasiShim(options = {}) {
-  const args = options.args ?? [];
-  const env = options.env ?? {};
-  const stdinBytes = new Uint8Array(options.stdinBytes ?? []);
+  const shared = options.processState;
+  const args = shared?.args ?? options.args ?? [];
+  const env = shared?.env ?? options.env ?? {};
+  const stdinBytes = shared?.input ?? new Uint8Array(options.stdinBytes ?? []);
   const logOutput = options.logOutput === true;
   const performanceApi = options.performance ?? globalThis.performance ?? {
     now: () => Date.now(),
@@ -100,7 +123,14 @@ export function createBrowserWasiShim(options = {}) {
       const base = iovsPtr + i * 8;
       const ptr = dv.getUint32(base, true);
       const len = dv.getUint32(base + 4, true);
-      target.push(bytes.slice(ptr, ptr + len));
+      if (shared) {
+        const output = fd === 1 ? shared.stdout : shared.stderr;
+        const offset = reserve(shared.control, fd, len, output.length);
+        if (offset < 0) return 51; // NOSPC: never silently truncate command output.
+        output.set(bytes.subarray(ptr, ptr + len), offset);
+      } else {
+        target.push(bytes.slice(ptr, ptr + len));
+      }
       totalWritten += len;
     }
 
@@ -119,16 +149,22 @@ export function createBrowserWasiShim(options = {}) {
     let totalRead = 0;
 
     for (let i = 0; i < iovsLen; i += 1) {
-      if (stdinOffset >= stdinBytes.length) {
-        break;
-      }
       const base = iovsPtr + i * 8;
       const ptr = dv.getUint32(base, true);
       const len = dv.getUint32(base + 4, true);
-      const remaining = stdinBytes.length - stdinOffset;
-      const count = Math.min(len, remaining);
-      bytes.set(stdinBytes.subarray(stdinOffset, stdinOffset + count), ptr);
-      stdinOffset += count;
+      let offset, count;
+      if (shared) {
+        do {
+          offset = Atomics.load(shared.control, 0);
+          count = Math.min(len, stdinBytes.length - offset);
+        } while (Atomics.compareExchange(shared.control, 0, offset, offset + count) !== offset);
+      } else {
+        offset = stdinOffset;
+        count = Math.min(len, stdinBytes.length - offset);
+        stdinOffset += count;
+      }
+      if (count === 0) break;
+      bytes.set(stdinBytes.subarray(offset, offset + count), ptr);
       totalRead += count;
     }
 
@@ -243,6 +279,10 @@ export function createBrowserWasiShim(options = {}) {
   }
 
   function proc_exit(code) {
+    if (shared) {
+      Atomics.store(shared.control, 4, code);
+      Atomics.store(shared.control, 3, 1);
+    }
     if (logOutput) {
       flushOutput();
     }
@@ -317,10 +357,10 @@ export function createBrowserWasiShim(options = {}) {
     getMemory,
     flushOutput,
     get stdout() {
-      return concatChunks(stdoutChunks);
+      return shared ? shared.stdout.slice(0, Atomics.load(shared.control, 1)) : concatChunks(stdoutChunks);
     },
     get stderr() {
-      return concatChunks(stderrChunks);
+      return shared ? shared.stderr.slice(0, Atomics.load(shared.control, 2)) : concatChunks(stderrChunks);
     },
   };
 }
