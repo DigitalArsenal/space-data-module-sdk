@@ -2063,6 +2063,353 @@ export function createSabHostcallServer(options: {
   dispatch: (operation: string, params: unknown) => Promise<unknown> | unknown;
 }): { handleRequest(request: { operation: string; params?: unknown }): Promise<void> };
 
+// --- FlatSQL partition store host I/O (T9; docs/isomorphic-pthreads.md) ---
+export const DEFAULT_FLATSQL_IO_CHUNK_BYTES: number;
+export const DEFAULT_FLATSQL_IO_SPIN_MICROS: number;
+export const DEFAULT_SAB_IO_CLIENT_SPIN_MICROS: number;
+export const DEFAULT_SAB_IO_DATA_BYTES: number;
+export const DEFAULT_SAB_IO_MAX_INSTANCES: number;
+export const DEFAULT_SAB_IO_SLOTS: number;
+export const FLATSQL_IO_CREATE: number;
+export const FLATSQL_IO_CREATE_PARENTS: number;
+export const FLATSQL_IO_DELETE_ON_CLOSE: number;
+export const FLATSQL_IO_ERR_ACCESS: number;
+export const FLATSQL_IO_ERR_BADHANDLE: number;
+export const FLATSQL_IO_ERR_BUSY: number;
+export const FLATSQL_IO_ERR_GENERIC: number;
+export const FLATSQL_IO_ERR_IO: number;
+export const FLATSQL_IO_ERR_NOENT: number;
+export const FLATSQL_IO_ERR_NOSPACE: number;
+export const FLATSQL_IO_EXCL: number;
+export const FLATSQL_IO_MAX_PATH_BYTES: number;
+export const FLATSQL_IO_OK: number;
+export const FLATSQL_IO_OPEN_DEFERRED: number;
+export const FLATSQL_IO_PROBE: number;
+export const FLATSQL_IO_READ: number;
+export const FLATSQL_IO_SERVER_CREATE_FLAGS: number;
+export const FLATSQL_IO_TRUNC: number;
+export const FLATSQL_IO_UNLINK: number;
+export const FLATSQL_IO_UNLINK_IF_UNUSED: number;
+export const FLATSQL_IO_WRITE: number;
+export const NODE_SYNC_FS_ANONYMOUS_INSTANCE: number;
+export const SAB_IO_DATA_MEMORY: number;
+export const SAB_IO_DATA_SLOT: number;
+export const SAB_IO_DOORBELL_ATOMICS: number;
+export const SAB_IO_DOORBELL_MESSAGE: number;
+export const SAB_IO_H_CHANNEL_ID: number;
+export const SAB_IO_H_CLAIM_HINT: number;
+export const SAB_IO_H_DATA_BYTES: number;
+export const SAB_IO_H_DOORBELL: number;
+export const SAB_IO_H_DOORBELL_MODE: number;
+export const SAB_IO_H_MAGIC: number;
+export const SAB_IO_H_MAX_INSTANCES: number;
+export const SAB_IO_H_SERVED: number;
+export const SAB_IO_H_SERVER_EPOCH: number;
+export const SAB_IO_H_SERVER_STATE: number;
+export const SAB_IO_H_SLOT_BYTES: number;
+export const SAB_IO_H_SLOT_COUNT: number;
+export const SAB_IO_H_SLOT_RELEASES: number;
+export const SAB_IO_H_VERSION: number;
+export const SAB_IO_INSTANCE_ATTACHED: number;
+export const SAB_IO_INSTANCE_NONE: number;
+export const SAB_IO_INSTANCE_REVOKED: number;
+export const SAB_IO_INSTANCE_REVOKING: number;
+export const SAB_IO_MAGIC: number;
+export const SAB_IO_NOTIFY_ATOMICS: number;
+export const SAB_IO_NOTIFY_MESSAGE: number;
+export const SAB_IO_OP_CLOSE: number;
+export const SAB_IO_OP_OPEN: number;
+export const SAB_IO_OP_READ: number;
+export const SAB_IO_OP_SIZE: number;
+export const SAB_IO_OP_SYNC: number;
+export const SAB_IO_OP_TRUNCATE: number;
+export const SAB_IO_OP_WRITE: number;
+export const SAB_IO_SCRATCH_INSTANCE: number;
+export const SAB_IO_SERVER_DEAD: number;
+export const SAB_IO_SERVER_NOT_STARTED: number;
+export const SAB_IO_SERVER_RUNNING: number;
+export const SAB_IO_SERVER_STOPPED: number;
+export const SAB_IO_SLOT_DONE: number;
+export const SAB_IO_SLOT_FREE: number;
+export const SAB_IO_SLOT_IDLE: number;
+export const SAB_IO_SLOT_PENDING: number;
+export const SAB_IO_SLOT_SERVICING: number;
+export const SAB_IO_STATUS_DEAD: number;
+export const SAB_IO_STATUS_REVOKED: number;
+export const SAB_IO_S_DATA_MODE: number;
+export const SAB_IO_S_DONE_SEQ: number;
+export const SAB_IO_S_F64_OFFSET: number;
+export const SAB_IO_S_F64_RESULT: number;
+export const SAB_IO_S_FLAGS: number;
+export const SAB_IO_S_HANDLE: number;
+export const SAB_IO_S_INSTANCE: number;
+export const SAB_IO_S_LEN: number;
+export const SAB_IO_S_NOTIFY: number;
+export const SAB_IO_S_OP: number;
+export const SAB_IO_S_OWNER: number;
+export const SAB_IO_S_PATH_LEN: number;
+export const SAB_IO_S_PTR: number;
+export const SAB_IO_S_SEQ: number;
+export const SAB_IO_S_STATE: number;
+export const SAB_IO_S_STATUS: number;
+export const SAB_IO_VERSION: number;
+export const SAB_IO_WAIT_SLICE_MS: number;
+export const FLATSQL_IO_IMPORT_MODULE: string;
+export const FLATSQL_IO_PROVIDER_DESCRIPTOR: string;
+export const FLATSQL_IO_WORKER_FILENAME: string;
+export const NODE_SYNC_FS_PROVIDER_DESCRIPTOR: string;
+export const OPFS_SHARED_HANDLE_MODE: string;
+export const FLATSQL_IO_FLAGS: Readonly<Record<string, number>>;
+export const FLATSQL_IO_STATUS: Readonly<Record<string, number>>;
+export const FLATSQL_IO_IMPORT_NAMES: readonly string[];
+export const FLATSQL_IO_TRACE_OPS: Readonly<Record<string, number>>;
+
+/** Synchronous provider behind the seven env.flatsql_io_* imports. */
+export interface FlatsqlIoProvider {
+  open(path: Uint8Array | string, flags: number): number;
+  read(handle: number, ptr: number, len: number, offset: number): number;
+  write(handle: number, ptr: number, len: number, offset: number): number;
+  truncate(handle: number, size: number): number;
+  sync(handle: number): number;
+  size(handle: number): number;
+  close(handle: number): number;
+}
+export interface FlatsqlIoSyncClient extends FlatsqlIoProvider {
+  readonly instanceId: number;
+  readonly requests: number;
+  readInto(handle: number, view: Uint8Array, offset: number): number;
+  writeFrom(handle: number, view: Uint8Array, offset: number): number;
+  release(): void;
+}
+export interface FlatsqlIoAsyncClient {
+  readonly instanceId: number;
+  open(path: Uint8Array | string, flags: number): Promise<number>;
+  read(handle: number, length: number, offset: number): Promise<Uint8Array | number>;
+  write(handle: number, bytes: Uint8Array, offset: number): Promise<number>;
+  truncate(handle: number, size: number): Promise<number>;
+  sync(handle: number): Promise<number>;
+  size(handle: number): Promise<number>;
+  close(handle: number): Promise<number>;
+  close$(): void;
+}
+export interface FlatsqlIoBackendFile {
+  read(view: Uint8Array, options?: { at?: number }): number;
+  write(view: Uint8Array, options?: { at?: number }): number;
+  truncate(size: number): void;
+  flush(): void;
+  getSize(): number;
+  close(): void;
+}
+export interface FlatsqlIoBackend {
+  kind: string;
+  init?(): Promise<Record<string, unknown>>;
+  openFile(path: string, components: string[], flags: number): FlatsqlIoBackendFile | Promise<FlatsqlIoBackendFile>;
+  exists(path: string, components: string[]): boolean | Promise<boolean>;
+  remove(path: string, components: string[]): void | Promise<void>;
+}
+export interface FlatsqlIoMirrorOptions {
+  buffer: SharedArrayBuffer;
+  suffixes?: string[];
+  write?: boolean;
+}
+export type FlatsqlIoExtraImport =
+  | { provider: "flatsql-io"; instanceId?: number; channels: SharedArrayBuffer[]; mirror?: FlatsqlIoMirrorOptions; trace?: { buffer: SharedArrayBuffer } }
+  | { provider: "flatsql-io-node"; root: string; table: SharedArrayBuffer; instanceId?: number; mirror?: FlatsqlIoMirrorOptions; trace?: { buffer: SharedArrayBuffer } }
+  | { moduleUrl: string; exportName?: string; config?: unknown };
+
+export class FlatsqlIoStatusError extends Error {
+  constructor(status: number, message?: string);
+  status: number;
+}
+export function flatsqlIoStatusForError(error: unknown, options?: { during?: "open" }): number;
+export function flatsqlIoStatusOf(error: unknown, options?: { during?: "open" }): number;
+export function splitFlatsqlIoPath(path: string): string[] | number;
+export function decodeFlatsqlIoPath(bytes: Uint8Array): string | number;
+export function hashFlatsqlIoPath(bytes: Uint8Array): number;
+
+export function createSabIoChannelBuffer(options?: { slots?: number; dataBytes?: number; maxInstances?: number }): SharedArrayBuffer;
+export function describeSabIoChannel(buffer: SharedArrayBuffer): Record<string, unknown>;
+export function sabIoDoorbellChannelName(channelId: number): string;
+export function sabIoCompletionChannelName(channelId: number): string;
+export function createSabIoClient(options: { buffer: SharedArrayBuffer; instanceId?: number; getMemory?: () => WebAssembly.Memory | null; spinMicros?: number }): FlatsqlIoSyncClient;
+export function createSabIoAsyncClient(options: { buffer: SharedArrayBuffer; instanceId?: number; forceMessages?: boolean }): FlatsqlIoAsyncClient;
+export function sabIoInstanceState(buffer: SharedArrayBuffer, instanceId: number): number;
+export function revokeSabIoInstance(buffer: SharedArrayBuffer, instanceId: number, options?: { pollMs?: number }): Promise<void>;
+export function resetSabIoInstance(buffer: SharedArrayBuffer, instanceId: number): void;
+export function failPendingSabIoRequests(buffer: SharedArrayBuffer, status?: number): number;
+export function reclaimSabIoSlots(buffer: SharedArrayBuffer, instanceId: number): number;
+export function completeSabIoSlot(layout: unknown, slot: unknown, status: number, f64Result?: number): void;
+
+export function createSabIoMirrorBuffer(options?: { entries?: number; entryBytes?: number; maxPathBytes?: number }): SharedArrayBuffer;
+export function sabIoMirrorEntryBytes(buffer: SharedArrayBuffer): number;
+export function findSabIoMirrorEntry(buffer: SharedArrayBuffer, path: string | Uint8Array): number;
+export function updateSabIoMirror(buffer: SharedArrayBuffer, path: string | Uint8Array, offset: number, bytes: Uint8Array, options?: { truncateTo?: number }): boolean;
+export function clearSabIoMirror(buffer: SharedArrayBuffer, path: string | Uint8Array): void;
+export function readSabIoMirror(buffer: SharedArrayBuffer, path: string | Uint8Array, dst: Uint8Array, offset: number): number;
+export function readSabIoMirrorEntry(buffer: SharedArrayBuffer, index: number, dst: Uint8Array, offset: number): number;
+export function createSabIoMirrorMatcher(suffixes?: string[]): (path: string) => boolean;
+
+export function createFlatsqlIoImports(options: {
+  getMemory: () => WebAssembly.Memory;
+  provider: FlatsqlIoProvider | FlatsqlIoProvider[];
+  mirror?: FlatsqlIoMirrorOptions;
+  trace?: { buffer: SharedArrayBuffer };
+}): { env: Record<string, (...args: number[]) => number> };
+export function resolveFlatsqlIoDescriptor(descriptor: FlatsqlIoExtraImport, ctx: { getMemory: () => WebAssembly.Memory }): { imports: WebAssembly.Imports; close(): void };
+export function resolveExtraImports(extraImports: Array<FlatsqlIoExtraImport | ((ctx: unknown) => unknown)>, ctx: { memory: WebAssembly.Memory; getMemory: () => WebAssembly.Memory; tid?: number | null; workerIndex?: number | null }): { fragments: WebAssembly.Imports[]; close(): void };
+export function mergeImportFragments(imports: WebAssembly.Imports, fragments: WebAssembly.Imports[]): WebAssembly.Imports;
+export function createFlatsqlIoTraceBuffer(capacity?: number): SharedArrayBuffer;
+export function readFlatsqlIoTrace(buffer: SharedArrayBuffer): { recorded: number; capacity: number; samples: Array<{ op: number; micros: number }> };
+
+export interface FlatsqlIoServer {
+  readonly doorbellMode: number;
+  readonly stats: Record<string, number | boolean>;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  attachMemory(instanceId: number, memory: WebAssembly.Memory | SharedArrayBuffer): boolean;
+  detachMemory(instanceId: number): void;
+  preopen(paths: string[], flags?: number): Promise<number[]>;
+  releasePreopen(paths: string[]): void;
+  inventory(): { files: Array<{ path: string; refs: number; pins: number; opening: boolean; openStatus: number }>; handles: number };
+}
+export function createFlatsqlIoServer(options: {
+  buffer: SharedArrayBuffer;
+  backend: FlatsqlIoBackend;
+  chunkBytes?: number;
+  doorbell?: "auto" | "atomics" | "message";
+  mirror?: { buffer: SharedArrayBuffer; match(path: string): boolean; write?: boolean };
+  spinMicros?: number;
+  onEvent?: (event: Record<string, unknown>) => void;
+}): FlatsqlIoServer;
+export function createFlatsqlIoMemoryBackend(options?: { maxBytes?: number }): FlatsqlIoBackend & {
+  reset(): void;
+  usage(): { files: number; allocatedBytes: number };
+  list(): string[];
+};
+export function createOpfsIoBackend(options?: {
+  rootDirectory?: string;
+  handleMode?: "auto" | "shared" | "exclusive";
+  openDelayMs?: (path: string) => number;
+  root?: unknown;
+  busyRetry?: { attempts: number; baseMs?: number };
+}): FlatsqlIoBackend & { readonly sharedModes: boolean; readonly sharedViews: boolean | null; clear(): Promise<void> };
+export function probeOpfsSharedHandleModes(root: unknown, name?: string): Promise<{ supported: boolean; detail: string }>;
+export function probeOpfsSharedViews(root: unknown, name?: string): Promise<boolean>;
+
+export class FlatsqlIoWorkerStartError extends Error {
+  lockUnavailable?: boolean;
+}
+export interface FlatsqlIoWorkerController {
+  readonly buffer: SharedArrayBuffer;
+  readonly info: Record<string, unknown> | null;
+  readonly dead: boolean;
+  readonly restarts: number;
+  readonly worker: unknown;
+  attachMemory(instanceId: number, memory: WebAssembly.Memory | SharedArrayBuffer): Promise<boolean>;
+  detachMemory(instanceId: number): void;
+  revoke(instanceId: number): Promise<void>;
+  preopen(paths: string[], flags?: number): Promise<number[]>;
+  releasePreopen(paths: string[]): void;
+  stats(): Promise<Record<string, unknown>>;
+  reset(): Promise<void>;
+  clear(): Promise<unknown>;
+  stop(): Promise<void>;
+  kill(): void;
+}
+export function createFlatsqlIoWorker(options?: {
+  buffer?: SharedArrayBuffer;
+  channel?: { slots?: number; dataBytes?: number; maxInstances?: number };
+  backend?: "opfs" | "memory";
+  role?: "writer" | "reader";
+  chunkBytes?: number;
+  doorbell?: "auto" | "atomics" | "message";
+  mirror?: FlatsqlIoMirrorOptions;
+  rootDirectory?: string;
+  handleMode?: "auto" | "shared" | "exclusive";
+  memoryMaxBytes?: number;
+  openDelay?: { pattern: string; ms: number } | null;
+  lock?: { name: string; ifAvailable?: boolean } | null;
+  busyRetry?: { attempts: number; baseMs?: number } | null;
+  workerUrl?: string | URL;
+  workerType?: "module" | "classic";
+  onError?: (error: unknown, info: { restarted: boolean; failedRequests: number }) => void;
+  restart?: boolean;
+}): Promise<FlatsqlIoWorkerController>;
+
+export const FLATSQL_IO_CONFORMANCE_CASES: ReadonlyArray<{ name: string; run(io: unknown, dir: string): Promise<void> }>;
+export function runFlatsqlIoConformance(io: unknown, options?: { prefix?: string; skip?: string[] }): Promise<{ passed: string[]; failed: Array<{ name: string; error: string }>; skipped: string[] }>;
+export function conformanceAdapterForAsyncClient(client: FlatsqlIoAsyncClient): unknown;
+
+export function probeWorkerCapabilities(): Promise<Record<string, unknown>>;
+export function workerCapabilityProbeSource(): string;
+export function probeBrowserCapabilities(options?: { timeoutMs?: number }): Promise<{
+  page: Record<string, unknown>;
+  worker: Record<string, unknown> | null;
+  localStore: { supported: boolean; missing: string[]; doorbell: "atomics" | "message"; transfer: "direct" | "scratch" };
+}>;
+export function flatsqlLocalStoreGate(matrix: { page: Record<string, unknown>; worker: Record<string, unknown> | null }): {
+  supported: boolean;
+  missing: string[];
+  doorbell: "atomics" | "message";
+  transfer: "direct" | "scratch";
+};
+
+export function createNodeSyncFsIoTable(options?: { maxHandles?: number; maxPathBytes?: number; maxInstances?: number }): SharedArrayBuffer;
+export function createNodeSyncFsIo(options: {
+  root: string;
+  table: SharedArrayBuffer;
+  instanceId?: number;
+  getMemory?: () => WebAssembly.Memory | null;
+  interpose?: (op: string, fn: (...args: unknown[]) => unknown, args: unknown[]) => unknown;
+}): FlatsqlIoProvider & {
+  readInto(handle: number, view: Uint8Array, offset: number): number;
+  writeFrom(handle: number, view: Uint8Array, offset: number): number;
+  closeLocalFds(): void;
+  liveHandles(): number;
+  localFdCount(): number;
+};
+export function revokeNodeSyncFsIoInstance(table: SharedArrayBuffer, instanceId: number): void;
+export function resetNodeSyncFsIoInstance(table: SharedArrayBuffer, instanceId: number): void;
+export function resolveNodeFlatsqlIoDescriptors(entries: unknown[]): unknown[];
+
+export interface WasiThreadSpawnReport {
+  poolSize: number | null;
+  armed: number;
+  failedToArm: number;
+  spawned: number;
+  declined: number;
+  declinedByReason: Record<string, number>;
+  lastDeclineReason: string | null;
+  active: number;
+  idle?: number;
+}
+export function isWasiThreadsModule(wasmModule: WebAssembly.Module): boolean;
+export function createWasiThreadSpawn(options: {
+  wasmModule: WebAssembly.Module;
+  memory: WebAssembly.Memory;
+  requestedThreads?: number;
+  poolSize?: number;
+  extraImports?: FlatsqlIoExtraImport[];
+  instanceId?: number;
+  onGuestError?: (instanceId: number | null, tid: number | null, error: unknown) => void;
+  onSpawnDeclined?: (event: { reason: string; poolSize: number | null; declined: number }) => void;
+  probeTimeoutMs?: number;
+  hostcallChannel?: unknown;
+  processState?: unknown;
+  requiresHostcalls?: boolean;
+  enableBrowserThreads?: boolean;
+  browserWorkerBaseUrl?: string | URL;
+  browserWorkerUrl?: string | URL;
+  browserWorkerType?: "module" | "classic";
+}): Promise<{
+  threadSpawn(startArg: number): number;
+  activeThreadCount(): number;
+  spawnCount(): number;
+  distinctOsThreadCount(): number;
+  spawnReport(): WasiThreadSpawnReport;
+  terminateAll(): Promise<void>;
+}>;
+
 // --- Browser cron/timer driver (WS6.3) ---
 export interface ModuleTimerRunRecord {
   timerId: string;

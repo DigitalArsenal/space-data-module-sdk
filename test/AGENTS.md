@@ -34,6 +34,10 @@ module authors can borrow from.
   real-plugin loading tests at a sibling plugin workspace.
 - `SPACE_DATA_MODULE_SDK_ENABLE_RUNTIME_MATRIX=1` enables the broader runtime
   matrix suite.
+- `SPACE_DATA_MODULE_SDK_ENABLE_BROWSER_IO=1` enables the real-browser FlatSQL
+  I/O suite (`test/opfs-io-worker.browser.test.js`: headless Chromium, Firefox
+  and WebKit through Playwright; `SPACE_DATA_MODULE_SDK_BROWSERS` narrows the
+  set). A browser that cannot launch fails the suite.
 
 ## Note
 

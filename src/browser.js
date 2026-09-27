@@ -41,7 +41,13 @@ export {
   resolveBrowserWorkerUrl,
   DEFAULT_BROWSER_WORKER_URL,
   WasiThreadWorkerUnreachableError,
+  createWasiThreadSpawn,
+  isWasiThreadsModule,
 } from "./host/wasiThreadHost.js";
+// FlatSQL partition store host I/O (T9): the SAB I/O channel, the I/O worker
+// controller, OPFS and memory backends, and the capability probe. The worker
+// bundles for blob: spawning are on the "./host/worker-bundles" subpath.
+export * from "./host/flatsqlIo.js";
 // The runtime-target gate is reachable so a consumer can catch the refusal by
 // CLASS (`error instanceof RuntimeTargetError`) rather than by matching a
 // message string, and can ask the same question the loaders ask before it

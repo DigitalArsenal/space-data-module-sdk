@@ -7,11 +7,20 @@
 // worker). Thread lifecycle/join synchronization happens entirely over shared
 // memory atomics (memory.atomic.wait/notify emitted by the guest) — no
 // messages are needed for correctness.
+//
+// `extraImports` entries arrive through workerData: built-in descriptors such
+// as `{ provider: "flatsql-io" }` (SAB channel) or `{ provider:
+// "flatsql-io-node", root, table }` (synchronous fs over a shared virtual-handle
+// table, nodeSyncFsIo.js, design §5.6), and `{ moduleUrl }` factory modules.
 
 import { writeSync } from "node:fs";
 import { workerData } from "node:worker_threads";
 
-import { createWasiThreadWorkerRuntime } from "./wasiThreadWorkerRuntime.js";
+import {
+  createWasiThreadWorkerRuntime,
+  resolveModuleExtraImports,
+} from "./wasiThreadWorkerRuntime.js";
+import { resolveNodeFlatsqlIoDescriptors } from "./nodeSyncFsIo.js";
 
 const { wasmModule, memory, tid, startArg, hostcallChannel, processState } = workerData;
 
@@ -27,18 +36,25 @@ function reportGuestThreadFault(what, error) {
   }
 }
 
-const runtime = createWasiThreadWorkerRuntime({
-  wasmModule,
-  memory,
-  hostcallChannel,
-  processState,
-});
+let runtime;
 let instance;
 try {
+  const extraImports = resolveNodeFlatsqlIoDescriptors(
+    await resolveModuleExtraImports(workerData.extraImports ?? []),
+  );
+  runtime = createWasiThreadWorkerRuntime({
+    wasmModule,
+    memory,
+    hostcallChannel,
+    processState,
+    extraImports,
+    workerIndex: workerData.workerIndex,
+    tid,
+  });
   instance = runtime.instantiate();
 } catch (error) {
   reportGuestThreadFault("failed to instantiate", error);
-  runtime.close();
+  runtime?.close();
   throw error;
 }
 

@@ -1,22 +1,29 @@
-import { createWasiThreadWorkerRuntime } from "./wasiThreadWorkerRuntime.js";
+import {
+  createWasiThreadWorkerRuntime,
+  resolveModuleExtraImports,
+} from "./wasiThreadWorkerRuntime.js";
 
-let wasmModule = null;
-let memory = null;
-let hostcallChannel = null;
+// One pooled browser worker = one guest OS thread. It is pre-started and
+// probed by createWasiThreadSpawn (wasiThreadHost.js), then runs
+// wasi_thread_start for each {t:"run"} it is dispatched. The same source ships
+// as a self-contained classic bundle spawned from a blob: URL (A39,
+// hostWorkerBundles.js); nothing here depends on the module-worker form except
+// `{ moduleUrl }` extraImports entries, which need a module worker.
+
 let runtime = null;
 
-self.onmessage = (event) => {
+self.onmessage = async (event) => {
   const message = event.data ?? {};
   if (message.t === "probe") {
-    wasmModule = message.wasmModule;
-    memory = message.memory;
-    hostcallChannel = message.hostcallChannel ?? null;
     try {
+      const extraImports = await resolveModuleExtraImports(message.extraImports ?? []);
       runtime = createWasiThreadWorkerRuntime({
-        wasmModule,
-        memory,
-        hostcallChannel,
+        wasmModule: message.wasmModule,
+        memory: message.memory,
+        hostcallChannel: message.hostcallChannel ?? null,
         processState: message.processState,
+        extraImports,
+        workerIndex: message.workerIndex,
       });
       runtime.instantiate();
       self.postMessage({ t: "ready", ok: true });

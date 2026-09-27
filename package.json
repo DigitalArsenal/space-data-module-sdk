@@ -62,6 +62,10 @@
     "./host/runtime-target-gate": "./src/host/runtimeTargetGate.js",
     "./host/node-builtin": "./src/host/nodeBuiltinSpecifier.js",
     "./host/worker-module": "./src/host/workerModuleHarness.js",
+    "./host/wasi-threads": "./src/host/wasiThreadHost.js",
+    "./host/flatsql-io": "./src/host/flatsqlIo.js",
+    "./host/flatsql-io/node": "./src/host/nodeSyncFsIo.js",
+    "./host/worker-bundles": "./src/host/hostWorkerBundles.js",
     "./testing/browser": "./src/testing/browser.js",
     "./testing/module-flatbuffer-stream-pump": {
       "types": "./src/index.d.ts",
@@ -129,7 +133,8 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.0",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "playwright-core": "1.63.0"
   },
   "engines": {
     "node": ">=20.0.0"

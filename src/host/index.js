@@ -13,3 +13,12 @@ export * from "./providerAccessFixtureAdapter.js";
 export * from "./providerAccessEngineAdapter.js";
 export * from "./providerAccessTileStoreAdapter.js";
 export * from "./terrainSourceSeam.js";
+// FlatSQL partition store host I/O (T9): SAB I/O channel, I/O workers, OPFS
+// and memory backends, the Node sync-fs provider, and the wasi-threads host
+// with an explicit pool size.
+export * from "./flatsqlIo.js";
+export * from "./nodeSyncFsIo.js";
+export {
+  createWasiThreadSpawn,
+  isWasiThreadsModule,
+} from "./wasiThreadHost.js";
