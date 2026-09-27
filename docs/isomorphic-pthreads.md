@@ -183,6 +183,12 @@ artifacts; artifacts without `wasi.thread-spawn` keep the ordinary CLI path.
 The Docker runner image includes a source digest in its tag to avoid stale
 runner reuse.
 
+Direct-only threaded reactors have no `_start`. For those artifacts the runner
+calls `_initialize`, stages the raw request through `plugin_alloc`, and invokes
+`plugin_invoke_stream`. The parity harness selects the browser direct surface
+automatically as well. This is one request per process; the legacy resident
+runner's framing protocol remains separate.
+
 The browser command harness runs `_start` exactly once per request, after
 installing stdin. Pthreads share one process input cursor and output buffers,
 as well as argv and environment. Each command owns and terminates its workers.

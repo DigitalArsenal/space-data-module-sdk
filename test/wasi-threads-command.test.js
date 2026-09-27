@@ -59,16 +59,20 @@ const request = encodePluginInvokeRequest({
   methodId: "echo", inputs: [{ portId: "request", typeRef: identity, payload }],
 });
 
+function fixtureManifest(invokeSurfaces) {
+  return {
+    pluginId: "com.digitalarsenal.test.threaded-command", name: "Threaded command",
+    version: "0.1.0", pluginFamily: "analysis",
+    runtimeTargets: ["browser", "wasmedge"], invokeSurfaces,
+    methods: [{ methodId: "echo", displayName: "Echo", inputPorts: [port("request")],
+      outputPorts: [port("response")], maxBatch: 1, drainPolicy: "single-shot" }],
+  };
+}
+
 test("SDK pthread command delivers real stdin once, joins workers, and matches native WasmEdge", async (t) => {
   const compilation = await compileModuleFromSource({
     language: "c", sourceCode: source, threadModel: "emscripten-pthreads",
-    manifest: {
-      pluginId: "com.digitalarsenal.test.threaded-command", name: "Threaded command",
-      version: "0.1.0", pluginFamily: "analysis",
-      runtimeTargets: ["browser", "wasmedge"], invokeSurfaces: ["direct", "command"],
-      methods: [{ methodId: "echo", displayName: "Echo", inputPorts: [port("request")],
-        outputPorts: [port("response")], maxBatch: 1, drainPolicy: "single-shot" }],
-    },
+    manifest: fixtureManifest(["direct", "command"]),
   });
   t.after(() => cleanupCompilation(compilation));
   assert.equal(compilation.threadFeatures.hasWasiThreadSpawnImport, true);
@@ -157,6 +161,41 @@ test("SDK pthread command delivers real stdin once, joins workers, and matches n
       await writeFile(path.join(process.env.SDM_THREAD_TEST_ARTIFACT_DIR, "parity.json"), await readFile(fixturePath));
       await writeFile(path.join(process.env.SDM_THREAD_TEST_ARTIFACT_DIR, "command-report.json"), JSON.stringify(report, null, 2));
       await writeFile(path.join(process.env.SDM_THREAD_TEST_ARTIFACT_DIR, "direct-report.json"), JSON.stringify(directReport, null, 2));
+    }
+  }
+});
+
+test("pthread reactors without _start auto-select the direct surface in every lane", async (t) => {
+  const compilation = await compileModuleFromSource({
+    language: "c", sourceCode: source, threadModel: "emscripten-pthreads",
+    manifest: fixtureManifest(["direct"]),
+  });
+  t.after(() => cleanupCompilation(compilation));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "sdm-thread-reactor-test-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const wasmPath = path.join(dir, "module.wasm");
+  await writeFile(wasmPath, compilation.wasmBytes);
+  const browser = await createBrowserModuleHarness({ wasmSource: compilation.wasmBytes, env: { SDM_PARITY_THREADS: "2" } });
+  t.after(() => browser.destroy());
+  assert.equal(browser.instance.exports._start, undefined);
+  const expected = await browser.invokeRaw(request);
+  assert.deepEqual(decodePluginInvokeResponse(expected).outputs[0].payload, payload);
+  if (process.env.SPACE_DATA_MODULE_SDK_ENABLE_WASMEDGE_PARITY === "1") {
+    const native = await createStandaloneHarness("wasmedge", wasmPath, { env: { SDM_PARITY_THREADS: "2" } });
+    t.after(() => native.destroy());
+    assert.equal(native.runtime.surface, "direct");
+    assert.deepEqual(await native.invokeRaw(request), expected);
+  }
+  if (process.env.SPACE_DATA_MODULE_SDK_ENABLE_TRI_RUNTIME_PARITY === "1") {
+    const report = await runParityHarness({ wasmPath, timeoutMs: 60000, plan: {
+      name: "threaded-reactor", threadEnvVar: "SDM_PARITY_THREADS", cases: [{
+        id: "echo", stdinBytes: request, args: [], env: {}, threadCounts: [1, 2, 4], expect: "ok",
+      }],
+    } });
+    assert.equal(report.ok, true, formatParityReport(report));
+    for (const run of report.runs) {
+      assert.equal(run.stdoutSha256, createHash("sha256").update(expected).digest("hex"));
+      assert.equal(run.spawnCount, run.threadCount);
     }
   }
 });

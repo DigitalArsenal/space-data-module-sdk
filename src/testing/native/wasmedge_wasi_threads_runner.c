@@ -150,6 +150,63 @@ static WasmEdge_ModuleInstanceContext *memory_import(Threads *g) {
   return env;
 }
 
+// Reactor artifacts use the same PIV request/response bytes as commands. Stage
+// the request through the public allocator, then monitor the direct call with
+// the same worker-group lifecycle as _start. No guest ABI is reimplemented.
+static uint32_t stage_direct_request(Threads *g,
+    WasmEdge_ModuleInstanceContext *instance,
+    WasmEdge_MemoryInstanceContext *memory, WasmEdge_Value args[3]) {
+  size_t size = 0, capacity = 4096;
+  uint8_t *input = malloc(capacity);
+  if (!input) exit(1);
+  for (;;) {
+    size += fread(input + size, 1, capacity - size, stdin);
+    if (ferror(stdin)) { fprintf(stderr, "failed to read stdin\n"); exit(1); }
+    if (feof(stdin)) break;
+    if (capacity >= (1U << 30)) { fprintf(stderr, "request exceeds 1 GiB\n"); exit(1); }
+    capacity *= 2;
+    uint8_t *grown = realloc(input, capacity);
+    if (!grown) exit(1);
+    input = grown;
+  }
+  const WasmEdge_FunctionInstanceContext *init =
+      WasmEdge_ModuleInstanceFindFunction(instance, name("_initialize"));
+  if (init) require_result("initialize", WasmEdge_ExecutorInvoke(g->executor, init, NULL, 0, NULL, 0));
+  const WasmEdge_FunctionInstanceContext *alloc =
+      WasmEdge_ModuleInstanceFindFunction(instance, name("plugin_alloc"));
+  if (!alloc || !memory) { fprintf(stderr, "direct module requires plugin_alloc and memory\n"); exit(1); }
+  uint32_t padded = ((uint32_t)size + 7U) & ~7U;
+  WasmEdge_Value allocation_size = WasmEdge_ValueGenI32((int32_t)(padded + 4));
+  WasmEdge_Value pointer;
+  require_result("allocate", WasmEdge_ExecutorInvoke(g->executor, alloc, &allocation_size, 1, &pointer, 1));
+  uint32_t ptr = (uint32_t)WasmEdge_ValueGetI32(pointer);
+  if (!ptr || ptr % 8) { fprintf(stderr, "invalid direct allocation\n"); exit(1); }
+  uint32_t length_ptr = ptr + padded;
+  const uint8_t zero[4] = {0};
+  require_result("copy request", WasmEdge_MemoryInstanceSetData(memory, input, ptr, (uint32_t)size));
+  require_result("clear response length", WasmEdge_MemoryInstanceSetData(memory, zero, length_ptr, 4));
+  free(input);
+  args[0] = pointer;
+  args[1] = WasmEdge_ValueGenI32((int32_t)size);
+  args[2] = WasmEdge_ValueGenI32((int32_t)length_ptr);
+  return length_ptr;
+}
+
+static bool write_direct_response(WasmEdge_MemoryInstanceContext *memory,
+    uint32_t ptr, uint32_t length_ptr) {
+  uint8_t bytes[4];
+  require_result("read response length", WasmEdge_MemoryInstanceGetData(memory, bytes, length_ptr, 4));
+  uint32_t length = (uint32_t)bytes[0] | (uint32_t)bytes[1] << 8 |
+      (uint32_t)bytes[2] << 16 | (uint32_t)bytes[3] << 24;
+  if (!ptr || ptr % 8 || !length) {
+    fprintf(stderr, "invalid direct response\n");
+    return false;
+  }
+  const uint8_t *data = WasmEdge_MemoryInstanceGetPointerConst(memory, ptr, length);
+  if (!data) { fprintf(stderr, "direct response is out of bounds\n"); return false; }
+  return fwrite(data, 1, length, stdout) == length;
+}
+
 int main(int argc, char **argv) {
   if (strcmp(WasmEdge_VersionGet(), "0.16.4") != 0) {
     fprintf(stderr, "WASI threads runner requires WasmEdge 0.16.4; linked %s\n", WasmEdge_VersionGet());
@@ -214,8 +271,19 @@ int main(int argc, char **argv) {
       g.executor, &instance, g.store, g.ast));
   const WasmEdge_FunctionInstanceContext *start =
       WasmEdge_ModuleInstanceFindFunction(instance, name("_start"));
-  if (!start) { fprintf(stderr, "command module has no _start\n"); return 1; }
-  WasmEdge_Async *main_call = WasmEdge_ExecutorAsyncInvoke(g.executor, start, NULL, 0);
+  bool direct = start == NULL;
+  WasmEdge_Value direct_args[3], response_pointer;
+  uint32_t response_length_ptr = 0;
+  WasmEdge_MemoryInstanceContext *memory = env
+      ? WasmEdge_ModuleInstanceFindMemory(env, name("memory"))
+      : WasmEdge_ModuleInstanceFindMemory(instance, name("memory"));
+  if (direct) {
+    start = WasmEdge_ModuleInstanceFindFunction(instance, name("plugin_invoke_stream"));
+    if (!start) { fprintf(stderr, "module has neither _start nor plugin_invoke_stream\n"); return 1; }
+    response_length_ptr = stage_direct_request(&g, instance, memory, direct_args);
+  }
+  WasmEdge_Async *main_call = WasmEdge_ExecutorAsyncInvoke(g.executor, start,
+      direct ? direct_args : NULL, direct ? 3 : 0);
   if (!main_call) return 1;
   for (;;) {
     bool finished = WasmEdge_AsyncWaitFor(main_call, 1);
@@ -241,7 +309,8 @@ int main(int argc, char **argv) {
     fflush(NULL);
     _Exit(1);
   }
-  WasmEdge_Result result = WasmEdge_AsyncGet(main_call, NULL, 0);
+  WasmEdge_Result result = WasmEdge_AsyncGet(main_call,
+      direct ? &response_pointer : NULL, direct ? 1 : 0);
   bool failed = g.failed || (!WasmEdge_ResultOK(result) && !g.exited);
   if (failed) fprintf(stderr, "wasm trap: command: %s\n", WasmEdge_ResultGetMessage(result));
   for (size_t i = 0; i < MAX_WORKERS; ++i) {
@@ -256,6 +325,9 @@ int main(int argc, char **argv) {
     WasmEdge_ModuleInstanceDelete(w->instance);
   }
   if (stats) fprintf(stderr, "sdm-wasi-threads: spawned=%d\n", g.next_tid - 1);
+  if (direct && !failed && !g.exited) {
+    failed = !write_direct_response(memory, (uint32_t)WasmEdge_ValueGetI32(response_pointer), response_length_ptr);
+  }
   int exit_code = failed ? 1 : (int)WasmEdge_ModuleInstanceWASIGetExitCode(wasi);
   WasmEdge_AsyncDelete(main_call);
   WasmEdge_ModuleInstanceDelete(instance);

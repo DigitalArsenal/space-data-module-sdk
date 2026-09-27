@@ -65,12 +65,18 @@ async function createWasmEdgeCommandHarness(options = {}) {
   const loadableBytes = toLoadableWasmBytes(wasmBytes);
   const inspection = await inspectModule(loadableBytes);
 
-  if (!inspection.exports.includes(DefaultInvokeExports.commandSymbol)) {
+  const threaded = inspection.imports.some((entry) =>
+    entry.module === "wasi" && entry.name === "thread-spawn");
+  const surface = inspection.exports.includes(DefaultInvokeExports.commandSymbol) ? "command" : "direct";
+  if (surface === "direct" && (!threaded || !inspection.exports.includes(DefaultInvokeExports.invokeSymbol))) {
     throw new Error(
       "Standalone WasmEdge loading requires a command-surface artifact with the _start export.",
     );
   }
 
+  const command = threaded
+    ? await (await import("../testing/buildWasmEdgeRunner.js")).resolveWasmEdgeWasiThreadsRunner(options)
+    : options.wasmEdgeRunnerBinary ?? options.wasmEdgeBinary ?? "wasmedge";
   let launchWasmPath = wasmPath;
   let tempArtifactDir = null;
   if (loadableBytes.byteLength !== wasmBytes.byteLength) {
@@ -84,11 +90,6 @@ async function createWasmEdgeCommandHarness(options = {}) {
     await writeFile(launchWasmPath, loadableBytes);
   }
 
-  const threaded = inspection.imports.some((entry) =>
-    entry.module === "wasi" && entry.name === "thread-spawn");
-  const command = threaded
-    ? await (await import("../testing/buildWasmEdgeRunner.js")).resolveWasmEdgeWasiThreadsRunner(options)
-    : options.wasmEdgeRunnerBinary ?? options.wasmEdgeBinary ?? "wasmedge";
   const args = [
     ...(options.enableThreads === false ? [] : ["--enable-threads"]),
     ...Object.entries(options.env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
@@ -161,7 +162,7 @@ async function createWasmEdgeCommandHarness(options = {}) {
     runtime: {
       kind: "wasmedge",
       profile: inspection.profile,
-      surface: "command",
+      surface,
     },
     launchPlan,
     invokeRaw,
@@ -268,11 +269,11 @@ export async function loadModule(options = {}) {
     });
     if (needsCompiledModule) {
       const inspection = await inspectModule(wasmModule);
+      const threaded = inspection.imports.some((entry) => entry.module === "wasi" && entry.name === "thread-spawn");
       if (
         (inspection.profile === "standalone" || inspection.profile === "module-host-abi") &&
-        inspection.exports.includes("_start") &&
-        (!options.wasmEdgeRunnerBinary || options.surface === "command" ||
-          inspection.imports.some((entry) => entry.module === "wasi" && entry.name === "thread-spawn"))
+        (inspection.exports.includes("_start") || (threaded && inspection.exports.includes("plugin_invoke_stream"))) &&
+        (!options.wasmEdgeRunnerBinary || options.surface === "command" || threaded)
       ) {
         return attachHostDispatch(
           await createWasmEdgeCommandHarness(options),

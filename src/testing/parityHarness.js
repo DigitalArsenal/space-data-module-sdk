@@ -554,7 +554,8 @@ export async function runParityHarness(options = {}) {
     chromeBinary: options.chromeBinary,
     wasmedgeBinary: options.wasmedgeBinary,
     wasmEdgeRunnerBinary: options.wasmEdgeRunnerBinary,
-    browserSurface: options.browserSurface ?? "command",
+    browserSurface: options.browserSurface ??
+      (WebAssembly.Module.exports(await WebAssembly.compile(loadableBytes)).some((entry) => entry.name === "_start") ? "command" : "direct"),
     dockerBinary: options.dockerBinary,
     dockerPlatform: options.dockerPlatform,
     autoBuildDockerImage: options.autoBuildDockerImage !== false,

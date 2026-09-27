@@ -211,6 +211,7 @@ test("loadModule can drive standalone artifacts through the WasmEdge server path
     }),
     sourceCode: createEchoSource(),
     language: "c",
+    threadModel: ModuleThreadModel.SINGLE_THREAD,
   });
   t.after(async () => {
     await cleanupCompilation(compilation);
@@ -240,6 +241,7 @@ test("loadModule can drive standalone artifacts through the WasmEdge server path
       {
         portId: "request",
         payload: new TextEncoder().encode("wasmedge-server-path"),
+        typeRef: TEST_FRAME_IDENTITY,
       },
     ],
   });
