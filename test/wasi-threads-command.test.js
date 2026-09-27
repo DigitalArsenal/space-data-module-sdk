@@ -80,7 +80,7 @@ test("SDK pthread command delivers real stdin once, joins workers, and matches n
   assert.deepEqual(decodePluginInvokeResponse(first).outputs[0].payload, payload);
   assert.deepEqual(await harness.invokeRaw(request), first, "fresh CRT per invocation");
   await assert.rejects(harness.invokeRaw(new Uint8Array()), { name: "WasiExitError", code: 1 });
-  assert.match(new TextDecoder().decode(harness.wasi.stderr), /request bytes are empty/i);
+  assert.match(decodePluginInvokeResponse(harness.wasi.stdout).errorMessage, /request bytes are empty/i);
   assert.deepEqual(await harness.invokeRaw(request), first, "failure does not poison next invocation");
   const direct = await createBrowserModuleHarness({ wasmSource: compilation.wasmBytes, surface: "direct" });
   t.after(() => direct.destroy());
