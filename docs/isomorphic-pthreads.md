@@ -256,8 +256,10 @@ V8 (Node 20 to 25) checks bulk memory operations, and every access when the
 WebAssembly trap handler is off (Node on Linux arm64), against a per-instance
 copy of a shared memory's size. That copy is refreshed asynchronously after
 another thread grows the memory, so a thread that writes into memory another
-thread has just grown can trap with "memory access out of bounds". An initial
-memory that covers the call's peak use avoids the growth.
+thread has just grown can trap with "memory access out of bounds", even after
+synchronizing with the growing thread. The guest's allocator uses the heap the
+artifact was linked with and then grows the memory, so a larger imported initial
+memory does not prevent it.
 
 The old source path `src/testing/browserModuleHarness.js` remains a pure
 compatibility re-export. New browser consumers should use the public
