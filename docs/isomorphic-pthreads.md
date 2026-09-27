@@ -333,6 +333,269 @@ and reports it cannot instantiate the module, a probe timeout, a non-isolated
 context, non-shared memory, or a 1-core host all still disable threading and let
 the guest run its proven sequential path (`wasi.thread-spawn` -> `-1`).
 
+## 5. FlatSQL partition store host I/O (SDK 0.8.22)
+
+The FlatSQL partition store (stack design `docs/architecture/flatsql-partition-store.md`,
+§5.5, §5.6, §18 T9, A7, A36, A38, A39) runs one wasi-threads artifact as a
+writer instance and reader instances, each with guest threads that call
+FlatSQL's seven `env.flatsql_io_*` imports. This section is the SDK half: the
+thread pool, the I/O channel and workers, the Node provider, link shim v2, the
+worker bundles and the browser capability probe.
+
+### Explicit pool size, partial spawns, supervision hooks
+
+`createWasiThreadSpawn` options added in 0.8.22:
+
+| Option | Effect |
+| --- | --- |
+| `poolSize` | Browser: pre-start exactly this many workers, independent of `hardwareConcurrency - 1` (pools are sized for isolation: writers + lanes). Node: cap on live guest threads. Arming is partial: workers that fail to start are dropped, the rest serve. |
+| `extraImports` | Per-worker import objects, as structured-cloneable descriptors (below). Factories run once per worker. |
+| `instanceId`, `onGuestError(instanceId, tid, error)` | Called when a guest thread traps or its worker dies (A36). A dead pooled worker leaves the pool. |
+| `onSpawnDeclined({ reason, poolSize, declined })` | Called for every spawn that returns -1. Reasons: `pool-exhausted`, `pool-not-armed`, `threads-unavailable`, `pool-empty`, `worker-create-failed`, `dispatch-failed`, `hostcall-channel-missing`, `terminated`. |
+| `probeTimeoutMs` | Browser warm-pool probe deadline. |
+| `browserWorkerType: "classic"` | Spawn classic workers, for the blob bundles below. |
+
+The returned host adds `spawnReport()`: `{ poolSize, armed, failedToArm, spawned,
+declined, declinedByReason, lastDeclineReason, active, idle }`. The implicit
+(no `poolSize`) path keeps its all-or-nothing arming.
+
+`extraImports` entries (the same descriptors work in the engine worker through
+`resolveExtraImports`):
+
+| Descriptor | Imports |
+| --- | --- |
+| `{ provider: "flatsql-io", instanceId, channels, mirror?, trace? }` | `env.flatsql_io_*` over one SAB I/O channel per I/O worker. Each worker claims its own request slot. |
+| `{ provider: "flatsql-io-node", root, table, instanceId }` | `env.flatsql_io_*` over synchronous `fs` (Node workers). |
+| `{ moduleUrl, exportName?, config? }` | A factory module (module workers and Node only). |
+
+A module that bundles this host into an IIFE or a blob: module worker has no
+usable `import.meta.url`. `DEFAULT_BROWSER_WORKER_URL` is then `null` instead of
+a module-evaluation `TypeError`, and such hosts pass `browserWorkerUrl`.
+
+### Flags and statuses
+
+The partition store adds three open flags and one status. They are flags, so the
+import set stays at seven. flatsql's `flatsql_io.h` (T1) must carry the same
+values.
+
+| Name | Value | Meaning |
+| --- | --- | --- |
+| `FLATSQL_IO_CREATE_PARENTS` | `0x0100` | mkdir -p; sync each new directory's parent, and the parent of a new file. Best effort on OPFS. |
+| `FLATSQL_IO_UNLINK_IF_UNUSED` | `0x0200` | Unlink, or `BUSY` while any handle names the path. |
+| `FLATSQL_IO_OPEN_DEFERRED` | `0x0400` | Return a handle before the open finishes; the first use waits, or fails with the open's status. Synchronous hosts treat it as a plain open. |
+| `FLATSQL_IO_ERR_BUSY` | `-7` | Path in use, or its lock held elsewhere. |
+
+Every SDK host maps `EEXIST` to `GENERIC` (the Go host's mapping), a write on a
+read-only handle and a read on a write-only handle to `IO`, and `..` to
+`ACCESS`. OPFS errors map as NotFound -> `NOENT`, NoModificationAllowed ->
+`BUSY`, QuotaExceeded -> `NOSPACE`; WebKit refuses a second sync handle with
+InvalidStateError (measured), which maps to `BUSY` during an open.
+
+### The SAB I/O channel and the I/O worker
+
+`sabIoChannel.js` extends `sabHostcallChannel.js` to many guest threads and one
+server:
+
+- A request ring of slots in one SharedArrayBuffer. Each request owns a slot
+  until its result is read, so a guest never queues behind another guest's
+  request and a slow open blocks only its caller. Idle threads hold no slot, so
+  terminating a pool leaks none; `reclaimSabIoSlots(buffer, instanceId)` frees
+  the slots of requests that were in flight when an instance's threads died.
+- Doorbell: `Atomics.waitAsync` on a header word. The server publishes the mode;
+  in message mode (`doorbell: "message"`, or no `waitAsync`) clients also post
+  on a BroadcastChannel. Completions for non-blocking callers without
+  `waitAsync` arrive the same way (22.3a-5).
+- No timeout, no throw (A36). Blocking waits run in 250 ms slices forever. A
+  supervisor that sees the I/O worker die calls `failPendingSabIoRequests`,
+  which completes every pending slot with `IO`.
+- Data moves directly between the instance's shared memory and the file when the
+  instance's memory is attached to the I/O worker, else through the slot's data
+  area. Paths are always copied out of shared memory before decoding.
+- Revocation (A36): `revokeSabIoInstance(buffer, id)` resolves after the server
+  has closed the instance's handles; later requests get `ACCESS` and no byte of
+  the instance is written after it resolves.
+
+`opfsIoWorker.mjs` runs `flatsqlIoServer.js` over a backend:
+
+- `opfs`: every open is async (`getDirectoryHandle`, `getFileHandle`,
+  `createSyncAccessHandle`) and awaited on the worker's event loop while the
+  requester waits on its slot. One sync handle per path, shared by all virtual
+  handles. Handles open in `"readwrite-unsafe"` mode where it exists, so a
+  reader I/O worker can read files a writer I/O worker holds (A7). Views over a
+  SharedArrayBuffer go straight to `read`/`write`; a user agent that rejects
+  them gets a private scratch copy.
+- `memory`: the dashboard window store (§5.5). Nothing reaches OPFS;
+  `reset()` drops it; `memoryMaxBytes` is the per-tab budget (`NOSPACE`).
+
+Roles (A7): one writer I/O worker per writer holds the writer's active files;
+reader I/O workers (one, or two when `hardwareConcurrency >= 8`) hold sealed
+files. Reads and writes run in steps of at most 256 KiB with the slots rescanned
+between steps, so a small read never waits for a whole large write. With
+several reader I/O workers, `createFlatsqlIoImports` routes each open by a path
+hash and every later call to the same worker (the worker index rides in handle
+bits 24-30).
+
+`createFlatsqlIoWorker(options)` spawns and supervises one I/O worker:
+`attachMemory`, `revoke`, `preopen(paths)` (A38: open the registry's active
+files in parallel at start; later guest opens of those paths return at once),
+`releasePreopen`, `stats`, `reset`, `clear`, `stop`, and `onError` plus
+`restart: true` (A36: pending requests fail with `IO`, a replacement starts on
+the same channel with the live memories re-attached; handles do not survive).
+
+Store lock (A37): with `lock: { name }` the I/O worker takes that Web Lock
+before it opens any handle and releases it only after `stop()` has closed them,
+so the lock lives exactly as long as the handles. `ifAvailable: true` fails the
+start with `lockUnavailable` instead of waiting; `busyRetry` retries a handle a
+previous leader still holds, with backoff. Measured takeover (holder `stop()` to
+successor ready): 5 ms Chromium, 52 ms Firefox, 5 ms WebKit. Leadership,
+follower proxying and heartbeats are the engine's (sdn-js, T10).
+
+Head mirror (A7): with `mirror: { buffer, suffixes: ["/h.fsh"] }`, the writer
+I/O worker copies every write to a matching path into a seqlock mirror in a
+SharedArrayBuffer (`sabIoMirror.js`), and reader imports configured with the
+same mirror serve reads of those paths from it without a round trip.
+
+### Node synchronous fs (§5.6)
+
+`nodeSyncFsIo.js`: synchronous `fs` in each worker over a shared virtual-handle
+table in a SharedArrayBuffer (`createNodeSyncFsIoTable`). A handle is
+`(slot << 8) | gen`; each worker opens its own fd for a slot on first use and
+drops stale fds when the generation moves. Paths are confined below `root`,
+including through symlinked parents. `sync` is `fdatasync` (libuv issues
+`F_FULLFSYNC` on darwin). `revokeNodeSyncFsIoInstance` follows A23: it sets the
+revoked flag and waits for the instance's in-flight calls to drain. Fault
+injection (§19, 22.3a-7) belongs to FlatSQL's Node host (T4); `interpose` wraps
+every syscall for it.
+
+### Link shim v2
+
+`FLATSQL_LINK_SHIM_V2_WASM` (`src/flow/flatsqlLinkShim.js`) is a deterministic
+module that imports the reader instance's SHARED lane memory as
+`flatsql.memory` and gives a linked flow the lane mailbox as direct calls. v1 is
+unchanged (sha256 `8d83e69b…`), because today's linked flows use it. v2 sha256:
+`67d5b2d9bc2d1b346a14a253a586fd4d08c8056d54eb62701b48000585ed9613`.
+
+| Export | Result |
+| --- | --- |
+| `mb_submit(mailbox, op, req_ptr, req_len)` | `seq`, or -1 when the mailbox holds a request |
+| `mb_poll(mailbox, seq)` | 1 when complete |
+| `mb_wait(mailbox, seq, poll_ns: i64, max_polls)` | the lane's status, or -110 after `max_polls` bounded waits (`max_polls <= 0`: no limit) |
+| `mb_release(mailbox, seq)` | 0, or -1 when not complete |
+| `mb_cancel(mailbox, seq)` | 0; the lane polls the cancel word |
+| `load32_acquire`, `store32_release`, `peek8/32/64`, `poke8/32`, `fnv1a64`, `count_frames` | as in v1, over lane memory |
+
+Mailbox, 64 bytes, 8-aligned, little-endian: `+0 state` (IDLE 0, SUBMITTED 1,
+CLAIMED 2, DONE 3, SUBMITTING 4), `+4 seq`, `+8 done_seq`, `+12 op`,
+`+16 req_ptr`, `+20 req_len`, `+24 status`, `+28 resp_ptr`, `+32 resp_len`,
+`+36 doorbell`, `+40 cancel`, `+44 flags`, `+48 generation (u64)`. A lane waits
+(bounded) on the doorbell, CASes SUBMITTED -> CLAIMED, writes the result,
+stores `done_seq = seq`, stores DONE and notifies the state word.
+
+`mb_wait` never waits unboundedly: each `memory.atomic.wait32` lasts `poll_ns`
+and every wake re-reads the mailbox. WasmEdge keeps waiters per executor, so a
+lane's notify may never reach a flow on another executor; a lost notify then
+costs one poll interval and never a completion. `poll_ns = 0` polls without
+executing a wait (contexts that may not block).
+
+### Worker bundles (A39)
+
+The dashboard is one HTML file under `worker-src 'self' blob:`.
+`space-data-module-sdk/host/worker-bundles` ships the pool worker and the I/O
+worker as self-contained classic scripts (esbuild IIFE, built by
+`scripts/build-host-worker-bundles.mjs` into `src/host/hostWorkerBundleSources.js`):
+
+```js
+import { hostWorkerBundleUrl } from "space-data-module-sdk/host/worker-bundles";
+import { createWasiThreadSpawn } from "space-data-module-sdk/host/wasi-threads";
+import { createFlatsqlIoWorker } from "space-data-module-sdk/host/flatsql-io";
+
+const writerIo = await createFlatsqlIoWorker({
+  workerUrl: hostWorkerBundleUrl("flatsql-io"), workerType: "classic",
+  backend: "opfs", role: "writer", rootDirectory: "sdn-store",
+});
+await writerIo.attachMemory(1, writerMemory);
+const pool = await createWasiThreadSpawn({
+  wasmModule, memory: writerMemory, poolSize: 1 + 2, instanceId: 1,
+  enableBrowserThreads: true,
+  browserWorkerUrl: hostWorkerBundleUrl("wasi-thread-pool"), browserWorkerType: "classic",
+  extraImports: [{ provider: "flatsql-io", instanceId: 1, channels: [writerIo.buffer] }],
+  onGuestError: (instanceId, tid, error) => supervisor.poison(instanceId, tid, error),
+});
+```
+
+### Browser capability matrix
+
+`probeBrowserCapabilities()` probes the page and a blob worker;
+`flatsqlLocalStoreGate(matrix)` is the store gate: cross-origin isolation,
+shared memory, OPFS sync handles in a worker, `Atomics.wait` in workers, and
+shared sync-handle modes (§22.4-6: without them there is no local store).
+Measured 2026-09-27 on the owner's Mac Studio (Apple M3 Ultra, macOS 26.3.1),
+headless, Playwright 1.63.0, under the dashboard CSP with COOP/COEP:
+
+| | Chromium 153.0.8010.12 | Firefox 155.0 | WebKit 26.6 |
+| --- | --- | --- | --- |
+| `crossOriginIsolated`, shared wasm memory | yes | yes | yes |
+| `Atomics.waitAsync` (page and worker) | yes | yes | yes |
+| OPFS sync access handle in a worker | yes | yes | yes (persistent profile only) |
+| Second default handle on one file | NoModificationAllowedError | NoModificationAllowedError | InvalidStateError |
+| Shared modes (`readwrite-unsafe` x 2) | yes | no (mode ignored) | no (mode ignored) |
+| SharedArrayBuffer views in `read`/`write` | yes | yes | yes |
+| Wasm shared-memory views in `read` | yes | yes | yes |
+| `removeEntry` of an open file | NoModificationAllowedError | NoModificationAllowedError | NoModificationAllowedError |
+| Nested blob workers | yes | yes | yes |
+| `performance.now()` resolution | 5 µs | 20 µs | 20 µs |
+| Local-store gate | supported | no (shared modes) | no (shared modes) |
+
+WebKit refuses OPFS in Playwright's ephemeral context (`UnknownError`); the suite
+uses a persistent profile.
+
+### Conformance
+
+`runFlatsqlIoConformance(io)` (`flatsqlIoConformance.js`) is one script for every
+host (22.3a-6): 15 cases covering statuses, short reads, sparse writes,
+truncation, EXCL/TRUNC/PROBE/UNLINK/UNLINK_IF_UNUSED/CREATE_PARENTS/
+DELETE_ON_CLOSE/OPEN_DEFERRED, access modes, confinement and multi-handle
+visibility. It passes on the Node sync-fs provider, on the channel over the
+memory backend (blocking and async clients, both doorbells), on the blob bundle
+run as a standalone script, and on OPFS and memory in Chromium, Firefox and
+WebKit. Plain `UNLINK` of an open path is `BUSY` in the I/O worker (OPFS cannot
+remove a file with an open sync handle) and succeeds on POSIX hosts; the script
+does not test it.
+
+### Measured acceptance (§18 T9, A7, A38)
+
+Owner's Mac Studio (Apple M3 Ultra, 28 cores, macOS 26.3.1), 2026-09-27,
+headless, final full run of `test/opfs-io-worker.browser.test.js`. The machine
+was shared with other lanes (load average 23-33 on 28 cores). Latencies are
+guest-observed import calls (`trace`), in microseconds.
+
+| Item | Chromium 153 | Firefox 155 | WebKit 26.6 |
+| --- | --- | --- | --- |
+| #1 8 threads, mixed I/O + 200 async opens + 50 unlinks through 1 I/O worker: errors / lost writes | 0 / 0 | 0 / 0 | 0 / 0 |
+| same run, 4 KiB read p50 / p99 | 50 / 2145 | 260 / 8180 | 60 / 2660 |
+| same run, message doorbell: errors / lost writes | 0 / 0 | 0 / 0 | 0 / 0 |
+| A7 lane 4 KiB read p99 during 100 x 4 MiB write+flush, same partition | 790 (active file, shared mode) | 120 (sealed segment) | 40 (sealed segment) |
+| A7 same, other partition | 45 | 120 | 40 |
+| A7 writer flush p50 / p99 (4 MiB) | 6365 / 28945 | 3540 / 27740 | 5260 / 70700 |
+| #2 500 ms open, median of 3 runs: other threads' read p99, baseline / during | 85 / 85 | 440 / 400 | 60 / 60 |
+| #2 longest other-thread read while the open was pending | 1020 | 18500 | 320 |
+| A38 OPEN_DEFERRED: open returns in / first write waits (ms) | 3.8 / 504 | 28.8 / 511 | 5.2 / 755 |
+| #3 `poolSize=6` on `hardwareConcurrency=2` | 6 workers; 7th spawn -1, reported `pool-exhausted` | same | same |
+| #5 link shim v2 (Node 25): 10,000 calls, lost completions | 0 with a notifying lane, 0 with a lane that never notifies, 0 spinning (`poll_ns = 0`) | | |
+
+Chromium's same-partition A7 p99 varies with host load: 90, 110, 295 and 790
+over four runs with the adaptive spin (below), and 125-1165 over four runs
+before it. The original #1 target (4 KiB read p99 <= 200 µs under the mixed
+load) is not met through one I/O worker; A7 replaced #1 with the <= 1 ms lane
+target, which is met. Firefox and WebKit have no shared handle modes, so their
+lanes read a partition's sealed segment; per §22.4-6 those browsers get no
+local store.
+
+Adaptive waits: an idle I/O worker polls its doorbell for 50 µs, and a blocking
+client polls for its answer for 20 µs, before sleeping (`spinMicros`), so
+back-to-back requests skip a thread wake-up. In the Node channel test this took
+the fast-thread read p50 from 30-39 µs to 11-12 µs.
+
 ## Tests
 
 - `test/wasi-thread-bundled-consumer-anchor.test.js` — the **bundled-consumer
@@ -360,6 +623,28 @@ the guest run its proven sequential path (`wasi.thread-spawn` -> `-1`).
   `symbolPrefix` / `methodSymbols` as authoritative (never re-derived), keeping a
   legacy truncated-prefix artifact compatible.
 
+- `test/wasi-thread-pool-size.test.js` — explicit `poolSize` (6 workers on
+  `hardwareConcurrency=2`, the 7th spawn -1 and reported), partial arming,
+  extraImports delivery, `onGuestError`, classic workers.
+- `test/sab-io-channel.test.js` — the I/O channel under a real wasi-threads
+  guest (`test/support/flatsql-io/ioGuestWasm.mjs`): 8 threads of mixed I/O in
+  both doorbell modes, a 500 ms open blocking only its caller, OPEN_DEFERRED,
+  revocation, a dead I/O worker, supervisor restart, 256 KiB steps, the head
+  mirror, scratch vs direct transfers, pre-open, and path-hash routing.
+- `test/node-sync-fs-io.test.js` — shared handles across workers, stale handles,
+  CREATE_PARENTS, UNLINK_IF_UNUSED, confinement, A23 revocation.
+- `test/flatsql-io-conformance.test.js` — the conformance script on every Node host.
+- `test/host-worker-bundles.test.js` — the bundles equal a fresh build, and the
+  I/O worker bundle passes the conformance script standalone.
+- `test/link-shim-v2.test.js` — shim v2 bytes, contract, and 10,000 calls
+  against a stub lane with and without notify.
+- `test/opfs-io-worker.browser.test.js` — the real-browser suite above
+  (env-gated):
+
+```sh
+SPACE_DATA_MODULE_SDK_ENABLE_BROWSER_IO=1 node --test test/opfs-io-worker.browser.test.js
+```
+
 ## See also
 
 - [`docs/browser-wasmedge-isomorphic.md`](./browser-wasmedge-isomorphic.md) —
@@ -371,5 +656,10 @@ the guest run its proven sequential path (`wasi.thread-spawn` -> `-1`).
   `WasiThreadWorkerUnreachableError`.
 - `src/compiler/pthreadArtifactGuard.js` — the flag list + wasm validator.
 - `src/compiler/wasiThreadsToolchain.js` — the wasi-threads toolchain resolver.
+- `src/host/sabIoChannel.js`, `src/host/flatsqlIoServer.js`,
+  `src/host/opfsIoWorker.mjs`, `src/host/flatsqlIoWorkers.js`,
+  `src/host/nodeSyncFsIo.js`, `src/host/sabIoMirror.js`,
+  `src/host/flatsqlIoConformance.js`, `src/host/browserCapabilityProbe.js`,
+  `src/host/hostWorkerBundles.js` — the FlatSQL partition store host I/O (§5).
 - `src/compiler/compileModule.js` — `ModuleThreadModel`, `buildCompilerArgs`,
   `compileWithWasiThreads`, `resolveThreadModel`, `compileModuleFromSource`.
