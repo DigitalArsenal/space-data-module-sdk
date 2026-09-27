@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.8.22
+
+Host I/O for the FlatSQL partition store (docs/isomorphic-pthreads.md §5).
+
+- `createWasiThreadSpawn` takes an explicit `poolSize`: the browser pre-starts
+  exactly that many workers, independent of `hardwareConcurrency - 1`, and Node
+  caps its live guest threads. Explicit pools arm partially. Spawns beyond the
+  pool return -1 and are reported through `onSpawnDeclined` and
+  `spawnReport()`. `onGuestError(instanceId, tid, error)` reports guest traps
+  and dead pooled workers. `extraImports` descriptors give every worker its own
+  import objects, such as FlatSQL's `env.flatsql_io_*`.
+- The FlatSQL I/O worker (`space-data-module-sdk/host/flatsql-io`): a
+  multi-slot SharedArrayBuffer request ring, an I/O worker over OPFS or memory
+  that holds every handle and never blocks, deferred opens and pre-open,
+  256 KiB write steps, revocation, supervision and restart, a head mirror, and
+  the store Web Lock. Every request completes with a status; nothing times
+  out or throws into a guest.
+- `space-data-module-sdk/host/flatsql-io/node`: synchronous `fs` per worker
+  over a shared virtual-handle table.
+- New `flatsql_io` flags `CREATE_PARENTS` (0x0100), `UNLINK_IF_UNUSED` (0x0200)
+  and `OPEN_DEFERRED` (0x0400), and status `BUSY` (-7).
+- One `flatsql_io` conformance script for every host, and a browser capability
+  probe with the local-store gate.
+- `space-data-module-sdk/host/worker-bundles`: the pool worker and the I/O
+  worker as self-contained scripts for blob: URLs.
+- FlatSQL link shim v2 (`FLATSQL_LINK_SHIM_V2_WASM`): a mailbox over shared lane
+  memory with polling-bounded waits. v1 is unchanged.
+- The wasi-threads host no longer throws while loading when it is bundled
+  without `import.meta.url` (IIFE bundles, blob: module workers).
+
 ## 0.8.21
 
 - A module built with both the direct and the command surface exports
