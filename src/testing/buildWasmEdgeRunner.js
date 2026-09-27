@@ -6,7 +6,7 @@ import process from "node:process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile, rename, rm } from "node:fs/promises";
+import { mkdir, readFile, writeFile, copyFile, rename, rm } from "node:fs/promises";
 
 const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
@@ -248,10 +248,25 @@ export async function buildWasmEdgeEmscriptenPthreadRunner(options = {}) {
     cwd: options.cwd ?? process.cwd(),
   });
   if (process.platform === "darwin") {
+    let linkedLibrary = plan.wasmedgeSharedLibraryPath;
+    if (options.runnerKind === "wasi-threads") {
+      // DYLD_LIBRARY_PATH can override even an absolute install name by its
+      // basename. Give this exact runtime a unique name so ambient SDK paths
+      // cannot silently replace the corrected atomic-wait implementation.
+      const sha = createHash("sha256").update(await readFile(linkedLibrary)).digest("hex");
+      linkedLibrary = path.join(path.dirname(plan.outputPath), `libsdm-wasmedge-${sha}.dylib`);
+      if (!existsSync(linkedLibrary)) {
+        const stagingLibrary = `${linkedLibrary}.${process.pid}`;
+        try {
+          await copyFile(plan.wasmedgeSharedLibraryPath, stagingLibrary);
+          await rename(stagingLibrary, linkedLibrary);
+        } finally { await rm(stagingLibrary, { force: true }); }
+      }
+    }
     await execFileAsync("install_name_tool", [
       "-change",
       "@rpath/libwasmedge.0.dylib",
-      plan.wasmedgeSharedLibraryPath,
+      linkedLibrary,
       plan.outputPath,
     ]);
   }
@@ -313,7 +328,8 @@ async function prepareWasmEdgeThreadsRuntime(options) {
           catch { await run("git", ["-C", source, "apply", patchPath]); }
           await run("cmake", ["-S", source, "-B", buildDir, "-G", "Ninja",
             "-DCMAKE_BUILD_TYPE=Release", `-DCMAKE_INSTALL_PREFIX=${prefix}`,
-            "-DCMAKE_CXX_FLAGS=-Wno-invalid-specialization", "-DWASMEDGE_USE_LLVM=OFF",
+            process.platform === "darwin" ? "-DCMAKE_CXX_FLAGS=-Wno-invalid-specialization" : "-DCMAKE_CXX_FLAGS=-Wno-error=maybe-uninitialized -Wno-error=array-bounds",
+            "-DWASMEDGE_USE_LLVM=OFF",
             "-DWASMEDGE_BUILD_PLUGINS=OFF", "-DWASMEDGE_BUILD_TOOLS=OFF", "-DWASMEDGE_FORCE_DISABLE_LTO=ON"]);
           await run("cmake", ["--build", buildDir, "-j", "4"]);
           await run("cmake", ["--install", buildDir]);
@@ -349,6 +365,7 @@ export async function resolveWasmEdgeWasiThreadsRunner(options = {}) {
     ...options, runnerKind: "wasi-threads", outputPath: path.join(os.tmpdir(), "sdm-runner"),
   });
   const digest = createHash("sha256")
+    .update(await readFile(__filename))
     .update(await readFile(plan.runnerSourcePath))
     .update(await readFile(plan.wasmedgeSharedLibraryPath))
     .update(JSON.stringify([process.platform, process.arch, plan.wasmedgeIncludeDir,

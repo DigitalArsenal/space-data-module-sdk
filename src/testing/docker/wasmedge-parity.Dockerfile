@@ -43,6 +43,7 @@ RUN git clone --depth 1 --branch 0.16.4 https://github.com/WasmEdge/WasmEdge.git
     && git -C /tmp/wasmedge-source apply /tmp/atomic-wait.patch \
     && cmake -S /tmp/wasmedge-source -B /tmp/wasmedge-build -G Ninja \
        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/sdm-wasmedge \
+       "-DCMAKE_CXX_FLAGS=-Wno-error=maybe-uninitialized -Wno-error=array-bounds" \
        -DWASMEDGE_USE_LLVM=OFF -DWASMEDGE_BUILD_PLUGINS=OFF \
        -DWASMEDGE_BUILD_TOOLS=OFF -DWASMEDGE_FORCE_DISABLE_LTO=ON \
     && cmake --build /tmp/wasmedge-build -j 4 \
