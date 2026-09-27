@@ -369,11 +369,22 @@ export async function createWasiThreadSpawn({
     );
     const NodeWorker = workerThreads.Worker;
     const nodeWorkerUrl = new URL("./wasiThreadWorker.mjs", import.meta.url);
+    // An --input-type parent runs eval/stdin, but this worker loads a file.
+    // Inheriting that flag makes the worker fail while the guest is blocked
+    // synchronously in pthread_join and cannot receive the error event.
+    const parentArgs = globalThis.process.execArgv;
+    const sourceFlags = ["--input-type", "--eval", "-e", "--print", "-p"];
+    const execArgv = parentArgs.some((arg) => arg.startsWith("--input-type"))
+      ? parentArgs.filter((arg, index, args) =>
+        !sourceFlags.some((flag) => arg === flag || arg.startsWith(`${flag}=`)) &&
+        !(index > 0 && sourceFlags.includes(args[index - 1])))
+      : undefined;
 
     const threadSpawn = (startArg) => {
       const tid = (nextTid += 1);
       try {
         const worker = new NodeWorker(nodeWorkerUrl, {
+          execArgv,
           workerData: {
             wasmModule,
             memory,

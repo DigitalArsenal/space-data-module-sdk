@@ -11,7 +11,7 @@ ARG WASMEDGE_VERSION
 RUN test -n "${WASMEDGE_VERSION}" || (echo "WASMEDGE_VERSION build-arg is required (injected from src/testing/wasmedgePin.json)" && exit 1)
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates build-essential \
+    && apt-get install -y --no-install-recommends curl ca-certificates build-essential git cmake ninja-build \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
@@ -35,9 +35,22 @@ ENV PATH="/opt/wasmedge/bin:${PATH}" \
     LD_LIBRARY_PATH="/opt/wasmedge/lib64:/opt/wasmedge/lib"
 
 COPY native/wasmedge_wasi_threads_runner.c /tmp/sdm-wasi-threads-runner.c
+COPY native/wasmedge-0.16.4-atomic-wait.patch /tmp/atomic-wait.patch
+# The ordinary CLI keeps its release library. Only the SDK thread runner uses
+# the isolated 0.16.4 atomic-wait correction, matching the native build.
+RUN git clone --depth 1 --branch 0.16.4 https://github.com/WasmEdge/WasmEdge.git /tmp/wasmedge-source \
+    && test "$(git -C /tmp/wasmedge-source rev-parse HEAD)" = be85c2fbba68318f103b4a766728f6946e65abf8 \
+    && git -C /tmp/wasmedge-source apply /tmp/atomic-wait.patch \
+    && cmake -S /tmp/wasmedge-source -B /tmp/wasmedge-build -G Ninja \
+       -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/sdm-wasmedge \
+       -DWASMEDGE_USE_LLVM=OFF -DWASMEDGE_BUILD_PLUGINS=OFF \
+       -DWASMEDGE_BUILD_TOOLS=OFF -DWASMEDGE_FORCE_DISABLE_LTO=ON \
+    && cmake --build /tmp/wasmedge-build -j 4 \
+    && cmake --install /tmp/wasmedge-build \
+    && rm -rf /tmp/wasmedge-source /tmp/wasmedge-build /tmp/atomic-wait.patch
 RUN cc /tmp/sdm-wasi-threads-runner.c -std=c11 -O2 -pthread -Wall -Wextra -Werror \
-    -I/opt/wasmedge/include -L/opt/wasmedge/lib64 -L/opt/wasmedge/lib -lwasmedge \
-    -Wl,-rpath,/opt/wasmedge/lib64 -Wl,-rpath,/opt/wasmedge/lib \
+    -I/opt/sdm-wasmedge/include -L/opt/sdm-wasmedge/lib64 -L/opt/sdm-wasmedge/lib -lwasmedge \
+    -Wl,--disable-new-dtags,-rpath,/opt/sdm-wasmedge/lib64,-rpath,/opt/sdm-wasmedge/lib \
     -o /opt/wasmedge/bin/sdm-wasi-threads-runner \
     && /opt/wasmedge/bin/sdm-wasi-threads-runner --version \
     && rm /tmp/sdm-wasi-threads-runner.c

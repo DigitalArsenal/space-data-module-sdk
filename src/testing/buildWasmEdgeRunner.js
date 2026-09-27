@@ -6,7 +6,7 @@ import process from "node:process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, rm } from "node:fs/promises";
 
 const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
@@ -150,6 +150,7 @@ export function resolveWasmEdgeRunnerBuildPlan(options = {}) {
       process.platform === "darwin"
         ? [
             "clang",
+            "-Wl,-headerpad_max_install_names",
             runnerSourcePath,
             "-std=c11",
             "-O2",
@@ -195,6 +196,7 @@ export async function buildWasmEdgeEmscriptenPthreadRunner(options = {}) {
     process.platform === "darwin"
       ? [
           "clang",
+          "-Wl,-headerpad_max_install_names",
           basePlan.runnerSourcePath,
           "-std=c11",
           "-O2",
@@ -256,8 +258,82 @@ export async function buildWasmEdgeEmscriptenPthreadRunner(options = {}) {
   return plan.outputPath;
 }
 
-export function buildWasmEdgeWasiThreadsRunner(options = {}) {
-  return buildWasmEdgeEmscriptenPthreadRunner({ ...options, runnerKind: "wasi-threads" });
+const WASMEDGE_THREADS_REVISION = "be85c2fbba68318f103b4a766728f6946e65abf8";
+const runtimeBuilds = new Map();
+
+// Upstream 0.16.4 can lose atomic notifications between comparison and sleep.
+// Keep its established SDN fix isolated from the owner's installed SDK/CLI.
+// An explicit include/lib pair remains supported for operator-built runtimes.
+async function prepareWasmEdgeThreadsRuntime(options) {
+  if ((options.wasmedgeIncludeDir ?? process.env.WASMEDGE_INCLUDE_DIR) &&
+      (options.wasmedgeLibDir ?? process.env.WASMEDGE_LIB_DIR)) return {};
+  const patchPath = path.join(__dirname, "native/wasmedge-0.16.4-atomic-wait.patch");
+  const digest = createHash("sha256").update(WASMEDGE_THREADS_REVISION)
+    .update(await readFile(patchPath)).update(`${process.platform}-${process.arch}`).digest("hex");
+  if (!runtimeBuilds.has(digest)) {
+    const build = (async () => {
+      const root = path.join(os.tmpdir(), "sdm-wasmedge-runtimes", digest);
+      const prefix = path.join(root, "sdk");
+      const marker = path.join(root, "complete.json");
+      const lock = `${root}.lock`;
+      await mkdir(path.dirname(root), { recursive: true, mode: 0o700 });
+      const started = Date.now();
+      let held = false;
+      while (!existsSync(marker)) {
+        try {
+          await mkdir(lock);
+          held = true;
+          await writeFile(path.join(lock, "pid"), String(process.pid));
+          break;
+        } catch (error) {
+          if (error.code !== "EEXIST") throw error;
+          try {
+            const owner = Number(await readFile(path.join(lock, "pid"), "utf8"));
+            if (owner > 0) {
+              try { process.kill(owner, 0); }
+              catch (error) { if (error.code === "ESRCH") await rm(lock, { recursive: true, force: true }); }
+            }
+          } catch { /* another builder is still acquiring its lock */ }
+          if (Date.now() - started > 900000) throw new Error("Timed out waiting for the isolated WasmEdge runtime build.");
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
+      try {
+        if (!existsSync(marker)) {
+          await mkdir(root, { recursive: true });
+          const source = path.join(root, "source");
+          const buildDir = path.join(root, "build");
+          const run = (command, args) => execFileAsync(command, args, { timeout: 900000, maxBuffer: 16 * 1024 * 1024 });
+          if (!existsSync(path.join(source, ".git"))) {
+            await run("git", ["clone", "--depth", "1", "--branch", "0.16.4", "https://github.com/WasmEdge/WasmEdge.git", source]);
+          }
+          const revision = (await run("git", ["-C", source, "rev-parse", "HEAD"])).stdout.trim();
+          if (revision !== WASMEDGE_THREADS_REVISION) throw new Error(`Unexpected WasmEdge source revision: ${revision}`);
+          try { await run("git", ["-C", source, "apply", "--reverse", "--check", patchPath]); }
+          catch { await run("git", ["-C", source, "apply", patchPath]); }
+          await run("cmake", ["-S", source, "-B", buildDir, "-G", "Ninja",
+            "-DCMAKE_BUILD_TYPE=Release", `-DCMAKE_INSTALL_PREFIX=${prefix}`,
+            "-DCMAKE_CXX_FLAGS=-Wno-invalid-specialization", "-DWASMEDGE_USE_LLVM=OFF",
+            "-DWASMEDGE_BUILD_PLUGINS=OFF", "-DWASMEDGE_BUILD_TOOLS=OFF", "-DWASMEDGE_FORCE_DISABLE_LTO=ON"]);
+          await run("cmake", ["--build", buildDir, "-j", "4"]);
+          await run("cmake", ["--install", buildDir]);
+          await writeFile(marker, JSON.stringify({ revision, patchSha256: createHash("sha256").update(await readFile(patchPath)).digest("hex") }));
+        }
+      } finally {
+        if (held) await rm(lock, { recursive: true, force: true });
+      }
+      const libDir = existsSync(path.join(prefix, "lib", resolveWasmEdgeSharedLibraryFilename())) ? "lib" : "lib64";
+      return { wasmedgeIncludeDir: path.join(prefix, "include"), wasmedgeLibDir: path.join(prefix, libDir) };
+    })();
+    runtimeBuilds.set(digest, build);
+    build.catch(() => runtimeBuilds.delete(digest));
+  }
+  return runtimeBuilds.get(digest);
+}
+
+export async function buildWasmEdgeWasiThreadsRunner(options = {}) {
+  const runtime = await prepareWasmEdgeThreadsRuntime(options);
+  return buildWasmEdgeEmscriptenPthreadRunner({ ...options, ...runtime, runnerKind: "wasi-threads" });
 }
 
 const builds = new Map();
@@ -268,6 +344,7 @@ export async function resolveWasmEdgeWasiThreadsRunner(options = {}) {
   const explicit = options.wasmEdgeRunnerBinary ?? options.wasmedgeRunnerBinary ??
     process.env.SDM_WASMEDGE_RUNNER_BINARY;
   if (explicit) return path.resolve(String(explicit));
+  options = { ...options, ...await prepareWasmEdgeThreadsRuntime(options) };
   const plan = resolveWasmEdgeRunnerBuildPlan({
     ...options, runnerKind: "wasi-threads", outputPath: path.join(os.tmpdir(), "sdm-runner"),
   });

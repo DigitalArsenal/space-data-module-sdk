@@ -174,12 +174,19 @@ fresh module instance for each `wasi_thread_start(tid, arg)`. It limits live
 workers to 32 and cancels the command group on a worker trap. Guest arguments,
 environment, stdin, stdout and stderr use WASI preview1.
 
-Install the pinned WasmEdge headers and library under `~/.wasmedge`, or set
-`WASMEDGE_INCLUDE_DIR` and `WASMEDGE_LIB_DIR`. An explicit
-`wasmEdgeRunnerBinary` selects a prebuilt command runner. The builder is
+The automatic build requires Git, CMake, Ninja, and a C/C++ compiler. It builds
+an isolated, cached WasmEdge 0.16.4 runtime with the SDN atomic-wait correction:
+unmodified 0.16.4 can lose a notification between comparing memory and sleeping,
+and does not correctly wake on notification without a memory store. The patch
+also preserves waiter iterators when other waiters register. The installed
+`~/.wasmedge` SDK and CLI are unchanged.
+
+Set both `WASMEDGE_INCLUDE_DIR` and `WASMEDGE_LIB_DIR` to supply an operator-built
+runtime with the same correction. An explicit `wasmEdgeRunnerBinary` selects a
+prebuilt command runner. The builder is
 `buildWasmEdgeWasiThreadsRunner` in `src/testing/buildWasmEdgeRunner.js`.
-The Docker parity image compiles the same source and selects it for threaded
-artifacts; artifacts without `wasi.thread-spawn` keep the ordinary CLI path.
+The Docker parity image builds the same corrected runtime and runner for threaded
+artifacts; modules without `wasi.thread-spawn` keep the ordinary CLI path.
 The Docker runner image includes a source digest in its tag to avoid stale
 runner reuse.
 
@@ -187,7 +194,9 @@ Direct-only threaded reactors have no `_start`. For those artifacts the runner
 calls `_initialize`, stages the raw request through `plugin_alloc`, and invokes
 `plugin_invoke_stream`. The parity harness selects the browser direct surface
 automatically as well. This is one request per process; the legacy resident
-runner's framing protocol remains separate.
+runner's framing protocol remains separate. Module-owned external memory regions
+are not materialized by this one-shot transport; outputs containing pointers
+into guest memory are not portable byte-level parity results.
 
 The browser command harness runs `_start` exactly once per request, after
 installing stdin. Pthreads share one process input cursor and output buffers,

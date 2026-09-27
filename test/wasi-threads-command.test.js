@@ -29,6 +29,12 @@ const source = `#include <pthread.h>
 #include <stdio.h>
 #include "space_data_module_invoke.h"
 static _Atomic int finished;
+static int wait_word;
+static void *notify_without_store(void *arg) {
+  (void)arg;
+  while (__builtin_wasm_memory_atomic_notify(&wait_word, 1) == 0) {}
+  return NULL;
+}
 static void *work(void *arg) {
   (void)arg;
   if (getenv("SDM_WORKER_TRAP")) __builtin_trap();
@@ -43,6 +49,7 @@ int echo(void) {
   const char *setting = getenv("SDM_PARITY_THREADS");
   int n = setting ? atoi(setting) : 2;
   if (n < 1 || n > 8) return 4;
+  if (!getenv("SDM_ATOMIC_WAIT")) {
   pthread_t workers[8];
   atomic_store(&finished, 0);
   for (int i = 0; i < n; ++i) {
@@ -50,6 +57,13 @@ int echo(void) {
   }
   for (int i = 0; i < n; ++i) pthread_join(workers[i], NULL);
   if (atomic_load(&finished) != n) return 6;
+  } else {
+    pthread_t notifier;
+    if (pthread_create(&notifier, NULL, notify_without_store, NULL) != 0) return 7;
+    int waited = __builtin_wasm_memory_atomic_wait32(&wait_word, 0, 500000000LL);
+    pthread_join(notifier, NULL);
+    if (waited != 0) return 8;
+  }
   plugin_push_output("response", frame->schema_name, frame->file_identifier,
                      frame->payload, frame->payload_length);
   return 0;
@@ -80,6 +94,7 @@ test("SDK pthread command delivers real stdin once, joins workers, and matches n
   t.after(() => rm(dir, { recursive: true, force: true }));
   const wasmPath = path.join(dir, "module.wasm");
   await writeFile(wasmPath, compilation.wasmBytes);
+  await writeFile(path.join(dir, "request.bin"), request);
   if (process.env.SDM_THREAD_TEST_ARTIFACT_DIR) {
     await writeFile(path.join(process.env.SDM_THREAD_TEST_ARTIFACT_DIR, "module.wasm"), compilation.wasmBytes);
     await writeFile(path.join(process.env.SDM_THREAD_TEST_ARTIFACT_DIR, "request.bin"), request);
@@ -106,8 +121,17 @@ test("SDK pthread command delivers real stdin once, joins workers, and matches n
   const direct = await createBrowserModuleHarness({ wasmSource: compilation.wasmBytes, surface: "direct", env: { SDM_PARITY_THREADS: "2" } });
   t.after(() => direct.destroy());
   assert.deepEqual(await direct.invokeRaw(request), first, "direct and command surfaces agree");
+  const { stdout: evalOutput } = await promisify(execFile)(process.execPath, ["--input-type=module", "--eval", `
+    import { readFile } from 'node:fs/promises';
+    import { createStandaloneHarness } from ${JSON.stringify(new URL("../src/testing/isomorphicHarness.js", import.meta.url).href)};
+    const h = await createStandaloneHarness('browser', ${JSON.stringify(wasmPath)}, { env: { SDM_PARITY_THREADS: '2' } });
+    try { process.stdout.write(await h.invokeRaw(await readFile(${JSON.stringify(path.join(dir, "request.bin"))}))); }
+    finally { await h.destroy(); }
+  `], { timeout: 15000, encoding: "buffer" });
+  assert.deepEqual(new Uint8Array(evalOutput), first, "eval parents must start file-backed pthread workers");
   const plan = { name: "threaded-command", threadEnvVar: "SDM_PARITY_THREADS", cases: [
     { id: "echo", stdinBytes: request, args: [], env: {}, threadCounts: [1, 2, 4, 8], expect: "ok" },
+    { id: "notify-without-store", stdinBytes: request, args: [], env: { SDM_ATOMIC_WAIT: "1" }, threadCounts: [2], expect: "ok" },
     { id: "empty", stdinBytes: new Uint8Array(), args: [], env: {}, threadCounts: [1], expect: "guest-error" },
   ] };
   if (process.env.SPACE_DATA_MODULE_SDK_ENABLE_WASMEDGE_PARITY === "1") {
@@ -120,6 +144,10 @@ test("SDK pthread command delivers real stdin once, joins workers, and matches n
       assert.equal(run.spawnCount, run.threadCount);
     }
     assert.equal(runs.at(-1).exitClass, "guest-error");
+    const notified = runs.find((r) => r.caseId === "notify-without-store");
+    assert.equal(notified.exitClass, "ok", notified.exitDetail);
+    assert.equal(notified.spawnCount, 1);
+    assert.deepEqual(notified.stdout, first);
     assert.match(new TextDecoder().decode(runs[0].stderr), /worker ran/);
     const trapped = await runNativeWasmEdgeLane({
       wasmPath, wasmBytes: compilation.wasmBytes, pin: loadWasmEdgePin(), timeoutMs: 5000,

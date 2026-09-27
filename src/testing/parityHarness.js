@@ -73,6 +73,7 @@ export function loadWasmEdgePin() {
   }
   const runnerIdentity = createHash("sha256")
     .update(readFileSync(path.join(__dirname, "native/wasmedge_wasi_threads_runner.c")))
+    .update(readFileSync(path.join(__dirname, "native/wasmedge-0.16.4-atomic-wait.patch")))
     .update(readFileSync(path.join(__dirname, String(pin.dockerfile))))
     .digest("hex").slice(0, 16);
   return Object.freeze({
