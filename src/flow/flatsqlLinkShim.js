@@ -122,6 +122,23 @@ const OP = {
   i64_mul: 0x7e,
   i64_xor: 0x85,
   void: 0x40,
+  unreachable: 0x00,
+  drop: 0x1a,
+  i32_eq: 0x46,
+  i32_ne: 0x47,
+  i32_gt_s: 0x4a,
+  i32_ge_s: 0x4e,
+  i64_eqz: 0x50,
+};
+
+// Threads-proposal opcodes (0xFE prefix) used by shim v2.
+const ATOMIC = {
+  notify: [0xfe, 0x00],
+  wait32: [0xfe, 0x01],
+  i32_load: [0xfe, 0x10],
+  i32_store: [0xfe, 0x17],
+  i32_add: [0xfe, 0x1e],
+  i32_cmpxchg: [0xfe, 0x48],
 };
 
 const FNV_OFFSET_BASIS = 1469598103934665603n; // deployed decision-gate basis
@@ -301,4 +318,282 @@ export function readEngineRefEntry(view, base) {
     frames: view.getUint32(base + 32, true),
     used: view.getUint32(base + 36, true),
   };
+}
+
+
+// ---------------------------------------------------------------------------
+// Shim v2 (FlatSQL partition store T9, design §18 T9 and §20): a mailbox over
+// IMPORTED LANE MEMORY.
+//
+// In the partition store a linked flow no longer calls engine functions: the
+// engine is a set of multithreaded instances, and a query runs on a reader
+// lane thread that serves a mailbox in the reader instance's shared memory.
+// v2 imports that shared memory and gives the flow the mailbox protocol as
+// direct in-wasm calls:
+//
+//   mb_submit(mailbox, op, req_ptr, req_len) -> seq | -1 (mailbox busy)
+//   mb_poll(mailbox, seq)                    -> 1 when complete, else 0
+//   mb_wait(mailbox, seq, poll_ns, max_polls) -> the lane's status, or
+//                                              FLATSQL_LINK_PENDING (-110) after
+//                                              max_polls bounded waits
+//   mb_release(mailbox, seq)                 -> 0, or -1 when not complete
+//   mb_cancel(mailbox, seq)                  -> 0 (the lane polls the cancel word)
+//   load32_acquire(addr) / store32_release(addr, value)
+// plus v1's peek8/peek32/peek64/poke8/poke32/fnv1a64/count_frames over the
+// lane memory.
+//
+// POLLING-BOUNDED WAITS, NO RELIANCE ON CROSS-EXECUTOR NOTIFY. WasmEdge keeps
+// atomic waiters per executor, and the flow and the reader instance run on
+// different executors, so a lane's notify may never reach the flow's wait.
+// mb_wait therefore never waits unboundedly: each wait is `poll_ns` long and
+// every wake (notified or timed out) re-reads the mailbox, so a lost notify
+// costs at most one poll interval and can never lose a completion. poll_ns = 0
+// polls without executing memory.atomic.wait at all (contexts that may not
+// block, such as a browser main thread). The shim still notifies the lane's
+// doorbell on submit and cancel; that is only an accelerator.
+//
+// Mailbox (64 bytes, 8-aligned, in lane memory; little-endian):
+//   +0 state (IDLE 0, SUBMITTED 1, CLAIMED 2, DONE 3, SUBMITTING 4)
+//   +4 seq   +8 done_seq   +12 op   +16 req_ptr   +20 req_len
+//   +24 status   +28 resp_ptr   +32 resp_len   +36 doorbell   +40 cancel
+//   +44 flags    +48 generation (u64)   +56 reserved
+// Client: IDLE -> SUBMITTING -> SUBMITTED (publishes the fields), waits for
+// DONE with done_seq == seq, reads status/resp, then DONE -> IDLE (release).
+// Lane: waits (bounded) on the doorbell, CAS SUBMITTED -> CLAIMED, runs the
+// request, writes status/resp_ptr/resp_len/generation, stores done_seq = seq,
+// stores DONE, and notifies the state word. A lane checks `cancel == seq`
+// while it runs.
+
+export const FLATSQL_LINK_MAILBOX_BYTES = 64;
+export const FLATSQL_LINK_MAILBOX = Object.freeze({
+  STATE: 0,
+  SEQ: 4,
+  DONE_SEQ: 8,
+  OP: 12,
+  REQ_PTR: 16,
+  REQ_LEN: 20,
+  STATUS: 24,
+  RESP_PTR: 28,
+  RESP_LEN: 32,
+  DOORBELL: 36,
+  CANCEL: 40,
+  FLAGS: 44,
+  GENERATION: 48,
+});
+export const FLATSQL_LINK_STATE = Object.freeze({
+  IDLE: 0,
+  SUBMITTED: 1,
+  CLAIMED: 2,
+  DONE: 3,
+  SUBMITTING: 4,
+});
+/** mb_wait's "not complete yet" result: retryable, the request stays live. */
+export const FLATSQL_LINK_PENDING = -110;
+/** mb_submit's result when the mailbox holds another request. */
+export const FLATSQL_LINK_BUSY = -1;
+
+/** Assemble the v2 shim bytes (deterministic). */
+export function buildFlatsqlLinkShimV2Wasm() {
+  const types = [
+    [0x60, ...vec([[I32]]), ...vec([[I32]])], // t0: (i32)->i32
+    [0x60, ...vec([[I32]]), ...vec([[I64]])], // t1: (i32)->i64
+    [0x60, ...vec([[I32], [I32]]), ...vec([])], // t2: (i32,i32)->()
+    [0x60, ...vec([[I32], [I32]]), ...vec([[I64]])], // t3: (i32,i32)->i64
+    [0x60, ...vec([[I32], [I32]]), ...vec([[I32]])], // t4: (i32,i32)->i32
+    [0x60, ...vec([[I32], [I32], [I32], [I32]]), ...vec([[I32]])], // t5: submit
+    [0x60, ...vec([[I32], [I32], [I64], [I32]]), ...vec([[I32]])], // t6: wait
+  ];
+
+  // (import "flatsql" "memory" (memory 0 65536 shared))
+  const imports = [
+    [
+      ...lebU(7), ...utf8("flatsql"),
+      ...lebU(6), ...utf8("memory"),
+      0x02,
+      0x03, ...lebU(0), ...lebU(65536),
+    ],
+  ];
+
+  const names = [
+    ["peek8", 0], ["peek32", 0], ["peek64", 1], ["poke8", 2], ["poke32", 2],
+    ["fnv1a64", 3], ["count_frames", 4],
+    ["mb_submit", 5], ["mb_poll", 4], ["mb_wait", 6], ["mb_release", 4],
+    ["mb_cancel", 4], ["load32_acquire", 0], ["store32_release", 2],
+  ];
+  const funcTypes = names.map(([, type]) => type);
+  const exports = names.map(([name], index) => [
+    ...lebU(name.length), ...utf8(name), 0x00, ...lebU(index),
+  ]);
+
+  const m = FLATSQL_LINK_MAILBOX;
+  const S = FLATSQL_LINK_STATE;
+  const aload = (offset) => [...ATOMIC.i32_load, ...lebU(2), ...lebU(offset)];
+  const astore = (offset) => [...ATOMIC.i32_store, ...lebU(2), ...lebU(offset)];
+  const store = (offset) => [OP.i32_store, ...lebU(2), ...lebU(offset)];
+  const load = (offset) => [OP.i32_load, ...lebU(2), ...lebU(offset)];
+
+  const peek8 = func([], [OP.local_get, 0, OP.i32_load8_u, ...memarg(0)]);
+  const peek32 = func([], [OP.local_get, 0, OP.i32_load, ...memarg(0)]);
+  const peek64 = func([], [OP.local_get, 0, OP.i64_load, ...memarg(0)]);
+  const poke8 = func([], [OP.local_get, 0, OP.local_get, 1, OP.i32_store8, ...memarg(0)]);
+  const poke32 = func([], [OP.local_get, 0, OP.local_get, 1, OP.i32_store, ...memarg(0)]);
+  const v1 = buildFlatsqlLinkShimWasm();
+  // fnv1a64 and count_frames are byte-for-byte v1's bodies (same algorithm,
+  // same code); lift them from the v1 code section.
+  const v1Bodies = extractCodeBodies(v1);
+  const fnv = v1Bodies[5];
+  const countFrames = v1Bodies[6];
+
+  // mb_submit(mb, op, req_ptr, req_len) -> seq | -1 ; local 4 = seq
+  const submit = func(
+    [[1, I32]],
+    [
+      OP.local_get, 0, OP.i32_const, S.IDLE, OP.i32_const, S.SUBMITTING,
+      ...ATOMIC.i32_cmpxchg, ...lebU(2), ...lebU(m.STATE),
+      OP.if, OP.void, OP.i32_const, ...lebS32(FLATSQL_LINK_BUSY), OP.return, OP.end,
+      OP.local_get, 0, ...aload(m.SEQ), OP.i32_const, 1, OP.i32_add, OP.local_set, 4,
+      OP.local_get, 4, OP.i32_eqz, OP.if, OP.void, OP.i32_const, 1, OP.local_set, 4, OP.end,
+      OP.local_get, 0, OP.local_get, 1, ...store(m.OP),
+      OP.local_get, 0, OP.local_get, 2, ...store(m.REQ_PTR),
+      OP.local_get, 0, OP.local_get, 3, ...store(m.REQ_LEN),
+      OP.local_get, 0, OP.i32_const, 0, ...store(m.STATUS),
+      OP.local_get, 0, OP.i32_const, 0, ...store(m.RESP_PTR),
+      OP.local_get, 0, OP.i32_const, 0, ...store(m.RESP_LEN),
+      OP.local_get, 0, OP.i32_const, 0, ...astore(m.CANCEL),
+      OP.local_get, 0, OP.local_get, 4, ...astore(m.SEQ),
+      OP.local_get, 0, OP.i32_const, S.SUBMITTED, ...astore(m.STATE),
+      OP.local_get, 0, OP.i32_const, 1, ...ATOMIC.i32_add, ...lebU(2), ...lebU(m.DOORBELL), OP.drop,
+      OP.local_get, 0, OP.i32_const, 1, ...ATOMIC.notify, ...lebU(2), ...lebU(m.DOORBELL), OP.drop,
+      OP.local_get, 4,
+    ],
+  );
+
+  // mb_poll(mb, seq) -> 1 | 0
+  const poll = func(
+    [],
+    [
+      OP.local_get, 0, ...aload(m.STATE), OP.i32_const, S.DONE, OP.i32_eq,
+      OP.local_get, 0, ...aload(m.DONE_SEQ), OP.local_get, 1, OP.i32_eq,
+      OP.i32_and,
+    ],
+  );
+
+  // mb_wait(mb, seq, poll_ns, max_polls) -> status | PENDING
+  // locals: 4 polls, 5 state
+  const wait = func(
+    [[2, I32]],
+    [
+      OP.loop, OP.void,
+      OP.local_get, 0, ...aload(m.STATE), OP.local_set, 5,
+      OP.local_get, 5, OP.i32_const, S.DONE, OP.i32_eq,
+      OP.local_get, 0, ...aload(m.DONE_SEQ), OP.local_get, 1, OP.i32_eq,
+      OP.i32_and,
+      OP.if, OP.void, OP.local_get, 0, ...load(m.STATUS), OP.return, OP.end,
+      OP.local_get, 3, OP.i32_const, 0, OP.i32_gt_s,
+      OP.local_get, 4, OP.local_get, 3, OP.i32_ge_s,
+      OP.i32_and,
+      OP.if, OP.void, OP.i32_const, ...lebS32(FLATSQL_LINK_PENDING), OP.return, OP.end,
+      OP.local_get, 4, OP.i32_const, 1, OP.i32_add, OP.local_set, 4,
+      OP.local_get, 2, OP.i64_eqz, OP.i32_eqz,
+      OP.if, OP.void,
+      OP.local_get, 0, OP.local_get, 5, OP.local_get, 2,
+      ...ATOMIC.wait32, ...lebU(2), ...lebU(m.STATE), OP.drop,
+      OP.end,
+      OP.br, 0,
+      OP.end,
+      OP.unreachable,
+    ],
+  );
+
+  // mb_release(mb, seq) -> 0 | -1
+  const release = func(
+    [],
+    [
+      OP.local_get, 0, ...aload(m.DONE_SEQ), OP.local_get, 1, OP.i32_ne,
+      OP.if, OP.void, OP.i32_const, ...lebS32(-1), OP.return, OP.end,
+      OP.local_get, 0, OP.i32_const, S.DONE, OP.i32_const, S.IDLE,
+      ...ATOMIC.i32_cmpxchg, ...lebU(2), ...lebU(m.STATE),
+      OP.i32_const, S.DONE, OP.i32_eq,
+      OP.if, I32, OP.i32_const, 0, 0x05 /* else */, OP.i32_const, ...lebS32(-1), OP.end,
+    ],
+  );
+
+  // mb_cancel(mb, seq) -> 0
+  const cancel = func(
+    [],
+    [
+      OP.local_get, 0, OP.local_get, 1, ...astore(m.CANCEL),
+      OP.local_get, 0, OP.i32_const, 1, ...ATOMIC.i32_add, ...lebU(2), ...lebU(m.DOORBELL), OP.drop,
+      OP.local_get, 0, OP.i32_const, 1, ...ATOMIC.notify, ...lebU(2), ...lebU(m.DOORBELL), OP.drop,
+      OP.i32_const, 0,
+    ],
+  );
+
+  const loadAcquire = func([], [OP.local_get, 0, ...aload(0)]);
+  const storeRelease = func([], [OP.local_get, 0, OP.local_get, 1, ...astore(0)]);
+
+  const bytes = [
+    0x00, 0x61, 0x73, 0x6d,
+    0x01, 0x00, 0x00, 0x00,
+    ...section(1, vec(types)),
+    ...section(2, vec(imports)),
+    ...section(3, vec(funcTypes.map((t) => lebU(t)))),
+    ...section(7, vec(exports)),
+    ...section(
+      10,
+      vec([
+        peek8, peek32, peek64, poke8, poke32, fnv, countFrames,
+        submit, poll, wait, release, cancel, loadAcquire, storeRelease,
+      ]),
+    ),
+  ];
+  return new Uint8Array(bytes);
+}
+
+function readLebU(bytes, offset) {
+  let result = 0;
+  let shift = 0;
+  let at = offset;
+  for (;;) {
+    const byte = bytes[at];
+    at += 1;
+    result |= (byte & 0x7f) << shift;
+    if ((byte & 0x80) === 0) return [result >>> 0, at];
+    shift += 7;
+  }
+}
+
+// The code section's function bodies, each as its size-prefixed byte array.
+function extractCodeBodies(wasm) {
+  let at = 8;
+  while (at < wasm.length) {
+    const id = wasm[at];
+    const [size, payload] = readLebU(wasm, at + 1);
+    if (id === 10) {
+      let [count, cursor] = readLebU(wasm, payload);
+      const bodies = [];
+      for (let i = 0; i < count; i += 1) {
+        const [bodySize, bodyStart] = readLebU(wasm, cursor);
+        bodies.push(Array.from(wasm.subarray(cursor, bodyStart + bodySize)));
+        cursor = bodyStart + bodySize;
+      }
+      return bodies;
+    }
+    at = payload + size;
+  }
+  throw new Error("no code section");
+}
+
+/** The v2 shim module bytes (assembled once at import). */
+export const FLATSQL_LINK_SHIM_V2_WASM = buildFlatsqlLinkShimV2Wasm();
+
+/**
+ * Instantiate shim v2 against a lane's shared memory (the reader instance's
+ * `WebAssembly.Memory`, shared).
+ */
+export async function instantiateFlatsqlLinkShimV2(laneMemory) {
+  const { instance } = await WebAssembly.instantiate(FLATSQL_LINK_SHIM_V2_WASM.slice().buffer, {
+    [FLATSQL_ENGINE_IMPORT_MODULE]: { memory: laneMemory },
+  });
+  return instance;
 }

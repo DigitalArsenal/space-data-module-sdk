@@ -103,6 +103,37 @@ export function instantiateFlatsqlLinkShim(
 export function isEngineBodyRefToken(
   token: bigint | number | string,
 ): boolean;
+/** Link shim v2: a mailbox over imported (shared) lane memory. */
+export const FLATSQL_LINK_SHIM_V2_WASM: Uint8Array;
+export function buildFlatsqlLinkShimV2Wasm(): Uint8Array;
+export function instantiateFlatsqlLinkShimV2(
+  laneMemory: WebAssembly.Memory,
+): Promise<WebAssembly.Instance>;
+export const FLATSQL_LINK_MAILBOX_BYTES: number;
+export const FLATSQL_LINK_MAILBOX: Readonly<{
+  STATE: number;
+  SEQ: number;
+  DONE_SEQ: number;
+  OP: number;
+  REQ_PTR: number;
+  REQ_LEN: number;
+  STATUS: number;
+  RESP_PTR: number;
+  RESP_LEN: number;
+  DOORBELL: number;
+  CANCEL: number;
+  FLAGS: number;
+  GENERATION: number;
+}>;
+export const FLATSQL_LINK_STATE: Readonly<{
+  IDLE: number;
+  SUBMITTED: number;
+  CLAIMED: number;
+  DONE: number;
+  SUBMITTING: number;
+}>;
+export const FLATSQL_LINK_PENDING: number;
+export const FLATSQL_LINK_BUSY: number;
 export function readEngineRefEntry(
   view: DataView,
   base: number,

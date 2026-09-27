@@ -25,6 +25,14 @@ export {
   instantiateFlatsqlLinkShim,
   isEngineBodyRefToken,
   readEngineRefEntry,
+  FLATSQL_LINK_SHIM_V2_WASM,
+  buildFlatsqlLinkShimV2Wasm,
+  instantiateFlatsqlLinkShimV2,
+  FLATSQL_LINK_MAILBOX,
+  FLATSQL_LINK_MAILBOX_BYTES,
+  FLATSQL_LINK_STATE,
+  FLATSQL_LINK_PENDING,
+  FLATSQL_LINK_BUSY,
 } from "./flatsqlLinkShim.js";
 // The flow compiler (flow check/compile) is node-only (emception + fs) and
 // ships on the dedicated "./flow/compiler" subpath to keep this barrel
