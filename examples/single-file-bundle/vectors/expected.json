@@ -1,9 +1,9 @@
 {
   "bundleSectionName": "rec.mbl",
-  "baseModuleSha256Hex": "66cd1dedb5aa7902e6998d9e22ad1c3bc1b68d4493656439573e65ada2c3e379",
-  "bundleSha256Hex": "87e6a8c0f8f523c09c0b71668b997f82b9fe5ccf4103e26ee493e7b3d016f366",
-  "bundledModuleSha256Hex": "2fc7733f76a18ae91b957fa0cf4a35dda0a754edc6f52055f1e7b9870522372f",
-  "canonicalModuleHashHex": "e8b5d086f388f1c5e425d22b47129159450c7f3b3a6f5549e6cf2e8483914db6",
+  "baseModuleSha256Hex": "7da7d59212591542ef8b1901d6b8ee333b069dda3ac4759828b7cee8d1696063",
+  "bundleSha256Hex": "be5839c663bc01dcadf044a0f1e1d6eb8eacab0cd673d0c15be0de6fa414f62b",
+  "bundledModuleSha256Hex": "c8aac872c700e84a1c112b555f826e4127533677fea7d5c61bf8848f8fb8ec5e",
+  "canonicalModuleHashHex": "fb3a10ad08805759777f07f06737c25b663500ed0eb3be6287439879bf7ea4ea",
   "manifestHashHex": "2613ffbf9b3b904b8c50b73ca06597004a25f7e06a8535511f76ef9450000c82",
   "manifestPluginId": "com.digitalarsenal.examples.single-file-vector",
   "entryIds": [

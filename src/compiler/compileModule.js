@@ -798,6 +798,11 @@ async function compileWithEmception(options = {}) {
           );
         }
 
+        // The embedded manifest and the invoke bridge get the module source's
+        // own optimization flags. Without them both objects built at -O0 and
+        // every payload byte crossing the bridge (the std::vector copies of
+        // each request and response) cost hundreds of interpreted wasm
+        // instructions. The wasi path already compiles them this way.
         const remainingCommands = [
           [
             "em++",
@@ -806,6 +811,7 @@ async function compileWithEmception(options = {}) {
             "-std=c++17",
             `-I${workDir}`,
             `-I${runtimeIncludeDir}`,
+            ...buildSourceCompilerArgs(compileOptions),
             "-o",
             manifestObjectPath,
           ],
@@ -816,6 +822,7 @@ async function compileWithEmception(options = {}) {
             "-std=c++17",
             `-I${workDir}`,
             `-I${runtimeIncludeDir}`,
+            ...buildSourceCompilerArgs(compileOptions),
             "-o",
             invokeObjectPath,
           ],
@@ -973,13 +980,15 @@ async function compileWithSystemEmscripten(options = {}) {
       linkObjectPath,
     ];
     await runSystemCompiler(sourceCompilerCommand, linkCompileArgs);
+    // Same optimization flags as the module source (see compileWithEmception).
+    // buildSourceCompilerArgs carries -pthread whenever usesPthreadCompileFlags.
     await runSystemCompiler("em++", [
       "-c",
       manifestSourcePath,
       "-std=c++17",
       `-I${tempDir}`,
       `-I${runtimeIncludeDir}`,
-      ...(usesPthreadCompileFlags(compileOptions) ? ["-pthread"] : []),
+      ...buildSourceCompilerArgs(compileOptions),
       "-o",
       manifestObjectPath,
     ]);
@@ -989,7 +998,7 @@ async function compileWithSystemEmscripten(options = {}) {
       "-std=c++17",
       `-I${tempDir}`,
       `-I${runtimeIncludeDir}`,
-      ...(usesPthreadCompileFlags(compileOptions) ? ["-pthread"] : []),
+      ...buildSourceCompilerArgs(compileOptions),
       "-o",
       invokeObjectPath,
     ]);
