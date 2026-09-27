@@ -54,3 +54,14 @@ test("resolveWasmEdgeRunnerBuildPlan derives compiler args from explicit WasmEdg
     plan.compilerArgs.includes(path.resolve("/tmp/shared-wasmedge-runner")),
   );
 });
+
+test("WASI threads build selects the command host while preserving the legacy runner default", () => {
+  const plan = resolveWasmEdgeRunnerBuildPlan({
+    runnerKind: "wasi-threads", outputPath: "/tmp/wasi-command-runner",
+    wasmedgeIncludeDir: "/tmp/wasmedge/include", wasmedgeLibDir: "/tmp/wasmedge/lib",
+  });
+  assert.equal(path.basename(plan.runnerSourcePath), "wasmedge_wasi_threads_runner.c");
+  assert.ok(plan.compilerArgs.includes(plan.runnerSourcePath));
+  assert.ok(plan.compilerArgs.includes("-pthread"));
+  assert.equal(path.basename(resolveWasmEdgeRunnerSourcePath()), "wasmedge_emscripten_pthread_runner.c");
+});

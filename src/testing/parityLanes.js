@@ -214,6 +214,7 @@ export async function runNativeWasmEdgeLane(context) {
           exitDetail,
           stdout: normalized.stdout,
           stderr: normalized.stderr,
+          spawnCount: threaded ? Number(/sdm-wasi-threads: spawned=(\d+)/.exec(normalized.diagnosticText)?.[1] ?? NaN) : null,
           stateFiles: null,
         });
       }
@@ -333,6 +334,7 @@ export async function runDockerWasmEdgeLane(context) {
           exitDetail,
           stdout: normalized.stdout,
           stderr: normalized.stderr,
+          spawnCount: threaded ? Number(/sdm-wasi-threads: spawned=(\d+)/.exec(normalized.diagnosticText)?.[1] ?? NaN) : null,
           stateFiles: null,
         });
       }
@@ -543,6 +545,7 @@ export async function runBrowserLane(context) {
       threadCount: Number(run.threadCount),
       exitClass: String(run.exitClass),
       exitDetail: run.exitDetail ?? null,
+      spawnCount: run.spawnCount ?? null,
       stdout: new Uint8Array(Buffer.from(String(run.stdoutBase64 ?? ""), "base64")),
       stderr: new Uint8Array(Buffer.from(String(run.stderrBase64 ?? ""), "base64")),
       stateFiles: null,

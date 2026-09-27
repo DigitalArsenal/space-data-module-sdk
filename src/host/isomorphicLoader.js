@@ -88,7 +88,7 @@ async function createWasmEdgeCommandHarness(options = {}) {
     entry.module === "wasi" && entry.name === "thread-spawn");
   const command = threaded
     ? await (await import("../testing/buildWasmEdgeRunner.js")).resolveWasmEdgeWasiThreadsRunner(options)
-    : options.wasmEdgeBinary ?? "wasmedge";
+    : options.wasmEdgeRunnerBinary ?? options.wasmEdgeBinary ?? "wasmedge";
   const args = [
     ...(options.enableThreads === false ? [] : ["--enable-threads"]),
     ...Object.entries(options.env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]),

@@ -6,7 +6,7 @@ import process from "node:process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, rename, rm } from "node:fs/promises";
+import { mkdir, readFile, rename, rm } from "node:fs/promises";
 
 const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
@@ -271,11 +271,11 @@ export async function resolveWasmEdgeWasiThreadsRunner(options = {}) {
   const plan = resolveWasmEdgeRunnerBuildPlan({
     ...options, runnerKind: "wasi-threads", outputPath: path.join(os.tmpdir(), "sdm-runner"),
   });
-  const library = await stat(plan.wasmedgeSharedLibraryPath);
   const digest = createHash("sha256")
     .update(await readFile(plan.runnerSourcePath))
+    .update(await readFile(plan.wasmedgeSharedLibraryPath))
     .update(JSON.stringify([process.platform, process.arch, plan.wasmedgeIncludeDir,
-      plan.wasmedgeSharedLibraryPath, library.size, library.mtimeMs]))
+      plan.wasmedgeSharedLibraryPath, plan.compilerCommand, plan.compilerArgs]))
     .digest("hex");
   if (!builds.has(digest)) {
     const build = (async () => {

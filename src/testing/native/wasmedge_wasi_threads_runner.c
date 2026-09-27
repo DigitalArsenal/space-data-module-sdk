@@ -35,6 +35,17 @@ static WasmEdge_String name(const char *s) {
   return WasmEdge_StringWrap(s, (uint32_t)strlen(s));
 }
 
+static uint64_t monotonic_ms(void) {
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  return (uint64_t)now.tv_sec * 1000 + (uint64_t)now.tv_nsec / 1000000;
+}
+
+static bool wait_until(WasmEdge_Async *call, uint64_t deadline) {
+  uint64_t now = monotonic_ms();
+  return WasmEdge_AsyncWaitFor(call, now < deadline ? deadline - now : 0);
+}
+
 static void require_result(const char *step, WasmEdge_Result result) {
   if (!WasmEdge_ResultOK(result)) {
     fprintf(stderr, "wasm trap: %s: %s\n", step,
@@ -68,7 +79,7 @@ static WasmEdge_Result thread_spawn(void *data,
     const WasmEdge_CallingFrameContext *frame, const WasmEdge_Value *in,
     WasmEdge_Value *out) {
   Threads *g = data;
-  out[0] = WasmEdge_ValueGenI32(-1);
+  out[0] = WasmEdge_ValueGenI32(-6); // WASI EAGAIN: caller may retry or run inline.
   pthread_mutex_lock(&g->mutex);
   if (g->closed) goto done;
   reap(g);
@@ -149,6 +160,9 @@ int main(int argc, char **argv) {
            WasmEdge_VersionGet());
     return 0;
   }
+  // WasmEdge's default logger writes to stdout. Guest stdout is binary; all
+  // host diagnostics below are emitted to stderr instead.
+  WasmEdge_LogOff();
   const char **envs = calloc((size_t)argc, sizeof(*envs));
   if (!envs) return 1;
   uint32_t env_count = 0;
@@ -215,13 +229,14 @@ int main(int argc, char **argv) {
   // Exit/trap in any thread ends the whole command. Cancel all executions
   // before releasing shared memory; a stuck cancellation ends this process
   // without freeing objects underneath live native workers.
+  uint64_t deadline = monotonic_ms() + 2000;
   if (!WasmEdge_AsyncWaitFor(main_call, 0)) WasmEdge_AsyncCancel(main_call);
   pthread_mutex_lock(&g.mutex);
   for (size_t i = 0; i < MAX_WORKERS; ++i) {
     if (g.workers[i].async) WasmEdge_AsyncCancel(g.workers[i].async);
   }
   pthread_mutex_unlock(&g.mutex);
-  if (!WasmEdge_AsyncWaitFor(main_call, 2000)) {
+  if (!wait_until(main_call, deadline)) {
     fprintf(stderr, "wasm trap: main cancellation timed out\n");
     fflush(NULL);
     _Exit(1);
@@ -232,7 +247,7 @@ int main(int argc, char **argv) {
   for (size_t i = 0; i < MAX_WORKERS; ++i) {
     Worker *w = &g.workers[i];
     if (!w->async) continue;
-    if (!WasmEdge_AsyncWaitFor(w->async, 2000)) {
+    if (!wait_until(w->async, deadline)) {
       fprintf(stderr, "wasm trap: worker cancellation timed out\n");
       fflush(NULL);
       _Exit(1);

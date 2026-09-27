@@ -58,6 +58,10 @@ export async function createStandaloneHarness(runtimeKind, wasmPath, options = {
       allowRawInvoke: options.allowRawInvoke,
       initialMemoryBytes: options.initialMemoryBytes,
       maximumMemoryBytes: options.maximumMemoryBytes,
+      maxThreads: options.maxThreads,
+      enableBrowserWasiThreads: options.enableBrowserWasiThreads,
+      wasiThreadWorkerUrl: options.wasiThreadWorkerUrl,
+      wasiThreadWorkerBaseUrl: options.wasiThreadWorkerBaseUrl,
     });
   }
 
@@ -65,6 +69,7 @@ export async function createStandaloneHarness(runtimeKind, wasmPath, options = {
     return loadModule({
       wasmSource: resolvedWasmPath,
       runtimeKind: "wasmedge",
+      surface: options.surface ?? "command",
       enableThreads: options.enableThreads ?? false,
       wasmEdgeBinary: options.wasmEdgeBinary,
       wasmEdgeRunnerBinary: options.wasmEdgeRunnerBinary,

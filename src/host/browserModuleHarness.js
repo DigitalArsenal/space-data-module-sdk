@@ -398,38 +398,28 @@ async function instantiateBrowserModule(options = {}) {
     Object.assign(importObject, bridge.imports);
   }
 
-  instance = await WebAssembly.instantiate(options.wasmModule, importObject);
-  memory = instance.exports.memory ?? providedMemory;
-  if (memory) {
-    if (
-      options.sharedMemory === true &&
-      !isSharedArrayBufferLike(memory.buffer)
-    ) {
-      throw new Error(
-        "Browser module harness sharedMemory requires shared WebAssembly.Memory backing.",
-      );
-    }
-    wasi.setMemory(memory);
-  }
-  if (instance.exports._initialize) {
-    instance.exports._initialize();
-  } else if (
-    isThreaded && options.initializeCommand !== false &&
-    typeof instance.exports._start === "function"
-  ) {
-    // wasi-threads artifacts link the wasi command crt (exports `_start`), not a
-    // reactor (`_initialize`). Run `_start` ONCE to execute global constructors
-    // + WASI init before any direct invoke. The module declares no command
-    // surface, so its main is an empty stub — `_start` runs ctors and proc_exit's
-    // out; swallow that exit. Direct-invoke exports remain callable afterward
-    // (the linear memory + globals persist).
-    try {
-      instance.exports._start();
-    } catch (error) {
-      if (!(error instanceof WasiExitError)) {
-        throw error;
+  try {
+    instance = await WebAssembly.instantiate(options.wasmModule, importObject);
+    memory = instance.exports.memory ?? providedMemory;
+    if (memory) {
+      if (
+        options.sharedMemory === true &&
+        !isSharedArrayBufferLike(memory.buffer)
+      ) {
+        throw new Error(
+          "Browser module harness sharedMemory requires shared WebAssembly.Memory backing.",
+        );
       }
+      wasi.setMemory(memory);
     }
+    if (instance.exports._initialize) {
+      instance.exports._initialize();
+    }
+    // Command exports initialize their CRT on entry. Calling _start here would
+    // consume stdin before invocation; direct-only modules use _initialize.
+  } catch (error) {
+    await threadHost?.terminateAll();
+    throw error;
   }
 
   return {
@@ -553,7 +543,6 @@ export async function createBrowserModuleHarness(options = {}) {
 
   const activeContext = await instantiateBrowserModule({
     wasmModule,
-    initializeCommand: false,
     host,
     hostcallDispatch: options.hostcallDispatch,
     args: options.args,
@@ -572,7 +561,7 @@ export async function createBrowserModuleHarness(options = {}) {
     wasiThreadWorkerUrl: options.wasiThreadWorkerUrl,
   });
   const { instance, bridge, wasi, memory, threadHost } = activeContext;
-  let commandWasi = null;
+  let lastCommandContext = null;
   const allowRawInvoke = options.allowRawInvoke !== false;
 
   // --- Invoke helpers ---
@@ -817,7 +806,6 @@ export async function createBrowserModuleHarness(options = {}) {
       wasmModule,
       // Command CRT startup consumes stdin and is not reentrant. Run it only
       // below, after this fresh instance has received the actual request.
-      initializeCommand: false,
       host,
       hostcallDispatch: options.hostcallDispatch,
       args: options.args,
@@ -836,7 +824,7 @@ export async function createBrowserModuleHarness(options = {}) {
       wasiThreadWorkerBaseUrl: options.wasiThreadWorkerBaseUrl,
       wasiThreadWorkerUrl: options.wasiThreadWorkerUrl,
     });
-    commandWasi = commandContext.wasi;
+    lastCommandContext = commandContext;
     try {
       const commandExport = commandContext.instance.exports[DefaultInvokeExports.commandSymbol];
       if (typeof commandExport !== "function") {
@@ -921,11 +909,9 @@ export async function createBrowserModuleHarness(options = {}) {
     return new Uint8Array(memory.buffer, ptr, size).slice();
   }
 
-  function destroy() {
+  async function destroy() {
     wasi.flushOutput();
-    if (threadHost) {
-      void threadHost.terminateAll();
-    }
+    await threadHost?.terminateAll();
   }
 
   return {
@@ -938,12 +924,12 @@ export async function createBrowserModuleHarness(options = {}) {
     module: wasmModule,
     host,
     bridge,
-    get wasi() { return commandWasi ?? wasi; },
+    get wasi() { return lastCommandContext?.wasi ?? wasi; },
     memory,
     // Present only for isomorphic-pthreads (wasi-threads) artifacts: exposes the
     // spawn host so callers can observe real thread activity
     // (spawnCount/distinctOsThreadCount).
-    threadHost,
+    get threadHost() { return lastCommandContext?.threadHost ?? threadHost; },
     callHost,
     invokeDirect,
     invoke,

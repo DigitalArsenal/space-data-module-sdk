@@ -614,6 +614,7 @@ export async function runParityHarness(options = {}) {
       threadCount: run.threadCount,
       exitClass: run.exitClass,
       exitDetail: run.exitDetail ?? null,
+      spawnCount: run.spawnCount ?? null,
       stdoutSha256: sha256Hex(toUint8Array(run.stdout) ?? new Uint8Array(0)),
       stdoutLength: (toUint8Array(run.stdout) ?? new Uint8Array(0)).length,
     })),

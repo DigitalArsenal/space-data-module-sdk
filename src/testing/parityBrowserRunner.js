@@ -91,6 +91,7 @@ export async function runParityPlanInBrowser({ baseUrl = "" } = {}) {
       let stdout = new Uint8Array(0);
       let stderr = new Uint8Array(0);
       let harness = null;
+      let spawnCount = null;
       try {
         // Plaintext hygiene: no per-case copy. createBrowserModuleHarness
         // compiles directly from a caller-supplied buffer without copying it
@@ -117,8 +118,10 @@ export async function runParityPlanInBrowser({ baseUrl = "" } = {}) {
         ({ exitClass, exitDetail } = classifyBrowserError(error));
       } finally {
         stderr = harness?.wasi?.stderr ?? stderr;
+        if (exitClass !== OK) stdout = harness?.wasi?.stdout ?? stdout;
+        spawnCount = harness?.threadHost?.spawnCount() ?? null;
         try {
-          harness?.destroy?.();
+          await harness?.destroy?.();
         } catch {
           /* teardown must never mask the run result */
         }
@@ -128,6 +131,7 @@ export async function runParityPlanInBrowser({ baseUrl = "" } = {}) {
         threadCount,
         exitClass,
         exitDetail,
+        spawnCount,
         stdoutBase64: bytesToBase64(stdout),
         stderrBase64: bytesToBase64(stderr),
       });

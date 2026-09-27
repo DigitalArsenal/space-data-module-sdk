@@ -156,11 +156,54 @@ actually spawns and runs guest threads.
 > **Rule:** Do not claim WasmEdge thread support until a real runtime invocation
 > spawns threads and runs. Compile-time validation (wasi-threads contract +
 > shared memory + atomics) is necessary but not sufficient; runtime thread-spawn
-> verification is owned by the deploy/benchmark node, not by this SDK.
+> verification must exercise the actual host and linked runtime used in deployment.
 
 Record any WasmEdge runtime limitation honestly. An artifact that validates here
 but only compiles — and does not instantiate/spawn threads under the target
 runtime — must be reported as such.
+
+### SDK 0.8.20 command hosts
+
+WasmEdge 0.16.4's CLI enables atomics with `--enable-threads` but does not
+provide `wasi.thread-spawn`. For artifacts importing that function, the SDK's
+native parity lane and `createStandaloneHarness("wasmedge", ...)` automatically
+build and cache the C API command runner from
+`src/testing/native/wasmedge_wasi_threads_runner.c`. The runner links against
+WasmEdge **0.16.4**, uses one executor and shared imported memory, and creates a
+fresh module instance for each `wasi_thread_start(tid, arg)`. It limits live
+workers to 32 and cancels the command group on a worker trap. Guest arguments,
+environment, stdin, stdout and stderr use WASI preview1.
+
+Install the pinned WasmEdge headers and library under `~/.wasmedge`, or set
+`WASMEDGE_INCLUDE_DIR` and `WASMEDGE_LIB_DIR`. An explicit
+`wasmEdgeRunnerBinary` selects a prebuilt command runner. The builder is
+`buildWasmEdgeWasiThreadsRunner` in `src/testing/buildWasmEdgeRunner.js`.
+The Docker parity image compiles the same source and selects it for threaded
+artifacts; artifacts without `wasi.thread-spawn` keep the ordinary CLI path.
+The Docker runner image includes a source digest in its tag to avoid stale
+runner reuse.
+
+The browser command harness runs `_start` exactly once per request, after
+installing stdin. Pthreads share one process input cursor and output buffers,
+as well as argv and environment. Each command owns and terminates its workers.
+The real-browser parity lane runs in an owning worker with a warmed pthread
+pool, enabling blocking `pthread_join` outside the browser's main thread.
+Parity reports include `spawnCount`; requested thread counts alone are not
+evidence of actual spawning.
+
+The regression compiles a real pthread guest, validates distinct binary
+requests, and checks command/direct output and actual spawn counts at 1, 2, 4
+and 8 workers through the SDK parity CLI:
+
+```sh
+SPACE_DATA_MODULE_SDK_ENABLE_WASMEDGE_PARITY=1 \
+SPACE_DATA_MODULE_SDK_ENABLE_TRI_RUNTIME_PARITY=1 \
+node --test test/wasi-threads-command.test.js
+```
+
+The old source path `src/testing/browserModuleHarness.js` remains a pure
+compatibility re-export. New browser consumers should use the public
+`space-data-module-sdk/host/browser-module` entry point.
 
 ## 4. Integrators: the browser worker anchor (REQUIRED when you bundle)
 

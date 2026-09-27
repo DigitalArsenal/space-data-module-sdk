@@ -38,8 +38,9 @@ export class WasiExitError extends Error {
 // Offsets are atomically reserved so concurrent readers/writers never duplicate
 // input or overwrite another thread's output. Overflow is an explicit WASI error.
 export function createSharedWasiProcess({ args = [], env = {}, stdinBytes = [], maxOutputBytes = 16 * 1024 * 1024 } = {}) {
-  const input = new Uint8Array(new SharedArrayBuffer(stdinBytes.length));
-  input.set(stdinBytes);
+  const bytes = new Uint8Array(stdinBytes);
+  const input = new Uint8Array(new SharedArrayBuffer(bytes.length));
+  input.set(bytes);
   return {
     args, env, input,
     control: new Int32Array(new SharedArrayBuffer(5 * 4)),
@@ -163,7 +164,10 @@ export function createBrowserWasiShim(options = {}) {
         count = Math.min(len, stdinBytes.length - offset);
         stdinOffset += count;
       }
-      if (count === 0) break;
+      if (count === 0) {
+        if (offset >= stdinBytes.length) break;
+        continue; // An empty iovec does not mean end of file.
+      }
       bytes.set(stdinBytes.subarray(offset, offset + count), ptr);
       totalRead += count;
     }

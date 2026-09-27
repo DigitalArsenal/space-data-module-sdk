@@ -380,7 +380,7 @@ export async function createWasiThreadSpawn({
             tid,
             startArg,
             hostcallChannel: hostcallChannel ?? null,
-        processState,
+            processState,
           },
         });
         // Node exposes the OS-thread id per Worker — distinct ids are direct
