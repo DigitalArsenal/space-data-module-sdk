@@ -499,6 +499,11 @@ function applyInjectedDivergence(runs, injectDivergence) {
  * @param {string[]} [options.lanes] - subset of PARITY_LANES. Defaults to ALL
  *   THREE. Narrowing is always an explicit caller decision — lanes are never
  *   skipped silently, and a single-lane run can never claim parity.
+ * @param {string} [options.surface] - "direct" runs EVERY lane on the direct
+ *   surface: the browser harness, and the wasi-threads runner with
+ *   --sdm-direct (the WasmEdge CLI has no direct surface, so a single-thread
+ *   artifact cannot be compared on it). Omitted: the browser lane follows
+ *   browserSurface and the WasmEdge lanes run the artifact's default surface.
  * @param {Object} [options.laneRunners] - {laneName: async (context) => runs[]}
  *   override for tests. Default runners come from parityLanes.js.
  * @param {string} [options.injectDivergence] - fire-drill: XOR one output byte
@@ -555,7 +560,8 @@ export async function runParityHarness(options = {}) {
     chromeBinary: options.chromeBinary,
     wasmedgeBinary: options.wasmedgeBinary,
     wasmEdgeRunnerBinary: options.wasmEdgeRunnerBinary,
-    browserSurface: options.browserSurface ??
+    surface: options.surface ?? null,
+    browserSurface: options.browserSurface ?? options.surface ??
       (WebAssembly.Module.exports(await WebAssembly.compile(loadableBytes)).some((entry) => entry.name === "_start") ? "command" : "direct"),
     dockerBinary: options.dockerBinary,
     dockerPlatform: options.dockerPlatform,

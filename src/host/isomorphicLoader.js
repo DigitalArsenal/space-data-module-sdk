@@ -67,8 +67,15 @@ async function createWasmEdgeCommandHarness(options = {}) {
 
   const threaded = inspection.imports.some((entry) =>
     entry.module === "wasi" && entry.name === "thread-spawn");
-  const surface = inspection.exports.includes(DefaultInvokeExports.commandSymbol) ? "command" : "direct";
-  if (surface === "direct" && (!threaded || !inspection.exports.includes(DefaultInvokeExports.invokeSymbol))) {
+  const hasCommand = inspection.exports.includes(DefaultInvokeExports.commandSymbol);
+  const hasDirect = inspection.exports.includes(DefaultInvokeExports.invokeSymbol);
+  // The one-shot wasi-threads runner serves the direct surface of a reactor,
+  // and of a command artifact when the caller asks for it (--sdm-direct): the
+  // module's constructors then run through its initializer export, never main.
+  const surface = hasCommand && !(options.surface === "direct" && threaded && hasDirect)
+    ? "command"
+    : "direct";
+  if (surface === "direct" && (!threaded || !hasDirect)) {
     throw new Error(
       "Standalone WasmEdge loading requires a command-surface artifact with the _start export.",
     );
@@ -91,6 +98,7 @@ async function createWasmEdgeCommandHarness(options = {}) {
   }
 
   const args = [
+    ...(surface === "direct" && hasCommand ? ["--sdm-direct"] : []),
     ...(options.enableThreads === false ? [] : ["--enable-threads"]),
     ...Object.entries(options.env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
     launchWasmPath,

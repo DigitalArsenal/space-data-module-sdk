@@ -400,8 +400,9 @@ export async function createWasiThreadSpawn({
           osThreadIds.add(worker.threadId);
         }
         worker.on("error", (error) => {
-          // A worker crash cannot be surfaced to the guest synchronously; log it
-          // so a hung pthread_join is diagnosable rather than silent.
+          // A worker crash cannot be surfaced to the guest synchronously. The
+          // worker itself writes the fault to stderr first, because this
+          // handler never runs while this thread is blocked in pthread_join.
           // eslint-disable-next-line no-console
           console.error("[wasi-thread] worker error:", error);
         });

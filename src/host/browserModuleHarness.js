@@ -297,6 +297,28 @@ function resolveManifestSurface(manifest) {
   return null;
 }
 
+// Run the module's initializer, once per instance, before any direct call.
+// A reactor exports `_initialize` (constructors + WASI init) and runs it on
+// every instance, as before. A command artifact runs its constructors inside
+// `_start`, which then runs main and consumes stdin, so a command instance
+// only ever enters `_start`. An instance that serves the DIRECT surface of a
+// command artifact runs the artifact's `__wasm_call_ctors` export instead:
+// constructors (and main-thread setup) without main. Artifacts built before
+// that export existed have no constructor entry a host can call without main;
+// their direct surface stays uninitialized in every runtime alike.
+function initializeInstance(instance, directSurface) {
+  const exports = instance.exports;
+  const reactorInitialize = exports[DefaultInvokeExports.reactorInitializeSymbol];
+  if (typeof reactorInitialize === "function") {
+    reactorInitialize();
+    return;
+  }
+  const constructors = exports[DefaultInvokeExports.constructorsSymbol];
+  if (directSurface && typeof constructors === "function") {
+    constructors();
+  }
+}
+
 async function instantiateBrowserModule(options = {}) {
   let providedMemory = options.wasmMemory ?? options.memory ?? null;
   if (
@@ -412,11 +434,7 @@ async function instantiateBrowserModule(options = {}) {
       }
       wasi.setMemory(memory);
     }
-    if (instance.exports._initialize) {
-      instance.exports._initialize();
-    }
-    // Command exports initialize their CRT on entry. Calling _start here would
-    // consume stdin before invocation; direct-only modules use _initialize.
+    initializeInstance(instance, options.directSurface === true);
   } catch (error) {
     await threadHost?.terminateAll();
     throw error;
@@ -543,6 +561,7 @@ export async function createBrowserModuleHarness(options = {}) {
 
   const activeContext = await instantiateBrowserModule({
     wasmModule,
+    directSurface: surface === "direct",
     host,
     hostcallDispatch: options.hostcallDispatch,
     args: options.args,

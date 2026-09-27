@@ -2790,6 +2790,8 @@ export const DefaultInvokeExports: {
   allocSymbol: string;
   freeSymbol: string;
   commandSymbol: string;
+  reactorInitializeSymbol: string;
+  constructorsSymbol: string;
 };
 
 export const DrainPolicy: {

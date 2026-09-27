@@ -216,6 +216,49 @@ SPACE_DATA_MODULE_SDK_ENABLE_TRI_RUNTIME_PARITY=1 \
 node --test test/wasi-threads-command.test.js
 ```
 
+### SDK 0.8.21: constructors on the direct surface
+
+An artifact built with both the `direct` and the `command` surface links the
+WASI command runtime. Its `_start` sets up the main thread's pthread descriptor,
+runs the global constructors, then runs `main`, which reads stdin. A host that
+serves the direct surface never enters `_start`. From 0.8.21 such an artifact
+also exports `__wasm_call_ctors`: the same descriptor setup and constructors,
+without `main`, at most once per instance. Reactors keep `_initialize`.
+
+A direct host runs `_initialize` if the module exports it, otherwise
+`__wasm_call_ctors`, once per instance, before the first direct call. The
+browser harness does this for `surface: "direct"`; a command instance only
+enters `_start`. The wasi-threads runner serves the direct surface of a command
+artifact with `--sdm-direct`, selected by
+`createStandaloneHarness("wasmedge", path, { surface: "direct" })` and by
+`runParityHarness({ surface: "direct" })`. The SDN node uses the same order.
+
+Artifacts built with 0.8.20 or earlier have no such export. On their direct
+surface the constructors never run, in every runtime, and a threaded artifact's
+main thread has no pthread descriptor, so a recursive mutex held by the main
+thread does not exclude other threads. Rebuild them with 0.8.21.
+
+```sh
+SPACE_DATA_MODULE_SDK_ENABLE_WASMEDGE_PARITY=1 \
+SPACE_DATA_MODULE_SDK_ENABLE_TRI_RUNTIME_PARITY=1 \
+node --test test/direct-call-constructors.test.js
+```
+
+### Guest thread faults
+
+A guest thread that traps never finishes the pthread exit protocol. WasmEdge
+cancels the whole command. In the browser and Node harnesses the joining thread
+stays blocked inside the guest and cannot run the worker's error event, so the
+worker itself writes `[wasi-thread] guest thread N trapped: ...` to stderr
+(Node) or the console (browser). The call still does not return.
+
+V8 (Node 20 to 25) checks bulk memory operations, and every access when the
+WebAssembly trap handler is off (Node on Linux arm64), against a per-instance
+copy of a shared memory's size. That copy is refreshed asynchronously after
+another thread grows the memory, so a thread that writes into memory another
+thread has just grown can trap with "memory access out of bounds". An initial
+memory that covers the call's peak use avoids the growth.
+
 The old source path `src/testing/browserModuleHarness.js` remains a pure
 compatibility re-export. New browser consumers should use the public
 `space-data-module-sdk/host/browser-module` entry point.

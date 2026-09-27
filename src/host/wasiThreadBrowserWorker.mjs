@@ -38,6 +38,9 @@ self.onmessage = (event) => {
     instance.exports.wasi_thread_start(message.tid, message.startArg);
   } catch (error) {
     if (!(error && error.name === "WasiExitError")) {
+      // The thread that joins this one may be blocked in the guest and never
+      // handle the message below; report the fault from this worker as well.
+      console.error(`[wasi-thread] guest thread ${message.tid} trapped:`, error);
       self.postMessage({
         t: "error",
         tid: message.tid,

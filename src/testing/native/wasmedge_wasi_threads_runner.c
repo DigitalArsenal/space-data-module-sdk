@@ -150,9 +150,12 @@ static WasmEdge_ModuleInstanceContext *memory_import(Threads *g) {
   return env;
 }
 
-// Reactor artifacts use the same PIV request/response bytes as commands. Stage
-// the request through the public allocator, then monitor the direct call with
-// the same worker-group lifecycle as _start. No guest ABI is reimplemented.
+// Direct calls use the same PIV request/response bytes as commands. Stage the
+// request through the public allocator, then monitor the direct call with the
+// same worker-group lifecycle as _start. No guest ABI is reimplemented. The
+// module initializes first, once: a reactor through _initialize, a command
+// artifact serving the direct surface through __wasm_call_ctors (its _start
+// would run main).
 static uint32_t stage_direct_request(Threads *g,
     WasmEdge_ModuleInstanceContext *instance,
     WasmEdge_MemoryInstanceContext *memory, WasmEdge_Value args[3]) {
@@ -171,6 +174,7 @@ static uint32_t stage_direct_request(Threads *g,
   }
   const WasmEdge_FunctionInstanceContext *init =
       WasmEdge_ModuleInstanceFindFunction(instance, name("_initialize"));
+  if (!init) init = WasmEdge_ModuleInstanceFindFunction(instance, name("__wasm_call_ctors"));
   if (init) require_result("initialize", WasmEdge_ExecutorInvoke(g->executor, init, NULL, 0, NULL, 0));
   const WasmEdge_FunctionInstanceContext *alloc =
       WasmEdge_ModuleInstanceFindFunction(instance, name("plugin_alloc"));
@@ -224,10 +228,12 @@ int main(int argc, char **argv) {
   if (!envs) return 1;
   uint32_t env_count = 0;
   bool stats = false;
+  bool force_direct = false;
   int first = 1;
   for (; first < argc; ++first) {
     if (strcmp(argv[first], "--enable-threads") == 0) continue;
     if (strcmp(argv[first], "--sdm-thread-stats") == 0) { stats = true; continue; }
+    if (strcmp(argv[first], "--sdm-direct") == 0) { force_direct = true; continue; }
     if (strcmp(argv[first], "--env") == 0 && first + 1 < argc) {
       envs[env_count++] = argv[++first];
       continue;
@@ -235,7 +241,7 @@ int main(int argc, char **argv) {
     break;
   }
   if (first >= argc || argv[first][0] == '-') {
-    fprintf(stderr, "usage: %s [--env NAME=VALUE] module.wasm [args...]\n", argv[0]);
+    fprintf(stderr, "usage: %s [--sdm-direct] [--env NAME=VALUE] module.wasm [args...]\n", argv[0]);
     free(envs);
     return 2;
   }
@@ -269,7 +275,9 @@ int main(int argc, char **argv) {
   WasmEdge_ModuleInstanceContext *instance = NULL;
   require_result("instantiate", WasmEdge_ExecutorInstantiate(
       g.executor, &instance, g.store, g.ast));
-  const WasmEdge_FunctionInstanceContext *start =
+  // --sdm-direct serves the direct surface of an artifact that also has a
+  // command entry; a reactor (no _start) is always served directly.
+  const WasmEdge_FunctionInstanceContext *start = force_direct ? NULL :
       WasmEdge_ModuleInstanceFindFunction(instance, name("_start"));
   bool direct = start == NULL;
   WasmEdge_Value direct_args[3], response_pointer;

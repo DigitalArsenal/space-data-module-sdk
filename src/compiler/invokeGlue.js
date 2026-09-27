@@ -302,6 +302,43 @@ function renderMethodDescriptors(methods) {
     .join("\n");
 }
 
+// Direct-surface initializer for command-model artifacts (wasi toolchains).
+//
+// A command artifact links crt1-command: its _start sets up the main-thread
+// descriptor (__wasi_init_tp, threads sysroot) and runs the global
+// constructors, then main. A host that serves the direct surface never enters
+// _start, so without this entry namespace-scope C++ objects stay zero-filled
+// and the main thread has no pthread descriptor. It is exported under the
+// conventional __wasm_call_ctors name that direct hosts call when a module has
+// no reactor _initialize. It runs once per instance and is a no-op on an
+// instance whose constructors have already run.
+const COMMAND_DIRECT_INITIALIZER_SOURCE = `#if defined(__wasi__)
+extern "C" void __wasm_call_ctors(void);
+extern "C" __attribute__((weak)) void __wasi_init_tp(void);
+
+namespace {
+// volatile: the optimizer would otherwise evaluate the marking constructor at
+// compile time and emit the flag as already set.
+volatile int g_sdm_constructors_ran = 0;
+
+__attribute__((constructor)) void MarkConstructorsRan() {
+  __atomic_store_n(&g_sdm_constructors_ran, 1, __ATOMIC_SEQ_CST);
+}
+}  // namespace
+
+extern "C" __attribute__((export_name("__wasm_call_ctors")))
+void sdm_command_direct_initialize(void) {
+  if (__atomic_exchange_n(&g_sdm_constructors_ran, 1, __ATOMIC_SEQ_CST) != 0) {
+    return;
+  }
+  if (__wasi_init_tp) {
+    __wasi_init_tp();
+  }
+  __wasm_call_ctors();
+}
+#endif
+`;
+
 export function generateInvokeSupportSource({ manifest = {}, includeCommandMain = true } = {}) {
   const methods = Array.isArray(manifest.methods) ? manifest.methods : [];
   return `#include <algorithm>
@@ -1812,6 +1849,7 @@ extern "C" uint32_t plugin_invoke_stream(
   return response_ptr;
 }
 
+${includeCommandMain ? COMMAND_DIRECT_INITIALIZER_SOURCE : ""}
 ${includeCommandMain
     ? `int main(int argc, char **argv) {
   const char *shortcut_method = nullptr;

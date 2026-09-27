@@ -74,4 +74,10 @@ export const DefaultInvokeExports = Object.freeze({
   allocSymbol: "plugin_alloc",
   freeSymbol: "plugin_free",
   commandSymbol: "_start",
+  // Direct-surface initialization. A reactor exports `_initialize`; a command
+  // artifact that also serves the direct surface exports `__wasm_call_ctors`
+  // (its `_start` would run main). A direct host calls the first one present,
+  // once per instance, before the first direct call.
+  reactorInitializeSymbol: "_initialize",
+  constructorsSymbol: "__wasm_call_ctors",
 });

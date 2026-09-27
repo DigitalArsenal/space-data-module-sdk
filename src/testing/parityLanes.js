@@ -130,6 +130,21 @@ function wasmedgeInvocationArgs(planCase, plan, threadCount) {
   return args;
 }
 
+// Runner flags that select the surface. Only the wasi-threads runner serves the
+// direct surface of an artifact with a command entry; the WasmEdge CLI runs
+// `_start` or nothing, so a direct-surface comparison on it would silently
+// compare two different surfaces.
+function surfaceArgs(context, threaded, lane) {
+  if (context.surface !== "direct") return [];
+  if (!threaded) {
+    throw new Error(
+      `${lane}: the WasmEdge CLI serves only the command surface of a single-thread artifact; ` +
+        "it cannot take part in a direct-surface parity run.",
+    );
+  }
+  return ["--sdm-direct"];
+}
+
 async function stageModuleWorkdir(context, label) {
   const workdir = await mkdtemp(path.join(os.tmpdir(), `sdm-parity-${label}-`));
   // Stage the canonical loadable bytes (publication records stripped by the
@@ -183,6 +198,7 @@ export async function runNativeWasmEdgeLane(context) {
     `native binary ${binary}`,
   );
 
+  const directArgs = surfaceArgs(context, threaded, "native WasmEdge lane");
   const workdir = await stageModuleWorkdir(context, "native");
   const runs = [];
   try {
@@ -191,6 +207,7 @@ export async function runNativeWasmEdgeLane(context) {
         const outcome = await spawnWithStdin(
           binary,
           [...(threaded ? ["--sdm-thread-stats"] : []),
+            ...directArgs,
             ...wasmedgeInvocationArgs(planCase, context.plan, threadCount)],
           {
             cwd: workdir,
@@ -288,6 +305,7 @@ export async function runDockerWasmEdgeLane(context) {
       `docker WasmEdge lane: cannot execute "${dockerBinary}" (${error.message}).`,
     );
   }
+  const directArgs = surfaceArgs(context, threaded, "docker WasmEdge lane");
   const image = await ensureDockerParityImage(context);
 
   const workdir = await stageModuleWorkdir(context, "docker");
@@ -313,6 +331,7 @@ export async function runDockerWasmEdgeLane(context) {
         dockerArgs.push(
           image,
           ...(threaded ? ["--sdm-thread-stats"] : []),
+          ...directArgs,
           ...wasmedgeInvocationArgs(planCase, context.plan, threadCount),
         );
         const outcome = await spawnWithStdin(dockerBinary, dockerArgs, {
