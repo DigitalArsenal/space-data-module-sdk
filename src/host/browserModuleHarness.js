@@ -410,7 +410,10 @@ async function instantiateBrowserModule(options = {}) {
   }
   if (instance.exports._initialize) {
     instance.exports._initialize();
-  } else if (isThreaded && typeof instance.exports._start === "function") {
+  } else if (
+    isThreaded && options.initializeCommand !== false &&
+    typeof instance.exports._start === "function"
+  ) {
     // wasi-threads artifacts link the wasi command crt (exports `_start`), not a
     // reactor (`_initialize`). Run `_start` ONCE to execute global constructors
     // + WASI init before any direct invoke. The module declares no command
@@ -547,6 +550,7 @@ export async function createBrowserModuleHarness(options = {}) {
 
   const activeContext = await instantiateBrowserModule({
     wasmModule,
+    initializeCommand: surface !== "command",
     host,
     hostcallDispatch: options.hostcallDispatch,
     args: options.args,
@@ -561,8 +565,11 @@ export async function createBrowserModuleHarness(options = {}) {
     maxThreads: options.maxThreads,
     threadHostcallChannel: options.threadHostcallChannel,
     enableBrowserWasiThreads: options.enableBrowserWasiThreads,
+    wasiThreadWorkerBaseUrl: options.wasiThreadWorkerBaseUrl,
+    wasiThreadWorkerUrl: options.wasiThreadWorkerUrl,
   });
   const { instance, bridge, wasi, memory, threadHost } = activeContext;
+  let commandWasi = null;
   const allowRawInvoke = options.allowRawInvoke !== false;
 
   // --- Invoke helpers ---
@@ -805,6 +812,9 @@ export async function createBrowserModuleHarness(options = {}) {
   async function invokeCommandRaw(stdinBytes) {
     const commandContext = await instantiateBrowserModule({
       wasmModule,
+      // Command CRT startup consumes stdin and is not reentrant. Run it only
+      // below, after this fresh instance has received the actual request.
+      initializeCommand: false,
       host,
       hostcallDispatch: options.hostcallDispatch,
       args: options.args,
@@ -820,7 +830,10 @@ export async function createBrowserModuleHarness(options = {}) {
       maxThreads: options.maxThreads,
       threadHostcallChannel: options.threadHostcallChannel,
       enableBrowserWasiThreads: options.enableBrowserWasiThreads,
+      wasiThreadWorkerBaseUrl: options.wasiThreadWorkerBaseUrl,
+      wasiThreadWorkerUrl: options.wasiThreadWorkerUrl,
     });
+    commandWasi = commandContext.wasi;
     try {
       const commandExport = commandContext.instance.exports[DefaultInvokeExports.commandSymbol];
       if (typeof commandExport !== "function") {
@@ -833,6 +846,8 @@ export async function createBrowserModuleHarness(options = {}) {
       if (!(error instanceof WasiExitError) || error.code !== 0) {
         throw error;
       }
+    } finally {
+      await commandContext.threadHost?.terminateAll();
     }
     return commandContext.wasi.stdout;
   }
@@ -920,7 +935,7 @@ export async function createBrowserModuleHarness(options = {}) {
     module: wasmModule,
     host,
     bridge,
-    wasi,
+    get wasi() { return commandWasi ?? wasi; },
     memory,
     // Present only for isomorphic-pthreads (wasi-threads) artifacts: exposes the
     // spawn host so callers can observe real thread activity
