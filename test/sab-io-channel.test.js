@@ -108,6 +108,19 @@ function newMemory(pages = 256) {
   return new WebAssembly.Memory({ initial: pages, maximum: 4096, shared: true });
 }
 
+// Resolves once at least `ms` have passed on performance.now(), the clock the
+// I/O trace measures with. A bare setTimeout(ms) can fire up to 1 ms early
+// against that clock, because timers run on libuv's whole-millisecond loop
+// time. A 1000 ms open once traced at 999.8 ms that way. The guest's traced
+// interval contains this one, so a delay of `ms` here is at least `ms` in the
+// trace.
+async function delayAtLeast(ms) {
+  const until = performance.now() + ms;
+  for (let left = ms; left > 0; left = until - performance.now()) {
+    await new Promise((resolve) => setTimeout(resolve, Math.ceil(left)));
+  }
+}
+
 // A backend wrapper that delays opens of matching paths (a slow getFileHandle)
 // and slows each write call (a slow storage write) — the hazards the design's
 // acceptance items are about.
@@ -116,7 +129,7 @@ function hazardBackend(inner, { openDelay = null, writeBusyMs = 0 } = {}) {
     kind: "hazard",
     async openFile(path, components, flags) {
       if (openDelay && openDelay.pattern.test(path)) {
-        await new Promise((resolve) => setTimeout(resolve, openDelay.ms));
+        await delayAtLeast(openDelay.ms);
       }
       const file = inner.openFile(path, components, flags);
       if (!writeBusyMs) return file;
