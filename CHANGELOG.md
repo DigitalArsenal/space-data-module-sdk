@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.24
+
+Compiles stop filling the temp dir. One workstation had collected 497
+per-process emception copies (about 159 MB each) and 647 compile dirs, about
+79 GB.
+
+- `compileModuleFromSource` removes its `space-data-module-sdk-compile-*` dir
+  before it returns or throws. With `keepTempDir: true` a successful compile
+  keeps it: `result.tempDir` is set and `cleanupCompilation(result)` frees it,
+  as before. A failed compile always removes it.
+- Behavior change: with neither `outputPath` nor `keepTempDir`,
+  `result.outputPath` and `result.tempDir` are `null`. Use `result.wasmBytes`.
+  A build that reads files from `result.tempDir`, such as the intermediate
+  `plugin-invoke-bridge.o`, must pass `keepTempDir: true`.
+- The patched emception tree is one shared root per user,
+  `<tmpdir>/space-data-module-sdk-emception-node-v1-<version>-<fingerprint>-u<uid>`,
+  instead of a copy per process that was never removed. The key covers the
+  patch, the `sdn-emception` version and a sha256 of its files. The root is
+  built in a staging dir and renamed into place, so concurrent processes
+  share it safely. A root that fails its content check is rebuilt.
+- Dirs left by 0.8.23 and earlier (`space-data-module-sdk-emception-node-<pid>`
+  and `space-data-module-sdk-compile-*`) are not removed automatically.
+
 ## 0.8.23
 
 - The emcc single-thread lane (emception, and system Emscripten for
