@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.8.25
+
+One invoke can start more wasi-threads than the pool holds, and any guest
+thread can start threads. Conjunction screening spawns a coarse wave and then a
+refine wave of threads in one call. With a browser pool of 8 and waves of 5, the
+second wave's spawn was declined and `std::thread` aborted with `unreachable`.
+
+- Browser and Node share one pool protocol, `src/host/wasiThreadPool.js`: a
+  `SharedArrayBuffer` with a slot per worker. A pool worker blocks on its slot
+  between threads. A spawner on any thread claims an idle slot, writes the tid
+  and start argument, and notifies it. The worker frees the slot when
+  `wasi_thread_start` returns. No step needs an event loop. Through 0.8.24 a
+  browser worker was sent each thread by message and went idle only when the
+  spawner, which is blocked in the guest for the whole invoke, handled its
+  `{t:"exit"}`. One invoke could therefore spawn at most `poolSize` threads in
+  total. A pool now bounds how many threads run at once.
+- Node reuses its workers. Through 0.8.24 it started a worker per spawn, and a
+  finished worker was only joined and uncounted on the blocked event loop. So
+  an explicit `poolSize` had the browser's limit, and a guest that started
+  thousands of threads kept thousands of workers. The pool now grows on demand,
+  to `poolSize` or to 1024 workers without one, from whichever thread spawns.
+  Idle workers do not keep the process alive. Measured: 14,000 threads in one
+  invoke ran on 7 workers.
+- A guest thread's `wasi.thread-spawn` is the pool's. Through 0.8.24 a spawn
+  from any thread but the main one returned -1.
+- A spawn that finds every worker busy waits up to `spawnWaitMs` (default
+  250 ms) for one to finish before `wasi.thread-spawn` returns -1. Node waits at
+  most 2 ms, then starts a worker if it has room. The wait covers a joined
+  thread whose worker has not yet returned; measured in headless Chromium it is
+  0 to 30 µs. After one wait runs out, later spawns from that thread are
+  declined at once until a thread finishes. `spawnWaitMs: 0` never waits.
+- `spawnReport()` counts spawns from every thread and adds `waited` (and
+  `workers` in Node). `onSpawnDeclined` fires for the owning thread's spawns. A
+  Node worker started by a guest thread reports a guest fault on stderr only.
+- A guest thread that traps retires its worker.
+- The browser harness passes `wasiThreadSpawnWaitMs` and `wasiThreadPoolSize`
+  through to `createWasiThreadSpawn` (`spawnWaitMs`, `poolSize`).
+- `nodeSyncFsIo` with `root: "/"` (or another filesystem root) reaches the
+  paths under it. It returned `ACCESS` for every path, because the containment
+  check compared against `"//"`.
+- The worker scripts changed (`wasiThreadBrowserWorker.mjs`,
+  `wasiThreadWorker.mjs`, the `wasi-thread-pool` blob bundle), and the browser
+  worker now imports `wasiThreadPool.js`, which the served host directory must
+  include. A bundle that inlines the SDK host must be rebuilt against 0.8.25. A
+  browser worker script from an older SDK still works with a 0.8.25 host, with
+  the old limit.
+- Tests: `test/wasi-thread-pool-reuse.test.js` covers the protocol. In
+  `test/wasi-thread-pool-reuse-guest.test.js` a guest spawns, in one invoke, 3
+  waves of `poolSize - 1` threads, 3 waves of `poolSize`, and 3 waves spawned by
+  a non-main guest thread. It runs in Node, in headless Chromium, Firefox and
+  WebKit, and across the three parity lanes; the browser and parity runs are
+  env-gated. The T9 browser scenario #3 now passes `spawnWaitMs: 0`: its 7th
+  spawn comes while all six threads run.
+
 ## 0.8.24
 
 Compiles stop filling the temp dir. One workstation had collected 497
