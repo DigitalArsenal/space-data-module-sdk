@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.23
+
+- The emcc single-thread lane (emception, and system Emscripten for
+  `sharedMemory` builds) compiles the generated invoke bridge and the embedded
+  manifest with the module source's own flags (`-O3 -mbulk-memory -DNDEBUG`).
+  Every earlier release built both objects at `-O0`. The bridge copies every
+  request and response payload. Measured under the WasmEdge 0.16.4
+  interpreter on an echo module, a payload byte that goes in on stdin and
+  comes back on stdout cost 878 wasm instructions before this change and
+  about 2 after it. That is roughly 285 per request byte and 565 per
+  response byte before.
+- The wasi-sequential and wasi-threads lanes already used these flags and are
+  unchanged.
+- Artifact bytes change for every emcc-lane module, so rebuild those modules
+  with 0.8.23. The single-file bundle vectors are regenerated for the same
+  reason.
+
 ## 0.8.22
 
 Host I/O for the FlatSQL partition store (docs/isomorphic-pthreads.md §5).
