@@ -178,6 +178,20 @@ test("paths escaping the root, including through a planted symlink, are ACCESS",
   });
 });
 
+test("a root of \"/\" reaches every path under it", async () => {
+  await withRoot(async (dir) => {
+    // "/" + path.sep was "//", so every path under a filesystem root was ACCESS.
+    const root = path.parse(dir).root;
+    const io = createNodeSyncFsIo({ root, table: createNodeSyncFsIoTable() });
+    const relative = path.relative(root, path.join(dir, "under-root", "file.bin"));
+    const h = io.open(relative, RWC | FLATSQL_IO_CREATE_PARENTS);
+    assert.ok(h >= 0, `open under ${root} returned ${h}`);
+    assert.equal(io.writeFrom(h, encoder.encode("rooted"), 0), 6);
+    assert.equal(io.close(h), 0);
+    assert.equal(fs.readFileSync(path.join(dir, "under-root", "file.bin"), "utf8"), "rooted");
+  });
+});
+
 test("revocation (A23): calls after revoke return ACCESS and nothing of the instance is written afterwards", async () => {
   await withRoot(async (root) => {
     const table = createNodeSyncFsIoTable();

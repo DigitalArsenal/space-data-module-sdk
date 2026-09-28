@@ -2019,6 +2019,11 @@ export function createBrowserModuleHarness(options?: {
   // Upper bound on guest wasi-threads spawns; sizes the browser warm worker
   // pool (defaults to hardware concurrency). No effect on a non-threaded guest.
   maxThreads?: number;
+  // How long a guest spawn that finds every pooled thread busy waits for one to
+  // finish before pthread_create fails (createWasiThreadSpawn spawnWaitMs).
+  wasiThreadSpawnWaitMs?: number;
+  // Explicit wasi-threads pool size (createWasiThreadSpawn poolSize).
+  wasiThreadPoolSize?: number;
   // Request-isolated BroadcastChannel descriptor a nested pthread hostcall
   // dispatches over; supplied by createWorkerModuleHarness for the in-worker
   // harness instance, not something a top-level caller usually sets by hand.
@@ -2393,11 +2398,15 @@ export interface WasiThreadSpawnReport {
   armed: number;
   failedToArm: number;
   spawned: number;
+  /** Spawns that found every pool thread busy and got one by waiting (spawnWaitMs). */
+  waited: number;
   declined: number;
   declinedByReason: Record<string, number>;
   lastDeclineReason: string | null;
   active: number;
   idle?: number;
+  /** Node: pool workers started (each its own OS thread). */
+  workers?: number;
 }
 export function isWasiThreadsModule(wasmModule: WebAssembly.Module): boolean;
 export function createWasiThreadSpawn(options: {
@@ -2417,6 +2426,12 @@ export function createWasiThreadSpawn(options: {
   browserWorkerBaseUrl?: string | URL;
   browserWorkerUrl?: string | URL;
   browserWorkerType?: "module" | "classic";
+  /**
+   * How long a spawn that finds every pool thread busy waits for one to
+   * finish before it is declined. Default 250; 0 never waits. A Node pool
+   * with room to grow waits at most 2 ms, then starts another worker.
+   */
+  spawnWaitMs?: number;
 }): Promise<{
   threadSpawn(startArg: number): number;
   activeThreadCount(): number;

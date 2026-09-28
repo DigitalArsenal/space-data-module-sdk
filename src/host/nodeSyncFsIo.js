@@ -198,8 +198,10 @@ export function createNodeSyncFsIo(options = {}) {
 
   const call = (op, fn, ...args) => interpose(op, fn, args);
 
+  // A filesystem root ("/", "C:\\") already ends with the separator.
   function within(candidate, base) {
-    return candidate === base || candidate.startsWith(base + path.sep);
+    const prefix = base.endsWith(path.sep) ? base : base + path.sep;
+    return candidate === base || candidate.startsWith(prefix);
   }
 
   function resolvePath(relative) {

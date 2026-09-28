@@ -540,6 +540,10 @@ async function scenarioPoolSize() {
       instanceId: 1,
       enableBrowserThreads: true,
       probeTimeoutMs: 10_000,
+      // The 7th spawn comes while all six threads run. Since 0.8.25 a spawn
+      // waits up to spawnWaitMs for a thread to finish; these finish within
+      // it, so the default wait would hand the 7th spawn a worker.
+      spawnWaitMs: 0,
       browserWorkerUrl: hostWorkerBundleUrl("wasi-thread-pool"),
       browserWorkerType: "classic",
       onSpawnDeclined: (event) => declined.push(event),

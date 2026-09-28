@@ -42,6 +42,7 @@ const HOST_SRC = path.join(HOST_DIR, "wasiThreadHost.js");
 const WORKER_CHAIN = [
   "wasiThreadBrowserWorker.mjs",
   "wasiThreadWorkerRuntime.js",
+  "wasiThreadPool.js",
 ];
 
 const SHARED_MEMORY = { buffer: new SharedArrayBuffer(64) };

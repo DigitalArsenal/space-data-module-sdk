@@ -67,6 +67,10 @@ function createThreadHostcallDispatch(options) {
  * (flatsqlIoImports.js). Factories run once per worker, so each worker owns its
  * own resources (for flatsql-io: its own request-ring slot). `ctx` is
  * `{ memory, getMemory, tid, workerIndex }`.
+ *
+ * `threadSpawn` is this thread's `wasi.thread-spawn`: the pool's spawn
+ * (wasiThreadPool.js), so a guest thread can start threads of its own. Without
+ * one, a spawn from this thread returns -1.
  */
 export function createWasiThreadWorkerRuntime({
   wasmModule,
@@ -76,6 +80,7 @@ export function createWasiThreadWorkerRuntime({
   extraImports,
   workerIndex,
   tid,
+  threadSpawn,
 } = {}) {
   const wasi = createBrowserWasiShim({ processState });
   wasi.setMemory(memory);
@@ -84,7 +89,7 @@ export function createWasiThreadWorkerRuntime({
   const imports = {
     ...wasi.imports,
     env: { memory },
-    wasi: { "thread-spawn": () => -1 },
+    wasi: { "thread-spawn": typeof threadSpawn === "function" ? threadSpawn : () => -1 },
   };
 
   if (requiresHostcallBridge(wasmModule)) {

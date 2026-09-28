@@ -261,6 +261,83 @@ synchronizing with the growing thread. The guest's allocator uses the heap the
 artifact was linked with and then grows the memory, so a larger imported initial
 memory does not prevent it.
 
+### SDK 0.8.25: one pool protocol; threads reused within an invoke; spawns from any thread
+
+A guest runs `pthread_create` through `pthread_join` without yielding the
+spawning thread's event loop, often for a whole invoke that spawns wave after
+wave of threads (conjunction screening spawns a coarse wave, then a refine
+wave), and any guest thread may call `pthread_create`. Through 0.8.24:
+
+- a pooled browser worker was sent each thread by message and went back to
+  idle only when the spawner handled its `{t:"exit"}` message, which could not
+  happen until the invoke returned. One invoke could spawn at most `poolSize`
+  threads in total, however few ran at once, and a guest that spawned more got
+  `EAGAIN` (`std::thread` aborts with `unreachable`);
+- Node started a worker per spawn. Its live-thread count and the join of a
+  finished worker waited for `exit` events on the blocked event loop, so an
+  explicit `poolSize` had the same limit, and a guest that started thousands of
+  threads kept thousands of finished workers;
+- a spawn from a guest thread other than the main thread always returned -1.
+
+From 0.8.25 both runtimes share one pool protocol (`src/host/wasiThreadPool.js`),
+a `SharedArrayBuffer` every thread of the process holds: a tid counter, spawn
+counters, and per worker a slot (`PENDING`, `IDLE`, `CLAIMED`, `ASSIGNED`,
+`RUNNING`, `RETIRED`, plus the tid and start argument). A pool worker blocks on
+its slot between threads. A spawner on any thread claims an `IDLE` slot with a
+compare-exchange, writes the tid and argument, marks it `ASSIGNED` and notifies
+it. The worker runs `wasi_thread_start`, then marks the slot `IDLE` and bumps a
+release generation that waiting spawners sleep on. No step needs an event loop,
+so:
+
+- a pool bounds how many threads run **at the same time**, not how many one
+  invoke may start (measured: 14,000 threads in one invoke ran on 7 Node
+  workers);
+- every guest thread's own `wasi.thread-spawn` is the pool's, so a guest thread
+  can start threads of its own;
+- Node reuses its workers. With no `poolSize` it grows the pool to at most 1024
+  workers; with one, to `poolSize`. A spawn that finds every worker busy waits
+  up to 2 ms for one to come free, then starts a new worker from the spawning
+  thread, which may itself be a pool worker (a Node worker starts without its
+  parent's event loop). Idle workers do not keep the process alive;
+- the browser keeps its pre-started warm pool (a browser worker cannot start
+  while its parent is blocked). Its workers now serve their slots and never
+  return to their event loop after the probe.
+
+A joined thread's worker is still a few instructions from returning when the
+joiner wakes, so a wave spawned right after a join can find the pool busy for a
+moment (measured in headless Chromium: 0 to 30 µs). A spawn that finds every
+thread busy and cannot grow the pool therefore waits on the generation for up
+to `spawnWaitMs` (default 250 ms; harness option `wasiThreadSpawnWaitMs`) before
+it is declined. After one wait runs out, later spawns from that thread are
+declined at once until some thread finishes, so a pool held by long-running
+threads costs one wait, not one per spawn. The wait uses `Atomics.wait`, which
+workers and Node allow; where it is not allowed (a window's main thread) a spawn
+never waits.
+
+`spawnReport()` counts spawns from every thread (`spawned`, `waited`, and
+`pool-exhausted` declines); `onSpawnDeclined` fires for the owning thread's
+spawns. A Node worker started by a guest thread reports a guest fault on stderr
+only; `onGuestError` covers workers the owning thread started and every browser
+worker.
+
+A browser worker that answers the probe without the pool protocol (a worker
+script from an older SDK) still works: the owning thread sends it its threads by
+`{t:"run"}` and frees it on `{t:"exit"}`, as before, and guest threads never
+spawn onto it. A worker served from the matching SDK gets the fix.
+
+`test/wasi-thread-pool-reuse-guest.test.js` compiles a guest that spawns 3
+waves of `poolSize - 1` threads (the main thread runs one stripe), 3 waves of
+`poolSize` threads, and 3 waves whose threads a non-main guest thread spawns, in
+one invoke. It checks the output bytes and spawn counts in Node (explicit pool,
+no pool, and 14,000 threads on at most 16 workers), in headless Chromium,
+Firefox and WebKit, and across the three parity lanes:
+
+```sh
+SPACE_DATA_MODULE_SDK_ENABLE_BROWSER_THREADS=1 \
+SPACE_DATA_MODULE_SDK_ENABLE_TRI_RUNTIME_PARITY=1 \
+node --test test/wasi-thread-pool-reuse-guest.test.js
+```
+
 The old source path `src/testing/browserModuleHarness.js` remains a pure
 compatibility re-export. New browser consumers should use the public
 `space-data-module-sdk/host/browser-module` entry point.
@@ -312,8 +389,9 @@ participates:
 Rules that make this contract honest:
 
 - **The anchor names a DIRECTORY that serves the WHOLE chain.**
-  `wasiThreadBrowserWorker.mjs` imports `./wasiThreadWorkerRuntime.js`. Staging
-  the single `.mjs` next to your bundle does **not** work.
+  `wasiThreadBrowserWorker.mjs` imports `./wasiThreadWorkerRuntime.js` and
+  `./wasiThreadPool.js`, which import their own siblings. Staging the single
+  `.mjs` next to your bundle does **not** work.
 - **A relative base resolves against the document**; absolute URLs pass through
   unchanged.
 - **No consumer-side `location` sniffing.** Forking worker resolution per
@@ -348,15 +426,17 @@ worker bundles and the browser capability probe.
 
 | Option | Effect |
 | --- | --- |
-| `poolSize` | Browser: pre-start exactly this many workers, independent of `hardwareConcurrency - 1` (pools are sized for isolation: writers + lanes). Node: cap on live guest threads. Arming is partial: workers that fail to start are dropped, the rest serve. |
+| `poolSize` | Browser: pre-start exactly this many workers, independent of `hardwareConcurrency - 1` (pools are sized for isolation: writers + lanes). Node: cap on live guest threads (the pool grows to it on demand; without it, to 1024). Arming is partial: workers that fail to start are dropped, the rest serve. |
 | `extraImports` | Per-worker import objects, as structured-cloneable descriptors (below). Factories run once per worker. |
-| `instanceId`, `onGuestError(instanceId, tid, error)` | Called when a guest thread traps or its worker dies (A36). A dead pooled worker leaves the pool. |
-| `onSpawnDeclined({ reason, poolSize, declined })` | Called for every spawn that returns -1. Reasons: `pool-exhausted`, `pool-not-armed`, `threads-unavailable`, `pool-empty`, `worker-create-failed`, `dispatch-failed`, `hostcall-channel-missing`, `terminated`. |
+| `instanceId`, `onGuestError(instanceId, tid, error)` | Called when a guest thread traps or its worker dies (A36). A dead pooled worker leaves the pool. In Node, for workers the owning thread started. |
+| `onSpawnDeclined({ reason, poolSize, declined })` | Called for every spawn from the owning thread that returns -1. Reasons: `pool-exhausted`, `pool-not-armed`, `threads-unavailable`, `pool-empty`, `worker-create-failed`, `dispatch-failed`, `hostcall-channel-missing`, `terminated`. |
 | `probeTimeoutMs` | Browser warm-pool probe deadline. |
+| `spawnWaitMs` | How long a spawn that finds every pool thread busy waits for one to finish before it returns -1 (default 250; 0 never waits). Added in 0.8.25; see "one pool protocol" in §3. |
 | `browserWorkerType: "classic"` | Spawn classic workers, for the blob bundles below. |
 
 The returned host adds `spawnReport()`: `{ poolSize, armed, failedToArm, spawned,
-declined, declinedByReason, lastDeclineReason, active, idle }`. The implicit
+waited, declined, declinedByReason, lastDeclineReason, active, idle }` (Node adds
+`workers`). The counts cover spawns from every thread of the process. The implicit
 (no `poolSize`) path keeps its all-or-nothing arming.
 
 `extraImports` entries (the same descriptors work in the engine worker through
@@ -461,7 +541,8 @@ same mirror serve reads of those paths from it without a round trip.
 table in a SharedArrayBuffer (`createNodeSyncFsIoTable`). A handle is
 `(slot << 8) | gen`; each worker opens its own fd for a slot on first use and
 drops stale fds when the generation moves. Paths are confined below `root`,
-including through symlinked parents. `sync` is `fdatasync` (libuv issues
+including through symlinked parents; a filesystem root (`root: "/"`) reaches
+every path under it (through 0.8.24 every such path was `ACCESS`). `sync` is `fdatasync` (libuv issues
 `F_FULLFSYNC` on darwin). `revokeNodeSyncFsIoInstance` follows A23: it sets the
 revoked flag and waits for the instance's in-flight calls to drain. Fault
 injection (§19, 22.3a-7) belongs to FlatSQL's Node host (T4); `interpose` wraps
@@ -580,7 +661,7 @@ guest-observed import calls (`trace`), in microseconds.
 | #2 500 ms open, median of 3 runs: other threads' read p99, baseline / during | 85 / 85 | 440 / 400 | 60 / 60 |
 | #2 longest other-thread read while the open was pending | 1020 | 18500 | 320 |
 | A38 OPEN_DEFERRED: open returns in / first write waits (ms) | 3.8 / 504 | 28.8 / 511 | 5.2 / 755 |
-| #3 `poolSize=6` on `hardwareConcurrency=2` | 6 workers; 7th spawn -1, reported `pool-exhausted` | same | same |
+| #3 `poolSize=6` on `hardwareConcurrency=2` (`spawnWaitMs: 0` since 0.8.25) | 6 workers; 7th spawn -1, reported `pool-exhausted` | same | same |
 | #5 link shim v2 (Node 25): 10,000 calls, lost completions | 0 with a notifying lane, 0 with a lane that never notifies, 0 spinning (`poll_ns = 0`) | | |
 
 Chromium's same-partition A7 p99 varies with host load: 90, 110, 295 and 790
@@ -623,6 +704,15 @@ the fast-thread read p50 from 30-39 µs to 11-12 µs.
   `symbolPrefix` / `methodSymbols` as authoritative (never re-derived), keeping a
   legacy truncated-prefix artifact compatible.
 
+- `test/wasi-thread-pool-reuse.test.js` — the pool protocol with no message
+  and no event-loop turn: 3 waves of `poolSize - 1` and of `poolSize` spawns, a
+  spawn that blocks until a thread finishes on another thread, a spawn from a
+  thread that is not the owner, the `spawnWaitMs` bound and the no-second-wait
+  rule, an older worker script and a late `{t:"exit"}`, a dead worker,
+  `terminateAll`.
+- `test/wasi-thread-pool-reuse-guest.test.js` — the real wave guest in Node,
+  headless Chromium, Firefox and WebKit, and the three parity lanes (the
+  browser and parity runs are env-gated, see §3).
 - `test/wasi-thread-pool-size.test.js` — explicit `poolSize` (6 workers on
   `hardwareConcurrency=2`, the 7th spawn -1 and reported), partial arming,
   extraImports delivery, `onGuestError`, classic workers.

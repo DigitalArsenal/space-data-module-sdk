@@ -384,6 +384,7 @@ async function instantiateBrowserModule(options = {}) {
       // Browser warm-pool sizing: cap pooled workers at how many guest threads
       // the module will actually ask for. Ignored by the Node lazy path.
       requestedThreads: options.maxThreads,
+      poolSize: options.wasiThreadPoolSize,
       hostcallChannel: options.threadHostcallChannel,
       requiresHostcalls: needsHostBridge,
       enableBrowserThreads: options.enableBrowserWasiThreads,
@@ -395,6 +396,7 @@ async function instantiateBrowserModule(options = {}) {
       // packaged sibling, i.e. today's unbundled behavior.
       browserWorkerBaseUrl: options.wasiThreadWorkerBaseUrl,
       browserWorkerUrl: options.wasiThreadWorkerUrl,
+      spawnWaitMs: options.wasiThreadSpawnWaitMs,
     });
     importObject.wasi = {
       ...(importObject.wasi ?? {}),
@@ -469,6 +471,13 @@ async function instantiateBrowserModule(options = {}) {
  * @param {number} [options.maxThreads] - Upper bound on guest threads; sizes the
  *   browser wasi-threads warm pool. Ignored by single-thread artifacts and by
  *   the Node lazy worker path.
+ * @param {number} [options.wasiThreadPoolSize] - Explicit wasi-threads pool size
+ *   (createWasiThreadSpawn `poolSize`): the browser pre-starts exactly this many
+ *   workers; Node caps live guest threads at it. Unset: the browser pool is
+ *   min(hardwareConcurrency - 1, maxThreads) and Node spawns without a cap.
+ * @param {number} [options.wasiThreadSpawnWaitMs] - How long a guest spawn that
+ *   finds every pooled thread busy waits for one to finish before
+ *   pthread_create fails (createWasiThreadSpawn `spawnWaitMs`, default 250).
  */
 export async function createBrowserModuleHarness(options = {}) {
   let wasmSource = options.wasmSource;
@@ -578,6 +587,8 @@ export async function createBrowserModuleHarness(options = {}) {
     enableBrowserWasiThreads: options.enableBrowserWasiThreads,
     wasiThreadWorkerBaseUrl: options.wasiThreadWorkerBaseUrl,
     wasiThreadWorkerUrl: options.wasiThreadWorkerUrl,
+    wasiThreadSpawnWaitMs: options.wasiThreadSpawnWaitMs,
+    wasiThreadPoolSize: options.wasiThreadPoolSize,
   });
   const { instance, bridge, wasi, memory, threadHost } = activeContext;
   let lastCommandContext = null;
@@ -842,6 +853,8 @@ export async function createBrowserModuleHarness(options = {}) {
       enableBrowserWasiThreads: options.enableBrowserWasiThreads,
       wasiThreadWorkerBaseUrl: options.wasiThreadWorkerBaseUrl,
       wasiThreadWorkerUrl: options.wasiThreadWorkerUrl,
+      wasiThreadSpawnWaitMs: options.wasiThreadSpawnWaitMs,
+      wasiThreadPoolSize: options.wasiThreadPoolSize,
     });
     lastCommandContext = commandContext;
     try {

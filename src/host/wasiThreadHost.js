@@ -5,11 +5,17 @@
 // pthread_create it invokes `wasi.thread-spawn(startArg)`; the host must run a
 // NEW OS thread that instantiates the SAME module over the SAME shared memory
 // and calls `wasi_thread_start(tid, startArg)`. This module provides that host
-// in BOTH environments:
-//   - Node: a `node:worker_threads` Worker (src/host/wasiThreadWorker.mjs),
-//     created lazily per spawn.
-//   - Browser: a WARM POOL of classic Blob-URL Workers (inlined below), started
-//     and confirmed ready during host creation, then dispatched to per spawn.
+// in BOTH environments, over one pool protocol (wasiThreadPool.js):
+//   - Node: a pool of `node:worker_threads` Workers
+//     (src/host/wasiThreadWorker.mjs), grown when a spawn finds every worker
+//     busy, by whichever thread spawns.
+//   - Browser: a WARM POOL of Workers (src/host/wasiThreadBrowserWorker.mjs),
+//     started and confirmed ready during host creation.
+// A pool worker blocks on its slot of a SharedArrayBuffer between threads; any
+// guest thread assigns it a thread through that buffer and it frees the slot
+// when the thread returns. No step needs an event loop, so one invoke can
+// start any number of threads, at most the pool's size at a time, and a guest
+// thread can start threads of its own (since 0.8.25).
 // Thread join/exit synchronization is done by the guest over shared-memory
 // atomics (memory.atomic.wait/notify); the host only needs to start the thread.
 //
@@ -25,14 +31,31 @@
 //     the parent is already blocked in the join — so the lazily-spawned worker
 //     never starts and the join blocks forever.
 //   - Fix: PRE-START the workers here (while this thread's event loop is still
-//     free), confirm each is ready, and only postMessage work to an
-//     already-running worker at spawn time. A message posted to a live worker is
-//     delivered even while this thread is blocked in the synchronous join, so
-//     the pooled worker runs the guest thread and notifies the join. (Proven.)
+//     free), confirm each is ready, and only hand work to an already-running
+//     worker at spawn time. (Proven.) Since 0.8.25 that hand-off is a store and
+//     a notify on the worker's pool slot, not a message.
 //
 // See docs/isomorphic-pthreads.md and docs/browser-wasmedge-isomorphic.md.
 
 import { NODE_BUILTIN_PREFIX } from "./nodeBuiltinSpecifier.js";
+import {
+  DEFAULT_WASI_THREAD_SPAWN_WAIT_MS,
+  WASI_THREAD_POOL_PROTOCOL,
+  WASI_THREAD_POOL_SLOT,
+  armWasiThreadPoolSlot,
+  createWasiThreadPool,
+  createWasiThreadPoolSpawn,
+  openWasiThreadPoolSlots,
+  readWasiThreadPoolReport,
+  releaseWasiThreadPoolSlotIfRunning,
+  resolveSpawnWaitMs,
+  retireWasiThreadPoolSlot,
+  wasiThreadPoolLastTid,
+  wasiThreadPoolRunningTid,
+  wasiThreadPoolSlotState,
+} from "./wasiThreadPool.js";
+
+export { DEFAULT_WASI_THREAD_SPAWN_WAIT_MS };
 
 const IS_NODE =
   typeof process !== "undefined" &&
@@ -61,8 +84,9 @@ const IS_NODE =
 // byte-for-byte unchanged.
 //
 // IMPORTANT: the anchor names a DIRECTORY that must contain the WHOLE chain —
-// `wasiThreadBrowserWorker.mjs` imports `./wasiThreadWorkerRuntime.js`. Staging
-// only the single `.mjs` next to a bundle does NOT work.
+// `wasiThreadBrowserWorker.mjs` imports `./wasiThreadWorkerRuntime.js` and
+// `./wasiThreadPool.js`, and those import their own siblings. Staging only the
+// single `.mjs` next to a bundle does NOT work.
 //
 // There is deliberately NO consumer-side `location` sniffing and NO
 // fetch-and-retry probe: resolution must be deterministic (Node never fetches;
@@ -95,8 +119,9 @@ let browserWorkerBaseOverride = null;
  * directory. Pass `null` to restore the packaged default.
  *
  * @param {string|URL|null} baseUrl directory URL containing
- *   `wasiThreadBrowserWorker.mjs` AND `wasiThreadWorkerRuntime.js`. A trailing
- *   slash is added when missing.
+ *   `wasiThreadBrowserWorker.mjs` AND the modules it imports
+ *   (`wasiThreadWorkerRuntime.js`, `wasiThreadPool.js`, ...). A trailing slash
+ *   is added when missing.
  */
 export function setBrowserWasiThreadWorkerBase(baseUrl) {
   browserWorkerBaseOverride = baseUrl == null ? null : normalizeBase(baseUrl);
@@ -161,8 +186,9 @@ export class WasiThreadWorkerUnreachableError extends Error {
   constructor(workerUrl, cause) {
     super(
       `[wasi-thread] pooled browser worker asset is unreachable at ${workerUrl}. ` +
-        `The anchor must name a directory that serves BOTH ${BROWSER_WORKER_FILENAME} ` +
-        `and wasiThreadWorkerRuntime.js. When this host source is bundled, pass ` +
+        `The anchor must name a directory that serves ${BROWSER_WORKER_FILENAME} ` +
+        `and the modules it imports (wasiThreadWorkerRuntime.js, wasiThreadPool.js). ` +
+        `When this host source is bundled, pass ` +
         `browserWorkerBaseUrl / browserWorkerUrl to createWasiThreadSpawn (or call ` +
         `setBrowserWasiThreadWorkerBase) — import.meta.url anchors to the bundle, not ` +
         `to the package layout.`,
@@ -215,8 +241,10 @@ const BROWSER_POOL_PROBE_TIMEOUT_MS = 1500;
 // explicit poolSize, T9) waits for every worker to settle and keeps the ones
 // that armed: the engine tolerates partial spawns and runs fewer threads.
 // The per-worker onmessage handler installed here is PERSISTENT: after arming it
-// keeps dispatching {t:"exit"} (idle return) and {t:"error"} (guest fault
-// surfacing) for the life of the pool.
+// keeps dispatching {t:"exit"} (the idle return of a worker script from before
+// 0.8.25, which the pool dispatches to by message) and {t:"error"} (guest fault
+// surfacing) for the life of the pool. `protocols` records the pool protocol
+// each ready worker speaks (wasiThreadPool.js; 1 = message dispatch only).
 function armBrowserPool(
   created,
   {
@@ -225,6 +253,7 @@ function armBrowserPool(
     hostcallChannel,
     processState,
     extraImports,
+    pool,
     timeoutMs,
     partial,
     onExit,
@@ -239,6 +268,7 @@ function armBrowserPool(
     const spoke = new WeakSet();
     const readyWorkers = new Set();
     const failed = new Set();
+    const protocols = new Map();
     const finish = (ok, extra = {}) => {
       if (settled) {
         return;
@@ -253,6 +283,7 @@ function armBrowserPool(
         error: null,
         readyWorkers: created.filter((worker) => readyWorkers.has(worker)),
         failed: created.filter((worker) => failed.has(worker)),
+        protocols,
         ...extra,
       });
     };
@@ -285,6 +316,7 @@ function armBrowserPool(
         spoke.add(worker);
         if (message.t === "ready") {
           clearTimeout(timer);
+          protocols.set(worker, Number.isInteger(message.protocol) ? message.protocol : 1);
           if (message.ok !== true && message.error) {
             // eslint-disable-next-line no-console
             console.error("[wasi-thread] pooled worker not ready:", message.error);
@@ -329,6 +361,8 @@ function armBrowserPool(
         processState,
         extraImports: extraImports ?? [],
         workerIndex,
+        pool: pool ?? null,
+        slot: workerIndex,
       });
     });
   });
@@ -371,25 +405,49 @@ function assertCloneableExtraImports(extraImports) {
   }
 }
 
-function createSpawnLedger({ poolSize, onSpawnDeclined }) {
+
+// How many workers a Node pool with no explicit poolSize may grow to. Workers
+// are reused, so this bounds guest threads alive at once, not threads started.
+const NODE_POOL_CAPACITY = 1024;
+
+// Reasons the pool itself counts (any thread); the ledger counts the rest.
+const POOL_DECLINE_REASON = "pool-exhausted";
+
+function createSpawnLedger({ poolSize, onSpawnDeclined, getPool = () => null }) {
   const ledger = {
     poolSize,
     armed: 0,
     failedToArm: 0,
-    spawned: 0,
-    declined: 0,
     declinedByReason: {},
     lastDeclineReason: null,
   };
+  const report = () => {
+    const pool = getPool();
+    const counts = pool ? readWasiThreadPoolReport(pool) : null;
+    const declinedByReason = { ...ledger.declinedByReason };
+    if (counts?.declined) declinedByReason[POOL_DECLINE_REASON] = counts.declined;
+    return {
+      ...ledger,
+      spawned: counts?.spawned ?? 0,
+      waited: counts?.waited ?? 0,
+      declined: Object.values(declinedByReason).reduce((sum, count) => sum + count, 0),
+      declinedByReason,
+      counts,
+    };
+  };
   return {
     ledger,
+    report,
     decline(reason) {
-      ledger.declined += 1;
-      ledger.declinedByReason[reason] = (ledger.declinedByReason[reason] ?? 0) + 1;
+      // A pool counts its own exhaustion, including spawns from guest threads
+      // this ledger never sees.
+      if (reason !== POOL_DECLINE_REASON || !getPool()) {
+        ledger.declinedByReason[reason] = (ledger.declinedByReason[reason] ?? 0) + 1;
+      }
       ledger.lastDeclineReason = reason;
       if (typeof onSpawnDeclined === "function") {
         try {
-          onSpawnDeclined({ reason, poolSize, declined: ledger.declined });
+          onSpawnDeclined({ reason, poolSize, declined: report().declined });
         } catch {
           // a reporting hook never changes the spawn outcome
         }
@@ -412,6 +470,12 @@ function reportGuestError(onGuestError, instanceId, tid, error) {
  * Create the `wasi.thread-spawn` host for a wasi-threads module. Returns the
  * import function plus liveness/cleanup helpers.
  *
+ * Guest threads run on pooled workers (wasiThreadPool.js). A worker that
+ * finishes a thread takes the next one at once, through shared memory, so one
+ * invoke can start any number of threads, at most the pool's size at a time;
+ * every guest thread's own `wasi.thread-spawn` is the pool's, so a guest
+ * thread can start threads too.
+ *
  * @param {Object} options
  * @param {WebAssembly.Module} options.wasmModule compiled module the workers re-instantiate.
  * @param {WebAssembly.Memory} options.memory shared imported memory.
@@ -421,9 +485,10 @@ function reportGuestError(onGuestError, instanceId, tid, error) {
  * @param {number} [options.poolSize] EXPLICIT pool size (T9, design §5.5): the
  *   browser pre-starts exactly this many workers, independent of
  *   `hardwareConcurrency - 1` (writers + lanes: pools are sized for isolation,
- *   not only for cores). In Node it caps the live guest threads. Arming is
- *   partial: workers that fail to start are dropped and reported, the rest
- *   serve. Spawns beyond the pool return -1 and are reported.
+ *   not only for cores). In Node it caps the pool (live guest threads); workers
+ *   start when a spawn needs one. Arming is partial: workers that fail to start
+ *   are dropped and reported, the rest serve. Spawns beyond the pool return -1
+ *   and are reported. Without it, Node grows its pool to at most 1024 workers.
  * @param {Array<object>} [options.extraImports] per-worker import objects, as
  *   structured-cloneable descriptors: `{ provider: "flatsql-io", instanceId,
  *   channels, mirror?, trace? }` (SAB I/O channel), `{ provider:
@@ -433,9 +498,18 @@ function reportGuestError(onGuestError, instanceId, tid, error) {
  * @param {number} [options.instanceId] the owning instance, echoed to
  *   `onGuestError` so a supervisor knows which instance to poison (A36).
  * @param {(instanceId: number|null, tid: number|null, error: any) => void} [options.onGuestError]
- *   called when a guest thread traps or its worker dies (A36).
+ *   called when a guest thread traps or its worker dies (A36). Node reports
+ *   workers this thread started; a worker a guest thread started reports on
+ *   stderr only.
  * @param {(event: { reason: string, poolSize: number, declined: number }) => void} [options.onSpawnDeclined]
- *   called for every spawn that returns -1.
+ *   called for every spawn from this thread that returns -1 (spawns from guest
+ *   threads are counted in spawnReport()).
+ * @param {number} [options.spawnWaitMs=250] how long a spawn that finds every
+ *   pool thread busy waits for one to finish before it is declined. The wait
+ *   covers a thread that the guest has joined but whose worker has not yet
+ *   returned; after one wait runs out, that thread's spawns are declined at
+ *   once until a thread finishes. 0 never waits. A Node pool with room to grow
+ *   waits at most 2 ms before it starts another worker.
  * @param {number} [options.probeTimeoutMs] browser warm-pool probe deadline.
  * @param {object} [options.hostcallChannel] request-isolated channel owned by
  *   the controlling host. Required when pthread workers import the generic
@@ -446,11 +520,11 @@ function reportGuestError(onGuestError, instanceId, tid, error) {
  *   capability negotiation for an owning cross-origin-isolated worker harness.
  * @param {string|URL} [options.browserWorkerBaseUrl] BROWSER ANCHOR — the
  *   directory URL under which this build serves the SDK host worker chain
- *   (`wasiThreadBrowserWorker.mjs` + `wasiThreadWorkerRuntime.js`). REQUIRED
- *   whenever this host source is BUNDLED: `import.meta.url` then resolves to the
- *   bundle, not to the package layout, and the sibling asset 404s. Defaults to
- *   the process-wide `setBrowserWasiThreadWorkerBase()` value, then to the
- *   packaged sibling.
+ *   (`wasiThreadBrowserWorker.mjs`, `wasiThreadWorkerRuntime.js`,
+ *   `wasiThreadPool.js` and their imports). REQUIRED whenever this host source is BUNDLED: `import.meta.url`
+ *   then resolves to the bundle, not to the package layout, and the sibling
+ *   asset 404s. Defaults to the process-wide `setBrowserWasiThreadWorkerBase()`
+ *   value, then to the packaged sibling.
  * @param {string|URL} [options.browserWorkerUrl] the worker file itself; wins
  *   over `browserWorkerBaseUrl`. Use only when the file is not named
  *   `wasiThreadBrowserWorker.mjs` in its served directory, or to pass the
@@ -479,16 +553,16 @@ export async function createWasiThreadSpawn({
   browserWorkerBaseUrl,
   browserWorkerUrl,
   browserWorkerType = "module",
+  spawnWaitMs: requestedSpawnWaitMs,
 } = {}) {
-  let nextTid = 0;
-  let spawnCount = 0;
   const hasExplicitPool = Number.isFinite(explicitPoolSize);
   if (hasExplicitPool && (explicitPoolSize < 0 || Math.floor(explicitPoolSize) !== explicitPoolSize)) {
     throw new RangeError("poolSize must be a non-negative integer.");
   }
+  const spawnWaitMs = resolveSpawnWaitMs(requestedSpawnWaitMs);
   assertCloneableExtraImports(extraImports);
   if (requiresHostcalls && !hostcallChannel) {
-    const { ledger, decline } = createSpawnLedger({
+    const { report, decline } = createSpawnLedger({
       poolSize: hasExplicitPool ? explicitPoolSize : 0,
       onSpawnDeclined,
     });
@@ -497,20 +571,26 @@ export async function createWasiThreadSpawn({
       activeThreadCount: () => 0,
       spawnCount: () => 0,
       distinctOsThreadCount: () => 0,
-      spawnReport: () => ({ ...ledger, active: 0 }),
+      spawnReport: () => {
+        const { counts: _none, ...rest } = report();
+        return { ...rest, active: 0 };
+      },
       async terminateAll() {},
     };
   }
 
   if (IS_NODE) {
-    // NODE: lazy per-spawn worker_threads. Node workers start on their own OS
-    // thread independently of the parent's event loop, so lazy creation at
-    // pthread_create time is fine here — there is no startup-vs-join deadlock.
-    const workers = new Set();
-    const osThreadIds = new Set();
-    const { ledger, decline } = createSpawnLedger({
+    // NODE: a pool that grows on demand. A Node worker starts on its own OS
+    // thread without its parent's event loop, so a spawn may start one while
+    // every event loop of the process is blocked in the guest.
+    const pool = createWasiThreadPool({
+      capacity: hasExplicitPool ? explicitPoolSize : NODE_POOL_CAPACITY,
+      spawnWaitMs,
+    });
+    const { report, decline } = createSpawnLedger({
       poolSize: hasExplicitPool ? explicitPoolSize : null,
       onSpawnDeclined,
+      getPool: () => pool,
     });
     // The specifier is assembled at runtime on purpose. This branch is dead in
     // a browser, but a LITERAL `import("node:worker_threads")` is still
@@ -534,67 +614,102 @@ export async function createWasiThreadSpawn({
         !(index > 0 && sourceFlags.includes(args[index - 1])))
       : undefined;
 
-    const threadSpawn = (startArg) => {
-      if (hasExplicitPool && workers.size >= explicitPoolSize) {
-        // The explicit pool is fully busy: decline, so the guest runs the work
-        // inline (pthread_create -> EAGAIN) and the engine runs fewer threads.
-        return decline("pool-exhausted");
-      }
-      const tid = (nextTid += 1);
-      try {
-        const worker = new NodeWorker(nodeWorkerUrl, {
-          execArgv,
-          workerData: {
-            wasmModule,
-            memory,
-            tid,
-            startArg,
-            hostcallChannel: hostcallChannel ?? null,
-            processState,
-            extraImports: extraImports ?? [],
-            workerIndex: tid - 1,
-          },
-        });
-        // Node exposes the OS-thread id per Worker — distinct ids are direct
-        // evidence that pthread_create ran real concurrent threads.
-        if (typeof worker.threadId === "number") {
-          osThreadIds.add(worker.threadId);
+    // Workers this thread started, by slot. Idle pool workers must not keep
+    // the process alive: they are unref'd, ref'd while this thread's spawn
+    // runs on them, and unref'd again once idle.
+    const workers = new Map();
+    let settleTimer = null;
+    const settleRefs = () => {
+      let busy = 0;
+      for (const [slot, worker] of workers) {
+        if (wasiThreadPoolRunningTid(pool, slot) !== null) {
+          busy += 1;
+          worker.ref();
+        } else {
+          worker.unref();
         }
-        worker.on("error", (error) => {
-          // A worker crash cannot be surfaced to the guest synchronously. The
-          // worker itself writes the fault to stderr first, because this
-          // handler never runs while this thread is blocked in pthread_join.
-          // eslint-disable-next-line no-console
-          console.error("[wasi-thread] worker error:", error);
-          reportGuestError(onGuestError, instanceId, tid, error);
-        });
-        worker.once("exit", () => workers.delete(worker));
-        workers.add(worker);
-        spawnCount += 1;
-        ledger.spawned += 1;
-        return tid;
-      } catch {
-        // Signal spawn failure to the guest: wasi.thread-spawn returns a
-        // negative value, pthread_create returns EAGAIN, and the module's
-        // sequential fallback runs the stripe inline. Never abort.
-        return decline("worker-create-failed");
+      }
+      if (busy === 0 && settleTimer) {
+        clearInterval(settleTimer);
+        settleTimer = null;
       }
     };
 
+    const startWorker = (slot) => {
+      const worker = new NodeWorker(nodeWorkerUrl, {
+        execArgv,
+        workerData: {
+          wasmModule,
+          memory,
+          hostcallChannel: hostcallChannel ?? null,
+          processState,
+          extraImports: extraImports ?? [],
+          pool,
+          slot,
+          execArgv,
+        },
+      });
+      worker.unref();
+      worker.on("error", (error) => {
+        // A worker crash cannot be surfaced to the guest synchronously. The
+        // worker itself writes the fault to stderr first, because this
+        // handler never runs while this thread is blocked in pthread_join.
+        // eslint-disable-next-line no-console
+        console.error("[wasi-thread] worker error:", error);
+        reportGuestError(onGuestError, instanceId, wasiThreadPoolLastTid(pool, slot) || null, error);
+      });
+      worker.once("exit", () => {
+        workers.delete(slot);
+        if (wasiThreadPoolSlotState(pool, slot) !== WASI_THREAD_POOL_SLOT.RETIRED) {
+          retireWasiThreadPoolSlot(pool, slot);
+        }
+      });
+      workers.set(slot, worker);
+    };
+
+    const spawn = createWasiThreadPoolSpawn(pool, { owner: true, grow: startWorker });
+    const threadSpawn = (startArg) => {
+      const result = spawn(startArg);
+      if (result.tid < 0) {
+        // No worker came free: pthread_create returns EAGAIN, and the guest
+        // runs the work inline or fails the way it handles EAGAIN.
+        return decline(result.reason ?? POOL_DECLINE_REASON);
+      }
+      const worker = workers.get(result.slot);
+      if (worker) {
+        worker.ref();
+        settleTimer ??= setInterval(settleRefs, 20);
+        settleTimer.unref?.();
+      }
+      return result.tid;
+    };
+
+    const counts = () => readWasiThreadPoolReport(pool);
     return {
       threadSpawn,
-      activeThreadCount: () => workers.size,
-      spawnCount: () => spawnCount,
-      distinctOsThreadCount: () => osThreadIds.size,
-      spawnReport: () => ({ ...ledger, active: workers.size }),
+      activeThreadCount: () => counts().active,
+      spawnCount: () => counts().spawned,
+      // Each pool worker is its own OS thread; distinct workers are direct
+      // evidence that pthread_create ran real concurrent threads.
+      distinctOsThreadCount: () => counts().workers,
+      spawnReport: () => {
+        const { counts: pooled, ...rest } = report();
+        return { ...rest, active: pooled.active, idle: pooled.idle, workers: pooled.workers };
+      },
       async terminateAll() {
-        for (const worker of workers) {
-          try {
-            await worker.terminate?.();
-          } catch {
-            // best effort
-          }
-        }
+        if (settleTimer) clearInterval(settleTimer);
+        settleTimer = null;
+        const slots = counts().slots;
+        for (let slot = 0; slot < slots; slot += 1) retireWasiThreadPoolSlot(pool, slot);
+        await Promise.all(
+          [...workers.values()].map(async (worker) => {
+            try {
+              await worker.terminate?.();
+            } catch {
+              // best effort
+            }
+          }),
+        );
         workers.clear();
       },
     };
@@ -604,10 +719,11 @@ export async function createWasiThreadSpawn({
   // SharedArrayBuffer-backed memory; nested workers DO share it by reference.
   // The only hazard is lazy startup during the guest's synchronous, no-yield
   // pthread_create->pthread_join window, so we pre-start the pool here and only
-  // ever dispatch to an already-running worker.
-  const idleWorkers = [];
-  const busyByTid = new Map();
+  // ever hand work to an already-running worker. Each created worker owns the
+  // pool slot at its creation index.
   const poolWorkers = [];
+  const slotWorkers = [];
+  let pool = null;
   // Threading stays disabled (threadSpawn returns -1 -> guest runs inline) unless
   // the pool comes up green (all of it, or with an explicit poolSize, any of it).
   let poolDisabled = true;
@@ -633,39 +749,33 @@ export async function createWasiThreadSpawn({
       ? explicitPoolSize
       : Math.max(0, Math.min(Math.floor(hardwareConcurrency) - 1, requested))
     : 0;
-  const { ledger, decline } = createSpawnLedger({
+  const { ledger, report, decline } = createSpawnLedger({
     poolSize: hasExplicitPool ? explicitPoolSize : poolSize,
     onSpawnDeclined,
+    getPool: () => pool,
   });
   let disabledReason = armed ? null : "threads-unavailable";
 
+  // {t:"exit"} from a worker script before 0.8.25 (message dispatch). No-op
+  // once the slot runs another thread.
   const returnWorkerToIdle = (worker, tid) => {
-    if (tid !== undefined && tid !== null) {
-      busyByTid.delete(tid);
-    }
-    if (
-      !poolDisabled &&
-      poolWorkers.includes(worker) &&
-      !idleWorkers.includes(worker)
-    ) {
-      idleWorkers.push(worker);
+    const slot = slotWorkers.indexOf(worker);
+    if (pool && slot >= 0 && tid !== undefined && tid !== null) {
+      releaseWasiThreadPoolSlotIfRunning(pool, slot, tid);
     }
   };
 
   const retireWorker = (worker, error) => {
     // A pooled worker died after arming (A36): report it against the thread it
     // was running, and never dispatch to it again.
+    const slot = slotWorkers.indexOf(worker);
     let tid = null;
-    for (const [candidateTid, candidate] of busyByTid) {
-      if (candidate === worker) {
-        tid = candidateTid;
-        busyByTid.delete(candidateTid);
-      }
+    if (pool && slot >= 0) {
+      tid = wasiThreadPoolRunningTid(pool, slot);
+      retireWasiThreadPoolSlot(pool, slot);
     }
     const poolIndex = poolWorkers.indexOf(worker);
     if (poolIndex >= 0) poolWorkers.splice(poolIndex, 1);
-    const idleIndex = idleWorkers.indexOf(worker);
-    if (idleIndex >= 0) idleWorkers.splice(idleIndex, 1);
     reportGuestError(onGuestError, instanceId, tid, error);
   };
 
@@ -695,12 +805,16 @@ export async function createWasiThreadSpawn({
       }
       throw new WasiThreadWorkerUnreachableError(workerUrl, error);
     }
+    pool = createWasiThreadPool({ capacity: created.length, spawnWaitMs });
+    openWasiThreadPoolSlots(pool, created.length);
+    slotWorkers.push(...created);
     const armResult = await armBrowserPool(created, {
       wasmModule,
       memory,
       hostcallChannel,
       processState,
       extraImports,
+      pool,
       timeoutMs: Number.isFinite(probeTimeoutMs) && probeTimeoutMs > 0
         ? probeTimeoutMs
         : BROWSER_POOL_PROBE_TIMEOUT_MS,
@@ -722,19 +836,21 @@ export async function createWasiThreadSpawn({
     if (armResult.ok) {
       poolDisabled = false;
       const keep = hasExplicitPool ? armResult.readyWorkers : created;
-      for (const worker of keep) {
-        poolWorkers.push(worker);
-        idleWorkers.push(worker);
-      }
-      for (const worker of created) {
-        if (!keep.includes(worker)) {
+      created.forEach((worker, slot) => {
+        if (keep.includes(worker)) {
+          poolWorkers.push(worker);
+          armWasiThreadPoolSlot(pool, slot, {
+            messageDispatch: armResult.protocols.get(worker) !== WASI_THREAD_POOL_PROTOCOL,
+          });
+        } else {
+          retireWasiThreadPoolSlot(pool, slot);
           try {
             worker.terminate();
           } catch {
             // best effort
           }
         }
-      }
+      });
       ledger.armed = keep.length;
       ledger.failedToArm = created.length - keep.length;
     } else {
@@ -743,6 +859,9 @@ export async function createWasiThreadSpawn({
       // grid inline (correct, deterministic, non-hanging). Every created worker
       // is torn down — including ones that DID confirm ready — so no orphaned
       // nested worker lingers to contend with the sequential retry's pool.
+      for (let slot = 0; slot < created.length; slot += 1) {
+        retireWasiThreadPoolSlot(pool, slot);
+      }
       for (const worker of created) {
         try {
           worker.terminate();
@@ -757,45 +876,57 @@ export async function createWasiThreadSpawn({
     disabledReason = "pool-empty";
   }
 
+  const spawn = pool
+    ? createWasiThreadPoolSpawn(pool, {
+      owner: true,
+      // A worker script from before 0.8.25 only runs a thread it is sent.
+      dispatchMessage: (slot, tid, startArg) => {
+        slotWorkers[slot].postMessage({ t: "run", tid, startArg });
+      },
+    })
+    : null;
+
   const threadSpawn = (startArg) => {
     if (poolDisabled) {
       return decline(disabledReason ?? "pool-disabled");
     }
-    const worker = idleWorkers.pop();
-    if (!worker) {
-      // Pool exhausted (guest asked for more concurrent threads than the pool
-      // holds): decline this one so the guest runs the stripe inline. Correct
-      // and non-hanging; the already-dispatched threads still run in parallel.
-      return decline("pool-exhausted");
+    // Workers take their threads from shared memory and free their slots
+    // there, so this sees every thread that finished during this invoke even
+    // though this thread has not yielded its event loop since the invoke began.
+    const result = spawn(startArg);
+    if (result.tid < 0) {
+      // Every worker stayed busy (the guest asked for more CONCURRENT threads
+      // than the pool holds): decline this one so the guest runs the stripe
+      // inline. Correct and non-hanging; the dispatched threads still run.
+      return decline(result.reason ?? POOL_DECLINE_REASON);
     }
-    const tid = (nextTid += 1);
-    busyByTid.set(tid, worker);
-    try {
-      // Dispatch to a PRE-STARTED worker: its event loop is already live on its
-      // own thread, so this postMessage is delivered even while THIS thread then
-      // blocks in the guest's synchronous pthread_join (memory.atomic.wait).
-      worker.postMessage({ t: "run", tid, startArg });
-    } catch {
-      busyByTid.delete(tid);
-      idleWorkers.push(worker);
-      return decline("dispatch-failed");
-    }
-    spawnCount += 1;
-    ledger.spawned += 1;
-    return tid;
+    return result.tid;
   };
 
+  const counts = () => (pool ? readWasiThreadPoolReport(pool) : null);
+  const inService = (worker) =>
+    wasiThreadPoolSlotState(pool, slotWorkers.indexOf(worker)) !== WASI_THREAD_POOL_SLOT.RETIRED;
   return {
     threadSpawn,
-    activeThreadCount: () => busyByTid.size,
-    spawnCount: () => spawnCount,
+    activeThreadCount: () => counts()?.active ?? 0,
+    spawnCount: () => counts()?.spawned ?? 0,
     // No OS-thread ids in the browser; the count of distinct pooled Worker
-    // threads is the honest analogue.
-    distinctOsThreadCount: () => poolWorkers.length,
-    spawnReport: () => ({ ...ledger, active: busyByTid.size, idle: idleWorkers.length }),
+    // threads still in service is the honest analogue.
+    distinctOsThreadCount: () => poolWorkers.filter(inService).length,
+    spawnReport: () => {
+      const { counts: pooled, ...rest } = report();
+      return {
+        ...rest,
+        active: pooled?.active ?? 0,
+        idle: pooled && !poolDisabled ? pooled.idle : 0,
+      };
+    },
     async terminateAll() {
       poolDisabled = true;
       disabledReason = "terminated";
+      if (pool) {
+        for (let slot = 0; slot < slotWorkers.length; slot += 1) retireWasiThreadPoolSlot(pool, slot);
+      }
       for (const worker of poolWorkers) {
         try {
           worker.terminate();
@@ -804,8 +935,6 @@ export async function createWasiThreadSpawn({
         }
       }
       poolWorkers.length = 0;
-      idleWorkers.length = 0;
-      busyByTid.clear();
     },
   };
 }

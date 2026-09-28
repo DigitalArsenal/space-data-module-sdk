@@ -459,6 +459,8 @@ export function createBrowserModuleHarness(options?: {
   initialMemoryBytes?: number;
   maximumMemoryBytes?: number;
   maxThreads?: number;
+  wasiThreadSpawnWaitMs?: number;
+  wasiThreadPoolSize?: number;
   threadHostcallChannel?: {
     channelName: string;
     token: string;
