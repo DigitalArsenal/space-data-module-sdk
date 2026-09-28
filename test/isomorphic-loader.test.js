@@ -212,6 +212,7 @@ test("loadModule can drive standalone artifacts through the WasmEdge server path
     sourceCode: createEchoSource(),
     language: "c",
     threadModel: ModuleThreadModel.SINGLE_THREAD,
+    keepTempDir: true,
   });
   t.after(async () => {
     await cleanupCompilation(compilation);

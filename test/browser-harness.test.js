@@ -258,6 +258,7 @@ test("the same browser+wasmedge artifact can run in both browser harness and Was
     }),
     sourceCode: createEchoSource(),
     language: "c",
+    keepTempDir: true,
   });
   t.after(async () => {
     await cleanupCompilation(compilation);

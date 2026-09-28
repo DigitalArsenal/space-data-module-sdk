@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 
 import {
+  cleanupCompilation,
   compileModuleFromSource,
   validateArtifactWithStandards,
   validateManifestWithStandards,
@@ -47,7 +48,7 @@ function frame(portId, schemaName, fileIdentifier, payload, overrides = {}) {
   };
 }
 
-test("local FlatSQL module manifest validates and compiles", async () => {
+test("local FlatSQL module manifest validates and compiles", async (t) => {
   const manifest = await readJson("../examples/flatsql-store-local/manifest.json");
   const sourceCode = await readText("../examples/flatsql-store-local/module.c");
 
@@ -58,7 +59,9 @@ test("local FlatSQL module manifest validates and compiles", async () => {
     manifest,
     sourceCode,
     language: "c",
+    keepTempDir: true,
   });
+  t.after(() => cleanupCompilation(compilation));
   assert.equal(compilation.report.ok, true);
   assert.ok(compilation.wasmBytes.length > 0);
 

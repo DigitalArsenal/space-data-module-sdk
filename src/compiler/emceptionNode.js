@@ -1,17 +1,41 @@
 import os from "node:os";
 import path from "node:path";
-import { cp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import {
+  cp,
+  lstat,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { constants as fsConstants, createReadStream, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
+// Bump when the patched tree's layout or meaning changes. The patch transform's
+// own source text is part of the cache key as well (see
+// computeEmceptionIdentity), so editing patchEmceptionModuleSource cannot reuse
+// a tree patched by an older transform even if this string is left alone.
 const PATCH_VERSION = "space-data-module-sdk-emception-node-v1";
+const PATCH_KEY_TAG = "node-v1";
 const PATCH_MARKER_FILENAME = ".space-data-module-sdk-emception-patch";
-const EMCEPTION_PATCH_ROOT = path.join(
-  os.tmpdir(),
-  `space-data-module-sdk-emception-node-${process.pid}`,
+// One shared root per (patch, emception build) lives at
+// <tmpdir>/space-data-module-sdk-emception-<tag>-<version>-<fingerprint>-u<uid>.
+// Every process of every consumer run by that user reuses it. Builds happen in a sibling
+// staging dir that is renamed into place only once it is complete.
+const PATCHED_ROOT_PREFIX = "space-data-module-sdk-emception-";
+const STAGING_MARKER = ".staging-";
+const STALE_MARKER = ".stale-";
+const ORPHAN_NAME_PATTERN = new RegExp(
+  `^${PATCHED_ROOT_PREFIX.replaceAll("-", "\\-")}.+\\.(?:staging|stale)-(\\d+)-[A-Za-z0-9]+$`,
 );
+const RENAME_COLLISION_CODES = new Set(["ENOTEMPTY", "EEXIST", "EPERM", "EBUSY"]);
+const MAX_PUBLISH_ATTEMPTS = 4;
 const FILE_URL_FETCH_PATCH_FLAG =
   "__spaceDataModuleSdkFileUrlFetchPatched";
 
@@ -84,90 +108,335 @@ function installNodeRuntimeShims() {
   }
 }
 
-async function patchEmceptionModuleTree(rootDir) {
-  const entries = await readdir(rootDir, { withFileTypes: true });
-  for (const entry of entries) {
-    const fullPath = path.join(rootDir, entry.name);
-    if (entry.isDirectory()) {
-      await patchEmceptionModuleTree(fullPath);
-      continue;
-    }
-    if (!entry.name.endsWith(".mjs")) {
-      continue;
-    }
+// Pure transform of one emception .mjs file. Its source text is hashed into
+// the cache key, so any edit here yields a fresh patched root.
+function patchEmceptionModuleSource(fileName, source) {
+  let patched = source.replaceAll(
+    'scriptDirectory=__dirname+"/"',
+    'scriptDirectory=(new URL(".", import.meta.url)).pathname',
+  );
 
-    let source = await readFile(fullPath, "utf8");
-    source = source.replaceAll(
-      'scriptDirectory=__dirname+"/"',
-      'scriptDirectory=(new URL(".", import.meta.url)).pathname',
+  if (fileName === "emception.mjs") {
+    patched = patched.replace(
+      "this.#fs = await new FileSystem();",
+      [
+        "this.#fs = await new FileSystem({",
+        "      locateFile: (file, scriptDirectory) => scriptDirectory + file,",
+        '      cache: "/tmp/emception-cache",',
+        "    });",
+      ].join("\n"),
     );
-
-    if (entry.name === "emception.mjs") {
-      source = source.replace(
-        "this.#fs = await new FileSystem();",
-        [
-          "this.#fs = await new FileSystem({",
-          "      locateFile: (file, scriptDirectory) => scriptDirectory + file,",
-          '      cache: "/tmp/emception-cache",',
-          "    });",
-        ].join("\n"),
-      );
-      source = source.replace(
+    patched = patched.replace(
+      "const config = {",
+      [
         "const config = {",
-        [
-          "const config = {",
-          "      locateFile: (file, scriptDirectory) => scriptDirectory + file,",
-        ].join("\n"),
-      );
-    }
+        "      locateFile: (file, scriptDirectory) => scriptDirectory + file,",
+      ].join("\n"),
+    );
+  }
 
-    if (entry.name === "FileSystem.mjs") {
-      source = source.replace(
-        [
-          "        if (!this.exists(cache)) {",
-          "            this.persist(cache);",
-          "        }",
-          "        await this.pull();",
-        ].join("\n"),
-        [
-          '        if (typeof indexedDB !== "undefined") {',
-          "            if (!this.exists(cache)) {",
-          "                this.persist(cache);",
-          "            }",
-          "            await this.pull();",
-          "        }",
-        ].join("\n"),
-      );
-    }
+  if (fileName === "FileSystem.mjs") {
+    patched = patched.replace(
+      [
+        "        if (!this.exists(cache)) {",
+        "            this.persist(cache);",
+        "        }",
+        "        await this.pull();",
+      ].join("\n"),
+      [
+        '        if (typeof indexedDB !== "undefined") {',
+        "            if (!this.exists(cache)) {",
+        "                this.persist(cache);",
+        "            }",
+        "            await this.pull();",
+        "        }",
+      ].join("\n"),
+    );
+  }
 
-    await writeFile(fullPath, source, "utf8");
+  return patched;
+}
+
+// Relative POSIX paths of every regular file under rootDir, sorted.
+async function listTreeFiles(rootDir, relativeDir = "") {
+  const entries = await readdir(path.join(rootDir, relativeDir), {
+    withFileTypes: true,
+  });
+  const files = [];
+  for (const entry of entries) {
+    const relativePath = relativeDir
+      ? path.posix.join(relativeDir, entry.name)
+      : entry.name;
+    if (entry.isDirectory()) {
+      files.push(...(await listTreeFiles(rootDir, relativePath)));
+    } else if (entry.isFile()) {
+      files.push(relativePath);
+    }
+  }
+  return files.sort();
+}
+
+async function patchEmceptionModuleTree(rootDir, files) {
+  for (const relativePath of files) {
+    if (!relativePath.endsWith(".mjs")) {
+      continue;
+    }
+    const fullPath = path.join(rootDir, relativePath);
+    const source = await readFile(fullPath, "utf8");
+    const patched = patchEmceptionModuleSource(
+      path.posix.basename(relativePath),
+      source,
+    );
+    if (patched !== source) {
+      await writeFile(fullPath, patched, "utf8");
+    }
   }
 }
 
-async function preparePatchedEmceptionRoot() {
-  if (!patchedEmceptionRootPromise) {
-    patchedEmceptionRootPromise = (async () => {
-      const sourceRoot = path.dirname(require.resolve("sdn-emception"));
-      const markerPath = path.join(EMCEPTION_PATCH_ROOT, PATCH_MARKER_FILENAME);
-      let marker = null;
-      try {
-        marker = await readFile(markerPath, "utf8");
-      } catch {
-        marker = null;
+async function readEmceptionPackageVersion(sourceRoot) {
+  let directory = sourceRoot;
+  for (;;) {
+    try {
+      const packageJson = JSON.parse(
+        await readFile(path.join(directory, "package.json"), "utf8"),
+      );
+      if (packageJson?.name === "sdn-emception") {
+        return String(packageJson.version ?? "unknown");
       }
+    } catch {
+      // Keep walking up.
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) {
+      return "unknown";
+    }
+    directory = parent;
+  }
+}
 
-      if (marker?.trim() !== PATCH_VERSION) {
-        await rm(EMCEPTION_PATCH_ROOT, { recursive: true, force: true });
-        await cp(sourceRoot, EMCEPTION_PATCH_ROOT, { recursive: true });
-        await patchEmceptionModuleTree(EMCEPTION_PATCH_ROOT);
-        await writeFile(markerPath, `${PATCH_VERSION}\n`, "utf8");
+// The cache key: the patch version, the patch transform, the emception
+// package version, and a sha256 over every source file's path, size and
+// bytes. Two installs with the same version but different bytes never share
+// a root.
+async function computeEmceptionIdentity(sourceRoot) {
+  const version = await readEmceptionPackageVersion(sourceRoot);
+  const files = await listTreeFiles(sourceRoot);
+  const hash = createHash("sha256");
+  hash.update(`${PATCH_VERSION}\0${patchEmceptionModuleSource.toString()}\0`);
+  hash.update(`${version}\0`);
+  for (const relativePath of files) {
+    const fullPath = path.join(sourceRoot, relativePath);
+    const { size } = await stat(fullPath);
+    hash.update(`${relativePath}\0${size}\0`);
+    for await (const chunk of createReadStream(fullPath)) {
+      hash.update(chunk);
+    }
+    hash.update("\0");
+  }
+  const fingerprint = hash.digest("hex");
+  const safeVersion = version.replace(/[^A-Za-z0-9._]/g, "_");
+  // Per user: where the tmp dir is shared (Linux /tmp), users never collide.
+  const uid = currentUid();
+  return {
+    version,
+    fingerprint,
+    files,
+    key: `${PATCH_KEY_TAG}-${safeVersion}-${fingerprint.slice(0, 16)}${uid === null ? "" : `-u${uid}`}`,
+  };
+}
+
+// The content check on reuse. The marker is written last inside the staging
+// dir, so a published root always has one; this also catches a root whose
+// files were later deleted or truncated (tmp cleaners purge by age).
+async function isPatchedRootValid(rootDir, identity) {
+  // The root is imported as code, so it must be a real directory that this
+  // user owns and nobody else can write. Anything else is never trusted.
+  try {
+    const rootStat = await lstat(rootDir);
+    if (!rootStat.isDirectory()) {
+      return false;
+    }
+    const uid = currentUid();
+    if (uid !== null && (rootStat.uid !== uid || (rootStat.mode & 0o022) !== 0)) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  let marker;
+  try {
+    marker = JSON.parse(
+      await readFile(path.join(rootDir, PATCH_MARKER_FILENAME), "utf8"),
+    );
+  } catch {
+    return false;
+  }
+  if (
+    marker?.patchVersion !== PATCH_VERSION ||
+    marker.emceptionVersion !== identity.version ||
+    marker.fingerprint !== identity.fingerprint ||
+    !Array.isArray(marker.files) ||
+    marker.files.length !== identity.files.length
+  ) {
+    return false;
+  }
+  for (let index = 0; index < marker.files.length; index += 1) {
+    const [relativePath, size] = marker.files[index] ?? [];
+    if (relativePath !== identity.files[index]) {
+      return false;
+    }
+    try {
+      const entry = await stat(path.join(rootDir, relativePath));
+      if (!entry.isFile() || entry.size !== size) {
+        return false;
       }
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
 
-      return EMCEPTION_PATCH_ROOT;
-    })().catch((error) => {
-      patchedEmceptionRootPromise = null;
+function currentUid() {
+  return typeof process.getuid === "function" ? process.getuid() : null;
+}
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+// Staging and stale dirs carry their creator's pid. A process that died
+// mid-build leaves one behind; nothing else would ever remove it.
+async function removeOrphanedBuildDirs(cacheRoot) {
+  let names;
+  try {
+    names = await readdir(cacheRoot);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const match = ORPHAN_NAME_PATTERN.exec(name);
+    if (!match) {
+      continue;
+    }
+    const pid = Number(match[1]);
+    if (pid === process.pid || isProcessAlive(pid)) {
+      continue;
+    }
+    const uid = currentUid();
+    if (uid !== null) {
+      const entry = await lstat(path.join(cacheRoot, name)).catch(() => null);
+      if (!entry || entry.uid !== uid) {
+        continue;
+      }
+    }
+    await rm(path.join(cacheRoot, name), { recursive: true, force: true }).catch(
+      () => {},
+    );
+  }
+}
+
+// rename(2) of a directory is atomic: the root either does not exist or is
+// complete. Losing the race to another process is success when its root
+// passes the content check.
+async function publishPatchedRoot(stagingDir, finalDir, identity) {
+  let lastError = null;
+  for (let attempt = 0; attempt < MAX_PUBLISH_ATTEMPTS; attempt += 1) {
+    try {
+      await rename(stagingDir, finalDir);
+      return;
+    } catch (error) {
+      if (!RENAME_COLLISION_CODES.has(error?.code)) {
+        throw error;
+      }
+      lastError = error;
+    }
+    if (await isPatchedRootValid(finalDir, identity)) {
+      return;
+    }
+    // What sits at finalDir is incomplete. Move it aside in one rename so no
+    // reader ever sees it half-deleted, then retry.
+    const staleDir = `${finalDir}${STALE_MARKER}${process.pid}-${randomBytes(4).toString("hex")}`;
+    try {
+      await rename(finalDir, staleDir);
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        continue;
+      }
       throw error;
+    }
+    await rm(staleDir, { recursive: true, force: true });
+  }
+  throw new Error(
+    `Could not publish the patched emception root at ${finalDir}.`,
+    { cause: lastError },
+  );
+}
+
+/**
+ * Returns the shared patched emception root under `cacheRoot` (default
+ * `os.tmpdir()`), building it first if it is missing or fails the content
+ * check. Safe to call from any number of processes at once.
+ */
+export async function preparePatchedEmceptionRoot(options = {}) {
+  const cacheRoot = options.cacheRoot ?? os.tmpdir();
+  const sourceRoot =
+    options.sourceRoot ?? path.dirname(require.resolve("sdn-emception"));
+  const identity = await computeEmceptionIdentity(sourceRoot);
+  const finalDir = path.join(cacheRoot, `${PATCHED_ROOT_PREFIX}${identity.key}`);
+  if (await isPatchedRootValid(finalDir, identity)) {
+    return finalDir;
+  }
+
+  await removeOrphanedBuildDirs(cacheRoot);
+  const stagingDir = await mkdtemp(
+    `${finalDir}${STAGING_MARKER}${process.pid}-`,
+  );
+  try {
+    // Copy-on-write clone where the filesystem supports it (APFS, btrfs);
+    // a plain copy elsewhere.
+    await cp(sourceRoot, stagingDir, {
+      recursive: true,
+      mode: fsConstants.COPYFILE_FICLONE,
     });
+    await patchEmceptionModuleTree(stagingDir, identity.files);
+    const files = [];
+    for (const relativePath of identity.files) {
+      const { size } = await stat(path.join(stagingDir, relativePath));
+      files.push([relativePath, size]);
+    }
+    await writeFile(
+      path.join(stagingDir, PATCH_MARKER_FILENAME),
+      `${JSON.stringify({
+        patchVersion: PATCH_VERSION,
+        emceptionVersion: identity.version,
+        fingerprint: identity.fingerprint,
+        files,
+      })}\n`,
+      "utf8",
+    );
+    await publishPatchedRoot(stagingDir, finalDir, identity);
+  } finally {
+    // A no-op after a successful rename; removes the copy after a lost race
+    // or a failure.
+    await rm(stagingDir, { recursive: true, force: true });
+  }
+  return finalDir;
+}
+
+function getPatchedEmceptionRoot() {
+  if (!patchedEmceptionRootPromise) {
+    patchedEmceptionRootPromise = preparePatchedEmceptionRoot().catch(
+      (error) => {
+        patchedEmceptionRootPromise = null;
+        throw error;
+      },
+    );
   }
 
   return patchedEmceptionRootPromise;
@@ -181,7 +450,7 @@ class EmceptionController {
     if (!this.#instancePromise) {
       this.#instancePromise = (async () => {
         installNodeRuntimeShims();
-        const patchedRoot = await preparePatchedEmceptionRoot();
+        const patchedRoot = await getPatchedEmceptionRoot();
         const moduleUrl = pathToFileURL(path.join(patchedRoot, "emception.mjs")).href;
         const { default: Emception } = await import(moduleUrl);
         const emception = new Emception({

@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  cleanupCompilation,
   compileModuleFromSource,
   ModuleThreadModel,
   createRecipientKeypairHex,
@@ -697,13 +698,15 @@ test("source compiler honors an explicit standards catalog for both validation p
   assert.deepEqual(result.report.warnings, []);
 });
 
-test("source compile emits a compliant wasm module", async () => {
+test("source compile emits a compliant wasm module", async (t) => {
   const manifest = createTestManifest();
   const result = await compileModuleFromSource({
     manifest,
     sourceCode: "int propagate(void) { return 7; }\n",
     language: "c",
+    keepTempDir: true,
   });
+  t.after(() => cleanupCompilation(result));
   assert.equal(result.report.ok, true);
   assert.ok(result.wasmBytes.length > 0);
   const validation = await validateArtifactWithStandards({
@@ -766,7 +769,7 @@ test("source compile emits growable memory for dense browser module outputs", as
   assert.doesNotThrow(() => memory.grow(1));
 });
 
-test("artifact compliance can validate a built module from its embedded PLG manifest bytes", async () => {
+test("artifact compliance can validate a built module from its embedded PLG manifest bytes", async (t) => {
   const manifest = {
     ...createTestManifest(),
     capabilities: ["clock", "random"],
@@ -817,7 +820,9 @@ test("artifact compliance can validate a built module from its embedded PLG mani
     sourceCode: "int propagate(void) { return 7; }\n",
     language: "c",
     catalog,
+    keepTempDir: true,
   });
+  t.after(() => cleanupCompilation(result));
   const wasi = new WASI({
     version: "preview1",
     args: ["embedded-manifest"],

@@ -252,6 +252,7 @@ async function buildRuntimeHostEchoModule(prefix = "runtime-host:") {
     }),
     sourceCode: createEchoSource(prefix),
     language: "c",
+    keepTempDir: true,
   });
 }
 
@@ -262,6 +263,7 @@ async function buildRuntimeHostCountingModule() {
     }),
     sourceCode: createCountingEchoSource(),
     language: "c",
+    keepTempDir: true,
   });
 }
 

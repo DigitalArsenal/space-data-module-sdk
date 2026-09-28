@@ -1963,6 +1963,7 @@ test("flow compile routes an all-wasi guest set through the wasi-threads linker"
     language: "c++",
     threadModel: ModuleThreadModel.EMSCRIPTEN_PTHREADS,
     catalog: catalogForManifests(manifest),
+    keepTempDir: true,
   });
   t.after(() => cleanupCompilation(compilation));
 
@@ -3689,7 +3690,7 @@ test('flow compile keeps an all-sequential WASI artifact self-contained and runn
   const manifest={...producerDependency.manifest,pluginId:'test.flow.sequential-guest',
     sequentialJustification:{kind:'pure-transform',detail:'This fixture returns without spawning a worker or accessing shared state.'},
     methods:[{methodId:'sequential_tick',displayName:'Sequential tick',inputPorts:[port('request',{typeSets:[typedTypeSet('request','Request.fbs','RQST')]})],outputPorts:[],maxBatch:1,drainPolicy:'single-shot'}],schemasUsed:[],abiVersion:1};
-  const compilation=await compileModuleFromSource({manifest,sourceCode:'extern "C" int sequential_tick(void) { return 0; }',language:'c++',threadModel:ModuleThreadModel.WASI_SEQUENTIAL,catalog:catalogForManifests(manifest)});
+  const compilation=await compileModuleFromSource({manifest,sourceCode:'extern "C" int sequential_tick(void) { return 0; }',language:'c++',threadModel:ModuleThreadModel.WASI_SEQUENTIAL,catalog:catalogForManifests(manifest),keepTempDir:true});
   t.after(()=>cleanupCompilation(compilation));
   const dependency={pluginId:manifest.pluginId,manifest,normalized:normalizeManifestForSdnFlow(manifest),guestLink:{objectBytes:compilation.guestLink.objectBytes,metadata:{symbolPrefix:compilation.guestLink.symbolPrefix,methodSymbols:compilation.guestLink.methodSymbols,threadModel:compilation.guestLink.threadModel,capabilities:[]}},wasmPath:compilation.outputPath};
   const result=await compileFlowProgram({flow:singleNodeFlow(dependency,{capabilities:[]}),dependencies:dependencyMap(dependency),catalog:catalogForManifests(manifest)});

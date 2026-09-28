@@ -196,27 +196,30 @@ runtimeMatrixTest("runtime matrix executes WASI smoke cases across supported fla
   const tempRoot = await fs.mkdtemp(
     path.join(os.tmpdir(), "space-data-module-sdk-runtime-matrix-"),
   );
-  const preopenHostDir = path.join(tempRoot, "preopen");
-  const guestMountPath = ".";
-  const guestFilePath = "input.txt";
-  await fs.mkdir(preopenHostDir, { recursive: true });
-  await fs.writeFile(path.join(preopenHostDir, "input.txt"), "from-preopen", "utf8");
-
-  const pureWasmPath = path.join(tempRoot, "pure-wasi.wasm");
-  await fs.writeFile(pureWasmPath, await compileStandaloneWasiC({
-    sourceCode: PURE_WASI_FIXTURE_SOURCE,
-  }));
-
-  const manifest = createRuntimeFixtureManifest();
-  const compilation = await compileModuleFromSource({
-    manifest,
-    sourceCode: PLUGIN_RUNTIME_FIXTURE_SOURCE,
-    language: "c",
-  });
-  const pluginWasmPath = path.join(tempRoot, "plugin-runtime.wasm");
-  await fs.writeFile(pluginWasmPath, compilation.wasmBytes);
-
+  // Everything after mkdtemp sits inside the try: a fixture compile that
+  // throws must not leave tempRoot behind.
+  let compilation = null;
   try {
+    const preopenHostDir = path.join(tempRoot, "preopen");
+    const guestMountPath = ".";
+    const guestFilePath = "input.txt";
+    await fs.mkdir(preopenHostDir, { recursive: true });
+    await fs.writeFile(path.join(preopenHostDir, "input.txt"), "from-preopen", "utf8");
+
+    const pureWasmPath = path.join(tempRoot, "pure-wasi.wasm");
+    await fs.writeFile(pureWasmPath, await compileStandaloneWasiC({
+      sourceCode: PURE_WASI_FIXTURE_SOURCE,
+    }));
+
+    const manifest = createRuntimeFixtureManifest();
+    compilation = await compileModuleFromSource({
+      manifest,
+      sourceCode: PLUGIN_RUNTIME_FIXTURE_SOURCE,
+      language: "c",
+    });
+    const pluginWasmPath = path.join(tempRoot, "plugin-runtime.wasm");
+    await fs.writeFile(pluginWasmPath, compilation.wasmBytes);
+
     const pythonPath = await ensurePythonWasmtime();
     const languages = await prepareLanguageRunners();
     assert.ok(pythonPath.includes("space-data-module-sdk-python-wasmtime"));

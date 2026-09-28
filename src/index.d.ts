@@ -978,7 +978,16 @@ export interface CompilationResult {
   compiler: string;
   language: string;
   threadModel: ModuleThreadModelName;
+  /**
+   * The explicit `outputPath`, or the artifact inside `tempDir` when the
+   * caller passed `keepTempDir: true`. `null` otherwise: the compile's temp
+   * dir has already been removed, so use `wasmBytes`.
+   */
   outputPath: string | null;
+  /**
+   * Non-null only with `keepTempDir: true`. The caller owns it and frees it
+   * with `cleanupCompilation(result)`.
+   */
   tempDir: string | null;
   wasmBytes: Uint8Array;
   guestLink: GuestLinkArtifact | null;
@@ -1054,6 +1063,13 @@ export function compileModuleFromSource(options: {
   language?: string;
   threadModel?: ModuleThreadModelName;
   outputPath?: string;
+  /**
+   * Keep the compile's temp dir (toolchain scratch, intermediate objects, and
+   * the artifact when no `outputPath` is given) after a successful compile.
+   * Default `false`: it is removed before the promise settles, on success and
+   * on failure. A failed compile always removes it.
+   */
+  keepTempDir?: boolean;
   importedMemory?: boolean;
   sharedMemory?: boolean;
   initialMemoryBytes?: number;

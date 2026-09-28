@@ -714,167 +714,159 @@ async function compileWithEmception(options = {}) {
     invokeSource,
     exportedSymbols,
     outputPath,
+    tempDir,
     compileOptions,
   } = options;
-  const tempDir = await mkdtemp(
-    path.join(os.tmpdir(), "space-data-module-sdk-compile-"),
-  );
   const resolvedOutputPath = path.resolve(
     outputPath ?? path.join(tempDir, "module.wasm"),
   );
 
-  try {
-    return await runWithEmceptionLock(async (emception) => {
-      const workDir = "/working/space-data-module-sdk-compile";
-      const runtimeIncludeDir = path.posix.join(workDir, "flatbuffers-runtime");
-      const sourcePath = path.posix.join(workDir, `module.${sourceExtension}`);
-      const manifestSourcePath = path.posix.join(workDir, "plugin-manifest-exports.cpp");
-      const invokeHeaderPath = path.posix.join(workDir, "space_data_module_invoke.h");
-      const invokeSourcePath = path.posix.join(workDir, "plugin-invoke-bridge.cpp");
-      const sourceObjectPath = path.posix.join(workDir, "module.o");
-      const linkObjectPath = path.posix.join(workDir, "module-link.o");
-      const manifestObjectPath = path.posix.join(workDir, "plugin-manifest-exports.o");
-      const invokeObjectPath = path.posix.join(workDir, "plugin-invoke-bridge.o");
-      const wasmOutputPath = path.posix.join(workDir, "module.wasm");
+  return runWithEmceptionLock(async (emception) => {
+    const workDir = "/working/space-data-module-sdk-compile";
+    const runtimeIncludeDir = path.posix.join(workDir, "flatbuffers-runtime");
+    const sourcePath = path.posix.join(workDir, `module.${sourceExtension}`);
+    const manifestSourcePath = path.posix.join(workDir, "plugin-manifest-exports.cpp");
+    const invokeHeaderPath = path.posix.join(workDir, "space_data_module_invoke.h");
+    const invokeSourcePath = path.posix.join(workDir, "plugin-invoke-bridge.cpp");
+    const sourceObjectPath = path.posix.join(workDir, "module.o");
+    const linkObjectPath = path.posix.join(workDir, "module-link.o");
+    const manifestObjectPath = path.posix.join(workDir, "plugin-manifest-exports.o");
+    const invokeObjectPath = path.posix.join(workDir, "plugin-invoke-bridge.o");
+    const wasmOutputPath = path.posix.join(workDir, "module.wasm");
 
-      const { runtimeHeaders, schemaHeaders } = await getInvokeCppSupportFiles();
-      const args = buildCompilerArgs(exportedSymbols, compileOptions);
+    const { runtimeHeaders, schemaHeaders } = await getInvokeCppSupportFiles();
+    const args = buildCompilerArgs(exportedSymbols, compileOptions);
 
-      try {
-        emception.FS.mkdirTree(workDir);
-        await writeFilesToEmception(emception, runtimeIncludeDir, runtimeHeaders);
-        await writeFilesToEmception(emception, workDir, schemaHeaders);
-        emception.writeFile(sourcePath, sourceCode);
-        emception.writeFile(manifestSourcePath, manifestSource);
-        emception.writeFile(invokeHeaderPath, invokeHeaderSource);
-        emception.writeFile(invokeSourcePath, invokeSource);
+    try {
+      emception.FS.mkdirTree(workDir);
+      await writeFilesToEmception(emception, runtimeIncludeDir, runtimeHeaders);
+      await writeFilesToEmception(emception, workDir, schemaHeaders);
+      emception.writeFile(sourcePath, sourceCode);
+      emception.writeFile(manifestSourcePath, manifestSource);
+      emception.writeFile(invokeHeaderPath, invokeHeaderSource);
+      emception.writeFile(invokeSourcePath, invokeSource);
 
-        const commands = [
-          [
-            sourceCompilerCommand,
-            "-c",
-            sourcePath,
-            `-I${workDir}`,
-            `-I${runtimeIncludeDir}`,
-            ...buildSourceCompilerArgs(compileOptions),
-            "-o",
-            sourceObjectPath,
-          ],
-        ];
-
-        for (const command of commands) {
-          const result = emception.run(command.join(" "));
-          if (result.returncode !== 0) {
-            throw new Error(
-              `Compilation failed with ${command[0]} (emception): ${result.stderr || result.stdout}`,
-            );
-          }
-        }
-
-        const sourceObjectBytes = new Uint8Array(emception.readFile(sourceObjectPath));
-        const guestLink = deriveGuestLinkRenameArgs({
-          objectBytes: sourceObjectBytes,
-          pluginId: manifest?.pluginId,
-          methodIds: Array.isArray(manifest?.methods)
-            ? manifest.methods.map((method) => String(method?.methodId ?? ""))
-            : [],
-        });
-
-        const linkCompileCommand = [
+      const commands = [
+        [
           sourceCompilerCommand,
           "-c",
           sourcePath,
           `-I${workDir}`,
           `-I${runtimeIncludeDir}`,
-          ...guestLink.renameArgs,
           ...buildSourceCompilerArgs(compileOptions),
           "-o",
-          linkObjectPath,
-        ];
-        const linkCompileResult = emception.run(linkCompileCommand.join(" "));
-        if (linkCompileResult.returncode !== 0) {
+          sourceObjectPath,
+        ],
+      ];
+
+      for (const command of commands) {
+        const result = emception.run(command.join(" "));
+        if (result.returncode !== 0) {
           throw new Error(
-            `Compilation failed with ${linkCompileCommand[0]} (emception): ${linkCompileResult.stderr || linkCompileResult.stdout}`,
+            `Compilation failed with ${command[0]} (emception): ${result.stderr || result.stdout}`,
           );
         }
+      }
 
-        // The embedded manifest and the invoke bridge get the module source's
-        // own optimization flags. Without them both objects built at -O0 and
-        // every payload byte crossing the bridge (the std::vector copies of
-        // each request and response) cost hundreds of interpreted wasm
-        // instructions. The wasi path already compiles them this way.
-        const remainingCommands = [
-          [
-            "em++",
-            "-c",
-            manifestSourcePath,
-            "-std=c++17",
-            `-I${workDir}`,
-            `-I${runtimeIncludeDir}`,
-            ...buildSourceCompilerArgs(compileOptions),
-            "-o",
-            manifestObjectPath,
-          ],
-          [
-            "em++",
-            "-c",
-            invokeSourcePath,
-            "-std=c++17",
-            `-I${workDir}`,
-            `-I${runtimeIncludeDir}`,
-            ...buildSourceCompilerArgs(compileOptions),
-            "-o",
-            invokeObjectPath,
-          ],
-          [
-            "em++",
-            sourceObjectPath,
-            manifestObjectPath,
-            invokeObjectPath,
-            ...args,
-            "-o",
-            wasmOutputPath,
-          ],
-        ];
-        for (const command of remainingCommands) {
-          const result = emception.run(command.join(" "));
-          if (result.returncode !== 0) {
-            throw new Error(
-              `Compilation failed with ${command[0]} (emception): ${result.stderr || result.stdout}`,
-            );
-          }
-        }
+      const sourceObjectBytes = new Uint8Array(emception.readFile(sourceObjectPath));
+      const guestLink = deriveGuestLinkRenameArgs({
+        objectBytes: sourceObjectBytes,
+        pluginId: manifest?.pluginId,
+        methodIds: Array.isArray(manifest?.methods)
+          ? manifest.methods.map((method) => String(method?.methodId ?? ""))
+          : [],
+      });
 
-        const wasmBytes = new Uint8Array(emception.readFile(wasmOutputPath));
-        const linkObjectBytes = new Uint8Array(emception.readFile(linkObjectPath));
-        await writeFile(resolvedOutputPath, wasmBytes);
-        return {
-          wasmBytes,
-          outputPath: resolvedOutputPath,
-          tempDir,
-          guestLink: {
-            format: "wasm-object",
-            language,
-            symbolPrefix: guestLink.prefix,
-            methodSymbols: guestLink.methodSymbols,
-            threadModel:
-              compileOptions.threadModel ?? ModuleThreadModel.SINGLE_THREAD,
-            capabilities: compileOptions.guestLinkCapabilities,
-            objectBytes: linkObjectBytes,
-          },
-        };
-      } finally {
-        try {
-          removeEmceptionDirectory(emception, workDir);
-        } catch {
-          // Best-effort cleanup only; the shared emception instance remains usable.
+      const linkCompileCommand = [
+        sourceCompilerCommand,
+        "-c",
+        sourcePath,
+        `-I${workDir}`,
+        `-I${runtimeIncludeDir}`,
+        ...guestLink.renameArgs,
+        ...buildSourceCompilerArgs(compileOptions),
+        "-o",
+        linkObjectPath,
+      ];
+      const linkCompileResult = emception.run(linkCompileCommand.join(" "));
+      if (linkCompileResult.returncode !== 0) {
+        throw new Error(
+          `Compilation failed with ${linkCompileCommand[0]} (emception): ${linkCompileResult.stderr || linkCompileResult.stdout}`,
+        );
+      }
+
+      // The embedded manifest and the invoke bridge get the module source's
+      // own optimization flags. Without them both objects built at -O0 and
+      // every payload byte crossing the bridge (the std::vector copies of
+      // each request and response) cost hundreds of interpreted wasm
+      // instructions. The wasi path already compiles them this way.
+      const remainingCommands = [
+        [
+          "em++",
+          "-c",
+          manifestSourcePath,
+          "-std=c++17",
+          `-I${workDir}`,
+          `-I${runtimeIncludeDir}`,
+          ...buildSourceCompilerArgs(compileOptions),
+          "-o",
+          manifestObjectPath,
+        ],
+        [
+          "em++",
+          "-c",
+          invokeSourcePath,
+          "-std=c++17",
+          `-I${workDir}`,
+          `-I${runtimeIncludeDir}`,
+          ...buildSourceCompilerArgs(compileOptions),
+          "-o",
+          invokeObjectPath,
+        ],
+        [
+          "em++",
+          sourceObjectPath,
+          manifestObjectPath,
+          invokeObjectPath,
+          ...args,
+          "-o",
+          wasmOutputPath,
+        ],
+      ];
+      for (const command of remainingCommands) {
+        const result = emception.run(command.join(" "));
+        if (result.returncode !== 0) {
+          throw new Error(
+            `Compilation failed with ${command[0]} (emception): ${result.stderr || result.stdout}`,
+          );
         }
       }
-    });
-  } catch (error) {
-    await rm(tempDir, { recursive: true, force: true });
-    throw error;
-  }
+
+      const wasmBytes = new Uint8Array(emception.readFile(wasmOutputPath));
+      const linkObjectBytes = new Uint8Array(emception.readFile(linkObjectPath));
+      await writeFile(resolvedOutputPath, wasmBytes);
+      return {
+        wasmBytes,
+        outputPath: resolvedOutputPath,
+        guestLink: {
+          format: "wasm-object",
+          language,
+          symbolPrefix: guestLink.prefix,
+          methodSymbols: guestLink.methodSymbols,
+          threadModel:
+            compileOptions.threadModel ?? ModuleThreadModel.SINGLE_THREAD,
+          capabilities: compileOptions.guestLinkCapabilities,
+          objectBytes: linkObjectBytes,
+        },
+      };
+    } finally {
+      try {
+        removeEmceptionDirectory(emception, workDir);
+      } catch {
+        // Best-effort cleanup only; the shared emception instance remains usable.
+      }
+    }
+  });
 }
 
 async function ensureSystemCompilerAvailable(command) {
@@ -918,11 +910,9 @@ async function compileWithSystemEmscripten(options = {}) {
     invokeSource,
     exportedSymbols,
     outputPath,
+    tempDir,
     compileOptions,
   } = options;
-  const tempDir = await mkdtemp(
-    path.join(os.tmpdir(), "space-data-module-sdk-compile-"),
-  );
   const resolvedOutputPath = path.resolve(
     outputPath ?? path.join(tempDir, "module.wasm"),
   );
@@ -937,101 +927,95 @@ async function compileWithSystemEmscripten(options = {}) {
   const invokeObjectPath = path.join(tempDir, "plugin-invoke-bridge.o");
   const wasmOutputPath = path.join(tempDir, "module.wasm");
 
-  try {
-    await ensureSystemCompilerAvailable(sourceCompilerCommand);
-    await ensureSystemCompilerAvailable("em++");
-    const { runtimeHeaders, schemaHeaders } = await getInvokeCppSupportFiles();
-    const args = buildCompilerArgs(exportedSymbols, compileOptions);
-    await writeFilesToDirectory(runtimeIncludeDir, runtimeHeaders);
-    await writeFilesToDirectory(tempDir, schemaHeaders);
-    await writeFile(sourcePath, sourceCode);
-    await writeFile(manifestSourcePath, manifestSource);
-    await writeFile(invokeHeaderPath, invokeHeaderSource);
-    await writeFile(invokeSourcePath, invokeSource);
+  await ensureSystemCompilerAvailable(sourceCompilerCommand);
+  await ensureSystemCompilerAvailable("em++");
+  const { runtimeHeaders, schemaHeaders } = await getInvokeCppSupportFiles();
+  const args = buildCompilerArgs(exportedSymbols, compileOptions);
+  await writeFilesToDirectory(runtimeIncludeDir, runtimeHeaders);
+  await writeFilesToDirectory(tempDir, schemaHeaders);
+  await writeFile(sourcePath, sourceCode);
+  await writeFile(manifestSourcePath, manifestSource);
+  await writeFile(invokeHeaderPath, invokeHeaderSource);
+  await writeFile(invokeSourcePath, invokeSource);
 
-    const sourceCompileArgs = [
-      "-c",
-      sourcePath,
-      `-I${tempDir}`,
-      `-I${runtimeIncludeDir}`,
-      ...buildSourceCompilerArgs(compileOptions),
-      "-o",
-      sourceObjectPath,
-    ];
-    await runSystemCompiler(sourceCompilerCommand, sourceCompileArgs);
+  const sourceCompileArgs = [
+    "-c",
+    sourcePath,
+    `-I${tempDir}`,
+    `-I${runtimeIncludeDir}`,
+    ...buildSourceCompilerArgs(compileOptions),
+    "-o",
+    sourceObjectPath,
+  ];
+  await runSystemCompiler(sourceCompilerCommand, sourceCompileArgs);
 
-    const sourceObjectBytes = new Uint8Array(await readFile(sourceObjectPath));
-    const guestLink = deriveGuestLinkRenameArgs({
-      objectBytes: sourceObjectBytes,
-      pluginId: manifest?.pluginId,
-      methodIds: Array.isArray(manifest?.methods)
-        ? manifest.methods.map((method) => String(method?.methodId ?? ""))
-        : [],
-    });
+  const sourceObjectBytes = new Uint8Array(await readFile(sourceObjectPath));
+  const guestLink = deriveGuestLinkRenameArgs({
+    objectBytes: sourceObjectBytes,
+    pluginId: manifest?.pluginId,
+    methodIds: Array.isArray(manifest?.methods)
+      ? manifest.methods.map((method) => String(method?.methodId ?? ""))
+      : [],
+  });
 
-    const linkCompileArgs = [
-      "-c",
-      sourcePath,
-      `-I${tempDir}`,
-      `-I${runtimeIncludeDir}`,
-      ...guestLink.renameArgs,
-      ...buildSourceCompilerArgs(compileOptions),
-      "-o",
-      linkObjectPath,
-    ];
-    await runSystemCompiler(sourceCompilerCommand, linkCompileArgs);
-    // Same optimization flags as the module source (see compileWithEmception).
-    // buildSourceCompilerArgs carries -pthread whenever usesPthreadCompileFlags.
-    await runSystemCompiler("em++", [
-      "-c",
-      manifestSourcePath,
-      "-std=c++17",
-      `-I${tempDir}`,
-      `-I${runtimeIncludeDir}`,
-      ...buildSourceCompilerArgs(compileOptions),
-      "-o",
-      manifestObjectPath,
-    ]);
-    await runSystemCompiler("em++", [
-      "-c",
-      invokeSourcePath,
-      "-std=c++17",
-      `-I${tempDir}`,
-      `-I${runtimeIncludeDir}`,
-      ...buildSourceCompilerArgs(compileOptions),
-      "-o",
-      invokeObjectPath,
-    ]);
-    await runSystemCompiler("em++", [
-      sourceObjectPath,
-      manifestObjectPath,
-      invokeObjectPath,
-      ...args,
-      "-o",
-      wasmOutputPath,
-    ]);
+  const linkCompileArgs = [
+    "-c",
+    sourcePath,
+    `-I${tempDir}`,
+    `-I${runtimeIncludeDir}`,
+    ...guestLink.renameArgs,
+    ...buildSourceCompilerArgs(compileOptions),
+    "-o",
+    linkObjectPath,
+  ];
+  await runSystemCompiler(sourceCompilerCommand, linkCompileArgs);
+  // Same optimization flags as the module source (see compileWithEmception).
+  // buildSourceCompilerArgs carries -pthread whenever usesPthreadCompileFlags.
+  await runSystemCompiler("em++", [
+    "-c",
+    manifestSourcePath,
+    "-std=c++17",
+    `-I${tempDir}`,
+    `-I${runtimeIncludeDir}`,
+    ...buildSourceCompilerArgs(compileOptions),
+    "-o",
+    manifestObjectPath,
+  ]);
+  await runSystemCompiler("em++", [
+    "-c",
+    invokeSourcePath,
+    "-std=c++17",
+    `-I${tempDir}`,
+    `-I${runtimeIncludeDir}`,
+    ...buildSourceCompilerArgs(compileOptions),
+    "-o",
+    invokeObjectPath,
+  ]);
+  await runSystemCompiler("em++", [
+    sourceObjectPath,
+    manifestObjectPath,
+    invokeObjectPath,
+    ...args,
+    "-o",
+    wasmOutputPath,
+  ]);
 
-    const wasmBytes = new Uint8Array(await readFile(wasmOutputPath));
-    const linkObjectBytes = new Uint8Array(await readFile(linkObjectPath));
-    await writeFile(resolvedOutputPath, wasmBytes);
-    return {
-      wasmBytes,
-      outputPath: resolvedOutputPath,
-      tempDir,
-      guestLink: {
-        format: "wasm-object",
-        language,
-        symbolPrefix: guestLink.prefix,
-        methodSymbols: guestLink.methodSymbols,
-        threadModel: compileOptions.threadModel,
-        capabilities: compileOptions.guestLinkCapabilities,
-        objectBytes: linkObjectBytes,
-      },
-    };
-  } catch (error) {
-    await rm(tempDir, { recursive: true, force: true });
-    throw error;
-  }
+  const wasmBytes = new Uint8Array(await readFile(wasmOutputPath));
+  const linkObjectBytes = new Uint8Array(await readFile(linkObjectPath));
+  await writeFile(resolvedOutputPath, wasmBytes);
+  return {
+    wasmBytes,
+    outputPath: resolvedOutputPath,
+    guestLink: {
+      format: "wasm-object",
+      language,
+      symbolPrefix: guestLink.prefix,
+      methodSymbols: guestLink.methodSymbols,
+      threadModel: compileOptions.threadModel,
+      capabilities: compileOptions.guestLinkCapabilities,
+      objectBytes: linkObjectBytes,
+    },
+  };
 }
 
 async function runWasiCompiler(command, args, options = {}) {
@@ -1070,6 +1054,7 @@ async function compileWithWasiThreads(options = {}) {
     invokeSource,
     exportedSymbols,
     outputPath,
+    tempDir,
     compileOptions,
   } = options;
   const toolchain = resolveWasiThreadsToolchain();
@@ -1077,9 +1062,6 @@ async function compileWithWasiThreads(options = {}) {
   const sourceDriver = isCpp ? toolchain.clangxx : toolchain.clang;
   const cppDriver = toolchain.clangxx;
 
-  const tempDir = await mkdtemp(
-    path.join(os.tmpdir(), "space-data-module-sdk-compile-"),
-  );
   const resolvedOutputPath = path.resolve(
     outputPath ?? path.join(tempDir, "module.wasm"),
   );
@@ -1094,98 +1076,92 @@ async function compileWithWasiThreads(options = {}) {
   const invokeObjectPath = path.join(tempDir, "plugin-invoke-bridge.o");
   const wasmOutputPath = path.join(tempDir, "module.wasm");
 
-  try {
-    const { runtimeHeaders, schemaHeaders } = await getInvokeCppSupportFiles();
-    const linkArgs = buildCompilerArgs(exportedSymbols, compileOptions);
-    await writeFilesToDirectory(runtimeIncludeDir, runtimeHeaders);
-    await writeFilesToDirectory(tempDir, schemaHeaders);
-    await writeFile(sourcePath, sourceCode);
-    await writeFile(manifestSourcePath, manifestSource);
-    await writeFile(invokeHeaderPath, invokeHeaderSource);
-    await writeFile(invokeSourcePath, invokeSource);
+  const { runtimeHeaders, schemaHeaders } = await getInvokeCppSupportFiles();
+  const linkArgs = buildCompilerArgs(exportedSymbols, compileOptions);
+  await writeFilesToDirectory(runtimeIncludeDir, runtimeHeaders);
+  await writeFilesToDirectory(tempDir, schemaHeaders);
+  await writeFile(sourcePath, sourceCode);
+  await writeFile(manifestSourcePath, manifestSource);
+  await writeFile(invokeHeaderPath, invokeHeaderSource);
+  await writeFile(invokeSourcePath, invokeSource);
 
-    const includeArgs = [`-I${tempDir}`, `-I${runtimeIncludeDir}`];
-    const sourceCompilerArgs = buildSourceCompilerArgs(compileOptions);
+  const includeArgs = [`-I${tempDir}`, `-I${runtimeIncludeDir}`];
+  const sourceCompilerArgs = buildSourceCompilerArgs(compileOptions);
 
-    await runWasiCompiler(sourceDriver, [
-      ...toolchain.toolchainArgs,
-      "-c",
-      sourcePath,
-      ...includeArgs,
-      ...(isCpp ? ["-std=c++17"] : []),
-      ...sourceCompilerArgs,
-      "-o",
-      sourceObjectPath,
-    ]);
+  await runWasiCompiler(sourceDriver, [
+    ...toolchain.toolchainArgs,
+    "-c",
+    sourcePath,
+    ...includeArgs,
+    ...(isCpp ? ["-std=c++17"] : []),
+    ...sourceCompilerArgs,
+    "-o",
+    sourceObjectPath,
+  ]);
 
-    const sourceObjectBytes = new Uint8Array(await readFile(sourceObjectPath));
-    const guestLink = deriveGuestLinkRenameArgs({
-      objectBytes: sourceObjectBytes,
-      pluginId: manifest?.pluginId,
-      methodIds: Array.isArray(manifest?.methods)
-        ? manifest.methods.map((method) => String(method?.methodId ?? ""))
-        : [],
-    });
+  const sourceObjectBytes = new Uint8Array(await readFile(sourceObjectPath));
+  const guestLink = deriveGuestLinkRenameArgs({
+    objectBytes: sourceObjectBytes,
+    pluginId: manifest?.pluginId,
+    methodIds: Array.isArray(manifest?.methods)
+      ? manifest.methods.map((method) => String(method?.methodId ?? ""))
+      : [],
+  });
 
-    await runWasiCompiler(sourceDriver, [
-      ...toolchain.toolchainArgs,
-      "-c",
-      sourcePath,
-      ...includeArgs,
-      ...(isCpp ? ["-std=c++17"] : []),
-      ...guestLink.renameArgs,
-      ...sourceCompilerArgs,
-      "-o",
-      linkObjectPath,
-    ]);
+  await runWasiCompiler(sourceDriver, [
+    ...toolchain.toolchainArgs,
+    "-c",
+    sourcePath,
+    ...includeArgs,
+    ...(isCpp ? ["-std=c++17"] : []),
+    ...guestLink.renameArgs,
+    ...sourceCompilerArgs,
+    "-o",
+    linkObjectPath,
+  ]);
 
-    for (const [srcPath, objPath] of [
-      [manifestSourcePath, manifestObjectPath],
-      [invokeSourcePath, invokeObjectPath],
-    ]) {
-      await runWasiCompiler(cppDriver, [
-        ...toolchain.toolchainArgs,
-        "-c",
-        srcPath,
-        "-std=c++17",
-        ...includeArgs,
-        ...sourceCompilerArgs,
-        "-o",
-        objPath,
-      ]);
-    }
-
+  for (const [srcPath, objPath] of [
+    [manifestSourcePath, manifestObjectPath],
+    [invokeSourcePath, invokeObjectPath],
+  ]) {
     await runWasiCompiler(cppDriver, [
       ...toolchain.toolchainArgs,
-      sourceObjectPath,
-      manifestObjectPath,
-      invokeObjectPath,
-      ...linkArgs,
+      "-c",
+      srcPath,
+      "-std=c++17",
+      ...includeArgs,
+      ...sourceCompilerArgs,
       "-o",
-      wasmOutputPath,
+      objPath,
     ]);
-
-    const wasmBytes = new Uint8Array(await readFile(wasmOutputPath));
-    const linkObjectBytes = new Uint8Array(await readFile(linkObjectPath));
-    await writeFile(resolvedOutputPath, wasmBytes);
-    return {
-      wasmBytes,
-      outputPath: resolvedOutputPath,
-      tempDir,
-      guestLink: {
-        format: "wasm-object",
-        language,
-        symbolPrefix: guestLink.prefix,
-        methodSymbols: guestLink.methodSymbols,
-        threadModel: compileOptions.threadModel,
-        capabilities: compileOptions.guestLinkCapabilities,
-        objectBytes: linkObjectBytes,
-      },
-    };
-  } catch (error) {
-    await rm(tempDir, { recursive: true, force: true });
-    throw error;
   }
+
+  await runWasiCompiler(cppDriver, [
+    ...toolchain.toolchainArgs,
+    sourceObjectPath,
+    manifestObjectPath,
+    invokeObjectPath,
+    ...linkArgs,
+    "-o",
+    wasmOutputPath,
+  ]);
+
+  const wasmBytes = new Uint8Array(await readFile(wasmOutputPath));
+  const linkObjectBytes = new Uint8Array(await readFile(linkObjectPath));
+  await writeFile(resolvedOutputPath, wasmBytes);
+  return {
+    wasmBytes,
+    outputPath: resolvedOutputPath,
+    guestLink: {
+      format: "wasm-object",
+      language,
+      symbolPrefix: guestLink.prefix,
+      methodSymbols: guestLink.methodSymbols,
+      threadModel: compileOptions.threadModel,
+      capabilities: compileOptions.guestLinkCapabilities,
+      objectBytes: linkObjectBytes,
+    },
+  };
 }
 
 export async function compileModuleFromSource(options = {}) {
@@ -1243,9 +1219,6 @@ export async function compileModuleFromSource(options = {}) {
     ),
   ];
 
-  let wasmBytes;
-  let resolvedOutputPath = null;
-  let tempDir = null;
   const threadModel = resolveThreadModel({
     manifest,
     threadModel: options.threadModel,
@@ -1275,72 +1248,92 @@ export async function compileModuleFromSource(options = {}) {
     : useSystemEmscripten
       ? compileWithSystemEmscripten
       : compileWithEmception;
-  const result = await compileFunction({
-    manifest,
-    language: compiler.language,
-    sourceCompilerCommand: compiler.command,
-    sourceExtension: compiler.extension,
-    sourceCode,
-    manifestSource,
-    invokeHeaderSource,
-    invokeSource,
-    exportedSymbols,
-    outputPath: options.outputPath,
-    compileOptions,
-  });
-  wasmBytes = appendWasmCustomSection(
-    result.wasmBytes,
-    SDS_MANIFEST_SECTION_NAME,
-    encodePluginManifest(manifest),
+  // Scratch for the toolchain and, without an explicit outputPath, the home of
+  // the emitted artifact. Removed in finally on success, failure and throw.
+  // `keepTempDir: true` hands it to the caller on success instead
+  // (result.tempDir, freed by cleanupCompilation); a failed compile never
+  // hands anything off, so its dir is always removed.
+  const keepTempDir = options.keepTempDir === true;
+  const tempDir = await mkdtemp(
+    path.join(os.tmpdir(), "space-data-module-sdk-compile-"),
   );
-  resolvedOutputPath = result.outputPath;
-  await writeFile(resolvedOutputPath, wasmBytes);
-  tempDir = result.tempDir;
+  let handedOff = false;
+  try {
+    const result = await compileFunction({
+      manifest,
+      language: compiler.language,
+      sourceCompilerCommand: compiler.command,
+      sourceExtension: compiler.extension,
+      sourceCode,
+      manifestSource,
+      invokeHeaderSource,
+      invokeSource,
+      exportedSymbols,
+      outputPath: options.outputPath,
+      tempDir,
+      compileOptions,
+    });
+    const wasmBytes = appendWasmCustomSection(
+      result.wasmBytes,
+      SDS_MANIFEST_SECTION_NAME,
+      encodePluginManifest(manifest),
+    );
+    const resolvedOutputPath = result.outputPath;
+    await writeFile(resolvedOutputPath, wasmBytes);
 
-  // Enforce the isomorphic-pthreads guardrail on the EMITTED artifact: a build
-  // that claims the pthreads thread model but did not emit a shared-memory /
-  // atomics wasm must FAIL the compile here rather than ship. See
-  // docs/isomorphic-pthreads.md.
-  let threadFeatures = null;
-  if (threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS) {
-    threadFeatures = assertPthreadArtifact(wasmBytes, {
-      source: resolvedOutputPath,
+    // Enforce the isomorphic-pthreads guardrail on the EMITTED artifact: a build
+    // that claims the pthreads thread model but did not emit a shared-memory /
+    // atomics wasm must FAIL the compile here rather than ship. See
+    // docs/isomorphic-pthreads.md.
+    let threadFeatures = null;
+    if (threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS) {
+      threadFeatures = assertPthreadArtifact(wasmBytes, {
+        source: resolvedOutputPath,
+      });
+    } else if (threadModel === ModuleThreadModel.WASI_SEQUENTIAL) {
+      // Mirror guard. The target is passed so that SDN_WASI_TARGET cannot be used
+      // to quietly build a plain wasm32-wasip1 object under the sequential model:
+      // it is a concurrency exemption, not a toolchain exemption.
+      threadFeatures = assertSequentialArtifact(wasmBytes, {
+        source: resolvedOutputPath,
+        target: resolveWasiThreadsToolchain().target,
+      });
+    }
+
+    // Validate the compiled artifact
+    const report = await validateArtifactWithStandards({
+      manifest,
+      wasmPath: resolvedOutputPath,
+      ...standardsOptions,
     });
-  } else if (threadModel === ModuleThreadModel.WASI_SEQUENTIAL) {
-    // Mirror guard. The target is passed so that SDN_WASI_TARGET cannot be used
-    // to quietly build a plain wasm32-wasip1 object under the sequential model:
-    // it is a concurrency exemption, not a toolchain exemption.
-    threadFeatures = assertSequentialArtifact(wasmBytes, {
-      source: resolvedOutputPath,
-      target: resolveWasiThreadsToolchain().target,
-    });
+
+    handedOff = keepTempDir;
+    return {
+      compiler: useWasiThreads
+        ? threadModel === ModuleThreadModel.WASI_SEQUENTIAL
+          ? "wasm32-wasi-clang++ (wasi-sequential)"
+          : "wasm32-wasi-clang++ (wasi-threads)"
+        : useSystemEmscripten
+          ? "em++ (system emscripten pthreads)"
+          : "em++ (emception)",
+      language: compiler.language,
+      threadModel,
+      // Without an explicit outputPath the artifact lived in tempDir, which is
+      // gone unless the caller kept it.
+      outputPath:
+        options.outputPath != null || keepTempDir ? resolvedOutputPath : null,
+      tempDir: keepTempDir ? tempDir : null,
+      wasmBytes,
+      guestLink: result.guestLink,
+      manifestWarnings: warnings,
+      threadFeatures,
+      report,
+    };
+  } finally {
+    if (!handedOff) {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   }
-
-  // Validate the compiled artifact
-  const report = await validateArtifactWithStandards({
-    manifest,
-    wasmPath: resolvedOutputPath,
-    ...standardsOptions,
-  });
-
-  return {
-    compiler: useWasiThreads
-      ? threadModel === ModuleThreadModel.WASI_SEQUENTIAL
-        ? "wasm32-wasi-clang++ (wasi-sequential)"
-        : "wasm32-wasi-clang++ (wasi-threads)"
-      : useSystemEmscripten
-        ? "em++ (system emscripten pthreads)"
-        : "em++ (emception)",
-    language: compiler.language,
-    threadModel,
-    outputPath: resolvedOutputPath,
-    tempDir,
-    wasmBytes,
-    guestLink: result.guestLink,
-    manifestWarnings: warnings,
-    threadFeatures,
-    report,
-  };
 }
 
 export async function cleanupCompilation(result) {

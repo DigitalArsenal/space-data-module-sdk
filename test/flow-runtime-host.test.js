@@ -99,6 +99,9 @@ async function buildNeutralRoutingFixture() {
     // Explicit: browser targeting no longer implies a toolchain (wasi-sequential
     // model). This fixture wants the legacy Emscripten path.
     threadModel: "single-thread",
+    // The flow dependency below reads the artifact from outputPath;
+    // the fixture's after() hook frees it with cleanupCompilation.
+    keepTempDir: true,
     manifest,
     language: "c++",
     sourceCode: `

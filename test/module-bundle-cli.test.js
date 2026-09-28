@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -19,10 +19,11 @@ import { extractPublicationRecordCollection } from "../src/transport/records.js"
 
 const execFileAsync = promisify(execFile);
 
-test("CLI protect can emit a single-file bundle wasm", async () => {
+test("CLI protect can emit a single-file bundle wasm", async (t) => {
   const tempDir = await mkdtemp(
     path.join(os.tmpdir(), "space-data-module-sdk-cli-"),
   );
+  t.after(() => rm(tempDir, { recursive: true, force: true }));
   const manifestPath = path.resolve(
     "examples",
     "single-file-bundle",
@@ -74,10 +75,11 @@ test("CLI protect can emit a single-file bundle wasm", async () => {
   );
 });
 
-test("CLI protect can emit an encrypted binary with an appended REC trailer", async () => {
+test("CLI protect can emit an encrypted binary with an appended REC trailer", async (t) => {
   const tempDir = await mkdtemp(
     path.join(os.tmpdir(), "space-data-module-sdk-cli-encrypted-"),
   );
+  t.after(() => rm(tempDir, { recursive: true, force: true }));
   const manifestPath = path.resolve(
     "examples",
     "single-file-bundle",
