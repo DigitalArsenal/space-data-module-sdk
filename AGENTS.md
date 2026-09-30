@@ -5,6 +5,10 @@ modules. Use it to learn the contract, compile modules, validate artifacts,
 package REC+MBL single-file artifacts, sign or encrypt delivery records, and verify
 browser/WasmEdge portability.
 
+## Design principles
+
+Before any code or structural change, read the stack's design principles and follow their hard rule (refactor to the principle first, then change behavior): `../../../docs/policies/design-principles.md` inside the spacedatanetwork-stack checkout, or https://github.com/DigitalArsenal/spacedatanetwork-stack/blob/main/docs/policies/design-principles.md.
+
 Nearest-file wins: read this file first, then follow the most specific child
 `AGENTS.md` in the directory you are editing.
 
