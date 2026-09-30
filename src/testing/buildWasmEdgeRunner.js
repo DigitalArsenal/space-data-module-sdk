@@ -276,15 +276,47 @@ export async function buildWasmEdgeEmscriptenPthreadRunner(options = {}) {
 const WASMEDGE_THREADS_REVISION = "be85c2fbba68318f103b4a766728f6946e65abf8";
 const runtimeBuilds = new Map();
 
-// Upstream 0.16.4 can lose atomic notifications between comparison and sleep.
-// Keep its established SDN fix isolated from the owner's installed SDK/CLI.
-// An explicit include/lib pair remains supported for operator-built runtimes.
+// The SDN patch series for WasmEdge 0.16.4 (sdn-server/internal/wasmrt/SUBSTRATE.md),
+// applied here byte-identical from SDN's testdata/ (kept local so this build
+// has no cross-repo file dependency). Order matters (02 and 04 both touch
+// lib/llvm/compiler.cpp) and matches SDN's own build-static-wasmedge.sh.
+//   01-atomic-wait            compare/register/sleep under one mutex; a notify
+//                             wakes a waiter without a store. Fixes upstream's
+//                             lost wakeups — this build's interpreter is the
+//                             only execution mode, so this is the one patch
+//                             with an observable effect here.
+//   02-stop-token             a stop is sticky, read (never consumed) by the
+//                             interpreter and by Interruptible AOT code.
+//   03-fault-jmp              darwin _setjmp/_longjmp signal-stack-flag fix
+//                             for the native-fault path AOT execution uses.
+//   04-atomic-memarg-offset   AOT memory.atomic.notify/wait honour the
+//                             instruction's memarg offset (lib/llvm/compiler.cpp).
+//
+// This runner is built with -DWASMEDGE_USE_LLVM=OFF: in 0.16.4 that flag also
+// gates WASMEDGE_BUILD_AOT_RUNTIME (WasmEdge's CMakeLists.txt), so the linked
+// library can neither compile nor LOAD AOT code. Patches 02-04 therefore
+// patch code this runner never executes; only 01 is load-bearing today. They
+// stay applied anyway so this isolated dependency's WasmEdge checkout tracks
+// SDN's full patched baseline (never drifts if AOT is enabled here later),
+// and 04 specifically is why no memarg-offset regression test is added
+// alongside it: there is no AOT lane in this SDK to run SDN's substrate probe
+// against (module-sdk-oracle: tri-runtime parity is browser / native
+// interpreter WasmEdge / Docker interpreter WasmEdge — none compile AOT).
+const WASMEDGE_PATCH_NAMES = Object.freeze([
+  "wasmedge-0.16.4-atomic-wait.patch",
+  "wasmedge-0.16.4-stop-token.patch",
+  "wasmedge-0.16.4-fault-jmp.patch",
+  "wasmedge-0.16.4-atomic-memarg-offset.patch",
+]);
+
 async function prepareWasmEdgeThreadsRuntime(options) {
   if ((options.wasmedgeIncludeDir ?? process.env.WASMEDGE_INCLUDE_DIR) &&
       (options.wasmedgeLibDir ?? process.env.WASMEDGE_LIB_DIR)) return {};
-  const patchPath = path.join(__dirname, "native/wasmedge-0.16.4-atomic-wait.patch");
-  const digest = createHash("sha256").update(WASMEDGE_THREADS_REVISION)
-    .update(await readFile(patchPath)).update(`${process.platform}-${process.arch}`).digest("hex");
+  const patchPaths = WASMEDGE_PATCH_NAMES.map((name) => path.join(__dirname, "native", name));
+  const patchBytes = await Promise.all(patchPaths.map((p) => readFile(p)));
+  const digestHash = createHash("sha256").update(WASMEDGE_THREADS_REVISION);
+  for (const bytes of patchBytes) digestHash.update(bytes);
+  const digest = digestHash.update(`${process.platform}-${process.arch}`).digest("hex");
   if (!runtimeBuilds.has(digest)) {
     const build = (async () => {
       const root = path.join(os.tmpdir(), "sdm-wasmedge-runtimes", digest);
@@ -324,8 +356,10 @@ async function prepareWasmEdgeThreadsRuntime(options) {
           }
           const revision = (await run("git", ["-C", source, "rev-parse", "HEAD"])).stdout.trim();
           if (revision !== WASMEDGE_THREADS_REVISION) throw new Error(`Unexpected WasmEdge source revision: ${revision}`);
-          try { await run("git", ["-C", source, "apply", "--reverse", "--check", patchPath]); }
-          catch { await run("git", ["-C", source, "apply", patchPath]); }
+          for (const patchPath of patchPaths) {
+            try { await run("git", ["-C", source, "apply", "--reverse", "--check", patchPath]); }
+            catch { await run("git", ["-C", source, "apply", patchPath]); }
+          }
           await run("cmake", ["-S", source, "-B", buildDir, "-G", "Ninja",
             "-DCMAKE_BUILD_TYPE=Release", `-DCMAKE_INSTALL_PREFIX=${prefix}`,
             process.platform === "darwin" ? "-DCMAKE_CXX_FLAGS=-Wno-invalid-specialization" : "-DCMAKE_CXX_FLAGS=-Wno-error=maybe-uninitialized -Wno-error=array-bounds",
@@ -333,7 +367,10 @@ async function prepareWasmEdgeThreadsRuntime(options) {
             "-DWASMEDGE_BUILD_PLUGINS=OFF", "-DWASMEDGE_BUILD_TOOLS=OFF", "-DWASMEDGE_FORCE_DISABLE_LTO=ON"]);
           await run("cmake", ["--build", buildDir, "-j", "4"]);
           await run("cmake", ["--install", buildDir]);
-          await writeFile(marker, JSON.stringify({ revision, patchSha256: createHash("sha256").update(await readFile(patchPath)).digest("hex") }));
+          const patchesSha256 = Object.fromEntries(
+            WASMEDGE_PATCH_NAMES.map((name, i) => [name, createHash("sha256").update(patchBytes[i]).digest("hex")]),
+          );
+          await writeFile(marker, JSON.stringify({ revision, patchesSha256 }));
         }
       } finally {
         if (held) await rm(lock, { recursive: true, force: true });

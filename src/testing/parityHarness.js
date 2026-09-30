@@ -71,9 +71,16 @@ export function loadWasmEdgePin() {
   if (!repository) {
     throw new Error("wasmedgePin.json dockerImageRepository is required.");
   }
+  // The SDN WasmEdge 0.16.4 patch series (01-atomic-wait, 02-stop-token,
+  // 03-fault-jmp, 04-atomic-memarg-offset; sdn-server/internal/wasmrt/SUBSTRATE.md).
+  // Any change to the runner source, any patch, or the Dockerfile itself must
+  // bump this identity so a stale-patched image is never reused.
   const runnerIdentity = createHash("sha256")
     .update(readFileSync(path.join(__dirname, "native/wasmedge_wasi_threads_runner.c")))
     .update(readFileSync(path.join(__dirname, "native/wasmedge-0.16.4-atomic-wait.patch")))
+    .update(readFileSync(path.join(__dirname, "native/wasmedge-0.16.4-stop-token.patch")))
+    .update(readFileSync(path.join(__dirname, "native/wasmedge-0.16.4-fault-jmp.patch")))
+    .update(readFileSync(path.join(__dirname, "native/wasmedge-0.16.4-atomic-memarg-offset.patch")))
     .update(readFileSync(path.join(__dirname, String(pin.dockerfile))))
     .digest("hex").slice(0, 16);
   return Object.freeze({
