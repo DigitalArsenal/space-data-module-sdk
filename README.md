@@ -145,6 +145,31 @@ Source-built modules can set this on an emitted output frame with
 `plugin_set_output_stream_frame(outputIndex, sequence, endOfStream)` or set the
 raw frame id with `plugin_set_output_frame_id(outputIndex, frameId)`.
 
+### Size-prefixed records
+
+A size-prefixed FlatBuffer is not an unprefixed buffer with a length written in
+front of it. FlatBuffers aligns each field relative to the start of the buffer.
+A size-prefixed finish lays the record out so that the 4-byte prefix comes
+before an aligned root:
+
+- C++: `FinishSizePrefixed`;
+- JS: `finishSizePrefixed`;
+- `flatc --binary --size-prefixed`.
+
+Writing a length in front of an unprefixed buffer moves every field by 4
+bytes. Eight-byte scalars and vectors, such as `double` and `long`, are then
+misaligned. `VerifySizePrefixedBuffer` with alignment checks, which a module's
+generated readers run, refuses the record.
+
+- Build size-prefixed frames with the generated builder's size-prefixed finish,
+  or with `flatc --binary --size-prefixed` from JSON.
+- flatc-wasm's `generateBinary(schema, json, { sizePrefix: true })`, the
+  default, writes the length in front in JS and does not produce such a record.
+  For a size-prefixed record, run flatc with `--size-prefixed` through
+  `runCommand`. Otherwise pass `sizePrefix: false` for an unprefixed record.
+- Forward a module's size-prefixed output frames unchanged. Do not strip the
+  prefix or add one.
+
 For simple single-input / single-output methods, command mode also supports a
 raw shortcut:
 
