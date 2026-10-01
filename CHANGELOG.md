@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.8.26
+
+Documents how a size-prefixed FlatBuffer record is built: by a size-prefixed
+finish, not by writing a length in front of an unprefixed buffer.
+
+- README, "Size-prefixed records": FlatBuffers aligns each field relative to the
+  start of the buffer. A size-prefixed finish (`FinishSizePrefixed`,
+  `finishSizePrefixed`, `flatc --binary --size-prefixed`) lays the record out
+  so that the 4-byte prefix comes before an aligned root. A length written in
+  front of an unprefixed buffer moves every field by 4 bytes. Eight-byte fields
+  are then misaligned, and aligned `VerifySizePrefixedBuffer`, which a module's
+  generated readers run, refuses the record.
+- flatc-wasm's `generateBinary(schema, json, { sizePrefix: true })`, the
+  default, writes the length in front in JS. Found forwarding HPOP's
+  `$PRW` trajectories (PPE `double` coefficient vectors) into
+  conjunction-assessment: flatc `--size-prefixed` output verified, and the
+  flatc-wasm prepended record did not. Build size-prefixed records with the
+  size-prefixed finish, or run flatc with `--size-prefixed`.
+- Testing: the wasi-threads runner and the Docker parity image apply the full
+  SDN WasmEdge 0.16.4 patch set (atomic wait, stop token, fault jump, atomic
+  memarg offset), in SDN's order. The runner identity hash covers all four.
+
 ## 0.8.25
 
 One invoke can start more wasi-threads than the pool holds, and any guest
