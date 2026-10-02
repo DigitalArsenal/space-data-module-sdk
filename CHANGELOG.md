@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.27
+
+The licensing challenge request can carry the requester's \$EPM.
+
+- `encodeLicensingChallengeRequest({ ..., requesterEpm })` writes
+  `REQUESTER_EPM`. The key server keeps it and, for a module published with an
+  xpub allowlist, verifies it when the requester proves its signing key: the
+  EPM must be signed by that key and carry the account key's proof that it
+  authorised the key. Without the field an allowlisted grant cannot succeed.
+  Optional: omitted, the request is byte-identical to 0.8.26's.
+
 ## 0.8.26
 
 Documents how a size-prefixed FlatBuffer record is built: by a size-prefixed
