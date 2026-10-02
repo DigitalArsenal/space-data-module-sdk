@@ -60,6 +60,15 @@ export function encodeLicensingChallengeRequest(options) {
   const providerPeerIdOffset = builder.createString(
     normalizeRequiredString(options.providerPeerId, "providerPeerId"),
   );
+  // The requester's $EPM, re-sent per grant: an allowlisted module needs it to
+  // bind the requester's xpub to the signing key it is about to prove.
+  const requesterEpmOffset =
+    options.requesterEpm == null
+      ? 0
+      : LCH.createRequesterEpmVector(
+          builder,
+          cloneRequiredBytes(options.requesterEpm, "requesterEpm"),
+        );
   const root = LCH.createLCH(
     builder,
     licensingChallengeMessageType.Request,
@@ -79,7 +88,7 @@ export function encodeLicensingChallengeRequest(options) {
     providerPeerIdOffset,
     0,
     0,
-    0,
+    requesterEpmOffset,
   );
   LCH.finishLCHBuffer(builder, root);
   return builder.asUint8Array();

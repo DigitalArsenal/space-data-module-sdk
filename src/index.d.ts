@@ -3055,6 +3055,8 @@ export function encodeLicensingChallengeRequest(options: {
   requestedTimeoutMs: number;
   requestedAtMs: number;
   providerPeerId: string;
+  /** The requester's $EPM FlatBuffer; an allowlisted module requires it. */
+  requesterEpm?: Uint8Array;
 }): Uint8Array;
 
 export function decodeLicensingChallengeMessage(
