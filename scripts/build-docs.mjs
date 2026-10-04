@@ -523,7 +523,7 @@ ${items}
 
   return `${pageHead(page, "Build once, run on every node. The Space Data Module SDK packages space software as digitally signed WebAssembly modules that run in browsers, on servers and on every Space Data Network node.")}
     <main id="main">
-      <section class="hero">
+      <section class="hero" data-sdn-hero>
         <p class="eyebrow">Space Data Module SDK</p>
         <h1>Build once. Run on every node.</h1>
         <p class="lede">
