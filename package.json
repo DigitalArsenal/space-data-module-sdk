@@ -110,7 +110,7 @@
     "build:docs": "node scripts/build-docs.mjs",
     "check:docs": "node scripts/build-docs.mjs --check && node scripts/check-docs-links.mjs",
     "check:docs-links": "node scripts/check-docs-links.mjs",
-    "check:nav": "node scripts/check-sdn-stack-nav.mjs module-sdk docs/index.html docs/families/propagator.html docs/families/rf.html docs/byo-wasm-quickstart.html docs/conformance.html docs/protect-and-sign.html docs/publication-submission.html docs/styles.css",
+    "check:nav": "node scripts/check-sdn-stack-nav.mjs module-sdk docs/index.html docs/families/propagator.html docs/families/rf.html docs/byo-wasm-quickstart.html docs/conformance.html docs/protect-and-sign.html docs/publication-submission.html docs/styles.css docs/assets/sdn-chrome/sdn-chrome.css",
     "check:compliance": "node ./bin/space-data-module.js check --repo-root .",
     "check:generated-bindings": "node scripts/check-generated-bindings.mjs",
     "check:propagator-abi": "node scripts/check-propagator-abi.mjs",
