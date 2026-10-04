@@ -25,7 +25,42 @@
   --size-code: 15px;
   --leading-body: 1.6;
 
-  /* Near-monochrome light palette with one accent. */
+  /* Space Data Network style guide palette: dark first, one amber accent
+     (spacedatanetwork.org/style-guide.html). */
+  --ink: #f5f5f7;
+  --ink-secondary: rgba(245, 245, 247, 0.78);
+  --ink-tertiary: #8e8e93;
+  --ink-quaternary: #6e6e73;
+  --surface: #000000;
+  --surface-raised: #161617;
+  --surface-sunken: #0b0b0c;
+  --surface-code: #0b0b0c;
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --hairline: rgba(255, 255, 255, 0.12);
+  --hairline-strong: rgba(255, 255, 255, 0.22);
+  --accent: #f5a524;
+  --accent-ink: #f5a524;
+  --accent-wash: rgba(245, 165, 36, 0.14);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 32px rgba(0, 0, 0, 0.45);
+
+  --status-shipped-ink: #f5a524;
+  --status-shipped-wash: rgba(245, 165, 36, 0.14);
+  --status-experimental-ink: #59d9ff;
+  --status-experimental-wash: rgba(89, 217, 255, 0.13);
+  --status-designed-ink: #f5f5f7;
+  --status-designed-wash: rgba(245, 245, 247, 0.1);
+  --status-planned-ink: #8e8e93;
+  --status-planned-wash: rgba(142, 142, 147, 0.14);
+
+  --measure: 46rem;
+  --sidebar-width: 17.5rem;
+  --rail-width: 14rem;
+  --gutter: clamp(1.25rem, 4vw, 3rem);
+  --radius: 12px;
+  --radius-small: 7px;
+}
+
+:root[data-theme="light"] {
   --ink: #1d1d1f;
   --ink-secondary: #4a4a4f;
   --ink-tertiary: #6e6e73;
@@ -36,83 +71,20 @@
   --surface-code: #f5f5f7;
   --surface-hover: rgba(0, 0, 0, 0.04);
   --hairline: rgba(0, 0, 0, 0.11);
-  --hairline-strong: rgba(0, 0, 0, 0.18);
-  --accent: #0071e3;
-  --accent-ink: #0058b0;
-  --accent-wash: rgba(0, 113, 227, 0.09);
+  --hairline-strong: rgba(0, 0, 0, 0.2);
+  --accent: #c77d00;
+  --accent-ink: #c77d00;
+  --accent-wash: rgba(199, 125, 0, 0.1);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 24px rgba(0, 0, 0, 0.05);
 
-  --status-shipped-ink: #146c2e;
-  --status-shipped-wash: rgba(20, 108, 46, 0.11);
-  --status-experimental-ink: #8a5300;
-  --status-experimental-wash: rgba(138, 83, 0, 0.12);
-  --status-designed-ink: #0058b0;
-  --status-designed-wash: rgba(0, 88, 176, 0.11);
+  --status-shipped-ink: #c77d00;
+  --status-shipped-wash: rgba(199, 125, 0, 0.11);
+  --status-experimental-ink: #0f6f8f;
+  --status-experimental-wash: rgba(15, 111, 143, 0.1);
+  --status-designed-ink: #1d1d1f;
+  --status-designed-wash: rgba(0, 0, 0, 0.07);
   --status-planned-ink: #6e6e73;
   --status-planned-wash: rgba(110, 110, 115, 0.12);
-
-  --measure: 46rem;
-  --sidebar-width: 17.5rem;
-  --rail-width: 14rem;
-  --gutter: clamp(1.25rem, 4vw, 3rem);
-  --radius: 12px;
-  --radius-small: 7px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --ink: #f5f5f7;
-    --ink-secondary: #c7c7cc;
-    --ink-tertiary: #98989d;
-    --ink-quaternary: #7c7c82;
-    --surface: #0b0b0d;
-    --surface-raised: #131316;
-    --surface-sunken: #17171a;
-    --surface-code: #16161a;
-    --surface-hover: rgba(255, 255, 255, 0.06);
-    --hairline: rgba(255, 255, 255, 0.13);
-    --hairline-strong: rgba(255, 255, 255, 0.22);
-    --accent: #4da3ff;
-    --accent-ink: #7cbcff;
-    --accent-wash: rgba(77, 163, 255, 0.14);
-    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 32px rgba(0, 0, 0, 0.45);
-
-    --status-shipped-ink: #6fd48a;
-    --status-shipped-wash: rgba(111, 212, 138, 0.14);
-    --status-experimental-ink: #e8b262;
-    --status-experimental-wash: rgba(232, 178, 98, 0.14);
-    --status-designed-ink: #7cbcff;
-    --status-designed-wash: rgba(124, 188, 255, 0.14);
-    --status-planned-ink: #98989d;
-    --status-planned-wash: rgba(152, 152, 157, 0.14);
-  }
-}
-
-:root[data-theme="dark"] {
-  --ink: #f5f5f7;
-  --ink-secondary: #c7c7cc;
-  --ink-tertiary: #98989d;
-  --ink-quaternary: #7c7c82;
-  --surface: #0b0b0d;
-  --surface-raised: #131316;
-  --surface-sunken: #17171a;
-  --surface-code: #16161a;
-  --surface-hover: rgba(255, 255, 255, 0.06);
-  --hairline: rgba(255, 255, 255, 0.13);
-  --hairline-strong: rgba(255, 255, 255, 0.22);
-  --accent: #4da3ff;
-  --accent-ink: #7cbcff;
-  --accent-wash: rgba(77, 163, 255, 0.14);
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 32px rgba(0, 0, 0, 0.45);
-
-  --status-shipped-ink: #6fd48a;
-  --status-shipped-wash: rgba(111, 212, 138, 0.14);
-  --status-experimental-ink: #e8b262;
-  --status-experimental-wash: rgba(232, 178, 98, 0.14);
-  --status-designed-ink: #7cbcff;
-  --status-designed-wash: rgba(124, 188, 255, 0.14);
-  --status-planned-ink: #98989d;
-  --status-planned-wash: rgba(152, 152, 157, 0.14);
 }
 
 /* ------------------------------------------------------------- baseline */
@@ -209,6 +181,8 @@ svg {
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   border-bottom: 1px solid var(--hairline);
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .site-brand {
@@ -711,9 +685,9 @@ samp {
 /* --------------------------------------------------------------- landing */
 
 .hero {
-  max-width: 60rem;
+  max-width: 70rem;
   margin: 0 auto;
-  padding: 5rem var(--gutter) 3rem;
+  padding: 3.5rem var(--gutter) 3rem;
   text-align: center;
 }
 
@@ -729,9 +703,9 @@ samp {
 .hero h1 {
   font-size: clamp(2.4rem, 1.4rem + 3.4vw, 3.75rem);
   line-height: 1.06;
-  letter-spacing: -0.026em;
-  font-weight: 660;
-  margin: 0 0 1.25rem;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+  margin: 0 0 1rem;
 }
 
 .hero .lede {
@@ -762,19 +736,25 @@ samp {
   background: transparent;
 }
 
+/* Style-guide pills: the primary is white; the hovered button turns white
+   and the primary gives up its white meanwhile. */
 .button:hover {
-  background: var(--surface-hover);
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface);
   text-decoration: none;
 }
 
 .button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface);
 }
 
-.button.primary:hover {
-  filter: brightness(1.08);
+.actions:hover .button.primary:not(:hover) {
+  background: transparent;
+  border-color: var(--hairline-strong);
+  color: var(--ink);
 }
 
 .section {
@@ -1010,4 +990,30 @@ body:not([data-assembly="scroll"]) #assembly {
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) .theme-toggle .moon { display: block; }
   :root:not([data-theme]) .theme-toggle .sun { display: none; }
+}
+
+/* The hero reel (player: media/reel/reel.css). */
+.hero .hero-reel {
+  width: min(100%, 960px, max(560px, calc((100svh - 470px) * 16 / 9)));
+  max-width: 100%;
+  margin: 0 auto 1.75rem;
+}
+
+/* Long identifiers in running text wrap instead of widening the page. */
+.doc p > code,
+.doc li > code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Wide tables and code blocks scroll inside themselves, never the page. */
+.doc table,
+.doc pre {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.shell > *,
+.doc {
+  min-width: 0;
 }

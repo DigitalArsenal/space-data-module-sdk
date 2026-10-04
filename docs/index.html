@@ -7,7 +7,10 @@
     <meta name="description" content="Build once, run on every node. The Space Data Module SDK packages space software as digitally signed WebAssembly modules that run in browsers, on servers and on every Space Data Network node." />
     <title>Space Data Module SDK — Build once. Run on every node.</title>
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./media/reel/reel.css" />
+    <script src="./media/reel/reel.js" defer></script>
     <script src="./assembly.js" defer></script>
+    <script src="./assets/ai-credits/ai-credits.js" defer></script>
     <!-- SDN_CONSUMER_ASSETS_START -->
 <link rel="stylesheet" href="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.c3f68d1cfd88478f10d836a5e829d1dfc6a10157972cf0f7d4d319d0636f2cc4.css" integrity="sha384-fICuhN4I9xqOK1F5vGGzl26opuO+xQIvTZXMSV76lWTBiQ6AfzztMGLLDw8yRT8i" crossorigin="anonymous">
 <script defer src="https://static.spacedatanetwork.org/assets/hd-wallet-ui/2.0.28/sdn-wallet-public-client.f611e7e151a3b5c38384272f8894a4c6634f0a29bf925b0e02e0e27f8db0bfff.js" integrity="sha384-R+QqsKoWJIS7iWrtPmgJ49DVnb1hSGjZokupbLInJd1PLp8RwQhtF/hnaerc33ci" crossorigin="anonymous" data-sdn-wallet-public-client="v1"></script>
@@ -33,11 +36,17 @@
         <p class="eyebrow">Space Data Module SDK</p>
         <h1>Build once. Run on every node.</h1>
         <p class="lede">
-          Package propagators, sensor models, data connectors and analytics as
-          digitally signed WebAssembly modules. The same file runs in a browser,
-          on a server and on every Space Data Network node, and any app loads it
-          without changes.
+          Space software as digitally signed modules that run in a browser, on a
+          server and on every node.
         </p>
+        <figure class="reel-frame hero-reel">
+          <div class="reel-stage">
+            <video muted playsinline preload="auto" data-poster="media/module-sdk-reel-poster.webp" aria-label="The Space Data Module SDK in 34 seconds, with music">
+              <source src="media/module-sdk-reel.webm" type='video/webm; codecs="av01.0.08M.08"'>
+              <source src="media/module-sdk-reel.mp4" type="video/mp4">
+            </video>
+          </div>
+        </figure>
         <div class="actions">
           <a class="button primary" href="./byo-wasm-quickstart.html">Build a module</a>
           <a class="button" href="./families/propagator.html">Read a shipped ABI</a>

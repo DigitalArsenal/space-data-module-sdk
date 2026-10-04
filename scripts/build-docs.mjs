@@ -400,7 +400,8 @@ function pageHead(page, description) {
     <meta name="description" content="${esc(description)}" />
     <title>${page.layout === "landing" ? "Space Data Module SDK — Build once. Run on every node." : `${esc(page.title)} — Space Data Module SDK`}</title>
     <link rel="stylesheet" href="${depth}styles.css" />
-    <script src="${depth}assembly.js" defer></script>
+${page.layout === "landing" ? `    <link rel="stylesheet" href="${depth}media/reel/reel.css" />\n    <script src="${depth}media/reel/reel.js" defer></script>\n` : ""}    <script src="${depth}assembly.js" defer></script>
+    <script src="${depth}assets/ai-credits/ai-credits.js" defer></script>
 ${CONSUMER_ASSETS}
   </head>
   <body${page.layout === "landing" ? ' data-assembly="scroll"' : ""}>
@@ -532,11 +533,17 @@ ${items}
         <p class="eyebrow">Space Data Module SDK</p>
         <h1>Build once. Run on every node.</h1>
         <p class="lede">
-          Package propagators, sensor models, data connectors and analytics as
-          digitally signed WebAssembly modules. The same file runs in a browser,
-          on a server and on every Space Data Network node, and any app loads it
-          without changes.
+          Space software as digitally signed modules that run in a browser, on a
+          server and on every node.
         </p>
+        <figure class="reel-frame hero-reel">
+          <div class="reel-stage">
+            <video muted playsinline preload="auto" data-poster="media/module-sdk-reel-poster.webp" aria-label="The Space Data Module SDK in 34 seconds, with music">
+              <source src="media/module-sdk-reel.webm" type='video/webm; codecs="av01.0.08M.08"'>
+              <source src="media/module-sdk-reel.mp4" type="video/mp4">
+            </video>
+          </div>
+        </figure>
         <div class="actions">
           <a class="button primary" href="./byo-wasm-quickstart.html">Build a module</a>
           <a class="button" href="./families/propagator.html">Read a shipped ABI</a>
