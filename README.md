@@ -163,10 +163,11 @@ generated readers run, refuses the record.
 
 - Build size-prefixed frames with the generated builder's size-prefixed finish,
   or with `flatc --binary --size-prefixed` from JSON.
-- flatc-wasm's `generateBinary(schema, json, { sizePrefix: true })`, the
-  default, writes the length in front in JS and does not produce such a record.
-  For a size-prefixed record, run flatc with `--size-prefixed` through
-  `runCommand`. Otherwise pass `sizePrefix: false` for an unprefixed record.
+- flatc-wasm 26.1.38 and later: `generateBinary(schema, json)` with
+  `sizePrefix: true`, the default, runs `flatc --binary --size-prefixed` and
+  produces such a record. Pass `sizePrefix: false` for an unprefixed record.
+  Earlier versions write the length in front in JS; `VerifySizePrefixedBuffer`
+  refuses their record when it has an 8-byte field.
 - Forward a module's size-prefixed output frames unchanged. Do not strip the
   prefix or add one.
 
