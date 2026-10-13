@@ -1,8 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.9.0
 
-The SDK JS hosts answer typed hostcalls (typed contracts 1.0).
+Typed contracts 1.0: the module runtime's frames and hostcalls are SDS FlatBuffers; the JSON hostcall envelope is
+still answered until every module is typed.
+
+### The SDK JS hosts answer typed hostcalls
 
 - `createHostcallBridge` (and with it NodeHost, BrowserHost, the browser and worker harnesses and the WASI thread
   pool) answers an SDS `$PIV` hostcall with a `$PIV` response. `src/host/typedDispatch.js` turns the call's aligned
@@ -17,7 +20,7 @@ The SDK JS hosts answer typed hostcalls (typed contracts 1.0).
 - The sync bridge no longer leaves a refused async operation's rejected promise unhandled (it crashed the process
   when the operation's capability was not granted).
 
-## 0.10.0-typed-hostcalls (landed 6387554)
+### Hostcalls on the invoke ABI (SDS $PIV, aligned-binary records + raw frames)
 
 Hostcalls on the SDK's documented invoke ABI (typed contracts 1.0: the JSON interface replaced, nothing else changed).
 
@@ -44,7 +47,7 @@ Hostcalls on the SDK's documented invoke ABI (typed contracts 1.0: the JSON inte
 - `src/invoke/codec.js`: the encoder now accepts a variable-length aligned stream (`byteLength` 0), as the decoder and
   the guest glue (`OutputTypeMatches`) already did.
 
-## 0.9.0-runtime-contracts (landed 53fb52a)
+### Module runtime contracts as typed FlatBuffers
 
 The module runtime contracts as typed FlatBuffers (typed-contracts 1.0, owner 2026-10-13: "flatbuffer SDS only"; no
 JSON forms kept).
@@ -60,6 +63,12 @@ JSON forms kept).
 - These replace, in the node and the modules that follow: the `sdn-timer-tick` frame, the `hostcap/http-request` JSON
   request and JSON / `$HRB` response, the `plugin.getConfig` JSON, the `storage.ingest_with_source` meta and result
   JSON, and the JSON status / report / unchanged-notice frames.
+
+### Tests
+
+- The opt-in runtime matrix (`SPACE_DATA_MODULE_SDK_ENABLE_RUNTIME_MATRIX=1`) runs again: its fixture declares
+  concrete SDS port types (its own `RuntimeMatrix.fbs` / `RTMX` identity through the compiler's `catalog` option)
+  instead of wildcard ports, which the tightened manifest rules refuse.
 
 ## 0.8.27
 

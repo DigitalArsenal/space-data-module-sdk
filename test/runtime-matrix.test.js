@@ -17,6 +17,7 @@ import {
 import { compileStandaloneWasiC } from "./support/runtime-matrix/compile.js";
 import {
   createRuntimeFixtureManifest,
+  RUNTIME_FIXTURE_CATALOG,
   PLUGIN_RUNTIME_FIXTURE_SOURCE,
   PURE_WASI_FIXTURE_SOURCE,
 } from "./support/runtime-matrix/fixtures.js";
@@ -216,6 +217,7 @@ runtimeMatrixTest("runtime matrix executes WASI smoke cases across supported fla
       manifest,
       sourceCode: PLUGIN_RUNTIME_FIXTURE_SOURCE,
       language: "c",
+      catalog: RUNTIME_FIXTURE_CATALOG,
     });
     const pluginWasmPath = path.join(tempRoot, "plugin-runtime.wasm");
     await fs.writeFile(pluginWasmPath, compilation.wasmBytes);

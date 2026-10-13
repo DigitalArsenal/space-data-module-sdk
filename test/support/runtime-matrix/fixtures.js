@@ -42,11 +42,17 @@ export const PLUGIN_RUNTIME_FIXTURE_SOURCE = `
 #include <string.h>
 #include "space_data_module_invoke.h"
 
+/* A probe's text answer: a variable-length aligned stream of the fixture's own RTMX identity (ProbeText). */
 static void push_text(const char *text) {
-  plugin_push_output(
+  plugin_push_output_typed(
     "out",
-    NULL,
-    NULL,
+    "RuntimeMatrix.fbs",
+    "RTMX",
+    PLUGIN_PAYLOAD_WIRE_FORMAT_ALIGNED_BINARY,
+    "ProbeText",
+    0,
+    0,
+    1,
     (const uint8_t *)text,
     (uint32_t)strlen(text)
   );
@@ -109,22 +115,27 @@ int stderr_probe(void) {
 }
 `;
 
+// The fixture's own type identity: RuntimeMatrix.fbs / RTMX, registered by RUNTIME_FIXTURE_CATALOG (every port names
+// one concrete SDS identity with canonical and aligned-binary peers; no wildcards). "echo" carries a 16-byte
+// AlignedEcho record; the probes answer ProbeText, a variable-length aligned stream (no byteLength).
+export const RUNTIME_FIXTURE_CATALOG = Object.freeze([
+  Object.freeze({ schemaCode: "RUNTIMEMATRIX", schemaName: "RuntimeMatrix.fbs", fileIdentifier: "RTMX", source: "runtime-matrix-fixture" }),
+]);
+function runtimeMatrixTypes(rootTypeName, byteLength, requiredAlignment) {
+  // the aligned peer first: the harness plan sends a port's first type, and these fixtures exchange aligned bytes
+  return [
+    // byteLength left out = a variable-length aligned stream
+    { schemaName: "RuntimeMatrix.fbs", fileIdentifier: "RTMX", wireFormat: "aligned-binary", rootTypeName, ...(byteLength ? { byteLength } : {}), requiredAlignment },
+    { schemaName: "RuntimeMatrix.fbs", fileIdentifier: "RTMX", rootTypeName },
+  ];
+}
+
 export function createRuntimeFixtureManifest() {
-  const anyType = [{ acceptsAnyFlatbuffer: true }];
-  const dualRuntimeMatrixTypes = [{
-    schemaName: "RuntimeMatrix.fbs",
-    fileIdentifier: "RTMX",
-  }, {
-    schemaName: "RuntimeMatrix.fbs",
-    fileIdentifier: "RTMX",
-    wireFormat: "aligned-binary",
-    rootTypeName: "AlignedEcho",
-    byteLength: 16,
-    requiredAlignment: 8,
-  }];
-  const optionalAnyInputPort = {
+  const dualRuntimeMatrixTypes = runtimeMatrixTypes("AlignedEcho", 16, 8);
+  const probeTextTypes = runtimeMatrixTypes("ProbeText", 0, 1);
+  const optionalProbeInputPort = {
     portId: "in",
-    acceptedTypeSets: [{ setId: "any-in", allowedTypes: anyType }],
+    acceptedTypeSets: [{ setId: "probe-in", allowedTypes: probeTextTypes }],
     minStreams: 0,
     maxStreams: 1,
     required: false,
@@ -165,11 +176,11 @@ export function createRuntimeFixtureManifest() {
       {
         methodId: "env_file_probe",
         displayName: "Env File Probe",
-        inputPorts: [optionalAnyInputPort],
+        inputPorts: [optionalProbeInputPort],
         outputPorts: [
           {
             portId: "out",
-            acceptedTypeSets: [{ setId: "any-out", allowedTypes: anyType }],
+            acceptedTypeSets: [{ setId: "probe-out", allowedTypes: probeTextTypes }],
             minStreams: 0,
             maxStreams: 1,
             required: false,
@@ -181,11 +192,11 @@ export function createRuntimeFixtureManifest() {
       {
         methodId: "stderr_probe",
         displayName: "Stderr Probe",
-        inputPorts: [optionalAnyInputPort],
+        inputPorts: [optionalProbeInputPort],
         outputPorts: [
           {
             portId: "out",
-            acceptedTypeSets: [{ setId: "any-out", allowedTypes: anyType }],
+            acceptedTypeSets: [{ setId: "probe-out", allowedTypes: probeTextTypes }],
             minStreams: 0,
             maxStreams: 1,
             required: false,
