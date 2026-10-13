@@ -19,8 +19,6 @@ table HttpRequest {
   /// FlatBuffer, identified by its own file identifier (an SDS record such as a $WXF header naming the wanted
   /// field, or another runtime type). Never JSON.
   CONTEXT: [ubyte];
-  /// Follow redirects (the host's default is to follow).
-  FOLLOW_REDIRECTS: bool = true;
 }
 
 root_type HttpRequest;

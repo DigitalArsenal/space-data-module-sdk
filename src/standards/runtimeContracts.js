@@ -29,17 +29,17 @@ import {
   configValueKind,
   flowNoticeKind,
   reconcileMode,
-  HostCall,
-  HostCallT,
-  HostCallParams,
-  HostCallResult,
-  HostCallResultT,
-  HostCallValue,
-  HostCallErrorT,
-  hostCallErrorCode,
 } from "../generated/runtime/sdn/runtime.js";
+import * as hostOps from "../generated/runtime/aligned/HostOps_aligned.js";
+import {
+  decodePluginInvokeRequest,
+  decodePluginInvokeResponse,
+  encodePluginInvokeRequest,
+  encodePluginInvokeResponse,
+} from "../invoke/codec.js";
 
 export * from "../generated/runtime/sdn/runtime.js";
+export * from "../generated/runtime/aligned/HostOps_enums.js";
 
 export const RUNTIME_FILE_IDENTIFIERS = Object.freeze({
   TimerTick: "TICK",
@@ -49,8 +49,6 @@ export const RUNTIME_FILE_IDENTIFIERS = Object.freeze({
   IngestRequest: "INGQ",
   IngestResult: "INGR",
   FlowNotice: "FNTC",
-  HostCall: "HCLQ",
-  HostCallResult: "HCLR",
 });
 
 /** The 4-character file identifier of a FlatBuffer frame (bytes 4-7), or "" when it has none. */
@@ -233,171 +231,306 @@ export function decodeFlowNotice(bytes) {
     count: num(n.COUNT), reason: n.REASON || "", items: (n.ITEMS || []).slice(), atMs: num(n.AT_MS) };
 }
 
-// ---- HostCall / HostCallResult (the hostcall envelope) ------------------------------------------------------------
+// ---- hostcalls: SDS $PIV in the module -> host direction, aligned-binary records + raw frames ---------------------
 
-function unionMember(Enum, enumName, typeName, value) {
-  const tag = Enum[typeName];
-  if (typeof tag !== "number" || tag === 0) throw new Error(`${enumName}: unknown member ${typeName}`);
-  if (!value || typeof value.pack !== "function") throw new Error(`${enumName}: ${typeName} needs a generated object (${typeName}T)`);
-  return tag;
+/** The schema a hostcall record frame's TAB.TYPE_REF names (schemas/runtime/HostOps.fbs, aligned layout). */
+export const HOST_OPS_SCHEMA = "HostOps.fbs";
+
+function recordClass(type) {
+  const Class = hostOps[type];
+  if (typeof Class !== "function" || !Class.SIZE) throw new Error(`hostcall: ${type} is not a HostOps record`);
+  return Class;
+}
+// The generated aligned accessors: field FIELD_NAME is read by fIELD_NAME() and written by setFIELD_NAME(); strings,
+// nested records and vectors carry a presence bit (hasX / setHasX); vectors are xLength / xAt.
+const getterOf = (field) => field[0].toLowerCase() + field.slice(1);
+function fieldsOf(Class) {
+  const names = Object.getOwnPropertyNames(Class.prototype);
+  return names.filter((n) => n.startsWith("set") && !n.startsWith("setHas") && !n.endsWith("Length") && !n.endsWith("At")).map((n) => n.slice(3))
+    .concat(names.filter((n) => n.startsWith("set") && n.endsWith("At") && !n.startsWith("setHas")).map((n) => n.slice(3, -2)));
+}
+function writeRecord(Class, view, value, where) {
+  for (const [field, v] of Object.entries(value || {})) {
+    if (v === undefined || v === null) continue;
+    const proto = Class.prototype, g = getterOf(field);
+    if (typeof proto[`set${field}At`] === "function") {
+      view[`set${field}Length`](v.length);
+      v.forEach((item, i) => view[`set${field}At`](i, item));
+      if (typeof proto[`setHas${field}`] === "function") view[`setHas${field}`](true);
+      if (view[`${g}Length`]() !== v.length) throw new RangeError(`${where}.${field}: ${v.length} items exceed the record's bound`);
+      continue;
+    }
+    if (typeof proto[`set${field}`] !== "function") {
+      // a nested record: written through its view
+      if (typeof proto[g] === "function" && typeof v === "object") {
+        const nested = view[g]();
+        writeRecord(nested.constructor, nested, v, `${where}.${field}`);
+        if (typeof proto[`setHas${field}`] === "function") view[`setHas${field}`](true);
+        continue;
+      }
+      throw new Error(`${where}: no field ${field}`);
+    }
+    if (typeof proto[`setHas${field}`] === "function") view[`setHas${field}`](true);
+    view[`set${field}`](typeof v === "number" && typeof view[g]() === "bigint" ? BigInt(v) : v);
+    // an aligned string holds a bounded number of bytes: refuse rather than truncate
+    if (typeof v === "string" && view[g]() !== v) throw new RangeError(`${where}.${field}: "${v.slice(0, 40)}..." exceeds the record's ${new TextEncoder().encode(view[g]()).length}-byte string`);
+  }
+}
+function readRecord(Class, view) {
+  const out = {};
+  for (const field of fieldsOf(Class)) {
+    const g = getterOf(field);
+    if (typeof view[`has${field}`] === "function" && !view[`has${field}`]()) { out[field] = typeof view[`${g}Length`] === "function" ? [] : null; continue; }
+    if (typeof view[`${g}Length`] === "function") { out[field] = Array.from({ length: view[`${g}Length`]() }, (_, i) => view[`${g}At`](i)); continue; }
+    out[field] = view[g]();
+  }
+  for (const n of Object.getOwnPropertyNames(Class.prototype)) {   // nested records (getter, presence, no setter)
+    if (n.startsWith("has") || n.startsWith("set") || n === "constructor") continue;
+    const field = n[0].toUpperCase() + n.slice(1);
+    if (field in out || typeof Class.prototype[`setHas${field}`] !== "function") continue;
+    out[field] = view[`has${field}`]() ? readRecord(view[n]().constructor, view[n]()) : null;
+  }
+  return out;
+}
+/** One aligned record of HostOps type `type` from plain field values (FIELD_NAME: value). */
+export function encodeHostOpsRecord(type, value) {
+  const Class = recordClass(type), bytes = new Uint8Array(Class.SIZE);
+  writeRecord(Class, Class.fromPointer(bytes.buffer, 0), value, type);
+  return bytes;
+}
+/** A run of aligned records (a list port), back to back at the type's stride. */
+export function encodeHostOpsList(type, values) {
+  const Class = recordClass(type), bytes = new Uint8Array(Class.SIZE * values.length);
+  values.forEach((v, i) => writeRecord(Class, Class.fromPointer(bytes.buffer, i * Class.SIZE), v, `${type}[${i}]`));
+  return bytes;
+}
+function readFrames(frames, where) {
+  const records = {}, lists = {}, raw = {};
+  for (const frame of frames || []) {
+    const port = frame.portId ?? frame.PORT_ID, tr = frame.typeRef || {}, type = tr.rootType ?? tr.rootTypeName ?? tr.ROOT_TYPE ?? null;
+    const payload = frame.payload instanceof Uint8Array ? frame.payload : new Uint8Array(frame.payload || []);
+    if ((frame.wireFormat ?? tr.wireFormat) === "aligned-binary" && type) {
+      const Class = recordClass(type), copy = payload.slice();   // (a copy: the decoded views outlive the envelope)
+      if (copy.length % Class.SIZE) throw new RangeError(`${where}: ${port} is ${copy.length} bytes, not a whole number of ${type} (${Class.SIZE})`);
+      const items = Array.from({ length: copy.length / Class.SIZE }, (_, i) => readRecord(Class, Class.fromPointer(copy.buffer, i * Class.SIZE)));
+      if (Number(tr.byteLength ?? 0) > 0) records[port] = { type, value: items[0] ?? null }; else lists[port] = { type, values: items };
+    } else raw[port] = payload.slice();
+  }
+  return { records, lists, raw };
+}
+const toBytes = (v) => (typeof v === "string" ? new TextEncoder().encode(v) : v instanceof Uint8Array ? v : new Uint8Array(v));
+function buildFrames(spec, { record, recordPort, recordType, raw = {}, lists = {} }, rawPorts, listPorts, where) {
+  const frames = [];
+  if (record != null) {
+    if (!recordType) throw new Error(`${where}: takes no ${recordPort} record`);
+    const Class = recordClass(recordType);
+    frames.push({ portId: recordPort, wireFormat: "aligned-binary", typeRef: { schemaName: HOST_OPS_SCHEMA, rootType: recordType, wireFormat: "aligned-binary", byteLength: Class.SIZE, requiredAlignment: Class.ALIGN }, payload: encodeHostOpsRecord(recordType, record) });
+  }
+  for (const [port, values] of Object.entries(lists)) {
+    const type = listPorts[port];
+    if (!type) throw new Error(`${where}: no list port ${port}`);
+    const Class = recordClass(type);
+    frames.push({ portId: port, wireFormat: "aligned-binary", typeRef: { schemaName: HOST_OPS_SCHEMA, rootType: type, wireFormat: "aligned-binary", byteLength: 0, requiredAlignment: Class.ALIGN }, payload: encodeHostOpsList(type, values) });
+  }
+  for (const [port, bytes] of Object.entries(raw)) {
+    if (!rawPorts.includes(port)) throw new Error(`${where}: no raw port ${port}`);
+    frames.push({ portId: port, payload: toBytes(bytes) });
+  }
+  return frames;
 }
 
 /**
- * One call from a module to its host.
- * @param {string} op the operation, e.g. "storage.expire"
- * @param {string} paramsType the HostCallParams member, e.g. "StorageExpireParams" (explicit: class names do not
- *   survive minification)
- * @param {object} params a generated object of that member (e.g. new StorageExpireParamsT(...))
+ * A module's call to its host: an SDS $PIV request. METHOD_ID is the operation; its frames are the "params" aligned
+ * record, its list ports (runs of aligned records) and its raw ports (bytes) as HOST_OPERATIONS declares them.
+ * @param {string} op
+ * @param {{params?:object, lists?:Record<string,object[]>, raw?:Record<string,Uint8Array|string>}} [call] field values
+ *   by schema name (e.g. { params: { SCHEMA: "WXF.fbs", BEFORE_MS: 1791900000000n } })
  */
-export function encodeHostCall(op, paramsType, params) {
-  if (!op) throw new Error("HostCall: op is required");
-  const tag = params == null ? HostCallParams.NONE : unionMember(HostCallParams, "HostCallParams", paramsType, params);
-  return finish(new HostCallT(String(op), tag, params ?? null), HostCall.finishHostCallBuffer);
+export function encodeHostCall(op, call = {}) {
+  const spec = HOST_OPERATIONS[op];
+  if (!spec) throw new Error(`hostcall: unknown operation ${op}`);
+  const inputs = buildFrames(spec, { record: call.params, recordPort: "params", recordType: spec.params, raw: call.raw, lists: call.lists }, spec.rawIn, spec.listsIn, op);
+  return encodePluginInvokeRequest({ methodId: op, inputs });
 }
-/** @returns {{op:string, paramsType:string|null, params:object|null}} params as the generated object */
+/** @returns {{op:string, params:object|null, lists:Record<string,object[]>, raw:Record<string,Uint8Array>}} */
 export function decodeHostCall(bytes) {
-  const c = rootOf(bytes, HostCall, HostCall.getRootAsHostCall, "HCLQ");
-  return { op: c.OP || "", paramsType: c.PARAMS_type ? HostCallParams[c.PARAMS_type] : null, params: c.PARAMS ?? null };
+  const request = decodePluginInvokeRequest(bytes);
+  const op = request.methodId ?? "", { records, lists, raw } = readFrames(request.inputs, op);
+  const spec = HOST_OPERATIONS[op];
+  if (spec && records.params && records.params.type !== spec.params) throw new Error(`hostcall: ${op} takes ${spec.params}, the frame carries ${records.params.type}`);
+  return { op, params: records.params?.value ?? null, lists: Object.fromEntries(Object.entries(lists).map(([k, v]) => [k, v.values])), raw };
 }
 
-const ERROR_CODE = Object.fromEntries(Object.entries(hostCallErrorCode).filter(([, v]) => typeof v === "number").map(([k, v]) => [k[0].toLowerCase() + k.slice(1), v]));
-const ERROR_NAME = Object.fromEntries(Object.entries(ERROR_CODE).map(([k, v]) => [v, k]));
+/** The error codes a host answers with (PIVResponse.ERROR_CODE). */
+export const HOSTCALL_ERROR_CODES = Object.freeze(["unsupported", "not-authorized", "invalid-params", "failed", "refused", "sandbox", "timeout", "too-large"]);
 
 /**
- * The host's answer.
- * @param {{ok:boolean, valueType?:string, value?:object, error?:{code:string, message?:string, sandbox?:string, capability?:string}}} r
- *   valueType is the HostCallValue member (e.g. "StorageExpireResult"), value its generated object; error.code one of
- *   unsupported, notAuthorized, invalidParams, failed, refused, sandbox, timeout, tooLarge.
+ * The host's answer: an SDS $PIV response - the "result" aligned record, list and raw ports (STATUS OK), or STATUS
+ * FAILED with ERROR_CODE (HOSTCALL_ERROR_CODES) and ERROR_MESSAGE.
+ * @param {{op:string, ok:boolean, result?:object, lists?:Record<string,object[]>, raw?:Record<string,Uint8Array|string>, error?:{code:string, message?:string}}} r
  */
 export function encodeHostCallResult(r) {
-  const ok = !!r?.ok;
-  let error = null;
-  if (!ok) {
-    const code = ERROR_CODE[r?.error?.code ?? "failed"];
-    if (code === undefined || code === 0) throw new Error(`HostCallResult: unknown error code ${r?.error?.code}`);
-    error = new HostCallErrorT(code, str(r.error.message), str(r.error.sandbox), str(r.error.capability));
+  if (r?.ok) {
+    const spec = HOST_OPERATIONS[r.op];
+    if (!spec) throw new Error(`hostcall: unknown operation ${r.op}`);
+    const outputs = buildFrames(spec, { record: r.result, recordPort: "result", recordType: spec.result, raw: r.raw, lists: r.lists }, spec.rawOut, spec.listsOut, `${r.op} result`);
+    return encodePluginInvokeResponse({ statusCode: 0, outputs });
   }
-  const tag = ok && r.value != null ? unionMember(HostCallValue, "HostCallValue", r.valueType, r.value) : HostCallValue.NONE;
-  return finish(new HostCallResultT(ok, error, tag, ok ? r.value ?? null : null), HostCallResult.finishHostCallResultBuffer);
+  const code = r?.error?.code ?? "failed";
+  if (!HOSTCALL_ERROR_CODES.includes(code)) throw new Error(`hostcall: unknown error code ${code}`);
+  return encodePluginInvokeResponse({ statusCode: 1, status: "FAILED", errorCode: code, errorMessage: str(r?.error?.message) });
 }
-/** @returns {{ok:boolean, valueType:string|null, value:object|null, error:{code:string, message:string, sandbox:string}|null}} */
+/** @returns {{ok:boolean, result:object|null, lists:Record<string,object[]>, raw:Record<string,Uint8Array>, error:{code:string, message:string}|null}} */
 export function decodeHostCallResult(bytes) {
-  const r = rootOf(bytes, HostCallResult, HostCallResult.getRootAsHostCallResult, "HCLR");
-  return {
-    ok: r.OK,
-    valueType: r.VALUE_type ? HostCallValue[r.VALUE_type] : null,
-    value: r.VALUE ?? null,
-    error: r.ERROR ? { code: ERROR_NAME[r.ERROR.CODE], message: r.ERROR.MESSAGE || "", sandbox: r.ERROR.SANDBOX || "", capability: r.ERROR.CAPABILITY || "" } : null,
-  };
+  const response = decodePluginInvokeResponse(bytes);
+  if (response.errorCode || (response.status !== undefined && response.status !== 0 && response.status !== "OK")) {
+    return { ok: false, result: null, lists: {}, raw: {}, error: { code: response.errorCode || "failed", message: response.errorMessage || "" } };
+  }
+  const { records, lists, raw } = readFrames(response.outputs, "hostcall result");
+  return { ok: true, result: records.result?.value ?? null, lists: Object.fromEntries(Object.entries(lists).map(([k, v]) => [k, v.values])), raw, error: null };
 }
 
-// ---- the one host operation set --------------------------------------------------------------------------------------
-
 /**
- * Every host operation a module can call, with its HostCallParams member, its HostCallValue member and the
- * capability it needs (null: none). The Go node and the SDK JS hosts serve exactly this set under these names; a host
- * that lacks one answers Unsupported. (Typed contracts 1.0: the node's 67 operations and the JS hosts' set unified;
- * where they differed - crypto names, AES-GCM tag placement, secp256k1 signature encoding - one form is chosen: the
- * ciphertext carries its 16-byte tag at the end, secp256k1 signatures are DER.)
- */
-export const HOST_OPERATIONS = Object.freeze(Object.fromEntries([
-  // clock, random, host, node, config
-  ["clock.now", "ClockNowParams", "ClockNow", "clock"],
-  ["random.bytes", "RandomBytesParams", "BytesValue", "random"],
-  ["host.info", "HostInfoParams", "HostInfo", null],
-  ["host.has_capability", "HasCapabilityParams", "BoolValue", null],
-  ["node.identity", "NodeIdentityParams", "NodeIdentity", null],
-  ["plugin.get_config", "GetConfigParams", "ModuleConfig", null],
-  ["timers.delay", "TimersDelayParams", "Empty", "timers"],
-  ["schedule.parse", "ScheduleParams", "ScheduleParsed", "schedule_cron"],
-  ["schedule.matches", "ScheduleParams", "BoolValue", "schedule_cron"],
-  ["schedule.next", "ScheduleParams", "TimeValue", "schedule_cron"],
-  // network
-  ["http.request", "HttpRequest", "HttpResponse", "http"],
-  ["websocket.exchange", "WebsocketExchangeParams", "WebsocketExchange", "websocket"],
-  ["mqtt.publish", "MqttParams", "MqttPublished", "mqtt"],
-  ["mqtt.subscribe_once", "MqttParams", "MqttMessage", "mqtt"],
-  ["tcp.request", "SocketRequestParams", "SocketResponse", "tcp"],
-  ["udp.request", "SocketRequestParams", "SocketResponse", "udp"],
-  ["tls.request", "SocketRequestParams", "SocketResponse", "tls"],
-  // storage
-  ["storage.query", "StorageQueryParams", "StoredRecords", "storage_query"],
-  ["storage.write", "StorageWriteParams", "StorageWriteResult", "storage_write"],
-  ["storage.delete", "StorageDeleteParams", "Empty", "storage_write"],
-  ["storage.expire", "StorageExpireParams", "StorageExpireResult", "storage_write"],
-  ["storage.ingest_with_source", "StorageIngestParams", "IngestResult", "storage_ingest"],
-  ["storage.flatsql_query_stream", "SqlStreamParams", "RecordStream", "storage_query"],
-  ["storage.flatsql_epoch_stream", "EpochStreamParams", "RecordStream", "storage_query"],
-  ["storage.query_sandboxed", "SandboxQueryParams", "SandboxQueryResult", "storage_query"],
-  ["storage.query_surface", "QuerySurfaceParams", "QuerySurface", "storage_query"],
-  ["storage.flatsql_cache_key", "CacheKeyParams", "TextValue", "storage_query"],
-  // crypto (one family)
-  ["crypto.hash", "CryptoHashParams", "BytesValue", "crypto_hash"],
-  ["crypto.public_key", "CryptoPublicKeyParams", "BytesValue", "crypto_sign"],
-  ["crypto.sign", "CryptoSignParams", "BytesValue", "crypto_sign"],
-  ["crypto.verify", "CryptoVerifyParams", "BoolValue", "crypto_verify"],
-  ["crypto.encrypt", "CryptoEncryptParams", "CryptoCiphertext", "crypto_encrypt"],
-  ["crypto.decrypt", "CryptoDecryptParams", "BytesValue", "crypto_decrypt"],
-  ["crypto.key_agreement", "CryptoKeyAgreementParams", "BytesValue", "crypto_key_agreement"],
-  ["crypto.kdf", "CryptoKdfParams", "BytesValue", "crypto_kdf"],
-  ["crypto.generate_key", "CryptoGenerateKeyParams", "CryptoKeyPair", "crypto_sign"],
-  ["crypto.seal", "CryptoSealParams", "BytesValue", "crypto_encrypt"],
-  ["crypto.open", "CryptoOpenParams", "BytesValue", "crypto_decrypt"],
-  // keyslot, secrets
-  ["keyslot.sign", "KeyslotSignParams", "BytesValue", "wallet_sign"],
-  ["keyslot.unwrap", "KeyslotUnwrapParams", "BytesValue", "wallet_sign"],
-  ["secrets.get", "SecretIdParams", "Secret", "secrets"],
-  ["secrets.status", "SecretIdParams", "SecretStatus", "secrets"],
-  ["secrets.put", "SecretPutParams", "SecretStored", "secrets"],
-  ["secrets.clear", "SecretIdParams", "Empty", "secrets"],
-  // ipfs, pubsub, protocol, p2p
-  ["ipfs.add", "IpfsAddParams", "IpfsAddResult", "ipfs"],
-  ["ipfs.cat", "IpfsCidParams", "BytesValue", "ipfs"],
-  ["ipfs.ls", "IpfsCidParams", "IpfsLinks", "ipfs"],
-  ["ipfs.pin_add", "IpfsCidParams", "TextList", "ipfs"],
-  ["ipfs.pin_rm", "IpfsCidParams", "TextList", "ipfs"],
-  ["ipfs.pin_ls", "IpfsPinLsParams", "IpfsPins", "ipfs"],
-  ["ipfs.dag_get", "IpfsCidParams", "BytesValue", "ipfs"],
-  ["ipfs.name_resolve", "IpfsNameResolveParams", "TextValue", "ipfs"],
-  ["ipfs.name_publish", "IpfsNamePublishParams", "IpfsNamePublished", "ipfs"],
-  ["ipfs.id", "IpfsIdParams", "IpfsIdentity", "ipfs"],
-  ["ipfs.swarm_peers", "IpfsSwarmPeersParams", "IpfsSwarmPeers", "ipfs"],
-  ["pubsub.publish", "PubsubPublishParams", "Empty", "pubsub"],
-  ["pubsub.subscribe", "PubsubTopicParams", "PubsubSubscribed", "pubsub"],
-  ["pubsub.unsubscribe", "PubsubTopicParams", "Empty", "pubsub"],
-  ["pubsub.list_topics", "PubsubListTopicsParams", "TextList", "pubsub"],
-  ["protocol.request", "ProtocolRequestParams", "BytesValue", "protocol_dial"],
-  ["protocol.dial", "ProtocolDialParams", "Empty", "protocol_dial"],
-  ["protocol.register", "ProtocolHandleParams", "Empty", "protocol_handle"],
-  ["protocol.unregister", "ProtocolHandleParams", "Empty", "protocol_handle"],
-  ["p2p.peers_snapshot", "P2pParams", "P2pPeersSnapshot", "p2p_read"],
-  ["p2p.standards_snapshot", "P2pParams", "P2pStandardsSnapshot", "p2p_read"],
-  ["p2p.pnm_history", "P2pParams", "P2pPnmHistory", "p2p_read"],
-  ["p2p.latest_dataset", "P2pParams", "P2pLatestDataset", "p2p_read"],
-  ["node.status", "NodeStatusParams", "NodeStatusReport", "node_status_read"],
-  ["node.activity", "NodeActivityParams", "NodeActivity", "node_activity_read"],
-  // filesystem, exec, context
-  ["filesystem.resolve_path", "FsPathParams", "TextValue", "filesystem"],
-  ["filesystem.read_file", "FsPathParams", "BytesValue", "filesystem"],
-  ["filesystem.write_file", "FsWriteParams", "Empty", "filesystem"],
-  ["filesystem.delete_file", "FsPathParams", "Empty", "filesystem"],
-  ["filesystem.mkdir", "FsMkdirParams", "Empty", "filesystem"],
-  ["filesystem.readdir", "FsPathParams", "FsEntries", "filesystem"],
-  ["filesystem.stat", "FsPathParams", "FsStat", "filesystem"],
-  ["filesystem.rename", "FsRenameParams", "Empty", "filesystem"],
-  ["exec.exec_file", "ExecParams", "ExecResult", "process_exec"],
-  ["context.get", "ContextParams", "ContextValue", "context_read"],
-  ["context.list_keys", "ContextParams", "TextList", "context_read"],
-  ["context.list_scopes", "ContextListScopesParams", "TextList", "context_read"],
-  ["context.set", "ContextParams", "Empty", "context_write"],
-  ["context.delete", "ContextParams", "BoolValue", "context_write"],
-].map(([op, params, result, capability]) => [op, Object.freeze({ params, result, capability })])));
-
-/**
- * Whether a hostcall payload is the typed envelope (a HostCall, "HCLQ" at bytes 4-7) rather than the JSON-meta
- * envelope of src/host/hostcallWire.js: while hosts move over they answer a typed call with a HostCallResult. The JSON
- * envelope goes once every module is typed (graph: sdk-compliance-typed-only-20261013).
+ * Whether a hostcall payload is the typed one (an SDS $PIV request) rather than the JSON-meta envelope of
+ * src/host/hostcallWire.js: while hosts move over they answer a $PIV call with a $PIV response. The JSON envelope goes
+ * once every module is typed (graph: sdk-compliance-typed-only-20261013).
  */
 export function isTypedHostCall(payload) {
-  return identifierOf(payload) === "HCLQ";
+  return identifierOf(payload) === "$PIV";
 }
+
+// ---- the operations ---------------------------------------------------------------------------------------------------
+
+/**
+ * Every host operation a module can call, under the names the hosts serve today (the Go node's and the SDK JS hosts'),
+ * with its frames: the "params" / "result" aligned record types (HostOps.fbs; null: none), raw ports (bytes) and list
+ * ports (runs of aligned records), and the capability it needs (null: none).
+ */
+const op = (params, result, capability, frames = {}) => Object.freeze({
+  params, result, capability,
+  rawIn: Object.freeze(frames.rawIn || []), rawOut: Object.freeze(frames.rawOut || []),
+  listsIn: Object.freeze(frames.listsIn || {}), listsOut: Object.freeze(frames.listsOut || {}),
+});
+const CRYPTO_IN = ["data", "key", "private_key", "public_key", "signature", "nonce", "aad", "ikm", "salt", "info", "envelope"];
+const CRYPTO_OUT = ["data", "nonce", "private_key", "public_key"];
+const crypto = (result, capability) => op("CryptoParams", result, capability, { rawIn: CRYPTO_IN, rawOut: CRYPTO_OUT });
+const STREAM = { rawOut: ["stream"] };
+const SQL_IN = { rawIn: ["sql"], listsIn: { sql_params: "SqlValue" } };
+export const HOST_OPERATIONS = Object.freeze({
+  // host, clock, random, node, config
+  "host.runtimeTarget": op(null, null, null, { rawOut: ["value"] }),
+  "host.listCapabilities": op(null, null, null, { listsOut: { items: "TextValue" } }),
+  "host.listSupportedCapabilities": op(null, null, null, { listsOut: { items: "TextValue" } }),
+  "host.listOperations": op(null, null, null, { listsOut: { items: "TextValue" } }),
+  "host.hasCapability": op("HasCapabilityParams", "BoolValue", null),
+  "clock.now": op(null, "TimeValue", "clock"),
+  "clock.nowIso": op(null, null, "clock", { rawOut: ["value"] }),
+  "clock.monotonicNow": op(null, "NumberValue", "clock"),
+  "random.bytes": op("RandomBytesParams", null, "random", { rawOut: ["data"] }),
+  "node.publicKey": op(null, null, null, { rawOut: ["value"] }),
+  "node.peerId": op(null, null, null, { rawOut: ["value"] }),
+  "plugin.getConfig": op(null, null, null, { listsOut: { entries: "ConfigEntry" } }),
+  // network
+  "http.request": op("HttpParams", "HttpResult", "http", { rawIn: ["url", "headers", "body"], rawOut: ["url", "headers", "body"] }),
+  "websocket.exchange": op("WebsocketParams", "WebsocketResult", "websocket", { rawIn: ["url", "protocols", "message"], rawOut: ["url", "body"] }),
+  "mqtt.publish": op("MqttParams", "MqttResult", "mqtt", { rawIn: ["payload", "password"] }),
+  "mqtt.subscribeOnce": op("MqttParams", "MqttResult", "mqtt", { rawIn: ["password"], rawOut: ["body"] }),
+  "tcp.request": op("SocketParams", "SocketResult", "tcp", { rawIn: ["data"], rawOut: ["body"] }),
+  "udp.request": op("SocketParams", "SocketResult", "udp", { rawIn: ["data"], rawOut: ["body"] }),
+  "tls.request": op("SocketParams", "SocketResult", "tls", { rawIn: ["data", "ca", "cert", "key"], rawOut: ["body"] }),
+  // storage
+  "storage.query": op("StorageQueryParams", null, "storage_query", { listsOut: { records_meta: "StoredRecordMeta" }, rawOut: ["records"] }),
+  "storage.write": op("StorageWriteParams", "StorageWriteResult", "storage_write", { rawIn: ["data"] }),
+  "storage.delete": op("StorageDeleteParams", null, "storage_write"),
+  "storage.expire": op("StorageExpireParams", "StorageExpireResult", "storage_write"),
+  "storage.ingest_with_source": op("StorageIngestParams", "StorageIngestResult", "storage_ingest", { rawIn: ["records", "archive"], listsIn: { provenance: "Provenance" } }),
+  "storage.flatsql_query_stream": op("SqlStreamParams", "StreamResult", "storage_query", { ...SQL_IN, ...STREAM }),
+  "storage.flatsql_epoch_stream": op("EpochStreamParams", "StreamResult", "storage_query", STREAM),
+  "storage.query_sandboxed": op("SandboxQueryParams", "SandboxQueryResult", "storage_query", { ...SQL_IN, rawOut: ["stream"], listsOut: { columns: "TextValue", cells: "SqlValue" } }),
+  "storage.query_surface": op(null, "QuerySurfaceLimits", "storage_query", { listsOut: { tables: "SurfaceTable", columns: "SurfaceColumn" } }),
+  "storage.flatsql_cache_key": op("CacheKeyParams", null, "storage_query", { ...SQL_IN, listsIn: { ...SQL_IN.listsIn, projection: "TextValue" }, rawOut: ["value"] }),
+  // crypto: the node's operations
+  "crypto.hash": crypto(null, "crypto_hash"),
+  "crypto.sign": crypto(null, "crypto_sign"),
+  "crypto.verify": crypto("BoolValue", "crypto_verify"),
+  "crypto.encrypt": crypto(null, "crypto_encrypt"),
+  "crypto.decrypt": crypto(null, "crypto_decrypt"),
+  "crypto.key_agreement": crypto(null, "crypto_key_agreement"),
+  "crypto.kdf": crypto(null, "crypto_kdf"),
+  "crypto.generate_key": crypto(null, "crypto_sign"),
+  "crypto.random": crypto(null, "crypto_hash"),
+  // crypto: both hosts
+  "crypto.ed25519.publicKeyFromSeed": crypto(null, "crypto_sign"),
+  "crypto.ed25519.sign": crypto(null, "crypto_sign"),
+  "crypto.ed25519.verify": crypto("BoolValue", "crypto_verify"),
+  "crypto.secp256k1.publicKeyFromPrivate": crypto(null, "crypto_sign"),
+  "crypto.secp256k1.sign": crypto(null, "crypto_sign"),
+  "crypto.secp256k1.verify": crypto("BoolValue", "crypto_verify"),
+  // crypto: the JS hosts' operations
+  "crypto.sha256": crypto(null, "crypto_hash"),
+  "crypto.sha512": crypto(null, "crypto_hash"),
+  "crypto.hkdf": crypto(null, "crypto_kdf"),
+  "crypto.aesGcmEncrypt": crypto(null, "crypto_encrypt"),
+  "crypto.aesGcmDecrypt": crypto(null, "crypto_decrypt"),
+  "crypto.x25519.generateKeypair": crypto(null, "crypto_key_agreement"),
+  "crypto.x25519.publicKey": crypto(null, "crypto_key_agreement"),
+  "crypto.x25519.sharedSecret": crypto(null, "crypto_key_agreement"),
+  "crypto.sealedBox.encryptForRecipient": crypto(null, "crypto_encrypt"),
+  "crypto.sealedBox.decryptFromEnvelope": crypto(null, "crypto_decrypt"),
+  "crypto.secp256k1.signDigest": crypto(null, "crypto_sign"),
+  "crypto.secp256k1.verifyDigest": crypto("BoolValue", "crypto_verify"),
+  // keyslot, secrets
+  "keyslot.sign": op("KeyslotParams", null, "wallet_sign", { rawIn: ["payload"], rawOut: ["data"] }),
+  "keyslot.unwrap": op("KeyslotParams", null, "wallet_sign", { rawIn: ["ephemeral_public_key", "nonce", "ciphertext"], rawOut: ["data"] }),
+  "secrets.get": op("SecretParams", "SecretResult", "secrets", { rawOut: ["secret"] }),
+  "secrets.status": op("SecretParams", "SecretResult", "secrets"),
+  "secrets.put": op("SecretParams", "SecretResult", "secrets", { rawIn: ["secret"] }),
+  "secrets.clear": op("SecretParams", null, "secrets"),
+  // ipfs, pubsub, protocol, p2p, node status
+  "ipfs.add": op("IpfsParams", "IpfsResult", "ipfs", { rawIn: ["data"] }),
+  "ipfs.cat": op("IpfsParams", null, "ipfs", { rawOut: ["data"] }),
+  "ipfs.ls": op("IpfsParams", null, "ipfs", { listsOut: { links: "IpfsLink" } }),
+  "ipfs.pin_add": op("IpfsParams", null, "ipfs", { listsOut: { items: "TextValue" } }),
+  "ipfs.pin_rm": op("IpfsParams", null, "ipfs", { listsOut: { items: "TextValue" } }),
+  "ipfs.pin_ls": op("IpfsParams", null, "ipfs", { listsOut: { pins: "IpfsPin" } }),
+  "ipfs.dag_get": op("IpfsParams", null, "ipfs", { rawOut: ["data"] }),
+  "ipfs.name_resolve": op("IpfsParams", "IpfsResult", "ipfs"),
+  "ipfs.name_publish": op("IpfsParams", "IpfsResult", "ipfs"),
+  "ipfs.id": op(null, "IpfsResult", "ipfs", { listsOut: { addresses: "TextValue" } }),
+  "ipfs.swarm_peers": op(null, null, "ipfs", { listsOut: { peers: "IpfsSwarmPeer" } }),
+  "ipfs.pubsub_publish": op("PubsubParams", null, "ipfs", { rawIn: ["data"] }),
+  "pubsub.publish": op("PubsubParams", null, "pubsub", { rawIn: ["data"] }),
+  "pubsub.subscribe": op("PubsubParams", "PubsubSubscribed", "pubsub"),
+  "pubsub.unsubscribe": op("PubsubParams", null, "pubsub"),
+  "pubsub.list_topics": op(null, null, "pubsub", { listsOut: { items: "TextValue" } }),
+  "protocol.request": op("ProtocolParams", null, "protocol_dial", { rawIn: ["payload"], rawOut: ["data"] }),
+  "protocol_dial.dial": op("ProtocolParams", null, "protocol_dial"),
+  "protocol_handle.register": op("ProtocolParams", null, "protocol_handle"),
+  "protocol_handle.unregister": op("ProtocolParams", null, "protocol_handle"),
+  "p2p.peers_snapshot": op("P2pParams", "P2pSummary", "p2p_read", { listsOut: { peers: "P2pPeer", peer_addresses: "P2pPeerValue", peer_standards: "P2pPeerValue" }, rawOut: ["records"] }),
+  "p2p.standards_snapshot": op("P2pParams", null, "p2p_read", { listsOut: { entries: "P2pPnmEntry" }, rawOut: ["records"] }),
+  "p2p.pnm_history": op("P2pParams", "P2pSummary", "p2p_read", { listsOut: { entries: "P2pPnmEntry" }, rawOut: ["records"] }),
+  "p2p.latest_dataset": op("P2pParams", "P2pLatestDataset", "p2p_read", { rawOut: ["stream"] }),
+  "node_status_read.status": op(null, "NodeStatusReport", "node_status_read", { listsOut: { bandwidth_history: "NodeBandwidthSample" } }),
+  "node_activity_read.activity": op("NodeActivityParams", null, "node_activity_read", { listsOut: { events: "NodeActivityEvent" } }),
+  // the JS hosts' timers, schedule, filesystem, exec, context
+  "timers.delay": op("TimersDelayParams", null, "timers"),
+  "schedule.parse": op("ScheduleParams", null, "schedule_cron", { listsOut: { fields: "CronField" } }),
+  "schedule.matches": op("ScheduleParams", "BoolValue", "schedule_cron"),
+  "schedule.next": op("ScheduleParams", "TimeValue", "schedule_cron"),
+  "filesystem.resolvePath": op(null, null, "filesystem", { rawIn: ["path"], rawOut: ["path"] }),
+  "filesystem.readFile": op(null, null, "filesystem", { rawIn: ["path"], rawOut: ["data"] }),
+  "filesystem.writeFile": op(null, null, "filesystem", { rawIn: ["path", "data"] }),
+  "filesystem.appendFile": op(null, null, "filesystem", { rawIn: ["path", "data"] }),
+  "filesystem.deleteFile": op(null, null, "filesystem", { rawIn: ["path"] }),
+  "filesystem.mkdir": op("FsParams", null, "filesystem", { rawIn: ["path"] }),
+  "filesystem.readdir": op(null, null, "filesystem", { rawIn: ["path"], listsOut: { entries: "FsEntry" } }),
+  "filesystem.stat": op(null, "FsStat", "filesystem", { rawIn: ["path"], rawOut: ["path"] }),
+  "filesystem.rename": op(null, null, "filesystem", { rawIn: ["path", "to_path"] }),
+  "exec.execFile": op("ExecParams", "ExecResult", "process_exec", { rawIn: ["file", "cwd", "input"], listsIn: { args: "TextValue", env: "EnvVar" }, rawOut: ["stdout", "stderr"] }),
+  "context.get": op("ContextParams", "BoolValue", "context_read", { rawOut: ["value"] }),
+  "context.listKeys": op("ContextParams", null, "context_read", { listsOut: { items: "TextValue" } }),
+  "context.listScopes": op(null, null, "context_read", { listsOut: { items: "TextValue" } }),
+  "context.set": op("ContextParams", null, "context_write", { rawIn: ["value"] }),
+  "context.delete": op("ContextParams", "BoolValue", "context_write"),
+});

@@ -115,16 +115,8 @@ contextArray():Uint8Array|null {
   return offset ? new Uint8Array(this.bb!.bytes().buffer, this.bb!.bytes().byteOffset + this.bb!.__vector(this.bb_pos + offset), this.bb!.__vector_len(this.bb_pos + offset)) : null;
 }
 
-/**
- * Follow redirects (the host's default is to follow).
- */
-FOLLOW_REDIRECTS():boolean {
-  const offset = this.bb!.__offset(this.bb_pos, 18);
-  return offset ? !!this.bb!.readInt8(this.bb_pos + offset) : true;
-}
-
 static startHttpRequest(builder:flatbuffers.Builder) {
-  builder.startObject(8);
+  builder.startObject(7);
 }
 
 static addMethod(builder:flatbuffers.Builder, METHODOffset:flatbuffers.Offset) {
@@ -191,10 +183,6 @@ static startContextVector(builder:flatbuffers.Builder, numElems:number) {
   builder.startVector(1, numElems, 1);
 }
 
-static addFollowRedirects(builder:flatbuffers.Builder, FOLLOW_REDIRECTS:boolean) {
-  builder.addFieldInt8(7, +FOLLOW_REDIRECTS, +true);
-}
-
 static endHttpRequest(builder:flatbuffers.Builder):flatbuffers.Offset {
   const offset = builder.endObject();
   builder.requiredField(offset, 6) // URL
@@ -209,7 +197,7 @@ static finishSizePrefixedHttpRequestBuffer(builder:flatbuffers.Builder, offset:f
   builder.finish(offset, 'HREQ', true);
 }
 
-static createHttpRequest(builder:flatbuffers.Builder, METHODOffset:flatbuffers.Offset, URLOffset:flatbuffers.Offset, HEADERSOffset:flatbuffers.Offset, BODYOffset:flatbuffers.Offset, TIMEOUT_MS:number, MAX_BYTES:bigint, CONTEXTOffset:flatbuffers.Offset, FOLLOW_REDIRECTS:boolean):flatbuffers.Offset {
+static createHttpRequest(builder:flatbuffers.Builder, METHODOffset:flatbuffers.Offset, URLOffset:flatbuffers.Offset, HEADERSOffset:flatbuffers.Offset, BODYOffset:flatbuffers.Offset, TIMEOUT_MS:number, MAX_BYTES:bigint, CONTEXTOffset:flatbuffers.Offset):flatbuffers.Offset {
   HttpRequest.startHttpRequest(builder);
   HttpRequest.addMethod(builder, METHODOffset);
   HttpRequest.addUrl(builder, URLOffset);
@@ -218,7 +206,6 @@ static createHttpRequest(builder:flatbuffers.Builder, METHODOffset:flatbuffers.O
   HttpRequest.addTimeoutMs(builder, TIMEOUT_MS);
   HttpRequest.addMaxBytes(builder, MAX_BYTES);
   HttpRequest.addContext(builder, CONTEXTOffset);
-  HttpRequest.addFollowRedirects(builder, FOLLOW_REDIRECTS);
   return HttpRequest.endHttpRequest(builder);
 }
 
@@ -230,8 +217,7 @@ unpack(): HttpRequestT {
     this.bb!.createScalarList<number>(this.BODY.bind(this), this.bodyLength()),
     this.TIMEOUT_MS(),
     this.MAX_BYTES(),
-    this.bb!.createScalarList<number>(this.CONTEXT.bind(this), this.contextLength()),
-    this.FOLLOW_REDIRECTS()
+    this.bb!.createScalarList<number>(this.CONTEXT.bind(this), this.contextLength())
   );
 }
 
@@ -244,7 +230,6 @@ unpackTo(_o: HttpRequestT): void {
   _o.TIMEOUT_MS = this.TIMEOUT_MS();
   _o.MAX_BYTES = this.MAX_BYTES();
   _o.CONTEXT = this.bb!.createScalarList<number>(this.CONTEXT.bind(this), this.contextLength());
-  _o.FOLLOW_REDIRECTS = this.FOLLOW_REDIRECTS();
 }
 }
 
@@ -256,8 +241,7 @@ constructor(
   public BODY: (number)[] = [],
   public TIMEOUT_MS: number = 0,
   public MAX_BYTES: bigint = BigInt('0'),
-  public CONTEXT: (number)[] = [],
-  public FOLLOW_REDIRECTS: boolean = true
+  public CONTEXT: (number)[] = []
 ){}
 
 
@@ -275,8 +259,7 @@ pack(builder:flatbuffers.Builder): flatbuffers.Offset {
     BODY,
     this.TIMEOUT_MS,
     this.MAX_BYTES,
-    CONTEXT,
-    this.FOLLOW_REDIRECTS
+    CONTEXT
   );
 }
 }

@@ -33,7 +33,6 @@ struct IngestResultT : public ::flatbuffers::NativeTable {
   uint64_t RECONCILED_OLD_BATCHES = 0;
   std::string ARCHIVED{};
   std::string REFUSED{};
-  std::string PROVENANCE_FILE{};
 };
 
 /// What the host did with one IngestRequest. Replaces the storage.ingest_with_source result JSON.
@@ -49,8 +48,7 @@ struct IngestResult FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_RECONCILED_DUPLICATES = 14,
     VT_RECONCILED_OLD_BATCHES = 16,
     VT_ARCHIVED = 18,
-    VT_REFUSED = 20,
-    VT_PROVENANCE_FILE = 22
+    VT_REFUSED = 20
   };
   const ::flatbuffers::String *SCHEMA() const {
     return GetPointer<const ::flatbuffers::String *>(VT_SCHEMA);
@@ -84,10 +82,6 @@ struct IngestResult FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const ::flatbuffers::String *REFUSED() const {
     return GetPointer<const ::flatbuffers::String *>(VT_REFUSED);
   }
-  /// Where the provenance document was written; empty when none was sent.
-  const ::flatbuffers::String *PROVENANCE_FILE() const {
-    return GetPointer<const ::flatbuffers::String *>(VT_PROVENANCE_FILE);
-  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -106,8 +100,6 @@ struct IngestResult FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyString(ARCHIVED()) &&
            VerifyOffset(verifier, VT_REFUSED) &&
            verifier.VerifyString(REFUSED()) &&
-           VerifyOffset(verifier, VT_PROVENANCE_FILE) &&
-           verifier.VerifyString(PROVENANCE_FILE()) &&
            verifier.EndTable();
   }
   IngestResultT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -146,9 +138,6 @@ struct IngestResultBuilder {
   void add_REFUSED(::flatbuffers::Offset<::flatbuffers::String> REFUSED) {
     fbb_.AddOffset(IngestResult::VT_REFUSED, REFUSED);
   }
-  void add_PROVENANCE_FILE(::flatbuffers::Offset<::flatbuffers::String> PROVENANCE_FILE) {
-    fbb_.AddOffset(IngestResult::VT_PROVENANCE_FILE, PROVENANCE_FILE);
-  }
   explicit IngestResultBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -170,13 +159,11 @@ inline ::flatbuffers::Offset<IngestResult> CreateIngestResult(
     uint64_t RECONCILED_DUPLICATES = 0,
     uint64_t RECONCILED_OLD_BATCHES = 0,
     ::flatbuffers::Offset<::flatbuffers::String> ARCHIVED = 0,
-    ::flatbuffers::Offset<::flatbuffers::String> REFUSED = 0,
-    ::flatbuffers::Offset<::flatbuffers::String> PROVENANCE_FILE = 0) {
+    ::flatbuffers::Offset<::flatbuffers::String> REFUSED = 0) {
   IngestResultBuilder builder_(_fbb);
   builder_.add_RECONCILED_OLD_BATCHES(RECONCILED_OLD_BATCHES);
   builder_.add_RECONCILED_DUPLICATES(RECONCILED_DUPLICATES);
   builder_.add_INSERTED(INSERTED);
-  builder_.add_PROVENANCE_FILE(PROVENANCE_FILE);
   builder_.add_REFUSED(REFUSED);
   builder_.add_ARCHIVED(ARCHIVED);
   builder_.add_BATCH_ID(BATCH_ID);
@@ -196,15 +183,13 @@ inline ::flatbuffers::Offset<IngestResult> CreateIngestResultDirect(
     uint64_t RECONCILED_DUPLICATES = 0,
     uint64_t RECONCILED_OLD_BATCHES = 0,
     const char *ARCHIVED = nullptr,
-    const char *REFUSED = nullptr,
-    const char *PROVENANCE_FILE = nullptr) {
+    const char *REFUSED = nullptr) {
   auto SCHEMA__ = SCHEMA ? _fbb.CreateString(SCHEMA) : 0;
   auto PROVIDER_ID__ = PROVIDER_ID ? _fbb.CreateString(PROVIDER_ID) : 0;
   auto SOURCE_NAME__ = SOURCE_NAME ? _fbb.CreateString(SOURCE_NAME) : 0;
   auto BATCH_ID__ = BATCH_ID ? _fbb.CreateString(BATCH_ID) : 0;
   auto ARCHIVED__ = ARCHIVED ? _fbb.CreateString(ARCHIVED) : 0;
   auto REFUSED__ = REFUSED ? _fbb.CreateString(REFUSED) : 0;
-  auto PROVENANCE_FILE__ = PROVENANCE_FILE ? _fbb.CreateString(PROVENANCE_FILE) : 0;
   return sdn::runtime::CreateIngestResult(
       _fbb,
       SCHEMA__,
@@ -215,8 +200,7 @@ inline ::flatbuffers::Offset<IngestResult> CreateIngestResultDirect(
       RECONCILED_DUPLICATES,
       RECONCILED_OLD_BATCHES,
       ARCHIVED__,
-      REFUSED__,
-      PROVENANCE_FILE__);
+      REFUSED__);
 }
 
 ::flatbuffers::Offset<IngestResult> CreateIngestResult(::flatbuffers::FlatBufferBuilder &_fbb, const IngestResultT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -239,7 +223,6 @@ inline void IngestResult::UnPackTo(IngestResultT *_o, const ::flatbuffers::resol
   { auto _e = RECONCILED_OLD_BATCHES(); _o->RECONCILED_OLD_BATCHES = _e; }
   { auto _e = ARCHIVED(); if (_e) _o->ARCHIVED = _e->str(); }
   { auto _e = REFUSED(); if (_e) _o->REFUSED = _e->str(); }
-  { auto _e = PROVENANCE_FILE(); if (_e) _o->PROVENANCE_FILE = _e->str(); }
 }
 
 inline ::flatbuffers::Offset<IngestResult> CreateIngestResult(::flatbuffers::FlatBufferBuilder &_fbb, const IngestResultT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -259,7 +242,6 @@ inline ::flatbuffers::Offset<IngestResult> IngestResult::Pack(::flatbuffers::Fla
   auto _RECONCILED_OLD_BATCHES = _o->RECONCILED_OLD_BATCHES;
   auto _ARCHIVED = _o->ARCHIVED.empty() ? 0 : _fbb.CreateString(_o->ARCHIVED);
   auto _REFUSED = _o->REFUSED.empty() ? 0 : _fbb.CreateString(_o->REFUSED);
-  auto _PROVENANCE_FILE = _o->PROVENANCE_FILE.empty() ? 0 : _fbb.CreateString(_o->PROVENANCE_FILE);
   return sdn::runtime::CreateIngestResult(
       _fbb,
       _SCHEMA,
@@ -270,8 +252,7 @@ inline ::flatbuffers::Offset<IngestResult> IngestResult::Pack(::flatbuffers::Fla
       _RECONCILED_DUPLICATES,
       _RECONCILED_OLD_BATCHES,
       _ARCHIVED,
-      _REFUSED,
-      _PROVENANCE_FILE);
+      _REFUSED);
 }
 
 inline const sdn::runtime::IngestResult *GetIngestResult(const void *buf) {

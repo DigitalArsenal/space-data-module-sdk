@@ -67,12 +67,8 @@ class IngestResult {
     const offset = this.bb.__offset(this.bb_pos, 20);
     return offset ? this.bb.__string(this.bb_pos + offset, optionalEncoding) : null;
   }
-  PROVENANCE_FILE(optionalEncoding) {
-    const offset = this.bb.__offset(this.bb_pos, 22);
-    return offset ? this.bb.__string(this.bb_pos + offset, optionalEncoding) : null;
-  }
   static startIngestResult(builder) {
-    builder.startObject(10);
+    builder.startObject(9);
   }
   static addSchema(builder, SCHEMAOffset) {
     builder.addFieldOffset(0, SCHEMAOffset, 0);
@@ -101,9 +97,6 @@ class IngestResult {
   static addRefused(builder, REFUSEDOffset) {
     builder.addFieldOffset(8, REFUSEDOffset, 0);
   }
-  static addProvenanceFile(builder, PROVENANCE_FILEOffset) {
-    builder.addFieldOffset(9, PROVENANCE_FILEOffset, 0);
-  }
   static endIngestResult(builder) {
     const offset = builder.endObject();
     return offset;
@@ -114,7 +107,7 @@ class IngestResult {
   static finishSizePrefixedIngestResultBuffer(builder, offset) {
     builder.finish(offset, "INGR", true);
   }
-  static createIngestResult(builder, SCHEMAOffset, PROVIDER_IDOffset, SOURCE_NAMEOffset, BATCH_IDOffset, INSERTED, RECONCILED_DUPLICATES, RECONCILED_OLD_BATCHES, ARCHIVEDOffset, REFUSEDOffset, PROVENANCE_FILEOffset) {
+  static createIngestResult(builder, SCHEMAOffset, PROVIDER_IDOffset, SOURCE_NAMEOffset, BATCH_IDOffset, INSERTED, RECONCILED_DUPLICATES, RECONCILED_OLD_BATCHES, ARCHIVEDOffset, REFUSEDOffset) {
     IngestResult.startIngestResult(builder);
     IngestResult.addSchema(builder, SCHEMAOffset);
     IngestResult.addProviderId(builder, PROVIDER_IDOffset);
@@ -125,7 +118,6 @@ class IngestResult {
     IngestResult.addReconciledOldBatches(builder, RECONCILED_OLD_BATCHES);
     IngestResult.addArchived(builder, ARCHIVEDOffset);
     IngestResult.addRefused(builder, REFUSEDOffset);
-    IngestResult.addProvenanceFile(builder, PROVENANCE_FILEOffset);
     return IngestResult.endIngestResult(builder);
   }
   unpack() {
@@ -138,8 +130,7 @@ class IngestResult {
       this.RECONCILED_DUPLICATES(),
       this.RECONCILED_OLD_BATCHES(),
       this.ARCHIVED(),
-      this.REFUSED(),
-      this.PROVENANCE_FILE()
+      this.REFUSED()
     );
   }
   unpackTo(_o) {
@@ -152,11 +143,10 @@ class IngestResult {
     _o.RECONCILED_OLD_BATCHES = this.RECONCILED_OLD_BATCHES();
     _o.ARCHIVED = this.ARCHIVED();
     _o.REFUSED = this.REFUSED();
-    _o.PROVENANCE_FILE = this.PROVENANCE_FILE();
   }
 }
 class IngestResultT {
-  constructor(SCHEMA = null, PROVIDER_ID = null, SOURCE_NAME = null, BATCH_ID = null, INSERTED = BigInt("0"), RECONCILED_DUPLICATES = BigInt("0"), RECONCILED_OLD_BATCHES = BigInt("0"), ARCHIVED = null, REFUSED = null, PROVENANCE_FILE = null) {
+  constructor(SCHEMA = null, PROVIDER_ID = null, SOURCE_NAME = null, BATCH_ID = null, INSERTED = BigInt("0"), RECONCILED_DUPLICATES = BigInt("0"), RECONCILED_OLD_BATCHES = BigInt("0"), ARCHIVED = null, REFUSED = null) {
     __publicField(this, "SCHEMA", SCHEMA);
     __publicField(this, "PROVIDER_ID", PROVIDER_ID);
     __publicField(this, "SOURCE_NAME", SOURCE_NAME);
@@ -166,7 +156,6 @@ class IngestResultT {
     __publicField(this, "RECONCILED_OLD_BATCHES", RECONCILED_OLD_BATCHES);
     __publicField(this, "ARCHIVED", ARCHIVED);
     __publicField(this, "REFUSED", REFUSED);
-    __publicField(this, "PROVENANCE_FILE", PROVENANCE_FILE);
   }
   pack(builder) {
     const SCHEMA = this.SCHEMA !== null ? builder.createString(this.SCHEMA) : 0;
@@ -175,7 +164,6 @@ class IngestResultT {
     const BATCH_ID = this.BATCH_ID !== null ? builder.createString(this.BATCH_ID) : 0;
     const ARCHIVED = this.ARCHIVED !== null ? builder.createString(this.ARCHIVED) : 0;
     const REFUSED = this.REFUSED !== null ? builder.createString(this.REFUSED) : 0;
-    const PROVENANCE_FILE = this.PROVENANCE_FILE !== null ? builder.createString(this.PROVENANCE_FILE) : 0;
     return IngestResult.createIngestResult(
       builder,
       SCHEMA,
@@ -186,8 +174,7 @@ class IngestResultT {
       this.RECONCILED_DUPLICATES,
       this.RECONCILED_OLD_BATCHES,
       ARCHIVED,
-      REFUSED,
-      PROVENANCE_FILE
+      REFUSED
     );
   }
 }

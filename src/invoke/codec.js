@@ -406,7 +406,8 @@ function normalizeFrameTypeRef(frame = {}) {
     typeRef.BYTE_LENGTH = readBoundedInteger(
       typeRef.BYTE_LENGTH,
       "SDS PIV/TAB aligned type byteLength",
-      { minimum: 1, maximum: UINT32_MAX },
+      // 0 = a variable-length aligned stream, as the decoder and the guest glue (OutputTypeMatches) admit
+      { minimum: 0, maximum: UINT32_MAX },
     );
   } else if (
     typeRef.REQUIRED_ALIGNMENT > 0 &&
@@ -440,7 +441,7 @@ function assertAlignedFrameSize(wireFormat, typeRef, size) {
   if (wireFormat !== "aligned-binary") {
     return;
   }
-  if (size !== typeRef.BYTE_LENGTH) {
+  if (typeRef.BYTE_LENGTH > 0 && size !== typeRef.BYTE_LENGTH) {
     throw new RangeError(
       `SDS PIV/TAB aligned payload size ${size} does not match declared byteLength ${typeRef.BYTE_LENGTH}.`,
     );

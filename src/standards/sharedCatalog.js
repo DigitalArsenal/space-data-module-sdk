@@ -60,19 +60,6 @@ const sharedModuleCatalogEntries = [
     fileIdentifier: "FNTC",
     source: "shared-module-runtime",
   },
-  // The hostcall envelope: a module's call to its host and the host's typed answer (schemas/runtime/HostCall*.fbs).
-  {
-    schemaCode: "HOSTCALL",
-    schemaName: "HostCall.fbs",
-    fileIdentifier: "HCLQ",
-    source: "shared-module-runtime",
-  },
-  {
-    schemaCode: "HOSTCALLRESULT",
-    schemaName: "HostCallResult.fbs",
-    fileIdentifier: "HCLR",
-    source: "shared-module-runtime",
-  },
   {
     schemaCode: "DETACHEDSIGNATURE",
     schemaName: "DetachedSignature.fbs",

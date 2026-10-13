@@ -1,0 +1,453 @@
+// The payloads of the host operations a module calls, in the FlatBuffers ALIGNED BINARY layout (fixed-size records,
+// read in place by advancing a fixed stride; generated with --aligned). Typed contracts 1.0, owner 2026-10-13: only
+// the JSON interface changes.
+//
+// A hostcall is an SDS $PIV invocation in the module -> host direction (the SDK's documented invoke ABI):
+// PIVRequest.METHOD_ID is the operation (HOST_OPERATIONS in src/standards/runtimeContracts.js names its frames), and
+// the PIVResponse answers with the result frames, or STATUS FAILED with ERROR_CODE / ERROR_MESSAGE. Frames live in
+// PAYLOAD_ARENA and are named by TAB.PORT_ID:
+//   - "params" / "result": one aligned record of the operation's table here (TAB WIRE_FORMAT ALIGNED_BINARY, TYPE_REF
+//     SCHEMA_NAME "HostOps.fbs", ROOT_TYPE the table, BYTE_LENGTH its size);
+//   - a list port (e.g. "entries"): a run of aligned records of one table, back to back at a fixed stride;
+//   - a raw port (e.g. "body", "records", "url", "sql", "path"): unbounded bytes, verbatim - bodies, keys, record
+//     streams (size-prefixed frames concatenated), and text that may exceed an aligned string (UTF-8).
+// Aligned strings hold at most 255 bytes; a value that does not fit is refused, never truncated. Times are Unix
+// milliseconds UTC. A zero or an empty string means "not given" and the host applies the documented default: aligned records have no
+// schema defaults (an unset field reads zero), so every field here is phrased so that zero is the default.
+namespace sdn.runtime;
+
+// ---- shared values -------------------------------------------------------------------------------------------------
+
+table BoolValue { VALUE: bool; }
+table NumberValue { VALUE: double; }
+table TimeValue { UNIX_MS: uint64; }
+table CountValue { VALUE: uint64; }
+/// A list item of text (list ports such as "capabilities", "topics", "keys").
+table TextValue { VALUE: string (aligned_max_length: 255); }
+
+/// Bytes a host keeps and a flow egress resolves later by TOKEN (deliver Ref): single use.
+table BodyRef { TOKEN: uint64; SIZE: uint64; FRAMES: int64; FNV1A64: string (aligned_max_length: 16); }  // FRAMES -1 = none (the host always writes it)
+
+enum deliverMode : ubyte { Inline, Ref }
+
+// ---- host, random, config ------------------------------------------------------------------------------------------
+
+table HasCapabilityParams { CAPABILITY: string (aligned_max_length: 64); }
+
+/// LENGTH 1..8192 (0 = 32); the bytes come back on raw "data".
+table RandomBytesParams { LENGTH: uint32; }
+
+enum configEntryKind : ubyte { String, Number, Bool }
+/// One configured value; nested tables and lists are flattened into dotted paths ("targets.0.provider_id",
+/// "widths.1"). plugin.getConfig answers with a run of these on list "entries".
+table ConfigEntry {
+  KEY: string (aligned_max_length: 255);
+  KIND: configEntryKind;
+  STRING_VALUE: string (aligned_max_length: 255);
+  NUMBER_VALUE: double;
+  BOOL_VALUE: bool;
+}
+
+// ---- http (raw in: "url", "headers" (an HTTP header block, "name: value" lines), "body"; raw out: the same) --------
+
+table HttpParams {
+  /// Empty = GET.
+  METHOD: string (aligned_max_length: 16);
+  /// 0 = the host's default.
+  TIMEOUT_MS: uint32;
+  /// Response body budget; the host errors past it, never truncates. 0 = the host's limit.
+  MAX_BYTES: uint64;
+  /// Redirects are followed unless set.
+  NO_REDIRECTS: bool;
+}
+table HttpResult {
+  STATUS: int32;
+  RETRIEVED_MS: uint64;
+}
+
+// ---- storage -------------------------------------------------------------------------------------------------------
+
+table StorageQueryParams {
+  SCHEMA: string (aligned_max_length: 64);
+  DAY: string (aligned_max_length: 16);
+  ENTITY_ID: string (aligned_max_length: 255);
+  NORAD_CAT_ID: uint32;
+  LIMIT: uint32;
+}
+/// One stored record's metadata (list "records_meta"); its bytes are the same-index frame of raw "records".
+table StoredRecordMeta {
+  CID: string (aligned_max_length: 128);
+  ROW_ID: int64;
+  PEER_ID: string (aligned_max_length: 128);
+  TIMESTAMP_MS: int64;
+  MATERIALIZED_MS: int64;
+  LENGTH: uint32;
+  PROVIDER_ID: string (aligned_max_length: 128);
+  SOURCE_NAME: string (aligned_max_length: 128);
+  BATCH_ID: string (aligned_max_length: 128);
+  PRODUCER_PEER_ID: string (aligned_max_length: 128);
+  LICENSE: string (aligned_max_length: 64);
+}
+
+/// One record on raw "data"; the result names its CID.
+table StorageWriteParams { SCHEMA: string (aligned_max_length: 64); }
+table StorageWriteResult { CID: string (aligned_max_length: 128); }
+
+table StorageDeleteParams { SCHEMA: string (aligned_max_length: 64); CID: string (aligned_max_length: 128); }
+
+/// A lane's records that arrived before BEFORE_MS, deleted through the store's record index.
+table StorageExpireParams {
+  SCHEMA: string (aligned_max_length: 64);
+  PROVIDER_ID: string (aligned_max_length: 128);
+  SOURCE_NAME: string (aligned_max_length: 128);
+  BEFORE_MS: uint64;
+  /// Index page size; 0 = 500.
+  BATCH: uint32;
+  /// 0 = 100000.
+  MAX_DELETES: uint32;
+}
+table StorageExpireResult { DELETED: uint64; MISSING: uint64; CAPPED: bool; }
+
+enum reconcileKind : ubyte { Duplicates, None, Current }
+/// One batch: raw "records" (size-prefixed record stream), optional raw "archive" (the source document, kept under
+/// ARCHIVE_SOURCE/ARCHIVE_NAME when the host has an archive root), optional "provenance" record.
+table StorageIngestParams {
+  SCHEMA: string (aligned_max_length: 64);
+  PROVIDER_ID: string (aligned_max_length: 128);
+  SOURCE_NAME: string (aligned_max_length: 128);
+  BATCH_ID: string (aligned_max_length: 128);
+  SOURCE_URL: string (aligned_max_length: 255);
+  CONTENT_KEY_ID: string (aligned_max_length: 64);
+  SOURCE_PEER: string (aligned_max_length: 128);
+  LICENSE: string (aligned_max_length: 64);
+  LICENSE_URL: string (aligned_max_length: 255);
+  CITATION: string (aligned_max_length: 255);
+  SHARE_ALIKE: bool;
+  RECONCILE: reconcileKind;
+  ARCHIVE_SOURCE: string (aligned_max_length: 128);
+  ARCHIVE_NAME: string (aligned_max_length: 255);
+}
+table Provenance {
+  SOURCE_URL: string (aligned_max_length: 255);
+  HTTP_STATUS: int32;
+  ETAG: string (aligned_max_length: 128);
+  LAST_MODIFIED: string (aligned_max_length: 64);
+  CONTENT_TYPE: string (aligned_max_length: 128);
+  RETRIEVED_MS: uint64;
+  PARSER: string (aligned_max_length: 64);
+  PARSER_VERSION: string (aligned_max_length: 32);
+  SOURCE_SHA256: string (aligned_max_length: 64);
+  NORMALIZED_SHA256: string (aligned_max_length: 64);
+  NORMALIZED_COUNT: uint64;
+  FROM_CACHE: bool;
+}
+table StorageIngestResult {
+  SCHEMA: string (aligned_max_length: 64);
+  BATCH_ID: string (aligned_max_length: 128);
+  INSERTED: uint64;
+  RECONCILED_DUPLICATES: uint64;
+  RECONCILED_OLD_BATCHES: uint64;
+  ARCHIVED: string (aligned_max_length: 255);
+  PROVENANCE_FILE: string (aligned_max_length: 255);
+}
+
+enum sqlValueKind : ubyte { Null, Bool, I64, F64, Str }
+/// One SQL parameter (list "sql_params") or result cell (list "cells", row-major).
+table SqlValue {
+  KIND: sqlValueKind;
+  BOOL_VALUE: bool;
+  I64_VALUE: int64;
+  F64_VALUE: double;
+  STR_VALUE: string (aligned_max_length: 255);
+}
+/// raw "sql", list "sql_params"; the answer: a StreamResult with raw "stream" (deliver Inline) or its BodyRef.
+table SqlStreamParams { DELIVER: deliverMode; }
+table StreamResult {
+  ROWS: uint64;
+  COLUMNS: uint32;
+  REF: BodyRef;
+}
+table EpochStreamParams {
+  SCHEMA: string (aligned_max_length: 64);
+  SOURCE: string (aligned_max_length: 128);
+  PROFILE: string (aligned_max_length: 32);
+  EPOCH: double;
+  LIMIT: uint32;
+  DELIVER: deliverMode;
+}
+enum sandboxWant : ubyte { Stream, Rows, Auto }
+/// raw "sql", list "sql_params"; Stream answers like SqlStream, Rows with list "columns" (TextValue) and list
+/// "cells" (SqlValue, row-major).
+table SandboxQueryParams { WANT: sandboxWant; DELIVER: deliverMode; }
+table SandboxQueryResult { KIND: sandboxWant; ROWS: uint64; COLUMNS: uint32; REF: BodyRef; }
+/// storage.query_surface: list "tables", list "columns".
+table SurfaceTable {
+  NAME: string (aligned_max_length: 128);
+  KIND: string (aligned_max_length: 16);
+  SOURCE: string (aligned_max_length: 128);
+  RECORDS: int64;
+}
+table SurfaceColumn {
+  TABLE: string (aligned_max_length: 128);
+  NAME: string (aligned_max_length: 128);
+  PLACEHOLDER: bool;
+}
+table QuerySurfaceLimits { TIMEOUT_MS: uint32; MAX_ROWS: uint64; MAX_BYTES: uint64; }
+/// raw "sql", list "sql_params", list "projection" (TextValue); the key comes back as a TextValue.
+table CacheKeyParams {
+  SCHEMA_NAME: string (aligned_max_length: 64);
+  SCHEMA_VERSION: string (aligned_max_length: 32);
+  FORMAT: string (aligned_max_length: 32);
+  PUBLISH_EVENT_KEY: string (aligned_max_length: 128);
+}
+
+// ---- crypto, keyslot (keys, data, signatures, nonces as raw frames) -----------------------------------------------
+
+enum cryptoAlgorithm : ubyte {
+  Default,
+  Ed25519,
+  /// ECDSA over secp256k1, signing SHA-256(data); DER signatures.
+  Secp256k1,
+  /// ECDSA over secp256k1, "data" is the 32-byte digest.
+  Secp256k1Digest,
+  X25519,
+  Sha256,
+  Sha512,
+  Aes256Gcm,
+  HkdfSha256
+}
+/// Every crypto operation's parameters. Raw in, by operation: "data", "key", "private_key", "public_key", "signature",
+/// "nonce", "aad", "ikm", "salt", "info", "envelope"; raw out: "data" (a hash, signature, plaintext, ciphertext with
+/// its tag, shared secret, derived key, public key), and "nonce", "private_key", "public_key" where an operation
+/// makes them.
+table CryptoParams { ALGORITHM: cryptoAlgorithm; LENGTH: uint32; }
+
+table KeyslotParams { SLOT_ID: string (aligned_max_length: 128); ALGORITHM: cryptoAlgorithm; }
+
+// ---- secrets (the secret itself on raw "secret") -------------------------------------------------------------------
+
+table SecretParams { ID: string (aligned_max_length: 128); USERNAME: string (aligned_max_length: 255); }
+table SecretResult {
+  ID: string (aligned_max_length: 128);
+  USERNAME: string (aligned_max_length: 255);
+  CONFIGURED: bool;
+  USERNAME_MASKED: string (aligned_max_length: 255);
+  UPDATED_MS: uint64;
+  VERIFIED_MS: uint64;
+}
+
+// ---- ipfs, pubsub, protocol ----------------------------------------------------------------------------------------
+
+table IpfsParams {
+  CID: string (aligned_max_length: 128);
+  NAME: string (aligned_max_length: 255);
+  TYPE: string (aligned_max_length: 32);
+  LIFETIME: string (aligned_max_length: 32);
+  TTL: string (aligned_max_length: 32);
+  /// The added content is pinned unless set.
+  NO_PIN: bool;
+}
+table IpfsResult {
+  CID: string (aligned_max_length: 128);
+  NAME: string (aligned_max_length: 255);
+  VALUE: string (aligned_max_length: 255);
+  SIZE: uint64;
+  AGENT_VERSION: string (aligned_max_length: 128);
+  PROTOCOL_VERSION: string (aligned_max_length: 64);
+}
+/// ipfs.ls list "links", ipfs.pin_ls list "pins", ipfs.swarm_peers list "peers".
+table IpfsLink { NAME: string (aligned_max_length: 255); CID: string (aligned_max_length: 128); SIZE: uint64; TYPE: int32; }
+table IpfsPin { CID: string (aligned_max_length: 128); TYPE: string (aligned_max_length: 32); }
+table IpfsSwarmPeer { PEER_ID: string (aligned_max_length: 128); ADDRESS: string (aligned_max_length: 255); LATENCY_MS: double; }
+
+/// raw "data" for a publish.
+table PubsubParams { TOPIC: string (aligned_max_length: 255); }
+table PubsubSubscribed { ALREADY: bool; }
+
+/// raw "payload" in, raw "data" out.
+table ProtocolParams {
+  TARGET: string (aligned_max_length: 255);
+  PROTOCOL_ID: string (aligned_max_length: 128);
+  PEER_ID: string (aligned_max_length: 128);
+  TIMEOUT_MS: uint32;
+}
+
+// ---- p2p (the $EPM / $PNM frames, size-prefixed and concatenated, on raw "records") -------------------------------
+
+table P2pParams {
+  PEER_ID: string (aligned_max_length: 128);
+  LIMIT: uint32;
+  STANDARD: string (aligned_max_length: 16);
+  DELIVER: deliverMode;
+}
+table P2pSummary {
+  SELF: string (aligned_max_length: 128);
+  PEER_ID: string (aligned_max_length: 128);
+  PUBLISHER_KEY_AVAILABLE: bool;
+  GOSSIP_ONLY_EXCLUDED: uint32;
+}
+/// list "peers"; a peer's addresses and standards are list "peer_addresses" / "peer_standards" rows (PEER_ID, VALUE).
+table P2pPeer {
+  PEER_ID: string (aligned_max_length: 128);
+  CONNECTED: bool;
+  SELF: bool;
+  EPM_INDEX: int32;  // -1 = none (the host always writes it)
+  AGENT_VERSION: string (aligned_max_length: 128);
+}
+table P2pPeerValue { PEER_ID: string (aligned_max_length: 128); VALUE: string (aligned_max_length: 255); }
+/// list "entries" (standards_snapshot, pnm_history).
+table P2pPnmEntry {
+  PEER_ID: string (aligned_max_length: 128);
+  PUBLISHER_PEER_ID: string (aligned_max_length: 128);
+  GOSSIP_PEER_ID: string (aligned_max_length: 128);
+  STANDARD: string (aligned_max_length: 16);
+  SCHEMA: string (aligned_max_length: 64);
+  FILE_ID: string (aligned_max_length: 16);
+  FILE_NAME: string (aligned_max_length: 255);
+  CID: string (aligned_max_length: 128);
+  PUBLISH_MS: uint64;
+  SIGNATURE_TYPE: string (aligned_max_length: 32);
+  SIGNATURE_HEX: string (aligned_max_length: 255);
+  SIGNATURE_VERIFIED: bool;
+  ATTRIBUTION: string (aligned_max_length: 16);
+  PNM_INDEX: int32;  // -1 = none (the host always writes it)
+  PUBLISHER_KEY_HEX: string (aligned_max_length: 128);
+  PUBLISHER_KEY_SOURCE: string (aligned_max_length: 64);
+}
+/// p2p.latest_dataset; the batch on raw "stream" (deliver Inline) or REF.
+table P2pLatestDataset {
+  KNOWN: bool;
+  REASON: string (aligned_max_length: 64);
+  PINNED: bool;
+  SELF: bool;
+  FRESH: bool;
+  STANDARD: string (aligned_max_length: 16);
+  SCHEMA: string (aligned_max_length: 64);
+  PNM_CID: string (aligned_max_length: 128);
+  PNM_FILE_ID: string (aligned_max_length: 16);
+  PNM_PUBLISH_MS: uint64;
+  PNM_SIGNATURE_VERIFIED: bool;
+  PNM_ATTRIBUTION: string (aligned_max_length: 16);
+  BATCH_ID: string (aligned_max_length: 128);
+  PROVIDER_ID: string (aligned_max_length: 128);
+  SOURCE_NAME: string (aligned_max_length: 128);
+  RECORD_COUNT: uint64;
+  BYTE_COUNT: uint64;
+  PARTS: uint32;
+  PUBLISHED_MS: uint64;
+  ETAG_FNV1A64: string (aligned_max_length: 16);
+  REF: BodyRef;
+}
+
+// ---- node status and activity --------------------------------------------------------------------------------------
+
+table NodeStatusReport {
+  UPTIME_S: uint64;
+  STARTED_MS: uint64;
+  STORE_TOTAL_BYTES: uint64;
+  STORE_TOTAL_RECORDS: uint64;
+  STORAGE_PATH: string (aligned_max_length: 255);
+  HAS_DISK: bool;
+  DISK_CAPACITY_BYTES: uint64;
+  DISK_FREE_BYTES: uint64;
+  DISK_AVAILABLE_BYTES: uint64;
+  SERVICE_STATE: string (aligned_max_length: 32);
+  SERVICE_MODE: string (aligned_max_length: 32);
+  HAS_BANDWIDTH: bool;
+  TOTAL_IN_BYTES: uint64;
+  TOTAL_OUT_BYTES: uint64;
+  RATE_IN_BPS: double;
+  RATE_OUT_BPS: double;
+}
+/// list "bandwidth_history".
+table NodeBandwidthSample { TS_MS: uint64; TOTAL_IN_BYTES: uint64; TOTAL_OUT_BYTES: uint64; RATE_IN_BPS: double; RATE_OUT_BPS: double; }
+/// LIMIT 0 = 50, at most 256; list "events".
+table NodeActivityParams { LIMIT: uint32; }
+table NodeActivityEvent {
+  TS_MS: uint64;
+  KIND: string (aligned_max_length: 32);
+  DETAIL: string (aligned_max_length: 255);
+  PEER_ID: string (aligned_max_length: 128);
+}
+
+// ---- timers, schedule (SDK JS hosts) -------------------------------------------------------------------------------
+
+table TimersDelayParams { MS: uint32; }
+/// schedule.parse answers with list "fields" (CronField); matches with BoolValue; next with TimeValue.
+table ScheduleParams { EXPRESSION: string (aligned_max_length: 128); AT_MS: uint64; }
+table CronField {
+  NAME: string (aligned_max_length: 16);
+  SOURCE: string (aligned_max_length: 64);
+  HAS_WILDCARD: bool;
+  VALUES: [int32] (aligned_max_count: 60);
+}
+
+// ---- websocket, mqtt, sockets (SDK JS hosts) -----------------------------------------------------------------------
+
+/// raw "url", "protocols" (comma-separated), "message"; raw out "url", "body".
+table WebsocketParams { TIMEOUT_MS: uint32; NO_RESPONSE: bool; MESSAGE_IS_TEXT: bool; }
+table WebsocketResult {
+  PROTOCOL: string (aligned_max_length: 64);
+  EXTENSIONS: string (aligned_max_length: 255);
+  CLOSE_CODE: int32;  // -1 = none (the host always writes it)
+  CLOSE_REASON: string (aligned_max_length: 255);
+  BODY_IS_TEXT: bool;
+}
+/// raw "payload" and "password" in; raw "body" out (subscribe_once).
+table MqttParams {
+  HOST: string (aligned_max_length: 255);
+  PORT: uint16;
+  CLIENT_ID: string (aligned_max_length: 128);
+  TOPIC: string (aligned_max_length: 255);
+  USERNAME: string (aligned_max_length: 128);
+  KEEP_ALIVE_S: uint16;
+  TIMEOUT_MS: uint32;
+  PACKET_ID: uint16;
+}
+table MqttResult {
+  HOST: string (aligned_max_length: 255);
+  PORT: uint16;
+  CLIENT_ID: string (aligned_max_length: 128);
+  TOPIC: string (aligned_max_length: 255);
+  PAYLOAD_BYTES: uint64;
+}
+/// tcp/udp/tls: raw "data", and "ca" / "cert" / "key" for TLS; raw "body" out.
+table SocketParams {
+  HOST: string (aligned_max_length: 255);
+  PORT: uint16;
+  TIMEOUT_MS: uint32;
+  /// A response is awaited unless set.
+  NO_RESPONSE: bool;
+  BIND_ADDRESS: string (aligned_max_length: 64);
+  BIND_PORT: uint16;
+  UDP_TYPE: string (aligned_max_length: 8);
+  /// Unverified TLS peers are refused unless set.
+  ALLOW_UNAUTHORIZED: bool;
+  SERVER_NAME: string (aligned_max_length: 255);
+}
+table SocketResult {
+  HOST: string (aligned_max_length: 255);
+  PORT: uint16;
+  LOCAL_ADDRESS: string (aligned_max_length: 64);
+  LOCAL_PORT: uint16;
+  REMOTE_ADDRESS: string (aligned_max_length: 64);
+  REMOTE_PORT: uint16;
+  AUTHORIZED: bool;
+  AUTHORIZATION_ERROR: string (aligned_max_length: 255);
+}
+
+// ---- filesystem, exec, context (SDK JS hosts) ----------------------------------------------------------------------
+
+/// raw "path" (and "to_path" for rename, "data" for writes); raw "path" / "data" out; readdir list "entries".
+/// mkdir creates parents unless NOT_RECURSIVE.
+table FsParams { NOT_RECURSIVE: bool; }
+table FsEntry { NAME: string (aligned_max_length: 255); IS_FILE: bool; IS_DIRECTORY: bool; }
+table FsStat { SIZE: uint64; IS_FILE: bool; IS_DIRECTORY: bool; CTIME_MS: double; MTIME_MS: double; }
+
+/// raw "file", "cwd", "input"; list "args" (TextValue), list "env" (EnvVar); raw "stdout", "stderr" out.
+table ExecParams { TIMEOUT_MS: uint32; }
+table EnvVar { NAME: string (aligned_max_length: 128); VALUE: string (aligned_max_length: 255); }
+table ExecResult { EXIT_CODE: int32; SIGNAL: string (aligned_max_length: 16); }  // EXIT_CODE -1 = none (the host always writes it)
+
+/// raw "value" (a typed FlatBuffer the module chooses) in for set, out for get.
+table ContextParams { SCOPE: string (aligned_max_length: 128); KEY: string (aligned_max_length: 255); }

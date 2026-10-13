@@ -17,8 +17,6 @@ table IngestResult {
   ARCHIVED: string;
   /// Why the batch was refused (quota, licence, policy); empty when it was stored.
   REFUSED: string;
-  /// Where the provenance document was written; empty when none was sent.
-  PROVENANCE_FILE: string;
 }
 
 root_type IngestResult;

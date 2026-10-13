@@ -2,23 +2,30 @@
 
 ## Unreleased
 
-The hostcall envelope as typed FlatBuffers (typed contracts 1.0).
+Hostcalls on the SDK's documented invoke ABI (typed contracts 1.0: the JSON interface replaced, nothing else changed).
 
-- `HostCall` (HCLQ): the operation and a union of typed parameter tables. `HostCallResult` (HCLR): OK, a typed error
-  (code enum, message, sandbox code, capability) and a union of typed result values. The types are in
-  `schemas/runtime/HostCall.fbs`, `HostCallResult.fbs` and `HostCallTypes.fbs`. Bytes are `[ubyte]` throughout: no
-  base64, no binary segments, no JSON meta.
-- `HOST_OPERATIONS` (`space-data-module-sdk/runtime-contracts`): the one operation set every host serves, 84
-  operations, each with its params member, result member and capability. It unifies the Go node's 67 operations with
-  the JS hosts' set, which differed in names, crypto naming, AES-GCM tag placement and secp256k1 signature encoding.
-  Ciphertext now carries its 16-byte tag at the end, and secp256k1 signatures are DER.
-- `encodeHostCall` / `decodeHostCall` / `encodeHostCallResult` / `decodeHostCallResult`; `isTypedHostCall`, so hosts
-  route a typed call while modules move over.
-- `src/host/cpp/typedHostcall.hpp`: the C++ guest call (`sdm_typed::call(op, build)`), verified typed results
-  (`value_as<T>()`, `code()`, `message()`). It refuses a truncated response; the JSON bridge truncated silently.
-- `HttpRequest.FOLLOW_REDIRECTS`, `IngestResult.PROVENANCE_FILE`; HostCall and HostCallResult in the shared catalog.
-- The TS generator post-processes flatc's preserve-case union accessors (unpack called `paramsType()` for
-  `PARAMS_type()`).
+- A module's call to its host is an SDS `$PIV` request in the module -> host direction, the same envelope as the
+  README's "Canonical Invoke ABI": `PIVRequest.METHOD_ID` is the operation and its frames sit in `PAYLOAD_ARENA`,
+  named by `TAB.PORT_ID`. The host answers with a `$PIV` response carrying the result frames, or `STATUS` FAILED with
+  `ERROR_CODE` (`HOSTCALL_ERROR_CODES`) and `ERROR_MESSAGE`. This replaces the JSON meta and binary segments; no
+  base64 is involved.
+- Frames use the FlatBuffers aligned binary layout. "params" and "result" are one fixed-size record each
+  (`WIRE_FORMAT` ALIGNED_BINARY, `TYPE_REF` `HostOps.fbs` + root type + `BYTE_LENGTH`). A list port is a run of
+  records at a fixed stride (`BYTE_LENGTH` 0, a variable-length aligned stream). A raw port carries unbounded bytes
+  verbatim: bodies, record streams, urls, sql, paths.
+- `schemas/runtime/HostOps.fbs` holds the operations' records, generated with `--aligned` into
+  `src/generated/runtime/aligned/` (TS/JS, plus `HostOps_enums`) and `cpp/HostOps_aligned.h` (with its enums).
+  Strings are capped at 255 bytes or less. A value that does not fit is refused, never truncated. Aligned records
+  have no schema defaults, so every field is phrased so that zero is the default (`NO_REDIRECTS`, `NO_PIN`, ...).
+- `HOST_OPERATIONS`: every operation the hosts serve today, under its current name (the Go node's and the JS
+  hosts'), with its params / result records, list ports, raw ports and capability.
+- `encodeHostCall` / `decodeHostCall` / `encodeHostCallResult` / `decodeHostCallResult` / `isTypedHostCall` are built
+  on the existing `src/invoke/codec.js`. `encodeHostOpsRecord` / `encodeHostOpsList` build records from field values.
+  `src/host/cpp/typedHostcall.hpp` is the C++ guest call: `sdm_piv::call` takes an aligned struct plus
+  `sdm_piv::raw` / `sdm_piv::list` frames, and results are read in place. It refuses a truncated response; the JSON
+  bridge cut one silently.
+- `src/invoke/codec.js`: the encoder now accepts a variable-length aligned stream (`byteLength` 0), as the decoder and
+  the guest glue (`OutputTypeMatches`) already did.
 
 ## 0.9.0-runtime-contracts (landed 53fb52a)
 
