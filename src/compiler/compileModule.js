@@ -658,12 +658,27 @@ function createGuestLinkBundleEntries(guestLink) {
   ];
 }
 
+// The typed hostcall (SDS $PIV, module -> host) for C++ guests: `#include "typedHostcall.hpp"` (sdm_piv::call) with
+// the HostOps aligned records it sends and reads (schemas/runtime/HostOps.fbs).
+const HOSTCALL_CPP_HEADERS = Object.freeze({
+  "typedHostcall.hpp": new URL("../host/cpp/typedHostcall.hpp", import.meta.url),
+  "HostOps_aligned.h": new URL("../generated/runtime/cpp/HostOps_aligned.h", import.meta.url),
+});
+let hostcallCppHeaders = null;
+async function getHostcallCppHeaders() {
+  hostcallCppHeaders ??= Promise.all(
+    Object.entries(HOSTCALL_CPP_HEADERS).map(async ([name, url]) => [name, await readFile(url, "utf8")]),
+  ).then(Object.fromEntries);
+  return hostcallCppHeaders;
+}
+
 async function getInvokeCppSupportFiles() {
-  const [runtimeHeaders, schemaHeaders] = await Promise.all([
+  const [runtimeHeaders, schemaHeaders, hostcallHeaders] = await Promise.all([
     getFlatbuffersCppRuntimeHeaders(),
     getInvokeCppSchemaHeaders(),
+    getHostcallCppHeaders(),
   ]);
-  return { runtimeHeaders, schemaHeaders };
+  return { runtimeHeaders, schemaHeaders: { ...schemaHeaders, ...hostcallHeaders } };
 }
 
 async function writeFilesToEmception(emception, rootDir, files) {

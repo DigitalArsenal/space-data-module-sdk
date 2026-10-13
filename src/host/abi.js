@@ -4,6 +4,8 @@ import {
   detachBinaryValues,
   encodeHostcallEnvelope,
 } from "./hostcallWire.js";
+import { isTypedHostCall } from "../standards/runtimeContracts.js";
+import { answerTypedHostCall } from "./typedDispatch.js";
 
 const textDecoder = new TextDecoder();
 
@@ -184,6 +186,9 @@ function isPromiseLike(value) {
 
 function assertSyncHostcallResult(value, operation) {
   if (isPromiseLike(value)) {
+    // The refused operation's promise may still reject (e.g. a capability the host does not grant): handle it here,
+    // or that rejection is unhandled and takes the process down.
+    if (typeof value.catch === "function") value.catch(() => {});
     throw new Error(
       `Operation "${operation}" is not available in the synchronous hostcall ABI.`,
     );
@@ -412,11 +417,23 @@ export function createHostcallBridge(options = {}) {
       const operation = textDecoder.decode(
         readMemoryBytes(getMemory, operationPtr, operationLen, "Operation"),
       );
-      const params = parseHostcallParams(
-        readMemoryBytes(getMemory, payloadPtr, payloadLen, "Payload"),
-      );
+      const payload = readMemoryBytes(getMemory, payloadPtr, payloadLen, "Payload");
+      // An SDS $PIV hostcall (typed contracts 1.0) is answered with a $PIV response; the JSON envelope below goes
+      // once every module is typed (graph: sdk-compliance-typed-only-20261013).
+      if (isTypedHostCall(payload)) {
+        const response = answerTypedHostCall(payload.slice(), dispatch);
+        if (response.length > maxResponseBytes) {
+          throw new Error(`Hostcall response exceeds ${maxResponseBytes} byte limit.`);
+        }
+        lastStatusCode = HOSTCALL_STATUS_OK;
+        lastEnvelope = null;
+        lastResponseBytes = response;
+        return HOSTCALL_STATUS_OK;
+      }
+      const params = parseHostcallParams(payload);
       const result = dispatch(operation, params);
       if (isPromiseLike(result)) {
+        if (typeof result.catch === "function") result.catch(() => {});
         throw new Error(
           `Operation "${operation}" returned a Promise. The synchronous hostcall ABI only supports synchronous operations.`,
         );

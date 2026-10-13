@@ -503,6 +503,7 @@ export class BrowserHost {
             method: params.method ?? "GET",
             headers: params.headers ?? undefined,
             body: params.body ?? undefined,
+            redirect: params.redirect ?? "follow",
             signal: controller.signal,
           });
           const responseType = params.responseType ?? "utf8";
@@ -511,6 +512,7 @@ export class BrowserHost {
           else if (responseType === "bytes") body = new Uint8Array(await response.arrayBuffer());
           else body = await response.text();
           return {
+            url: response.url || String(params.url),
             status: response.status,
             statusText: response.statusText,
             ok: response.ok,

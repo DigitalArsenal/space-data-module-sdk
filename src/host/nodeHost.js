@@ -1648,6 +1648,7 @@ export class NodeHost {
               method: requestOptions.method ?? "GET",
               headers: requestOptions.headers,
               body: normalizeRequestBody(requestOptions.body),
+              redirect: requestOptions.redirect ?? "follow",
               signal: resolveSignals(requestOptions.signal, timeout.signal),
             });
             const responseType = normalizeResponseType(requestOptions.responseType);

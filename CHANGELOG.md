@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+The SDK JS hosts answer typed hostcalls (typed contracts 1.0).
+
+- `createHostcallBridge` (and with it NodeHost, BrowserHost, the browser and worker harnesses and the WASI thread
+  pool) answers an SDS `$PIV` hostcall with a `$PIV` response. `src/host/typedDispatch.js` turns the call's aligned
+  records and raw / list frames into the arguments each host operation already takes, and the operation's answer
+  into its result record and frames. Errors come back as `ERROR_CODE` (`not-authorized`, `sandbox`, `unsupported`,
+  `invalid-params`, `timeout`, `too-large`, `failed`). The JSON envelope is still answered until every module is
+  typed (sdk-compliance-typed-only).
+- The SDK compiler stages `typedHostcall.hpp` and `HostOps_aligned.h` in every C++ compile, so a module includes
+  `"typedHostcall.hpp"` and calls `sdm_piv::call`.
+- `http.request` passes the redirect mode to fetch (typed `NO_REDIRECTS`). BrowserHost answers with the response url.
+- The sync bridge no longer leaves a refused async operation's rejected promise unhandled (it crashed the process
+  when the operation's capability was not granted).
+
+## 0.10.0-typed-hostcalls (landed 6387554)
+
 Hostcalls on the SDK's documented invoke ABI (typed contracts 1.0: the JSON interface replaced, nothing else changed).
 
 - A module's call to its host is an SDS `$PIV` request in the module -> host direction, the same envelope as the
