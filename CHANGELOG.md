@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+The hostcall envelope as typed FlatBuffers (typed contracts 1.0).
+
+- `HostCall` (HCLQ): the operation and a union of typed parameter tables. `HostCallResult` (HCLR): OK, a typed error
+  (code enum, message, sandbox code, capability) and a union of typed result values. The types are in
+  `schemas/runtime/HostCall.fbs`, `HostCallResult.fbs` and `HostCallTypes.fbs`. Bytes are `[ubyte]` throughout: no
+  base64, no binary segments, no JSON meta.
+- `HOST_OPERATIONS` (`space-data-module-sdk/runtime-contracts`): the one operation set every host serves, 84
+  operations, each with its params member, result member and capability. It unifies the Go node's 67 operations with
+  the JS hosts' set, which differed in names, crypto naming, AES-GCM tag placement and secp256k1 signature encoding.
+  Ciphertext now carries its 16-byte tag at the end, and secp256k1 signatures are DER.
+- `encodeHostCall` / `decodeHostCall` / `encodeHostCallResult` / `decodeHostCallResult`; `isTypedHostCall`, so hosts
+  route a typed call while modules move over.
+- `src/host/cpp/typedHostcall.hpp`: the C++ guest call (`sdm_typed::call(op, build)`), verified typed results
+  (`value_as<T>()`, `code()`, `message()`). It refuses a truncated response; the JSON bridge truncated silently.
+- `HttpRequest.FOLLOW_REDIRECTS`, `IngestResult.PROVENANCE_FILE`; HostCall and HostCallResult in the shared catalog.
+- The TS generator post-processes flatc's preserve-case union accessors (unpack called `paramsType()` for
+  `PARAMS_type()`).
+
+## 0.9.0-runtime-contracts (landed 53fb52a)
+
 The module runtime contracts as typed FlatBuffers (typed-contracts 1.0, owner 2026-10-13: "flatbuffer SDS only"; no
 JSON forms kept).
 

@@ -1,0 +1,92 @@
+include "HostCallTypes.fbs";
+namespace sdn.runtime;
+
+/// Why a host operation did not succeed.
+enum hostCallErrorCode : ubyte {
+  /// (success)
+  None,
+  /// The host does not serve OP.
+  Unsupported,
+  /// The module lacks the capability OP needs.
+  NotAuthorized,
+  /// PARAMS is missing, of the wrong type for OP, or out of range.
+  InvalidParams,
+  /// The operation ran and failed (a store error, a network error ...).
+  Failed,
+  /// Refused by host policy (disk floor, licence, egress pacing).
+  Refused,
+  /// A sandboxed query was refused; SANDBOX names why.
+  Sandbox,
+  Timeout,
+  /// A result exceeded its byte budget (never truncated).
+  TooLarge
+}
+
+table HostCallError {
+  CODE: hostCallErrorCode;
+  MESSAGE: string;
+  /// The sandbox's code when CODE is Sandbox: not-authorized, multi-statement, empty-statement, read-only, not-select,
+  /// timeout, row-cap, byte-cap, not-a-record-stream, params.
+  SANDBOX: string;
+  /// The capability the operation needed (NotAuthorized, Unsupported).
+  CAPABILITY: string;
+}
+
+/// The typed result of a host operation.
+union HostCallValue {
+  Empty,
+  BoolValue,
+  BytesValue,
+  TextValue,
+  TextList,
+  ClockNow,
+  HostInfo,
+  NodeIdentity,
+  ModuleConfig,
+  HttpResponse,
+  StoredRecords,
+  StorageWriteResult,
+  StorageExpireResult,
+  IngestResult,
+  RecordStream,
+  SandboxQueryResult,
+  QuerySurface,
+  CryptoCiphertext,
+  CryptoKeyPair,
+  IpfsAddResult,
+  IpfsLinks,
+  IpfsPins,
+  IpfsNamePublished,
+  IpfsIdentity,
+  IpfsSwarmPeers,
+  PubsubSubscribed,
+  Secret,
+  SecretStatus,
+  SecretStored,
+  P2pPeersSnapshot,
+  P2pStandardsSnapshot,
+  P2pPnmHistory,
+  P2pLatestDataset,
+  NodeStatusReport,
+  NodeActivity,
+  ScheduleParsed,
+  TimeValue,
+  WebsocketExchange,
+  MqttPublished,
+  MqttMessage,
+  SocketResponse,
+  FsEntries,
+  FsStat,
+  ExecResult,
+  ContextValue
+}
+
+/// The host's answer to one HostCall.
+table HostCallResult {
+  OK: bool;
+  ERROR: HostCallError;
+  VALUE: HostCallValue;
+}
+
+root_type HostCallResult;
+file_identifier "HCLR";

@@ -85,8 +85,15 @@ class HttpRequest {
     const offset = this.bb.__offset(this.bb_pos, 16);
     return offset ? new Uint8Array(this.bb.bytes().buffer, this.bb.bytes().byteOffset + this.bb.__vector(this.bb_pos + offset), this.bb.__vector_len(this.bb_pos + offset)) : null;
   }
+  /**
+   * Follow redirects (the host's default is to follow).
+   */
+  FOLLOW_REDIRECTS() {
+    const offset = this.bb.__offset(this.bb_pos, 18);
+    return offset ? !!this.bb.readInt8(this.bb_pos + offset) : true;
+  }
   static startHttpRequest(builder) {
-    builder.startObject(7);
+    builder.startObject(8);
   }
   static addMethod(builder, METHODOffset) {
     builder.addFieldOffset(0, METHODOffset, 0);
@@ -139,6 +146,9 @@ class HttpRequest {
   static startContextVector(builder, numElems) {
     builder.startVector(1, numElems, 1);
   }
+  static addFollowRedirects(builder, FOLLOW_REDIRECTS) {
+    builder.addFieldInt8(7, +FOLLOW_REDIRECTS, 1);
+  }
   static endHttpRequest(builder) {
     const offset = builder.endObject();
     builder.requiredField(offset, 6);
@@ -150,7 +160,7 @@ class HttpRequest {
   static finishSizePrefixedHttpRequestBuffer(builder, offset) {
     builder.finish(offset, "HREQ", true);
   }
-  static createHttpRequest(builder, METHODOffset, URLOffset, HEADERSOffset, BODYOffset, TIMEOUT_MS, MAX_BYTES, CONTEXTOffset) {
+  static createHttpRequest(builder, METHODOffset, URLOffset, HEADERSOffset, BODYOffset, TIMEOUT_MS, MAX_BYTES, CONTEXTOffset, FOLLOW_REDIRECTS) {
     HttpRequest.startHttpRequest(builder);
     HttpRequest.addMethod(builder, METHODOffset);
     HttpRequest.addUrl(builder, URLOffset);
@@ -159,6 +169,7 @@ class HttpRequest {
     HttpRequest.addTimeoutMs(builder, TIMEOUT_MS);
     HttpRequest.addMaxBytes(builder, MAX_BYTES);
     HttpRequest.addContext(builder, CONTEXTOffset);
+    HttpRequest.addFollowRedirects(builder, FOLLOW_REDIRECTS);
     return HttpRequest.endHttpRequest(builder);
   }
   unpack() {
@@ -169,7 +180,8 @@ class HttpRequest {
       this.bb.createScalarList(this.BODY.bind(this), this.bodyLength()),
       this.TIMEOUT_MS(),
       this.MAX_BYTES(),
-      this.bb.createScalarList(this.CONTEXT.bind(this), this.contextLength())
+      this.bb.createScalarList(this.CONTEXT.bind(this), this.contextLength()),
+      this.FOLLOW_REDIRECTS()
     );
   }
   unpackTo(_o) {
@@ -180,10 +192,11 @@ class HttpRequest {
     _o.TIMEOUT_MS = this.TIMEOUT_MS();
     _o.MAX_BYTES = this.MAX_BYTES();
     _o.CONTEXT = this.bb.createScalarList(this.CONTEXT.bind(this), this.contextLength());
+    _o.FOLLOW_REDIRECTS = this.FOLLOW_REDIRECTS();
   }
 }
 class HttpRequestT {
-  constructor(METHOD = null, URL = null, HEADERS = [], BODY = [], TIMEOUT_MS = 0, MAX_BYTES = BigInt("0"), CONTEXT = []) {
+  constructor(METHOD = null, URL = null, HEADERS = [], BODY = [], TIMEOUT_MS = 0, MAX_BYTES = BigInt("0"), CONTEXT = [], FOLLOW_REDIRECTS = true) {
     __publicField(this, "METHOD", METHOD);
     __publicField(this, "URL", URL);
     __publicField(this, "HEADERS", HEADERS);
@@ -191,6 +204,7 @@ class HttpRequestT {
     __publicField(this, "TIMEOUT_MS", TIMEOUT_MS);
     __publicField(this, "MAX_BYTES", MAX_BYTES);
     __publicField(this, "CONTEXT", CONTEXT);
+    __publicField(this, "FOLLOW_REDIRECTS", FOLLOW_REDIRECTS);
   }
   pack(builder) {
     const METHOD = this.METHOD !== null ? builder.createString(this.METHOD) : 0;
@@ -206,7 +220,8 @@ class HttpRequestT {
       BODY,
       this.TIMEOUT_MS,
       this.MAX_BYTES,
-      CONTEXT
+      CONTEXT,
+      this.FOLLOW_REDIRECTS
     );
   }
 }

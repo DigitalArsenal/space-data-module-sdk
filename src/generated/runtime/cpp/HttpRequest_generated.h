@@ -31,6 +31,7 @@ struct HttpRequestT : public ::flatbuffers::NativeTable {
   uint32_t TIMEOUT_MS = 0;
   uint64_t MAX_BYTES = 0;
   std::vector<uint8_t> CONTEXT{};
+  bool FOLLOW_REDIRECTS = true;
   HttpRequestT() = default;
   HttpRequestT(const HttpRequestT &o);
   HttpRequestT(HttpRequestT&&) FLATBUFFERS_NOEXCEPT = default;
@@ -50,7 +51,8 @@ struct HttpRequest FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_BODY = 10,
     VT_TIMEOUT_MS = 12,
     VT_MAX_BYTES = 14,
-    VT_CONTEXT = 16
+    VT_CONTEXT = 16,
+    VT_FOLLOW_REDIRECTS = 18
   };
   /// Verb, upper-case; empty means GET.
   const ::flatbuffers::String *METHOD() const {
@@ -80,6 +82,10 @@ struct HttpRequest FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const ::flatbuffers::Vector<uint8_t> *CONTEXT() const {
     return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_CONTEXT);
   }
+  /// Follow redirects (the host's default is to follow).
+  bool FOLLOW_REDIRECTS() const {
+    return GetField<uint8_t>(VT_FOLLOW_REDIRECTS, 1) != 0;
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -96,6 +102,7 @@ struct HttpRequest FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyField<uint64_t>(verifier, VT_MAX_BYTES, 8) &&
            VerifyOffset(verifier, VT_CONTEXT) &&
            verifier.VerifyVector(CONTEXT()) &&
+           VerifyField<uint8_t>(verifier, VT_FOLLOW_REDIRECTS, 1) &&
            verifier.EndTable();
   }
   HttpRequestT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -128,6 +135,9 @@ struct HttpRequestBuilder {
   void add_CONTEXT(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> CONTEXT) {
     fbb_.AddOffset(HttpRequest::VT_CONTEXT, CONTEXT);
   }
+  void add_FOLLOW_REDIRECTS(bool FOLLOW_REDIRECTS) {
+    fbb_.AddElement<uint8_t>(HttpRequest::VT_FOLLOW_REDIRECTS, static_cast<uint8_t>(FOLLOW_REDIRECTS), 1);
+  }
   explicit HttpRequestBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -148,7 +158,8 @@ inline ::flatbuffers::Offset<HttpRequest> CreateHttpRequest(
     ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> BODY = 0,
     uint32_t TIMEOUT_MS = 0,
     uint64_t MAX_BYTES = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> CONTEXT = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> CONTEXT = 0,
+    bool FOLLOW_REDIRECTS = true) {
   HttpRequestBuilder builder_(_fbb);
   builder_.add_MAX_BYTES(MAX_BYTES);
   builder_.add_CONTEXT(CONTEXT);
@@ -157,6 +168,7 @@ inline ::flatbuffers::Offset<HttpRequest> CreateHttpRequest(
   builder_.add_HEADERS(HEADERS);
   builder_.add_URL(URL);
   builder_.add_METHOD(METHOD);
+  builder_.add_FOLLOW_REDIRECTS(FOLLOW_REDIRECTS);
   return builder_.Finish();
 }
 
@@ -168,7 +180,8 @@ inline ::flatbuffers::Offset<HttpRequest> CreateHttpRequestDirect(
     const std::vector<uint8_t> *BODY = nullptr,
     uint32_t TIMEOUT_MS = 0,
     uint64_t MAX_BYTES = 0,
-    const std::vector<uint8_t> *CONTEXT = nullptr) {
+    const std::vector<uint8_t> *CONTEXT = nullptr,
+    bool FOLLOW_REDIRECTS = true) {
   auto METHOD__ = METHOD ? _fbb.CreateString(METHOD) : 0;
   auto URL__ = URL ? _fbb.CreateString(URL) : 0;
   auto HEADERS__ = HEADERS ? _fbb.CreateVectorOfSortedTables<sdn::runtime::Header>(HEADERS) : 0;
@@ -182,7 +195,8 @@ inline ::flatbuffers::Offset<HttpRequest> CreateHttpRequestDirect(
       BODY__,
       TIMEOUT_MS,
       MAX_BYTES,
-      CONTEXT__);
+      CONTEXT__,
+      FOLLOW_REDIRECTS);
 }
 
 ::flatbuffers::Offset<HttpRequest> CreateHttpRequest(::flatbuffers::FlatBufferBuilder &_fbb, const HttpRequestT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -193,7 +207,8 @@ inline HttpRequestT::HttpRequestT(const HttpRequestT &o)
         BODY(o.BODY),
         TIMEOUT_MS(o.TIMEOUT_MS),
         MAX_BYTES(o.MAX_BYTES),
-        CONTEXT(o.CONTEXT) {
+        CONTEXT(o.CONTEXT),
+        FOLLOW_REDIRECTS(o.FOLLOW_REDIRECTS) {
   HEADERS.reserve(o.HEADERS.size());
   for (const auto &HEADERS_ : o.HEADERS) { HEADERS.emplace_back((HEADERS_) ? new sdn::runtime::HeaderT(*HEADERS_) : nullptr); }
 }
@@ -206,6 +221,7 @@ inline HttpRequestT &HttpRequestT::operator=(HttpRequestT o) FLATBUFFERS_NOEXCEP
   std::swap(TIMEOUT_MS, o.TIMEOUT_MS);
   std::swap(MAX_BYTES, o.MAX_BYTES);
   std::swap(CONTEXT, o.CONTEXT);
+  std::swap(FOLLOW_REDIRECTS, o.FOLLOW_REDIRECTS);
   return *this;
 }
 
@@ -225,6 +241,7 @@ inline void HttpRequest::UnPackTo(HttpRequestT *_o, const ::flatbuffers::resolve
   { auto _e = TIMEOUT_MS(); _o->TIMEOUT_MS = _e; }
   { auto _e = MAX_BYTES(); _o->MAX_BYTES = _e; }
   { auto _e = CONTEXT(); if (_e) { _o->CONTEXT.resize(_e->size()); std::copy(_e->begin(), _e->end(), _o->CONTEXT.begin()); } }
+  { auto _e = FOLLOW_REDIRECTS(); _o->FOLLOW_REDIRECTS = _e; }
 }
 
 inline ::flatbuffers::Offset<HttpRequest> CreateHttpRequest(::flatbuffers::FlatBufferBuilder &_fbb, const HttpRequestT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -242,6 +259,7 @@ inline ::flatbuffers::Offset<HttpRequest> HttpRequest::Pack(::flatbuffers::FlatB
   auto _TIMEOUT_MS = _o->TIMEOUT_MS;
   auto _MAX_BYTES = _o->MAX_BYTES;
   auto _CONTEXT = _o->CONTEXT.size() ? _fbb.CreateVector(_o->CONTEXT) : 0;
+  auto _FOLLOW_REDIRECTS = _o->FOLLOW_REDIRECTS;
   return sdn::runtime::CreateHttpRequest(
       _fbb,
       _METHOD,
@@ -250,7 +268,8 @@ inline ::flatbuffers::Offset<HttpRequest> HttpRequest::Pack(::flatbuffers::FlatB
       _BODY,
       _TIMEOUT_MS,
       _MAX_BYTES,
-      _CONTEXT);
+      _CONTEXT,
+      _FOLLOW_REDIRECTS);
 }
 
 inline const sdn::runtime::HttpRequest *GetHttpRequest(const void *buf) {

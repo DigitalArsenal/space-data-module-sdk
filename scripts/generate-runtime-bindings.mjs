@@ -22,8 +22,8 @@ const schemaRoot = path.join(packageRoot, "schemas", "runtime");
 const outputRoot = path.join(packageRoot, "src", "generated", "runtime");
 
 // every root, plus the shared tables they include
-const rootFiles = ["TimerTick.fbs", "HttpRequest.fbs", "HttpResponse.fbs", "ModuleConfig.fbs", "IngestRequest.fbs", "IngestResult.fbs", "FlowNotice.fbs"];
-const schemaFiles = ["RuntimeCommon.fbs", ...rootFiles];
+const rootFiles = ["TimerTick.fbs", "HttpRequest.fbs", "HttpResponse.fbs", "ModuleConfig.fbs", "IngestRequest.fbs", "IngestResult.fbs", "FlowNotice.fbs", "HostCall.fbs", "HostCallResult.fbs"];
+const schemaFiles = ["RuntimeCommon.fbs", "HostCallTypes.fbs", ...rootFiles];
 
 function asVirtualSchemaPath(fileName) {
   return `/schemas/${fileName}`;
@@ -62,6 +62,16 @@ async function loadSchemaTree() {
   return files;
 }
 
+// flatc's TS generator with preserveCase names a union field's type accessor as the schema writes it (PARAMS ->
+// PARAMS_type()) but its unpack()/unpackTo() still call the camel-cased name (this.paramsType()): rewrite those calls
+// to the accessor that exists.
+function fixPreservedCaseUnions(code) {
+  return code.replace(/this\.([a-z][a-z0-9]*)Type\(\)/g, (match, field) => {
+    const accessor = `${field.replace(/([A-Z])/g, "_$1").toUpperCase()}_type`;
+    return code.includes(`${accessor}()`) ? `this.${accessor}()` : match;
+  });
+}
+
 function setGeneratedFile(generatedFiles, relativePath, content) {
   const existing = generatedFiles.get(relativePath);
   if (existing !== undefined && existing !== content) {
@@ -88,7 +98,7 @@ async function main() {
       if (!relativePath.endsWith(".ts") || !relativePath.startsWith("sdn/runtime/")) {
         continue;
       }
-      setGeneratedFile(tsFiles, relativePath, content);
+      setGeneratedFile(tsFiles, relativePath, fixPreservedCaseUnions(content));
     }
 
     const generatedCpp = flatc.generateCode(

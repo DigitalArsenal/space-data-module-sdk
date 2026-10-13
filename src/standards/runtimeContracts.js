@@ -29,6 +29,14 @@ import {
   configValueKind,
   flowNoticeKind,
   reconcileMode,
+  HostCall,
+  HostCallT,
+  HostCallParams,
+  HostCallResult,
+  HostCallResultT,
+  HostCallValue,
+  HostCallErrorT,
+  hostCallErrorCode,
 } from "../generated/runtime/sdn/runtime.js";
 
 export * from "../generated/runtime/sdn/runtime.js";
@@ -41,6 +49,8 @@ export const RUNTIME_FILE_IDENTIFIERS = Object.freeze({
   IngestRequest: "INGQ",
   IngestResult: "INGR",
   FlowNotice: "FNTC",
+  HostCall: "HCLQ",
+  HostCallResult: "HCLR",
 });
 
 /** The 4-character file identifier of a FlatBuffer frame (bytes 4-7), or "" when it has none. */
@@ -221,4 +231,173 @@ export function decodeFlowNotice(bytes) {
   const n = rootOf(bytes, FlowNotice, FlowNotice.getRootAsFlowNotice, "FNTC");
   return { kind: NOTICE_NAME[n.KIND], schema: n.SCHEMA || "", providerId: n.PROVIDER_ID || "", sourceName: n.SOURCE_NAME || "", batchId: n.BATCH_ID || "",
     count: num(n.COUNT), reason: n.REASON || "", items: (n.ITEMS || []).slice(), atMs: num(n.AT_MS) };
+}
+
+// ---- HostCall / HostCallResult (the hostcall envelope) ------------------------------------------------------------
+
+function unionMember(Enum, enumName, typeName, value) {
+  const tag = Enum[typeName];
+  if (typeof tag !== "number" || tag === 0) throw new Error(`${enumName}: unknown member ${typeName}`);
+  if (!value || typeof value.pack !== "function") throw new Error(`${enumName}: ${typeName} needs a generated object (${typeName}T)`);
+  return tag;
+}
+
+/**
+ * One call from a module to its host.
+ * @param {string} op the operation, e.g. "storage.expire"
+ * @param {string} paramsType the HostCallParams member, e.g. "StorageExpireParams" (explicit: class names do not
+ *   survive minification)
+ * @param {object} params a generated object of that member (e.g. new StorageExpireParamsT(...))
+ */
+export function encodeHostCall(op, paramsType, params) {
+  if (!op) throw new Error("HostCall: op is required");
+  const tag = params == null ? HostCallParams.NONE : unionMember(HostCallParams, "HostCallParams", paramsType, params);
+  return finish(new HostCallT(String(op), tag, params ?? null), HostCall.finishHostCallBuffer);
+}
+/** @returns {{op:string, paramsType:string|null, params:object|null}} params as the generated object */
+export function decodeHostCall(bytes) {
+  const c = rootOf(bytes, HostCall, HostCall.getRootAsHostCall, "HCLQ");
+  return { op: c.OP || "", paramsType: c.PARAMS_type ? HostCallParams[c.PARAMS_type] : null, params: c.PARAMS ?? null };
+}
+
+const ERROR_CODE = Object.fromEntries(Object.entries(hostCallErrorCode).filter(([, v]) => typeof v === "number").map(([k, v]) => [k[0].toLowerCase() + k.slice(1), v]));
+const ERROR_NAME = Object.fromEntries(Object.entries(ERROR_CODE).map(([k, v]) => [v, k]));
+
+/**
+ * The host's answer.
+ * @param {{ok:boolean, valueType?:string, value?:object, error?:{code:string, message?:string, sandbox?:string, capability?:string}}} r
+ *   valueType is the HostCallValue member (e.g. "StorageExpireResult"), value its generated object; error.code one of
+ *   unsupported, notAuthorized, invalidParams, failed, refused, sandbox, timeout, tooLarge.
+ */
+export function encodeHostCallResult(r) {
+  const ok = !!r?.ok;
+  let error = null;
+  if (!ok) {
+    const code = ERROR_CODE[r?.error?.code ?? "failed"];
+    if (code === undefined || code === 0) throw new Error(`HostCallResult: unknown error code ${r?.error?.code}`);
+    error = new HostCallErrorT(code, str(r.error.message), str(r.error.sandbox), str(r.error.capability));
+  }
+  const tag = ok && r.value != null ? unionMember(HostCallValue, "HostCallValue", r.valueType, r.value) : HostCallValue.NONE;
+  return finish(new HostCallResultT(ok, error, tag, ok ? r.value ?? null : null), HostCallResult.finishHostCallResultBuffer);
+}
+/** @returns {{ok:boolean, valueType:string|null, value:object|null, error:{code:string, message:string, sandbox:string}|null}} */
+export function decodeHostCallResult(bytes) {
+  const r = rootOf(bytes, HostCallResult, HostCallResult.getRootAsHostCallResult, "HCLR");
+  return {
+    ok: r.OK,
+    valueType: r.VALUE_type ? HostCallValue[r.VALUE_type] : null,
+    value: r.VALUE ?? null,
+    error: r.ERROR ? { code: ERROR_NAME[r.ERROR.CODE], message: r.ERROR.MESSAGE || "", sandbox: r.ERROR.SANDBOX || "", capability: r.ERROR.CAPABILITY || "" } : null,
+  };
+}
+
+// ---- the one host operation set --------------------------------------------------------------------------------------
+
+/**
+ * Every host operation a module can call, with its HostCallParams member, its HostCallValue member and the
+ * capability it needs (null: none). The Go node and the SDK JS hosts serve exactly this set under these names; a host
+ * that lacks one answers Unsupported. (Typed contracts 1.0: the node's 67 operations and the JS hosts' set unified;
+ * where they differed - crypto names, AES-GCM tag placement, secp256k1 signature encoding - one form is chosen: the
+ * ciphertext carries its 16-byte tag at the end, secp256k1 signatures are DER.)
+ */
+export const HOST_OPERATIONS = Object.freeze(Object.fromEntries([
+  // clock, random, host, node, config
+  ["clock.now", "ClockNowParams", "ClockNow", "clock"],
+  ["random.bytes", "RandomBytesParams", "BytesValue", "random"],
+  ["host.info", "HostInfoParams", "HostInfo", null],
+  ["host.has_capability", "HasCapabilityParams", "BoolValue", null],
+  ["node.identity", "NodeIdentityParams", "NodeIdentity", null],
+  ["plugin.get_config", "GetConfigParams", "ModuleConfig", null],
+  ["timers.delay", "TimersDelayParams", "Empty", "timers"],
+  ["schedule.parse", "ScheduleParams", "ScheduleParsed", "schedule_cron"],
+  ["schedule.matches", "ScheduleParams", "BoolValue", "schedule_cron"],
+  ["schedule.next", "ScheduleParams", "TimeValue", "schedule_cron"],
+  // network
+  ["http.request", "HttpRequest", "HttpResponse", "http"],
+  ["websocket.exchange", "WebsocketExchangeParams", "WebsocketExchange", "websocket"],
+  ["mqtt.publish", "MqttParams", "MqttPublished", "mqtt"],
+  ["mqtt.subscribe_once", "MqttParams", "MqttMessage", "mqtt"],
+  ["tcp.request", "SocketRequestParams", "SocketResponse", "tcp"],
+  ["udp.request", "SocketRequestParams", "SocketResponse", "udp"],
+  ["tls.request", "SocketRequestParams", "SocketResponse", "tls"],
+  // storage
+  ["storage.query", "StorageQueryParams", "StoredRecords", "storage_query"],
+  ["storage.write", "StorageWriteParams", "StorageWriteResult", "storage_write"],
+  ["storage.delete", "StorageDeleteParams", "Empty", "storage_write"],
+  ["storage.expire", "StorageExpireParams", "StorageExpireResult", "storage_write"],
+  ["storage.ingest_with_source", "StorageIngestParams", "IngestResult", "storage_ingest"],
+  ["storage.flatsql_query_stream", "SqlStreamParams", "RecordStream", "storage_query"],
+  ["storage.flatsql_epoch_stream", "EpochStreamParams", "RecordStream", "storage_query"],
+  ["storage.query_sandboxed", "SandboxQueryParams", "SandboxQueryResult", "storage_query"],
+  ["storage.query_surface", "QuerySurfaceParams", "QuerySurface", "storage_query"],
+  ["storage.flatsql_cache_key", "CacheKeyParams", "TextValue", "storage_query"],
+  // crypto (one family)
+  ["crypto.hash", "CryptoHashParams", "BytesValue", "crypto_hash"],
+  ["crypto.public_key", "CryptoPublicKeyParams", "BytesValue", "crypto_sign"],
+  ["crypto.sign", "CryptoSignParams", "BytesValue", "crypto_sign"],
+  ["crypto.verify", "CryptoVerifyParams", "BoolValue", "crypto_verify"],
+  ["crypto.encrypt", "CryptoEncryptParams", "CryptoCiphertext", "crypto_encrypt"],
+  ["crypto.decrypt", "CryptoDecryptParams", "BytesValue", "crypto_decrypt"],
+  ["crypto.key_agreement", "CryptoKeyAgreementParams", "BytesValue", "crypto_key_agreement"],
+  ["crypto.kdf", "CryptoKdfParams", "BytesValue", "crypto_kdf"],
+  ["crypto.generate_key", "CryptoGenerateKeyParams", "CryptoKeyPair", "crypto_sign"],
+  ["crypto.seal", "CryptoSealParams", "BytesValue", "crypto_encrypt"],
+  ["crypto.open", "CryptoOpenParams", "BytesValue", "crypto_decrypt"],
+  // keyslot, secrets
+  ["keyslot.sign", "KeyslotSignParams", "BytesValue", "wallet_sign"],
+  ["keyslot.unwrap", "KeyslotUnwrapParams", "BytesValue", "wallet_sign"],
+  ["secrets.get", "SecretIdParams", "Secret", "secrets"],
+  ["secrets.status", "SecretIdParams", "SecretStatus", "secrets"],
+  ["secrets.put", "SecretPutParams", "SecretStored", "secrets"],
+  ["secrets.clear", "SecretIdParams", "Empty", "secrets"],
+  // ipfs, pubsub, protocol, p2p
+  ["ipfs.add", "IpfsAddParams", "IpfsAddResult", "ipfs"],
+  ["ipfs.cat", "IpfsCidParams", "BytesValue", "ipfs"],
+  ["ipfs.ls", "IpfsCidParams", "IpfsLinks", "ipfs"],
+  ["ipfs.pin_add", "IpfsCidParams", "TextList", "ipfs"],
+  ["ipfs.pin_rm", "IpfsCidParams", "TextList", "ipfs"],
+  ["ipfs.pin_ls", "IpfsPinLsParams", "IpfsPins", "ipfs"],
+  ["ipfs.dag_get", "IpfsCidParams", "BytesValue", "ipfs"],
+  ["ipfs.name_resolve", "IpfsNameResolveParams", "TextValue", "ipfs"],
+  ["ipfs.name_publish", "IpfsNamePublishParams", "IpfsNamePublished", "ipfs"],
+  ["ipfs.id", "IpfsIdParams", "IpfsIdentity", "ipfs"],
+  ["ipfs.swarm_peers", "IpfsSwarmPeersParams", "IpfsSwarmPeers", "ipfs"],
+  ["pubsub.publish", "PubsubPublishParams", "Empty", "pubsub"],
+  ["pubsub.subscribe", "PubsubTopicParams", "PubsubSubscribed", "pubsub"],
+  ["pubsub.unsubscribe", "PubsubTopicParams", "Empty", "pubsub"],
+  ["pubsub.list_topics", "PubsubListTopicsParams", "TextList", "pubsub"],
+  ["protocol.request", "ProtocolRequestParams", "BytesValue", "protocol_dial"],
+  ["protocol.dial", "ProtocolDialParams", "Empty", "protocol_dial"],
+  ["protocol.register", "ProtocolHandleParams", "Empty", "protocol_handle"],
+  ["protocol.unregister", "ProtocolHandleParams", "Empty", "protocol_handle"],
+  ["p2p.peers_snapshot", "P2pParams", "P2pPeersSnapshot", "p2p_read"],
+  ["p2p.standards_snapshot", "P2pParams", "P2pStandardsSnapshot", "p2p_read"],
+  ["p2p.pnm_history", "P2pParams", "P2pPnmHistory", "p2p_read"],
+  ["p2p.latest_dataset", "P2pParams", "P2pLatestDataset", "p2p_read"],
+  ["node.status", "NodeStatusParams", "NodeStatusReport", "node_status_read"],
+  ["node.activity", "NodeActivityParams", "NodeActivity", "node_activity_read"],
+  // filesystem, exec, context
+  ["filesystem.resolve_path", "FsPathParams", "TextValue", "filesystem"],
+  ["filesystem.read_file", "FsPathParams", "BytesValue", "filesystem"],
+  ["filesystem.write_file", "FsWriteParams", "Empty", "filesystem"],
+  ["filesystem.delete_file", "FsPathParams", "Empty", "filesystem"],
+  ["filesystem.mkdir", "FsMkdirParams", "Empty", "filesystem"],
+  ["filesystem.readdir", "FsPathParams", "FsEntries", "filesystem"],
+  ["filesystem.stat", "FsPathParams", "FsStat", "filesystem"],
+  ["filesystem.rename", "FsRenameParams", "Empty", "filesystem"],
+  ["exec.exec_file", "ExecParams", "ExecResult", "process_exec"],
+  ["context.get", "ContextParams", "ContextValue", "context_read"],
+  ["context.list_keys", "ContextParams", "TextList", "context_read"],
+  ["context.list_scopes", "ContextListScopesParams", "TextList", "context_read"],
+  ["context.set", "ContextParams", "Empty", "context_write"],
+  ["context.delete", "ContextParams", "BoolValue", "context_write"],
+].map(([op, params, result, capability]) => [op, Object.freeze({ params, result, capability })])));
+
+/**
+ * Whether a hostcall payload is the typed envelope (a HostCall, "HCLQ" at bytes 4-7) rather than the JSON-meta
+ * envelope of src/host/hostcallWire.js: while hosts move over they answer a typed call with a HostCallResult. The JSON
+ * envelope goes once every module is typed (graph: sdk-compliance-typed-only-20261013).
+ */
+export function isTypedHostCall(payload) {
+  return identifierOf(payload) === "HCLQ";
 }

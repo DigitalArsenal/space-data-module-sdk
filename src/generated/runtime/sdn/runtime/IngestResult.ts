@@ -103,8 +103,18 @@ REFUSED(optionalEncoding?:any):string|Uint8Array|null {
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
 
+/**
+ * Where the provenance document was written; empty when none was sent.
+ */
+PROVENANCE_FILE():string|null
+PROVENANCE_FILE(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+PROVENANCE_FILE(optionalEncoding?:any):string|Uint8Array|null {
+  const offset = this.bb!.__offset(this.bb_pos, 22);
+  return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
+}
+
 static startIngestResult(builder:flatbuffers.Builder) {
-  builder.startObject(9);
+  builder.startObject(10);
 }
 
 static addSchema(builder:flatbuffers.Builder, SCHEMAOffset:flatbuffers.Offset) {
@@ -143,6 +153,10 @@ static addRefused(builder:flatbuffers.Builder, REFUSEDOffset:flatbuffers.Offset)
   builder.addFieldOffset(8, REFUSEDOffset, 0);
 }
 
+static addProvenanceFile(builder:flatbuffers.Builder, PROVENANCE_FILEOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(9, PROVENANCE_FILEOffset, 0);
+}
+
 static endIngestResult(builder:flatbuffers.Builder):flatbuffers.Offset {
   const offset = builder.endObject();
   return offset;
@@ -156,7 +170,7 @@ static finishSizePrefixedIngestResultBuffer(builder:flatbuffers.Builder, offset:
   builder.finish(offset, 'INGR', true);
 }
 
-static createIngestResult(builder:flatbuffers.Builder, SCHEMAOffset:flatbuffers.Offset, PROVIDER_IDOffset:flatbuffers.Offset, SOURCE_NAMEOffset:flatbuffers.Offset, BATCH_IDOffset:flatbuffers.Offset, INSERTED:bigint, RECONCILED_DUPLICATES:bigint, RECONCILED_OLD_BATCHES:bigint, ARCHIVEDOffset:flatbuffers.Offset, REFUSEDOffset:flatbuffers.Offset):flatbuffers.Offset {
+static createIngestResult(builder:flatbuffers.Builder, SCHEMAOffset:flatbuffers.Offset, PROVIDER_IDOffset:flatbuffers.Offset, SOURCE_NAMEOffset:flatbuffers.Offset, BATCH_IDOffset:flatbuffers.Offset, INSERTED:bigint, RECONCILED_DUPLICATES:bigint, RECONCILED_OLD_BATCHES:bigint, ARCHIVEDOffset:flatbuffers.Offset, REFUSEDOffset:flatbuffers.Offset, PROVENANCE_FILEOffset:flatbuffers.Offset):flatbuffers.Offset {
   IngestResult.startIngestResult(builder);
   IngestResult.addSchema(builder, SCHEMAOffset);
   IngestResult.addProviderId(builder, PROVIDER_IDOffset);
@@ -167,6 +181,7 @@ static createIngestResult(builder:flatbuffers.Builder, SCHEMAOffset:flatbuffers.
   IngestResult.addReconciledOldBatches(builder, RECONCILED_OLD_BATCHES);
   IngestResult.addArchived(builder, ARCHIVEDOffset);
   IngestResult.addRefused(builder, REFUSEDOffset);
+  IngestResult.addProvenanceFile(builder, PROVENANCE_FILEOffset);
   return IngestResult.endIngestResult(builder);
 }
 
@@ -180,7 +195,8 @@ unpack(): IngestResultT {
     this.RECONCILED_DUPLICATES(),
     this.RECONCILED_OLD_BATCHES(),
     this.ARCHIVED(),
-    this.REFUSED()
+    this.REFUSED(),
+    this.PROVENANCE_FILE()
   );
 }
 
@@ -195,6 +211,7 @@ unpackTo(_o: IngestResultT): void {
   _o.RECONCILED_OLD_BATCHES = this.RECONCILED_OLD_BATCHES();
   _o.ARCHIVED = this.ARCHIVED();
   _o.REFUSED = this.REFUSED();
+  _o.PROVENANCE_FILE = this.PROVENANCE_FILE();
 }
 }
 
@@ -208,7 +225,8 @@ constructor(
   public RECONCILED_DUPLICATES: bigint = BigInt('0'),
   public RECONCILED_OLD_BATCHES: bigint = BigInt('0'),
   public ARCHIVED: string|Uint8Array|null = null,
-  public REFUSED: string|Uint8Array|null = null
+  public REFUSED: string|Uint8Array|null = null,
+  public PROVENANCE_FILE: string|Uint8Array|null = null
 ){}
 
 
@@ -219,6 +237,7 @@ pack(builder:flatbuffers.Builder): flatbuffers.Offset {
   const BATCH_ID = (this.BATCH_ID !== null ? builder.createString(this.BATCH_ID!) : 0);
   const ARCHIVED = (this.ARCHIVED !== null ? builder.createString(this.ARCHIVED!) : 0);
   const REFUSED = (this.REFUSED !== null ? builder.createString(this.REFUSED!) : 0);
+  const PROVENANCE_FILE = (this.PROVENANCE_FILE !== null ? builder.createString(this.PROVENANCE_FILE!) : 0);
 
   return IngestResult.createIngestResult(builder,
     SCHEMA,
@@ -229,7 +248,8 @@ pack(builder:flatbuffers.Builder): flatbuffers.Offset {
     this.RECONCILED_DUPLICATES,
     this.RECONCILED_OLD_BATCHES,
     ARCHIVED,
-    REFUSED
+    REFUSED,
+    PROVENANCE_FILE
   );
 }
 }

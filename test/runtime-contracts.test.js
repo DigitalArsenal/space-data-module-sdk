@@ -83,7 +83,7 @@ test("runtime contracts: config refuses values with no typed kind", () => {
   assert.throws(() => encodeModuleConfig({ x: [1, "a"] }), /mixes value kinds/);
 });
 
-test("runtime contracts: all seven are in the shared module catalog with their identifiers", () => {
+test("runtime contracts: every runtime contract is in the shared module catalog with their identifiers", () => {
   for (const [name, id] of Object.entries(RUNTIME_FILE_IDENTIFIERS)) {
     const entry = sharedModuleCatalog.find((e) => e.schemaName === `${name}.fbs`);
     assert.ok(entry, `${name}.fbs registered`);
