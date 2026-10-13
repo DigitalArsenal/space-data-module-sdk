@@ -6,6 +6,7 @@ import {
   mkdtemp,
   mkdir,
   readFile,
+  readdir,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -658,17 +659,19 @@ function createGuestLinkBundleEntries(guestLink) {
   ];
 }
 
-// The typed hostcall (SDS $PIV, module -> host) for C++ guests: `#include "typedHostcall.hpp"` (sdm_piv::call) with
-// the HostOps aligned records it sends and reads (schemas/runtime/HostOps.fbs).
-const HOSTCALL_CPP_HEADERS = Object.freeze({
-  "typedHostcall.hpp": new URL("../host/cpp/typedHostcall.hpp", import.meta.url),
-  "HostOps_aligned.h": new URL("../generated/runtime/cpp/HostOps_aligned.h", import.meta.url),
-});
+// The typed module runtime for C++ guests, staged in every compile: `#include "typedHostcall.hpp"` (sdm_piv::call,
+// the SDS $PIV hostcall) with the HostOps aligned records it sends and reads, and the runtime types a module's
+// ports carry (HttpRequest_generated.h, IngestRequest_generated.h, FlowNotice_generated.h, ...).
+const RUNTIME_CPP_DIR = new URL("../generated/runtime/cpp/", import.meta.url);
+const HOSTCALL_HPP = new URL("../host/cpp/typedHostcall.hpp", import.meta.url);
 let hostcallCppHeaders = null;
 async function getHostcallCppHeaders() {
-  hostcallCppHeaders ??= Promise.all(
-    Object.entries(HOSTCALL_CPP_HEADERS).map(async ([name, url]) => [name, await readFile(url, "utf8")]),
-  ).then(Object.fromEntries);
+  hostcallCppHeaders ??= (async () => {
+    const names = (await readdir(RUNTIME_CPP_DIR)).filter((name) => name.endsWith(".h")).sort();
+    const headers = { "typedHostcall.hpp": await readFile(HOSTCALL_HPP, "utf8") };
+    for (const name of names) headers[name] = await readFile(new URL(name, RUNTIME_CPP_DIR), "utf8");
+    return headers;
+  })();
   return hostcallCppHeaders;
 }
 

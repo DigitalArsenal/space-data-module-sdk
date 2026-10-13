@@ -21,6 +21,7 @@ const GUEST_SOURCE = `
 #include <cstring>
 #include <string>
 #include "typedHostcall.hpp"
+#include "HttpRequest_generated.h"
 
 namespace A = sdn::runtime::Aligned;
 static char out_buffer[1024];
@@ -109,6 +110,12 @@ int t_context(void) {
   const auto* found = g.result<A::BoolValue>("BoolValue");
   return report("%d %d %d %s", s.ok(), g.ok(), found ? (int)found->VALUE : -1, std::string(g.raw("value")).c_str());
 }
+int t_runtime_types(void) {
+  flatbuffers::FlatBufferBuilder b(256);
+  sdn::runtime::FinishHttpRequestBuffer(b, sdn::runtime::CreateHttpRequestDirect(b, "GET", "https://example.org/x.idx"));
+  const auto* request = sdn::runtime::GetHttpRequest(b.GetBufferPointer());
+  return report("%s %s", sdn::runtime::HttpRequestIdentifier(), request->URL()->c_str());
+}
 int t_sync_async(void) {
   auto r = sdm_piv::call("crypto.sha256", {sdm_piv::raw("data", "abc")});
   return report("%d %s", r.ok(), r.error_code().c_str());
@@ -116,7 +123,7 @@ int t_sync_async(void) {
 }
 `;
 
-const METHODS = ["t_clock", "t_random", "t_ops", "t_schedule", "t_denied", "t_files", "t_sha", "t_http", "t_context", "t_sync_async", "guest_out_ptr", "guest_out_len"];
+const METHODS = ["t_clock", "t_random", "t_ops", "t_schedule", "t_denied", "t_files", "t_sha", "t_http", "t_context", "t_runtime_types", "t_sync_async", "guest_out_ptr", "guest_out_len"];
 function manifest() {
   return {
     pluginId: "com.digitalarsenal.examples.typed-hostcalls",
@@ -153,6 +160,8 @@ test("typed hostcalls: a C++ module on the sync bridge reads records, lists and 
   assert.equal(run("t_random"), "1 16");
   assert.equal(run("t_ops"), "1 1 1");
   assert.equal(run("t_schedule"), "1 1");
+  // the compiler stages the runtime types a module's ports carry
+  assert.equal(run("t_runtime_types"), "HREQ https://example.org/x.idx");
   assert.equal(run("t_denied"), "0 not-authorized");
   // an async-only operation on the sync bridge is refused with a code, not a trap
   assert.equal(run("t_sync_async"), "0 unsupported");

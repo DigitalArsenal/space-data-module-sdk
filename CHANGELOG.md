@@ -10,8 +10,9 @@ The SDK JS hosts answer typed hostcalls (typed contracts 1.0).
   into its result record and frames. Errors come back as `ERROR_CODE` (`not-authorized`, `sandbox`, `unsupported`,
   `invalid-params`, `timeout`, `too-large`, `failed`). The JSON envelope is still answered until every module is
   typed (sdk-compliance-typed-only).
-- The SDK compiler stages `typedHostcall.hpp` and `HostOps_aligned.h` in every C++ compile, so a module includes
-  `"typedHostcall.hpp"` and calls `sdm_piv::call`.
+- The SDK compiler stages the typed module runtime in every C++ compile: `typedHostcall.hpp` (`sdm_piv::call`) with
+  `HostOps_aligned.h`, and the runtime types a module's ports carry (`HttpRequest_generated.h`,
+  `IngestRequest_generated.h`, `FlowNotice_generated.h`, ...).
 - `http.request` passes the redirect mode to fetch (typed `NO_REDIRECTS`). BrowserHost answers with the response url.
 - The sync bridge no longer leaves a refused async operation's rejected promise unhandled (it crashed the process
   when the operation's capability was not granted).
