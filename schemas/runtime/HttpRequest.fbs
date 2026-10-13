@@ -1,0 +1,25 @@
+include "RuntimeCommon.fbs";
+namespace sdn.runtime;
+
+/// An outbound HTTP request a module asks the host to make (the http host connector). Replaces the
+/// hostcap/http-request JSON request. The host presents the validators it holds for URL (If-None-Match,
+/// If-Modified-Since) unless the module set either itself.
+table HttpRequest {
+  /// Verb, upper-case; empty means GET.
+  METHOD: string;
+  URL: string (required);
+  /// Request headers, sorted by NAME (e.g. "range": "bytes=0-1023").
+  HEADERS: [Header];
+  BODY: [ubyte];
+  /// Give up after this many milliseconds; 0 = the host's default.
+  TIMEOUT_MS: uint32;
+  /// Response body budget in bytes: the host errors past it, never truncates; 0 = the host's limit.
+  MAX_BYTES: uint64;
+  /// The module's own state for this request, echoed verbatim in the HttpResponse: one size-prefixed
+  /// FlatBuffer, identified by its own file identifier (an SDS record such as a $WXF header naming the wanted
+  /// field, or another runtime type). Never JSON.
+  CONTEXT: [ubyte];
+}
+
+root_type HttpRequest;
+file_identifier "HREQ";

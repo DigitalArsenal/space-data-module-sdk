@@ -52,6 +52,7 @@
     },
     "./flow/compiler": "./src/flow/flowCompiler.js",
     "./http": "./src/http/index.js",
+    "./runtime-contracts": "./src/standards/runtimeContracts.js",
     "./host/browser-edge-shims": "./src/host/browserEdgeShims.js",
     "./host/wasi-shim": "./src/host/wasiShim.js",
     "./host/isomorphic": {
@@ -121,7 +122,8 @@
     "prepublishOnly": "npm test && npm run check:compliance",
     "playground:build": "node ./playground/build.mjs",
     "playground:serve": "node ./playground/build.mjs && node ./playground/server.mjs",
-    "playground:gate": "node ./playground/build.mjs && node ./playground/test/browser-gate.mjs"
+    "playground:gate": "node ./playground/build.mjs && node ./playground/test/browser-gate.mjs",
+    "generate:runtime-contracts": "node scripts/generate-runtime-bindings.mjs"
   },
   "dependencies": {
     "flatbuffers": "^25.9.23",

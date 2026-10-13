@@ -1,0 +1,41 @@
+include "RuntimeCommon.fbs";
+namespace sdn.runtime;
+
+/// What a config value is.
+enum configValueKind : ubyte {
+  String,
+  Number,
+  Bool,
+  StringList,
+  NumberList,
+  /// A list of nested tables (e.g. retention targets: each a table of schema, provider_id, sources).
+  TableList
+}
+
+/// One configured value, typed. Readers check KIND and read the matching field.
+table ConfigEntry {
+  KEY: string (key);
+  KIND: configValueKind;
+  STRING_VALUE: string;
+  NUMBER_VALUE: double;
+  BOOL_VALUE: bool;
+  STRINGS: [string];
+  NUMBERS: [double];
+  TABLES: [ConfigTable];
+}
+
+/// A nested table of entries, sorted by KEY.
+table ConfigTable {
+  ENTRIES: [ConfigEntry];
+}
+
+/// A module node's configuration as the host delivers it (the node config file's flows.services[].config,
+/// typed). PLG defines node CONFIG as "FlatBuffer or raw bytes; never JSON": this is that FlatBuffer.
+/// Replaces the plugin.getConfig JSON.
+table ModuleConfig {
+  /// Entries sorted by KEY.
+  ENTRIES: [ConfigEntry];
+}
+
+root_type ModuleConfig;
+file_identifier "MCFG";

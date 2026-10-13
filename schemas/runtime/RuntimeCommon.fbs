@@ -1,0 +1,33 @@
+// Shared tables of the module runtime ABI (sdn.runtime). The typed frames that cross a module port, a host
+// connector or the flow runtime are FlatBuffers: SDS standards for data, these runtime types for the host/runtime
+// contract itself (typed-contracts 1.0, owner 2026-10-13: "flatbuffer SDS only"; no JSON forms).
+namespace sdn.runtime;
+
+/// One header of an outbound HTTP exchange. NAME is lower-cased and a FlatBuffers key, so a header vector is
+/// sorted and binary-searchable; encoders sort by NAME.
+table Header {
+  NAME: string (key);
+  VALUE: string;
+}
+
+/// Where a batch of records comes from and how it may be used: the source tags SDN stores beside every record
+/// (they are metadata about a record, never bytes inside it).
+table SourceTags {
+  /// Publisher identity, e.g. "noaa-ncep".
+  PROVIDER_ID: string;
+  /// The source lane within the provider, e.g. "gfs-0p25-sea".
+  SOURCE_NAME: string;
+  /// The batch the records belong to.
+  BATCH_ID: string;
+  /// The document the records were made from.
+  SOURCE_URL: string;
+  /// Content key the records are sealed under ("public" when not sealed).
+  CONTENT_KEY_ID: string;
+  /// Producer peer the records are attributed to, e.g. "source:noaa".
+  SOURCE_PEER: string;
+  /// SPDX licence identifier.
+  LICENSE: string;
+  LICENSE_URL: string;
+  CITATION: string;
+  SHARE_ALIKE: bool;
+}

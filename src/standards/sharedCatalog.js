@@ -33,6 +33,33 @@ const sharedModuleCatalogEntries = [
     fileIdentifier: "HRSP",
     source: "shared-module-runtime",
   },
+  // The rest of the module runtime contracts (schemas/runtime/*.fbs, typed-contracts 1.0, owner 2026-10-13:
+  // "flatbuffer SDS only"): TimerTick, HttpRequest and HttpResponse above gain their IDL there; these complete the
+  // set - node config, the storage-ingest connector's request and result, and a pass's notice to the flow runtime.
+  {
+    schemaCode: "MODULECONFIG",
+    schemaName: "ModuleConfig.fbs",
+    fileIdentifier: "MCFG",
+    source: "shared-module-runtime",
+  },
+  {
+    schemaCode: "INGESTREQUEST",
+    schemaName: "IngestRequest.fbs",
+    fileIdentifier: "INGQ",
+    source: "shared-module-runtime",
+  },
+  {
+    schemaCode: "INGESTRESULT",
+    schemaName: "IngestResult.fbs",
+    fileIdentifier: "INGR",
+    source: "shared-module-runtime",
+  },
+  {
+    schemaCode: "FLOWNOTICE",
+    schemaName: "FlowNotice.fbs",
+    fileIdentifier: "FNTC",
+    source: "shared-module-runtime",
+  },
   {
     schemaCode: "DETACHEDSIGNATURE",
     schemaName: "DetachedSignature.fbs",

@@ -1,0 +1,39 @@
+include "RuntimeCommon.fbs";
+namespace sdn.runtime;
+
+/// What a module pass did that is not a stored batch.
+enum flowNoticeKind : ubyte {
+  /// The source has nothing new (a 304, or the planned run already planned): a success without a batch. The flow
+  /// runtime does not count it as a failed retrieval.
+  Unchanged,
+  /// The pass did nothing by design (live access off, nothing to fetch).
+  Skipped,
+  /// Something expected was not there (a lead the run lacks, a file not yet published).
+  Missing,
+  /// Records left a rolling window and were deleted.
+  Expired,
+  /// Anything else worth recording.
+  Info
+}
+
+/// A module's report of a pass, to the flow's egress and the node's ledger. Replaces the JSON status, report and
+/// unchanged-notice frames.
+table FlowNotice {
+  KIND: flowNoticeKind;
+  /// The lane it concerns (any of them may be empty).
+  SCHEMA: string;
+  PROVIDER_ID: string;
+  SOURCE_NAME: string;
+  BATCH_ID: string;
+  /// How many (records expired, leads missing, inventories unchanged ...).
+  COUNT: uint64;
+  /// A short reason, e.g. "already-planned".
+  REASON: string;
+  /// The items concerned, e.g. the missing inventories' URLs.
+  ITEMS: [string];
+  /// A time the notice is about (e.g. a retention cutoff), Unix milliseconds UTC; 0 = none.
+  AT_MS: uint64;
+}
+
+root_type FlowNotice;
+file_identifier "FNTC";

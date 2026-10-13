@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+The module runtime contracts as typed FlatBuffers (typed-contracts 1.0, owner 2026-10-13: "flatbuffer SDS only"; no
+JSON forms kept).
+
+- `schemas/runtime/*.fbs` (namespace `sdn.runtime`): `TimerTick` (TICK), `HttpRequest` (HREQ), `HttpResponse` (HRSP),
+  `ModuleConfig` (MCFG), `IngestRequest` (INGQ), `IngestResult` (INGR), `FlowNotice` (FNTC). TICK, HREQ and HRSP were
+  registered in the shared catalog by name only; they now have IDL. MCFG, INGQ, INGR and FNTC are new catalog entries.
+- `npm run generate:runtime-contracts` (`scripts/generate-runtime-bindings.mjs`) emits TS/JS (object API, schema case
+  kept, as the SDS bindings) and C++ headers into `src/generated/runtime/`.
+- `space-data-module-sdk/runtime-contracts`: the bindings plus `encode*` / `decode*` per frame over plain objects and
+  `identifierOf`. An HttpRequest's CONTEXT (a typed FlatBuffer the module chooses) comes back verbatim in its
+  HttpResponse, so a module's job state travels typed with its request.
+- These replace, in the node and the modules that follow: the `sdn-timer-tick` frame, the `hostcap/http-request` JSON
+  request and JSON / `$HRB` response, the `plugin.getConfig` JSON, the `storage.ingest_with_source` meta and result
+  JSON, and the JSON status / report / unchanged-notice frames.
+
 ## 0.8.27
 
 The licensing challenge request can carry the requester's \$EPM.

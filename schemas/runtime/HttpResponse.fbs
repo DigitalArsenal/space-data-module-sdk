@@ -1,0 +1,24 @@
+include "RuntimeCommon.fbs";
+namespace sdn.runtime;
+
+/// The host's answer to one HttpRequest. Replaces the hostcap/http-request JSON response and the $HRB raw-body
+/// frame. A 304 means the host presented validators and the publisher has nothing new.
+table HttpResponse {
+  /// The URL answered (after redirects).
+  URL: string;
+  /// HTTP status; 0 when the request failed before a status (ERROR says why).
+  STATUS: int32;
+  /// Response headers, sorted by NAME.
+  HEADERS: [Header];
+  /// The body verbatim (never re-encoded).
+  BODY: [ubyte];
+  /// The request's CONTEXT, verbatim.
+  CONTEXT: [ubyte];
+  /// Why the exchange failed (timeout, budget exceeded, refused by policy); empty on an answered request.
+  ERROR: string;
+  /// When the body was received, Unix milliseconds UTC.
+  RETRIEVED_MS: uint64;
+}
+
+root_type HttpResponse;
+file_identifier "HRSP";

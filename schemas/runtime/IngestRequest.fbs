@@ -1,0 +1,58 @@
+include "RuntimeCommon.fbs";
+namespace sdn.runtime;
+
+/// How a stored batch relates to what the lane already holds.
+enum reconcileMode : ubyte {
+  /// Duplicates of records already held are dropped (the default).
+  Duplicates,
+  /// Store as given.
+  None,
+  /// The batch is the lane's whole current set: older batches of the lane are retired.
+  Current
+}
+
+/// The raw document a batch was made from, kept by the host when it has an archive root.
+table ArchiveTarget {
+  /// Archive folder (normally the provider).
+  SOURCE: string;
+  /// File name within it.
+  NAME: string;
+}
+
+/// How a batch was produced: what was fetched, what came of it.
+table Provenance {
+  SOURCE_URL: string;
+  HTTP_STATUS: int32;
+  ETAG: string;
+  LAST_MODIFIED: string;
+  CONTENT_TYPE: string;
+  /// When the source was retrieved, Unix milliseconds UTC.
+  RETRIEVED_MS: uint64;
+  /// The producing module and its version.
+  PARSER: string;
+  PARSER_VERSION: string;
+  /// SHA-256 (hex) of the source bytes, and of the normalized record stream.
+  SOURCE_SHA256: string;
+  NORMALIZED_SHA256: string;
+  NORMALIZED_COUNT: uint64;
+  /// Records per standard, as "SCHEMA" entries with their counts (parallel vectors).
+  SCHEMAS: [string];
+  SCHEMA_COUNTS: [uint64];
+  WARNINGS: [string];
+  FROM_CACHE: bool;
+}
+
+/// A request to store one batch of records with its source tags (the storage-ingest host connector). The records
+/// themselves travel beside it as the size-prefixed FlatBuffer record stream, the raw document (when archived) as
+/// raw bytes. Replaces the storage.ingest_with_source meta JSON.
+table IngestRequest {
+  /// The records' standard, e.g. "WXF.fbs".
+  SCHEMA: string (required);
+  TAGS: SourceTags (required);
+  RECONCILE: reconcileMode = Duplicates;
+  ARCHIVE: ArchiveTarget;
+  PROVENANCE: Provenance;
+}
+
+root_type IngestRequest;
+file_identifier "INGQ";

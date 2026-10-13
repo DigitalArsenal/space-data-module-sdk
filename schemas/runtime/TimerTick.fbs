@@ -1,0 +1,18 @@
+include "RuntimeCommon.fbs";
+namespace sdn.runtime;
+
+/// A trigger firing: what the host's scheduler hands a flow's timer-bound node. Replaces the untyped
+/// sdn-timer-tick frame.
+table TimerTick {
+  /// The flow trigger that fired (PLG trigger id).
+  TRIGGER_ID: string;
+  /// When it was due, Unix milliseconds UTC.
+  SCHEDULED_MS: uint64;
+  /// When the host fired it, Unix milliseconds UTC.
+  FIRED_MS: uint64;
+  /// How many times this trigger has fired since the flow started (0-based).
+  SEQUENCE: uint64;
+}
+
+root_type TimerTick;
+file_identifier "TICK";

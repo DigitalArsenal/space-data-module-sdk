@@ -1,0 +1,23 @@
+include "RuntimeCommon.fbs";
+namespace sdn.runtime;
+
+/// What the host did with one IngestRequest. Replaces the storage.ingest_with_source result JSON.
+table IngestResult {
+  SCHEMA: string;
+  PROVIDER_ID: string;
+  SOURCE_NAME: string;
+  BATCH_ID: string;
+  /// Records newly stored.
+  INSERTED: uint64;
+  /// Records already held, dropped (reconcile Duplicates).
+  RECONCILED_DUPLICATES: uint64;
+  /// Older records of the lane retired (reconcile Current).
+  RECONCILED_OLD_BATCHES: uint64;
+  /// Where the raw document was archived; empty when it was not.
+  ARCHIVED: string;
+  /// Why the batch was refused (quota, licence, policy); empty when it was stored.
+  REFUSED: string;
+}
+
+root_type IngestResult;
+file_identifier "INGR";
