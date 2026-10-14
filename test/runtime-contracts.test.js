@@ -80,7 +80,7 @@ test("runtime contracts: the request's typed context comes back out of the respo
 });
 
 test("runtime contracts: config refuses values with no typed kind", () => {
-  assert.throws(() => encodeModuleConfig({ x: null }), /no config value kind/);
+  assert.throws(() => encodeModuleConfig({ x: () => 1 }), /no config value kind/);
   assert.throws(() => encodeModuleConfig({ x: [1, "a"] }), /mixes value kinds/);
 });
 
@@ -126,4 +126,9 @@ int main(int argc, char** argv) {
   const notice = decodeFlowNotice(fs.readFileSync(out));
   assert.deepEqual(notice, { kind: "expired", schema: "WXF.fbs", providerId: "noaa-ncep", sourceName: "", batchId: "", count: 4608, reason: "window", items: [], atMs: 0 });
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("runtime contracts: a ModuleConfig leaves out null values, as the Go node does", () => {
+  const decoded = decodeModuleConfig(encodeModuleConfig({ a: null, b: 1, nested: { c: null, d: "x" } }));
+  assert.deepEqual(decoded, { b: 1, nested: [{ d: "x" }] });  // a nested object decodes as a one-table list
 });

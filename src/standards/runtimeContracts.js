@@ -133,7 +133,8 @@ function entryOf(key, value) {
   else throw new Error(`ModuleConfig: ${key} has no config value kind (${value === null ? "null" : typeof value})`);
   return e;
 }
-const entriesOf = (object) => Object.keys(object || {}).filter((k) => object[k] !== undefined).sort().map((k) => entryOf(k, object[k]));
+// A key whose value is null or undefined is left out, as the Go node does: "not configured".
+const entriesOf = (object) => Object.keys(object || {}).filter((k) => object[k] !== undefined && object[k] !== null).sort().map((k) => entryOf(k, object[k]));
 function valueOf(e) {
   switch (e.KIND) {
     case configValueKind.String: return e.STRING_VALUE || "";

@@ -81,8 +81,10 @@ int t_config(void) {
   FAILED(c);
   std::string s;
   dump(c, s);
-  return report("1 %zu %s|%s|%g|%d", c.size(), s.c_str(), std::string(c.string("targets.0.provider_id")).c_str(),
-                c.number("targets.0.widths.1"), (int)c.boolean("enabled"));
+  // bounds: an item past a list's end is missing; count() reads a list's length
+  return report("1 %zu %s|%s|%g|%d|%d %d %zu %zu %d", c.size(), s.c_str(), std::string(c.string("targets.0.provider_id")).c_str(),
+                c.number("targets.0.widths.1"), (int)c.boolean("enabled"), (int)c.has("targets.0.widths.5"),
+                (int)c.has("targets.0.widths.1"), c.count("targets.0.widths"), c.count("targets"), (int)c.has("targets.3"));
 }
 // A large config (a 1,000,000-number index): the module's memory grows by about the payload, not by a record per
 // value. Reports the count, the sum, the payload size and the growth in bytes.
@@ -463,7 +465,7 @@ function adapters(wrap) {
 
 // What the module reads back, whichever host and bridge answer it.
 const EXPECTED = {
-  t_config: "1 3 enabled=b:true;name=s:gfs;targets=[{provider_id=s:noaa;widths=n[1,2.5,];}];|noaa|2.5|1",
+  t_config: "1 3 enabled=b:true;name=s:gfs;targets=[{provider_id=s:noaa;widths=n[1,2.5,];}];|noaa|2.5|1|0 1 2 1 0",
   t_node: "1 12D3KooWSelf 08011220abcd",
   t_secrets: `1 noaa-key tj 1 s3cr3t|1 t* ${T0_MS}|1|1`,
   t_write: "1 bafy-1",
@@ -568,7 +570,7 @@ for (const [label, createHost] of Object.entries(HOSTS)) {
     // capability-gated (typed not-authorized), adapter-gated (unsupported), config defaults to {}
     const bare = await syncGuest(createHost({ capabilities: ["clock"], capabilityAdapters: { p2p: a.p2p } }));
     assert.match(await bare("t_peers"), /^0 not-authorized /);
-    assert.equal(await bare("t_config"), "1 0 ||0|0");
+    assert.equal(await bare("t_config"), "1 0 ||0|0|0 0 0 0 0");
     // a config the encoder has no kind for is a typed failure, not a trap
     assert.match(await (await syncGuest(createHost({ config: { mixed: [1, "a"] } })))("t_config"), /^0 failed plugin.getConfig: ModuleConfig: mixed mixes value kinds/);
     const noAdapter = await syncGuest(createHost({ capabilities: GRANTED }));

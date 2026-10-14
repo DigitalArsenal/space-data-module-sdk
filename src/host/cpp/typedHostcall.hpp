@@ -293,6 +293,18 @@ class ConfigTable {
     for (const auto* s : *f.entry->STRINGS()) out.push_back(view(s));
     return out;
   }
+  /// How many items a list holds: a NumberList's numbers, a StringList's strings or a TableList's tables (0 when
+  /// the key is missing or not a list). Iterate 0..count-1 instead of probing "key.N" until a lookup fails.
+  size_t count(std::string_view key) const {
+    const Found f = find(key);
+    if (!f.entry || f.index >= 0) return 0;
+    switch (f.entry->KIND()) {
+      case sdn::runtime::configValueKind_NumberList: return f.entry->NUMBERS() ? f.entry->NUMBERS()->size() : 0;
+      case sdn::runtime::configValueKind_StringList: return f.entry->STRINGS() ? f.entry->STRINGS()->size() : 0;
+      case sdn::runtime::configValueKind_TableList: return f.entry->TABLES() ? f.entry->TABLES()->size() : 0;
+      default: return 0;
+    }
+  }
   /// How many tables a TableList holds (0 when missing or another kind).
   size_t tables(std::string_view key) const {
     const Found f = find(key);
@@ -354,9 +366,13 @@ class ConfigTable {
       const bool indexed = index_of(head, index);
       switch (e->KIND()) {
         case sdn::runtime::configValueKind_NumberList:
-        case sdn::runtime::configValueKind_StringList:
-          if (indexed && next == std::string_view::npos) return {e, index};
+        case sdn::runtime::configValueKind_StringList: {
+          // an item past the end is missing, like any other missing key (modules find a list's end by probing)
+          const size_t n = e->KIND() == sdn::runtime::configValueKind_NumberList ? (e->NUMBERS() ? e->NUMBERS()->size() : 0)
+                                                                                 : (e->STRINGS() ? e->STRINGS()->size() : 0);
+          if (indexed && next == std::string_view::npos && static_cast<uint64_t>(index) < n) return {e, index};
           return {};
+        }
         case sdn::runtime::configValueKind_TableList: {
           const auto* tables = e->TABLES();
           if (!tables) return {};

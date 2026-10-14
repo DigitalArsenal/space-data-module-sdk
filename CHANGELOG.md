@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.3
+
+- `sdm_piv::Config` (typedHostcall.hpp): a path to an item past the end of a NumberList or StringList
+  ("targets.0.sources.5") is missing, like any other missing key. It used to answer the list's entry, so `has()`
+  stayed true and a module finding a list's end by probing "key.N" looped forever.
+- `encodeModuleConfig` leaves out keys whose value is null (it threw), as the Go node does.
+- `ConfigTable::count(key)`: the length of a NumberList, StringList or TableList, so a module iterates 0..count-1
+  instead of probing.
+
 ## 0.9.2
 
 ### plugin.getConfig answers with one ModuleConfig FlatBuffer
