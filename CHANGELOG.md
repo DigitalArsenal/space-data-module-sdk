@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.9.4
+
+### The JS hosts answer keyslot, ipfs, protocol and pubsub.list_topics
+
+- `typedDispatch.js` maps these operations the way the Go node does (`sdn-server internal/modulert/typed_hostcall_ops.go`).
+  Before, they had no mapping, so the hosts dropped their answers and got their inputs in the wrong form.
+  - `keyslot.sign` sends `{slotId, algorithm, payload}`. `algorithm` is the `cryptoAlgorithm` name, and `payload` is base64.
+    The `signature` comes back on raw `data`.
+  - `keyslot.unwrap` sends `{slotId, ephemeralPublicKey, nonce, ciphertext}`, all base64. The `plaintext` comes back on
+    raw `data`.
+  - `protocol.request` sends `{target, protocolId, timeoutMs, payloadBase64}`. The answer bytes come back on raw `data`.
+  - `pubsub.list_topics` answers with the `topics`, sorted, in list `items`.
+  - `ipfs.cat` answers on raw `data`. `ipfs.dag_get` answers on raw `data` as dag-json, with keys sorted like Go's
+    encoding/json.
+  - `ipfs.ls` answers in list `links`. `ipfs.pin_add` and `ipfs.pin_rm` answer the sorted `Pins` in list `items`.
+    `ipfs.pin_ls` answers in list `pins`, sorted by CID.
+  - `ipfs.id` answers in the `IpfsResult` record and list `addresses`. `ipfs.swarm_peers` answers in list `peers`,
+    with each Go duration as `LATENCY_MS`.
+  - `ipfs.name_resolve`, `ipfs.name_publish` and `ipfs.pubsub_publish` also follow the Go node's shapes.
+- A byte answer can be a `Uint8Array`, an `ArrayBuffer`, a typed view, base64 text (the Go semantics) or
+  `{__type: "bytes", base64}`. If there are no bytes, the call fails with a typed `failed`.
+- NodeHost and BrowserHost route the rest of the Go node's ipfs operations (`IPFS_ADAPTER_OPERATIONS`) to the ipfs
+  adapter as `adapter.<method>(params)` or `adapter.invoke(method, params)`. These are `ls`, `pin_add`, `pin_rm`,
+  `pin_ls`, `dag_get`, `id`, `swarm_peers`, `name_resolve`, `name_publish` and `pubsub_publish`.
+
+### Every parity lane serves the hostcall bridge
+
+- A module that imports `space_data_module_host` (`typedHostcall.hpp`) now runs in every parity lane. Before, it
+  could not even load on the WasmEdge lanes: it exited 1, even for methods that make no call.
+- `plugin.getConfig` answers with the case's config as one `ModuleConfig` on raw `config`, the same answer the JS hosts
+  give. Every other operation answers STATUS FAILED `unsupported`.
+- Parity fixtures take `config`, on the fixture or on a case. A case's `config` replaces the fixture's, and the default
+  is `{}`.
+- The browser lane answers through the SDK's typed dispatch.
+- The WasmEdge lanes run such an artifact on the SDK runner (`wasmedge_wasi_threads_runner.c`, now version 2), even
+  single-threaded, because the WasmEdge CLI provides no host imports. The runner replays the `$PIV` answers that the
+  orchestrator encodes with the SDK's own encoder and stages beside the module (`--sdm-hostcall-config`,
+  `--sdm-hostcall-unsupported`).
+- The Docker parity image copies the runner after the patched WasmEdge build, so a runner change no longer rebuilds
+  WasmEdge.
+
 ## 0.9.3
 
 - `sdm_piv::Config` (typedHostcall.hpp): a path to an item past the end of a NumberList or StringList
