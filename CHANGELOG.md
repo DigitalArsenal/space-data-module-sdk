@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.9.5
+
+### secp256k1 hashes once, everywhere
+
+hd-wallet-wasm's `secp256k1.sign` and `secp256k1.verify` hash their input with SHA-256. The SDK hashed first and
+then called them, so it signed and verified ECDSA over sha256(sha256(bytes)). The Go node signs and verifies
+sha256(bytes). Every secp256k1 path in the SDK now hashes once. A double-hashed signature fails verification, and
+nothing in the SDK still makes or accepts one.
+
+- `keyslot.sign` (secp256k1) is ECDSA over sha256(payload), DER-encoded, on NodeHost and BrowserHost.
+- `crypto.secp256k1.sign` and `crypto.secp256k1.verify` work over sha256(message), DER-encoded, on both hosts.
+- `crypto.secp256k1.signDigest` and `crypto.secp256k1.verifyDigest` (NodeHost) work over the 32-byte digest as
+  given. `secp256k1SignDigest` signs with `signRecoverable`. `secp256k1VerifyDigest` recovers the key with recovery
+  ids 0 and 1, and accepts a 33- or 65-byte public key. A digest that is not 32 bytes is refused (`invalid-params`).
+  New `secp256k1SignMessage` and `secp256k1VerifyMessage` (`src/utils/wasmCrypto.js`) take the message.
+- Deployment authorizations (`"secp256k1-sha256"`) are ECDSA over sha256(canonical bytes), hashed once:
+  - `protectModuleArtifact` signs the digest with `signRecoverable`.
+  - `createHdWalletSigner`'s `signDigest` and `createHdWalletVerifier`'s `verifyDigest` take the sha256 as given.
+    Never pass hd-wallet-wasm's `secp256k1.sign`, which hashes again.
+  - node:crypto verifies them with `crypto.verify("sha256", bytes, ...)`.
+  - Authorizations signed by SDKs before 0.9.5 are double-hashed and no longer verify. Re-sign them.
+- The typed `BoolValue` answer of a verify reads the hosts' `{result}` object. It used to answer true for any object,
+  so `crypto.secp256k1.verify` answered true for a bad signature through the typed hostcall.
+- The worker harness's hostcall channel keeps a host error's typed code (`hostcallCode`), and a `RangeError` or
+  `TypeError` that crossed it still answers `invalid-params`.
+
 ## 0.9.4
 
 ### The JS hosts answer keyslot, ipfs, protocol and pubsub.list_topics
