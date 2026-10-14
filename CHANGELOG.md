@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.7
+
+### The WasmEdge leg serves the hostcall bridge to single-thread artifacts
+
+- `loadModule({ runtimeKind: "wasmedge" })` runs an artifact that imports `space_data_module_host` on the SDK's
+  WasmEdge runner whether or not it is threaded. The plain `wasmedge` CLI provides WASI only, so a single-thread
+  module-host-abi artifact (`_start` + `plugin_invoke_stream`, no `wasi.thread-spawn`) failed there with
+  "unknown import space_data_module_host.call". Plain `wasmedge` still runs WASI-only artifacts.
+- The runner replays staged `$PIV` answers, as on the parity lanes: `plugin.getConfig` answers `loadModule`'s new
+  `config` option (else the host's `plugin.getConfig()`, else `{}`), and every other operation answers a typed
+  `unsupported` failure.
+- `createStandaloneHarness("wasmedge", ...)` passes `hostOptions.config` through, so both legs answer
+  `plugin.getConfig` with the same config.
+
 ## 0.9.6
 
 ### hd-wallet-wasm 2.1.0: every ECDSA signature hashes once
