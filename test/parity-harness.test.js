@@ -113,6 +113,24 @@ test("normalizeParityFixture rejects duplicate ids, bad expects, empty cases", a
   );
 });
 
+test("normalizeParityFixture carries the config plugin.getConfig answers: the case's replaces the fixture's, {} by default", async () => {
+  const plan = await normalizeParityFixture({
+    name: "fx",
+    config: { name: "gfs", targets: [{ provider_id: "noaa" }] },
+    cases: [
+      { id: "a", stdinUtf8: "x" },
+      { id: "b", stdinUtf8: "y", config: { lead: 72 } },
+    ],
+  });
+  assert.deepEqual(plan.cases.map((c) => c.config), [{ name: "gfs", targets: [{ provider_id: "noaa" }] }, { lead: 72 }]);
+  assert.ok(Object.isFrozen(plan.cases[0].config));
+  assert.deepEqual((await normalizeParityFixture({ name: "fx", cases: [{ id: "a", stdinUtf8: "x" }] })).cases[0].config, {});
+  await assert.rejects(
+    normalizeParityFixture({ name: "fx", cases: [{ id: "a", stdinUtf8: "x", config: [1] }] }),
+    /config must be an object/,
+  );
+});
+
 // --- Diff engine: divergence must FAIL, loudly ----------------------------------
 
 function makePlan(overrides = {}) {

@@ -43,6 +43,7 @@ import {
 import {
   ADAPTER_CAPABILITIES,
   ADAPTER_OPERATIONS,
+  IPFS_ADAPTER_OPERATIONS,
   callServiceAdapter,
   normalizePluginConfig,
   resolveServiceAdapters,
@@ -112,6 +113,7 @@ export const NodeHostSupportedOperations = Object.freeze([
   "ipfs.invoke",
   "ipfs.add",
   "ipfs.cat",
+  ...IPFS_ADAPTER_OPERATIONS,
   "protocol_handle.register",
   "protocol_handle.unregister",
   "protocol_dial.dial",
@@ -2077,6 +2079,12 @@ export class NodeHost {
         this.#withCapability("ipfs", "ipfs.cat", async () =>
           invokeAdapterMethod(this._ipfsAdapter, "cat", params, "ipfs"),
         ),
+      // ls, pin_add, pin_rm, pin_ls, dag_get, id, swarm_peers, name_resolve, name_publish, pubsub_publish
+      ...Object.fromEntries(IPFS_ADAPTER_OPERATIONS.map((operation) => [operation.slice(5), async (params = {}) =>
+        this.#withCapability("ipfs", operation, async () =>
+          invokeAdapterMethod(this._ipfsAdapter, operation.slice(5), params, "ipfs"),
+        ),
+      ])),
     });
 
     this.protocolHandle = Object.freeze({
@@ -2391,6 +2399,9 @@ export class NodeHost {
       default:
         if (ADAPTER_OPERATIONS[normalized]) {
           return this.serveAdapterOperation(normalized, params);
+        }
+        if (IPFS_ADAPTER_OPERATIONS.includes(normalized)) {
+          return this.ipfs[normalized.slice(5)](params);
         }
         throw new Error(`Unknown Node host operation "${normalized}".`);
     }

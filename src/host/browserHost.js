@@ -22,6 +22,7 @@ import { createBrowserEdgeShims } from "./browserEdgeShims.js";
 import {
   ADAPTER_CAPABILITIES,
   ADAPTER_OPERATIONS,
+  IPFS_ADAPTER_OPERATIONS,
   callServiceAdapter,
   normalizePluginConfig,
   resolveServiceAdapters,
@@ -87,6 +88,7 @@ export const BrowserHostSupportedOperations = Object.freeze([
   "ipfs.invoke",
   "ipfs.add",
   "ipfs.cat",
+  ...IPFS_ADAPTER_OPERATIONS,
   "protocol_handle.register",
   "protocol_handle.unregister",
   "protocol_dial.dial",
@@ -640,6 +642,11 @@ export class BrowserHost {
         this.#assertCapability("ipfs", "ipfs.cat");
         return invokeAdapterMethod(ipfsAdapter, "cat", params, "ipfs");
       },
+      // ls, pin_add, pin_rm, pin_ls, dag_get, id, swarm_peers, name_resolve, name_publish, pubsub_publish
+      ...Object.fromEntries(IPFS_ADAPTER_OPERATIONS.map((operation) => [operation.slice(5), async (params = {}) => {
+        this.#assertCapability("ipfs", operation);
+        return invokeAdapterMethod(ipfsAdapter, operation.slice(5), params, "ipfs");
+      }])),
     });
 
     this.protocolHandle = Object.freeze({
@@ -1225,6 +1232,9 @@ export class BrowserHost {
       default:
         if (ADAPTER_OPERATIONS[normalized]) {
           return this.serveAdapterOperation(normalized, params);
+        }
+        if (IPFS_ADAPTER_OPERATIONS.includes(normalized)) {
+          return this.ipfs[normalized.slice(5)](params);
         }
         throw new Error(`Unknown browser host operation "${normalized}".`);
     }

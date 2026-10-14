@@ -11,7 +11,7 @@ import {
   encodeSqlValues,
 } from "../standards/runtimeContracts.js";
 import * as hostOps from "../generated/runtime/aligned/HostOps_aligned.js";
-import { deliverMode, reconcileKind, sandboxWant } from "../generated/runtime/aligned/HostOps_enums.js";
+import { cryptoAlgorithm, deliverMode, reconcileKind, sandboxWant } from "../generated/runtime/aligned/HostOps_enums.js";
 import { base64ToBytes, bytesToBase64 } from "../utils/encoding.js";
 
 const textDecoder = new TextDecoder();
@@ -248,6 +248,58 @@ function pnmEntry(e) {
   });
 }
 const p2pRecords = (v) => (binary(v?.records) ? { records: binary(v.records) } : {});
+
+// ---- keyslot, ipfs, pubsub, protocol: the Go node's request maps (bytes as base64) and answers ----------------------
+// the HostOps cryptoAlgorithm enum -> the handlers' algorithm names (the Go node's cryptoAlgorithmNames; "" = default)
+const KEYSLOT_ALGORITHMS = {
+  Default: "", Ed25519: "ed25519", Secp256k1: "secp256k1", X25519: "x25519", Sha256: "sha256", Sha512: "sha512", Aes256Gcm: "aes-256-gcm", HkdfSha256: "hkdf-sha256",
+};
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+/**
+ * A handler's binary answer (the Go node's bytesOf): bytes (Uint8Array, a typed view, an ArrayBuffer), base64 text or
+ * {__type: "bytes", base64}; undefined when it is none of them.
+ */
+function answerBytes(v) {
+  const b = binary(v);
+  if (b) return b;
+  const encoded = typeof v === "string" ? v : v && typeof v === "object" && v.__type === "bytes" ? str(v.base64) : undefined;
+  if (encoded === undefined || !BASE64.test(encoded)) return undefined;
+  return base64ToBytes(encoded);
+}
+/** The bytes as one raw port (the Go node's dataAnswer / fieldBytes): no bytes is a failure. */
+function bytesAnswer(port, field) {
+  return (v, { op }) => {
+    const value = field === undefined ? v : v && typeof v === "object" && !binary(v) ? v[field] : undefined;
+    const bytes = answerBytes(value);
+    if (!bytes) throw failed(`${op}: the host answered no ${field ?? "bytes"}`);
+    return { raw: { [port]: bytes } };
+  };
+}
+/** A raw port's bytes as base64 under `key` when the module sent it (the Go node's rawB64). */
+function rawBase64(request, key, raw, port) {
+  if (raw[port] !== undefined) request[key] = bytesToBase64(raw[port]);
+  return request;
+}
+const intOf = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : 0; };
+/** The answer's `field` (a list) as sorted text items (the Go node's listOfText). */
+const textListOf = (field) => (v) => ({ lists: { items: (Array.isArray(v?.[field]) ? v[field] : []).map(str).sort().map((value) => ({ VALUE: value })) } });
+const GO_DURATION_UNITS = { ns: 1e-6, us: 1e-3, "µs": 1e-3, "μs": 1e-3, ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
+/** A Go duration ("1h2m3.5s", "350µs", "-12ms") in milliseconds; 0 when unreadable (time.ParseDuration's error). */
+function goDurationMs(v) {
+  const s = str(v);
+  if (s === "0") return 0;
+  const m = /^([-+]?)((?:(?:\d+\.?\d*|\.\d+)(?:ns|us|µs|μs|ms|s|m|h))+)$/.exec(s);
+  if (!m) return 0;
+  let total = 0;
+  for (const [, n, unit] of m[2].matchAll(/(\d+\.?\d*|\.\d+)(ns|us|µs|μs|ms|s|m|h)/g)) total += Number(n) * GO_DURATION_UNITS[unit];
+  return m[1] === "-" ? -total : total;
+}
+/** encoding/json's Marshal of a decoded JSON value: object keys sorted, <, >, & and U+2028 / U+2029 escaped. */
+function goJson(v) {
+  const sortKeys = (x) => (Array.isArray(x) ? x.map(sortKeys) : x && typeof x === "object" ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, sortKeys(x[k])])) : x);
+  return JSON.stringify(sortKeys(v) ?? null).replace(/[<>&\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+const objectOf = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
 const p2pRequest = ({ params }) => withDeliver(lower(params), params);
 const objects = (v) => (Array.isArray(v) ? v.filter((x) => x && typeof x === "object") : []);
 
@@ -484,6 +536,66 @@ const ADAPTERS = {
       return { result, raw: binary(serving.stream) ? { stream: binary(serving.stream) } : {} };
     },
   },
+  // keyslot: the host's crypto oracle takes and answers base64 ({signature} / {plaintext})
+  "keyslot.sign": {
+    in: ({ params, raw }) => {
+      const request = { slotId: str(params?.SLOT_ID) };
+      const algorithm = KEYSLOT_ALGORITHMS[enumName(cryptoAlgorithm, params?.ALGORITHM)];
+      if (algorithm) request.algorithm = algorithm;
+      return rawBase64(request, "payload", raw, "payload");
+    },
+    out: bytesAnswer("data", "signature"),
+  },
+  "keyslot.unwrap": {
+    in: ({ params, raw }) => {
+      const request = { slotId: str(params?.SLOT_ID) };
+      rawBase64(request, "ephemeralPublicKey", raw, "ephemeral_public_key");
+      rawBase64(request, "nonce", raw, "nonce");
+      return rawBase64(request, "ciphertext", raw, "ciphertext");
+    },
+    out: bytesAnswer("data", "plaintext"),
+  },
+  // protocol: {target, protocolId, timeoutMs, payloadBase64} -> the peer's answer bytes
+  "protocol.request": {
+    in: ({ params, raw }) => {
+      const request = { target: str(params?.TARGET), protocolId: str(params?.PROTOCOL_ID) };
+      if (Number(params?.TIMEOUT_MS) > 0) request.timeoutMs = Number(params.TIMEOUT_MS);
+      return rawBase64(request, "payloadBase64", raw, "payload");
+    },
+    out: bytesAnswer("data"),
+  },
+  "pubsub.list_topics": { in: () => ({}), out: textListOf("topics") },
+  // ipfs: the record's set fields as lower-case keys; Kubo's answers ({Objects: [{Links}]}, {Pins}, {Keys}, {ID, ...})
+  "ipfs.cat": { in: ({ params }) => lower(params), out: bytesAnswer("data") },
+  // the DAG node as Kubo encodes it (dag-json); bytes pass as they are
+  "ipfs.dag_get": { in: ({ params }) => lower(params), out: (v) => ({ raw: { data: binary(v) ?? textEncoder.encode(goJson(v)) } }) },
+  "ipfs.ls": {
+    in: ({ params }) => lower(params),
+    out: (v) => ({ lists: { links: objects(objectOf(v).Objects).flatMap((o) => objects(o.Links)).map((l) => fit("IpfsLink", { NAME: str(l.Name), CID: str(l.Hash), SIZE: intOf(l.Size), TYPE: intOf(l.Type) })) } }),
+  },
+  "ipfs.pin_add": { in: ({ params }) => lower(params), out: textListOf("Pins") },
+  "ipfs.pin_rm": { in: ({ params }) => lower(params), out: textListOf("Pins") },
+  "ipfs.pin_ls": {
+    in: ({ params }) => lower(params),
+    out: (v) => {
+      const keys = objectOf(objectOf(v).Keys);
+      return { lists: { pins: Object.keys(keys).sort().map((cid) => fit("IpfsPin", { CID: cid, TYPE: str(objectOf(keys[cid]).Type) })) } };
+    },
+  },
+  "ipfs.name_resolve": { in: ({ params }) => lower(params), out: (v) => ({ result: fit("IpfsResult", { VALUE: str(v?.Path) }) }) },
+  "ipfs.name_publish": { in: ({ params }) => lower(params), out: (v) => ({ result: fit("IpfsResult", { NAME: str(v?.Name), VALUE: str(v?.Value) }) }) },
+  "ipfs.id": {
+    in: () => ({}),
+    out: (v) => ({
+      result: fit("IpfsResult", { NAME: str(v?.ID), VALUE: str(v?.PublicKey), AGENT_VERSION: str(v?.AgentVersion), PROTOCOL_VERSION: str(v?.ProtocolVersion) }),
+      lists: { addresses: (Array.isArray(v?.Addresses) ? v.Addresses : []).map((a) => ({ VALUE: str(a) })) },
+    }),
+  },
+  "ipfs.swarm_peers": {
+    in: () => ({}),
+    out: (v) => ({ lists: { peers: objects(objectOf(v).Peers).map((p) => fit("IpfsSwarmPeer", { PEER_ID: str(p.Peer), ADDRESS: str(p.Addr), LATENCY_MS: goDurationMs(p.Latency) })) } }),
+  },
+  "ipfs.pubsub_publish": { in: ({ params, raw }) => rawBase64({ topic: str(params?.TOPIC) }, "base64", raw, "data"), out: () => ({}) },
   // node status and activity
   "node_status_read.status": {
     in: () => ({}),

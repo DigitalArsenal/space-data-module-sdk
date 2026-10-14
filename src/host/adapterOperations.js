@@ -40,6 +40,16 @@ export const ADAPTER_OPERATIONS = Object.freeze({
   "node_activity_read.activity": { capability: "node_activity_read", adapter: "node", method: "activity" },
 });
 
+/**
+ * The Go node's other ipfs operations, served by the host's ipfs adapter (options.ipfs / capabilityAdapters.ipfs) as
+ * adapter.<method>(params) or adapter.invoke(method, params): the IpfsParams record's set fields as lower-case keys
+ * ({cid, name, type, lifetime, ttl}), answered the way Kubo answers ({Objects: [{Links}]}, {Pins}, {Keys}, {ID, ...}).
+ */
+export const IPFS_ADAPTER_OPERATIONS = Object.freeze([
+  "ipfs.ls", "ipfs.pin_add", "ipfs.pin_rm", "ipfs.pin_ls", "ipfs.dag_get", "ipfs.id", "ipfs.swarm_peers",
+  "ipfs.name_resolve", "ipfs.name_publish", "ipfs.pubsub_publish",
+]);
+
 /** The capabilities those operations need. */
 export const ADAPTER_CAPABILITIES = Object.freeze(
   [...new Set(Object.values(ADAPTER_OPERATIONS).map((o) => o.capability).filter(Boolean))],

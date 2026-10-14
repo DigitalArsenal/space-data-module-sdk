@@ -113,6 +113,16 @@ Every lane receives EXACTLY the same guest-observable inputs:
   `payloadHex`, `payloadUtf8`.
 - Committed payload binaries are regenerated deterministically by
   `node fixtures/parity/generate-fixtures.mjs`.
+- `config` (an object, on the fixture or a case; the case's replaces the
+  fixture's, `{}` by default) is what a module's `plugin.getConfig` hostcall
+  answers. Every lane serves the typed hostcall bridge
+  (`space_data_module_host.call` / `response_len` / `read_response`):
+  `plugin.getConfig` answers the case's config as one `ModuleConfig` on raw
+  `config` (the answer the SDK JS hosts give), and every other operation a
+  STATUS FAILED `unsupported` $PIV answer. The WasmEdge CLI provides no host
+  imports, so the wasmedge lanes run an artifact that imports the bridge on the
+  SDK runner (single-thread or not), which replays answers the orchestrator
+  encodes with the SDK's own encoder.
 
 ## Scope and current limits (v1)
 

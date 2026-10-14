@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { WASI } from "node:wasi";
+import { createCipheriv, createPrivateKey, createPublicKey, diffieHellman, hkdfSync, sign as createSignature } from "node:crypto";
 
 import { cleanupCompilation, compileModuleFromSource } from "../src/index.js";
 import { createNodeHost } from "../src/host/nodeHost.js";
 import { createBrowserHost } from "../src/host/browserHost.js";
 import { createNodeHostSyncHostcallBridge } from "../src/host/abi.js";
 import { createWorkerModuleHarness } from "../src/host/workerModuleHarness.js";
+import { getWasmWallet } from "../src/utils/wasmCrypto.js";
 
 // The Go node's operations on the SDK JS hosts: a C++ module calls plugin.getConfig, node.*, secrets.*, storage.*,
 // p2p.* and node status / activity as typed $PIV hostcalls; NodeHost and BrowserHost answer them from their config
@@ -366,11 +368,125 @@ int t_activity(void) {
     s += std::to_string(e.first[i].TS_MS) + ":" + e.first[i].KIND.str() + ":" + e.first[i].DETAIL.str() + ":" + e.first[i].PEER_ID.str() + ",";
   return report("1 %zu %s", e.second, s.c_str());
 }
+// keyslot, protocol, ipfs, pubsub: their answers on raw "data" and the list ports
+static std::string items(const sdm_piv::Response& r) {
+  auto v = r.list<A::TextValue>("items", "TextValue");
+  std::string s;
+  for (size_t i = 0; i < v.second; ++i) s += v.first[i].VALUE.str() + ",";
+  return s;
+}
+int t_keyslot_sign(void) {
+  A::KeyslotParams p{};
+  TEXT(p, SLOT_ID, "sign-ed");
+  auto ed = sdm_piv::call("keyslot.sign", "KeyslotParams", p, {sdm_piv::raw("payload", "sign me")});
+  FAILED(ed);
+  A::KeyslotParams k{};
+  TEXT(k, SLOT_ID, "sign-k1");
+  k.ALGORITHM = A::cryptoAlgorithm_Secp256k1;
+  auto k1 = sdm_piv::call("keyslot.sign", "KeyslotParams", k, {sdm_piv::raw("payload", "sign me")});
+  FAILED(k1);
+  return report("1 %s %s", hex(ed.raw("data")).c_str(), hex(k1.raw("data")).c_str());
+}
+int t_keyslot_unwrap(void) {
+  A::KeyslotParams p{};
+  TEXT(p, SLOT_ID, "wrap");
+  // the wrapped key's parts, made by the test: "<ephemeral public key hex> <nonce hex> <ciphertext + tag hex>"
+  std::string staged("@WRAPPED@"), parts[3];
+  for (int i = 0, at = 0; i < 3; ++i) { size_t sp = staged.find(' ', at); parts[i] = staged.substr(at, sp == std::string::npos ? std::string::npos : sp - at); at = (int)sp + 1; }
+  auto unhex = [](const std::string& h) { std::string b; for (size_t i = 0; i + 1 < h.size(); i += 2) b += (char)std::stoi(h.substr(i, 2), nullptr, 16); return b; };
+  const std::string epk = unhex(parts[0]), nonce = unhex(parts[1]), ct = unhex(parts[2]);
+  auto r = sdm_piv::call("keyslot.unwrap", "KeyslotParams", p, {sdm_piv::raw("ephemeral_public_key", epk), sdm_piv::raw("nonce", nonce), sdm_piv::raw("ciphertext", ct)});
+  FAILED(r);
+  return report("1 %s", std::string(r.raw("data")).c_str());
+}
+int t_protocol(void) {
+  A::ProtocolParams p{};
+  TEXT(p, TARGET, "12D3Other");
+  TEXT(p, PROTOCOL_ID, "/sdn/echo/1.0.0");
+  p.TIMEOUT_MS = 2500;
+  const uint8_t payload[] = {0, 1, 2, 250};
+  auto r = sdm_piv::call("protocol.request", "ProtocolParams", p, {sdm_piv::raw("payload", payload, sizeof payload)});
+  FAILED(r);
+  return report("1 %s", hex(r.raw("data")).c_str());
+}
+// ipfs.cat answered as a Uint8Array, an ArrayBuffer, a typed view, base64 text and {__type: "bytes", base64}; then
+// an answer with no bytes
+int t_ipfs_cat(void) {
+  std::string s;
+  for (const char* cid : {"u8", "buffer", "view", "base64", "tagged", "none"}) {
+    A::IpfsParams p{};
+    TEXT(p, CID, cid);
+    auto r = sdm_piv::call("ipfs.cat", "IpfsParams", p);
+    s += r.ok() ? hex(r.raw("data")) : r.error_code() + ":" + r.error_message();
+    s += "|";
+  }
+  return report("1 %s", s.c_str());
+}
+int t_ipfs_dag(void) {
+  A::IpfsParams p{};
+  TEXT(p, CID, "bafy-dag");
+  auto r = sdm_piv::call("ipfs.dag_get", "IpfsParams", p);
+  FAILED(r);
+  return report("1 %s", std::string(r.raw("data")).c_str());
+}
+int t_ipfs_ls(void) {
+  A::IpfsParams p{};
+  TEXT(p, CID, "bafy-dir");
+  auto r = sdm_piv::call("ipfs.ls", "IpfsParams", p);
+  FAILED(r);
+  auto l = r.list<A::IpfsLink>("links", "IpfsLink");
+  std::string s;
+  for (size_t i = 0; i < l.second; ++i) s += l.first[i].NAME.str() + ":" + l.first[i].CID.str() + ":" + std::to_string(l.first[i].SIZE) + ":" + std::to_string(l.first[i].TYPE) + ",";
+  return report("1 %zu %s", l.second, s.c_str());
+}
+int t_ipfs_pins(void) {
+  A::IpfsParams p{};
+  TEXT(p, CID, "bafy-b");
+  auto add = sdm_piv::call("ipfs.pin_add", "IpfsParams", p);
+  FAILED(add);
+  auto rm = sdm_piv::call("ipfs.pin_rm", "IpfsParams", p);
+  FAILED(rm);
+  A::IpfsParams q{};
+  TEXT(q, TYPE, "recursive");
+  auto ls = sdm_piv::call("ipfs.pin_ls", "IpfsParams", q);
+  FAILED(ls);
+  auto pins = ls.list<A::IpfsPin>("pins", "IpfsPin");
+  std::string s;
+  for (size_t i = 0; i < pins.second; ++i) s += pins.first[i].CID.str() + ":" + pins.first[i].TYPE.str() + ",";
+  return report("1 %s %s %s", items(add).c_str(), items(rm).c_str(), s.c_str());
+}
+int t_ipfs_id(void) {
+  auto r = sdm_piv::call("ipfs.id");
+  FAILED(r);
+  const auto* x = r.result<A::IpfsResult>("IpfsResult");
+  auto a = r.list<A::TextValue>("addresses", "TextValue");
+  std::string s;
+  for (size_t i = 0; i < a.second; ++i) s += a.first[i].VALUE.str() + ",";
+  return report("1 %s %s %s %s %s", x->NAME.str().c_str(), x->VALUE.str().c_str(), x->AGENT_VERSION.str().c_str(), x->PROTOCOL_VERSION.str().c_str(), s.c_str());
+}
+int t_ipfs_swarm(void) {
+  auto r = sdm_piv::call("ipfs.swarm_peers");
+  FAILED(r);
+  auto l = r.list<A::IpfsSwarmPeer>("peers", "IpfsSwarmPeer");
+  std::string s;
+  char row[400];
+  for (size_t i = 0; i < l.second; ++i) {
+    std::snprintf(row, sizeof row, "%s:%s:%g,", l.first[i].PEER_ID.str().c_str(), l.first[i].ADDRESS.str().c_str(), l.first[i].LATENCY_MS);
+    s += row;
+  }
+  return report("1 %zu %s", l.second, s.c_str());
+}
+int t_topics(void) {
+  auto r = sdm_piv::call("pubsub.list_topics");
+  FAILED(r);
+  return report("1 %s", items(r).c_str());
+}
 }
 `;
 
 const METHODS = ["t_config", "t_big_config", "t_node", "t_secrets", "t_write", "t_query", "t_delete", "t_expire", "t_ingest", "t_sql_stream", "t_epoch", "t_sandboxed",
-  "t_surface", "t_cache_key", "t_peers", "t_standards", "t_history", "t_latest", "t_status", "t_activity", "guest_out_ptr", "guest_out_len"];
+  "t_surface", "t_cache_key", "t_peers", "t_standards", "t_history", "t_latest", "t_status", "t_activity", "t_keyslot_sign", "t_keyslot_unwrap",
+  "t_protocol", "t_ipfs_cat", "t_ipfs_dag", "t_ipfs_ls", "t_ipfs_pins", "t_ipfs_id", "t_ipfs_swarm", "t_topics", "guest_out_ptr", "guest_out_len"];
 const GRANTED = ["secrets", "storage_query", "storage_write", "storage_ingest", "p2p_read", "node_status_read", "node_activity_read"];
 
 function manifest() {
@@ -534,6 +650,91 @@ function assertRequests(calls) {
   assert.deepEqual(request("node.activity"), { limit: 3 });
 }
 
+// ---- keyslot, protocol, ipfs and pubsub: the hosts' async operations, answered through the worker harness ----------
+const hexOf = (b) => Buffer.from(b).toString("hex");
+const range = (from) => Uint8Array.from({ length: 32 }, (_, i) => from + i);
+const KEYS = { "sign-ed": range(1), "sign-k1": range(33), wrap: range(65) };
+const pkcs8 = (prefix, key) => createPrivateKey({ key: Buffer.concat([Buffer.from(prefix, "hex"), key]), format: "der", type: "pkcs8" });
+const edKey = pkcs8("302e020100300506032b657004220420", KEYS["sign-ed"]);
+// a content key wrapped to the "wrap" slot the way the Go node's keyslot.unwrap takes it: X25519 -> HKDF-SHA256 -> AES-256-GCM
+const CONTENT_KEY = "content-key-0123";
+const WRAPPED = (() => {
+  const slot = pkcs8("302e020100300506032b656e04220420", KEYS.wrap);
+  const ephemeral = pkcs8("302e020100300506032b656e04220420", range(97));
+  const epk = createPublicKey(ephemeral).export({ format: "der", type: "spki" }).subarray(-32);
+  const shared = diffieHellman({ privateKey: ephemeral, publicKey: createPublicKey(slot) });
+  const key = Buffer.from(hkdfSync("sha256", shared, Buffer.alloc(0), Buffer.from("sdn-server/keyslot.unwrap/v1"), 32));
+  const nonce = Buffer.from("0102030405060708090a0b0c", "hex");
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  const ct = Buffer.concat([cipher.update(CONTENT_KEY), cipher.final(), cipher.getAuthTag()]);
+  return `${hexOf(epk)} ${hexOf(nonce)} ${hexOf(ct)}`;
+})();
+
+function oracleAdapters(wrap) {
+  const calls = [];
+  const method = (name, answer) => (params) => { calls.push([name, params]); return wrap(answer(params)); };
+  const cat = { u8: bytes(0xca, 0xfe), buffer: bytes(1, 2).buffer, view: new Uint16Array([0x0201, 0x0403]), base64: "3q2+7w==", tagged: { __type: "bytes", base64: "AAE=" }, none: { nope: 1 } };
+  return {
+    calls,
+    wallet_sign: { get: method("wallet.get", (p) => KEYS[p.slotId]) },
+    protocol_dial: { request: method("protocol.request", (p) => Buffer.from(Buffer.from(p.payloadBase64, "base64").reverse()).toString("base64")) },
+    pubsub: { list_topics: method("pubsub.list_topics", () => ({ topics: ["sdn/wx", "sdn/omm"] })) },
+    ipfs: {
+      cat: method("ipfs.cat", (p) => cat[p.cid]),
+      dag_get: method("ipfs.dag_get", () => ({ z: 1, a: { b: "<x>&" }, Links: [] })),
+      ls: method("ipfs.ls", () => ({ Objects: [{ Hash: "bafy-dir", Links: [{ Name: "b.txt", Hash: "bafy-b", Size: 12, Type: 2 }, { Name: "sub", Hash: "bafy-sub", Size: 0, Type: 1 }] }] })),
+      // the remaining operations through invoke(method, params)
+      invoke: (name, p) => {
+        calls.push([`ipfs.${name}`, p]);
+        const answers = {
+          pin_add: { Pins: ["bafy-b", "bafy-a"] },
+          pin_rm: { Pins: ["bafy-b"] },
+          pin_ls: { Keys: { "bafy-z": { Type: "recursive" }, "bafy-a": { Type: "direct" } } },
+          id: { ID: "12D3KooWSelf", PublicKey: "CAESIA==", AgentVersion: "kubo/0.30.0", ProtocolVersion: "ipfs/0.1.0", Addresses: ["/ip4/10.0.0.1/tcp/4001", "/ip4/127.0.0.1/tcp/4001"] },
+          swarm_peers: { Peers: [{ Peer: "12D3Other", Addr: "/ip4/10.0.0.2/tcp/4001", Latency: "12.5ms" }, { Peer: "12D3Far", Addr: "/ip4/10.0.0.3/udp/4001/quic-v1", Latency: "1m2.5s" }, { Peer: "12D3Unknown", Addr: "", Latency: "n/a" }] },
+        };
+        return wrap(answers[name]);
+      },
+    },
+  };
+}
+const ORACLE_GRANTED = ["ipfs", "wallet_sign", "protocol_dial", "pubsub"];
+const EXPECTED_ORACLE = {
+  t_keyslot_unwrap: `1 ${CONTENT_KEY}`,
+  t_protocol: "1 fa020100",
+  t_ipfs_cat: "1 cafe|0102|01020304|deadbeef|0001|failed:ipfs.cat: the host answered no bytes|",
+  t_ipfs_dag: '1 {"Links":[],"a":{"b":"\\u003cx\\u003e\\u0026"},"z":1}',
+  t_ipfs_ls: "1 2 b.txt:bafy-b:12:2,sub:bafy-sub:0:1,",
+  t_ipfs_pins: "1 bafy-a,bafy-b, bafy-b, bafy-a:direct,bafy-z:recursive,",
+  t_ipfs_id: "1 12D3KooWSelf CAESIA== kubo/0.30.0 ipfs/0.1.0 /ip4/10.0.0.1/tcp/4001,/ip4/127.0.0.1/tcp/4001,",
+  t_ipfs_swarm: "1 3 12D3Other:/ip4/10.0.0.2/tcp/4001:12.5,12D3Far:/ip4/10.0.0.3/udp/4001/quic-v1:62500,12D3Unknown::0,",
+};
+async function assertOracle(label, run, calls) {
+  // keyslot.sign: ed25519 is deterministic; the secp256k1 signature (DER) is the one the host's own oracle makes for
+  // that slot and payload (it verifies with the host's crypto.secp256k1.verify)
+  const [ok, ed, k1] = (await run("t_keyslot_sign")).split(" ");
+  assert.equal(ok, "1");
+  assert.equal(ed, hexOf(cryptoSign(edKey)));
+  assert.equal(k1.slice(0, 2), "30");
+  const checker = createNodeHost({ capabilities: ["crypto_verify", "crypto_sign"] });
+  const k1Public = await checker.crypto.secp256k1.publicKeyFromPrivate(KEYS["sign-k1"]);
+  assert.deepEqual(await checker.crypto.secp256k1.verify(new TextEncoder().encode("sign me"), Buffer.from(k1, "hex"), k1Public), { result: true }, `${label} secp256k1 signature`);
+  for (const [name, expected] of Object.entries(EXPECTED_ORACLE)) assert.equal(await run(name), expected, `${label} ${name}`);
+  if (label === "BrowserHost") assert.equal(await run("t_topics"), "1 sdn/omm,sdn/wx,");
+  else assert.match(await run("t_topics"), /^0 unsupported /);
+  const request = (name) => calls.filter(([n]) => n === name).map(([, p]) => p);
+  assert.deepEqual(request("wallet.get").map((p) => p.slotId), ["sign-ed", "sign-k1", "wrap"]);
+  assert.deepEqual(request("protocol.request"), [{ target: "12D3Other", protocolId: "/sdn/echo/1.0.0", timeoutMs: 2500, payloadBase64: "AAEC+g==" }]);
+  assert.deepEqual(request("ipfs.cat").map((p) => p.cid), ["u8", "buffer", "view", "base64", "tagged", "none"]);
+  assert.deepEqual(request("ipfs.cat")[0], { cid: "u8" });
+  assert.deepEqual(request("ipfs.pin_add"), [{ cid: "bafy-b" }]);
+  assert.deepEqual(request("ipfs.pin_ls"), [{ type: "recursive" }]);
+  assert.deepEqual(request("ipfs.id"), [{}]);
+}
+function cryptoSign(key) {
+  return createSignature(null, Buffer.from("sign me"), key);
+}
+
 const HOSTS = {
   NodeHost: (options) => createNodeHost(options),
   BrowserHost: (options) => createBrowserHost(options),
@@ -541,7 +742,7 @@ const HOSTS = {
 
 let compilation;
 test.before(async () => {
-  compilation = await compileModuleFromSource({ manifest: manifest(), sourceCode: GUEST_SOURCE, language: "c++", allowUndefinedImports: true });
+  compilation = await compileModuleFromSource({ manifest: manifest(), sourceCode: GUEST_SOURCE.replace("@WRAPPED@", WRAPPED), language: "c++", allowUndefinedImports: true });
 });
 test.after(async () => { if (compilation) await cleanupCompilation(compilation); });
 
@@ -610,6 +811,33 @@ for (const [label, createHost] of Object.entries(HOSTS)) {
     try {
       for (const [name, expected] of Object.entries(EXPECTED)) assert.equal(await run(name), expected, `${label} ${name}`);
       assertRequests(a.calls);
+    } finally {
+      await harness.destroy?.();
+    }
+  });
+
+  test(`typed host adapters: ${label} answers keyslot, protocol, ipfs and pubsub through the worker harness - raw "data", the list ports, every byte form`, { timeout: 300_000 }, async (t) => {
+    if (typeof SharedArrayBuffer !== "function" || typeof Atomics !== "object") { t.skip("SharedArrayBuffer/Atomics unavailable"); return; }
+    const a = oracleAdapters((v) => new Promise((resolve) => setTimeout(() => resolve(v), 1)));
+    const host = createHost({ capabilities: ORACLE_GRANTED, wasmWallet: await getWasmWallet(), capabilityAdapters: { ipfs: a.ipfs, wallet_sign: a.wallet_sign, protocol_dial: a.protocol_dial, pubsub: a.pubsub } });
+    for (const op of ["ipfs.ls", "ipfs.pin_ls", "ipfs.swarm_peers", "ipfs.dag_get", "keyslot.unwrap", "protocol.request"]) assert.ok(host.listOperations().includes(op), op);
+    const harness = await createWorkerModuleHarness({ wasmSource: compilation.wasmBytes, host });
+    const run = async (name) => {
+      assert.equal(await harness.callExport(name), 0, name);
+      const out = await harness.readMemory(await harness.callExport("guest_out_ptr"), await harness.callExport("guest_out_len"));
+      return new TextDecoder().decode(out instanceof Uint8Array ? out : new Uint8Array(out));
+    };
+    try {
+      await assertOracle(label, run, a.calls);
+      // capability-gated: a typed not-authorized answer
+      const bare = await createWorkerModuleHarness({ wasmSource: compilation.wasmBytes, host: createHost({ capabilities: ["clock"], capabilityAdapters: { ipfs: a.ipfs } }) });
+      try {
+        assert.equal(await bare.callExport("t_ipfs_ls"), 0);
+        const out = await bare.readMemory(await bare.callExport("guest_out_ptr"), await bare.callExport("guest_out_len"));
+        assert.match(new TextDecoder().decode(out instanceof Uint8Array ? out : new Uint8Array(out)), /^0 not-authorized /);
+      } finally {
+        await bare.destroy?.();
+      }
     } finally {
       await harness.destroy?.();
     }

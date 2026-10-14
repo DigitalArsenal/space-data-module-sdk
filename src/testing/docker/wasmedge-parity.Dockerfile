@@ -34,7 +34,6 @@ RUN set -eux; \
 ENV PATH="/opt/wasmedge/bin:${PATH}" \
     LD_LIBRARY_PATH="/opt/wasmedge/lib64:/opt/wasmedge/lib"
 
-COPY native/wasmedge_wasi_threads_runner.c /tmp/sdm-wasi-threads-runner.c
 # The SDN WasmEdge 0.16.4 patch series, byte-identical to SDN's testdata/
 # (sdn-server/internal/wasmrt/SUBSTRATE.md): 01-atomic-wait, 02-stop-token,
 # 03-fault-jmp, 04-atomic-memarg-offset. Order matters (02 and 04 both touch
@@ -69,6 +68,9 @@ RUN git clone --depth 1 --branch 0.16.4 https://github.com/WasmEdge/WasmEdge.git
     && cmake --install /tmp/wasmedge-build \
     && rm -rf /tmp/wasmedge-source /tmp/wasmedge-build \
        /tmp/01-atomic-wait.patch /tmp/02-stop-token.patch /tmp/03-fault-jmp.patch /tmp/04-atomic-memarg-offset.patch
+# The runner (thread spawn + the hostcall bridge) last, so a runner change
+# reuses the patched WasmEdge build layer above.
+COPY native/wasmedge_wasi_threads_runner.c /tmp/sdm-wasi-threads-runner.c
 RUN cc /tmp/sdm-wasi-threads-runner.c -std=c11 -O2 -pthread -Wall -Wextra -Werror \
     -I/opt/sdm-wasmedge/include -L/opt/sdm-wasmedge/lib64 -L/opt/sdm-wasmedge/lib -lwasmedge \
     -Wl,--disable-new-dtags,-rpath,/opt/sdm-wasmedge/lib64,-rpath,/opt/sdm-wasmedge/lib \

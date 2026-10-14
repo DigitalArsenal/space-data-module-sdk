@@ -2,6 +2,11 @@
 // CLI enables atomics but does not implement wasi.thread-spawn. Like the SDN
 // Go host, use a fresh instance per worker, shared memory, and ONE executor:
 // atomic.wait/notify waiters belong to the executor in this runtime revision.
+// It also serves the typed hostcall bridge (space_data_module_host.call /
+// response_len / read_response) of a module that imports it, single-threaded
+// or not: the parity orchestrator stages the $PIV answers (plugin.getConfig ->
+// the case's ModuleConfig, every other operation STATUS FAILED "unsupported"),
+// encoded by the SDK's own encoder, and this runner replays them.
 #define _POSIX_C_SOURCE 200809L
 #include <wasmedge/wasmedge.h>
 #include <pthread.h>
@@ -30,6 +35,15 @@ typedef struct {
   bool failed;
   bool exited;
 } Threads;
+
+typedef struct {
+  uint8_t *data;
+  uint32_t size;
+} Bytes;
+
+// The staged answers; each thread reads back the answer to its own last call.
+static Bytes hostcall_config, hostcall_unsupported;
+static _Thread_local const Bytes *hostcall_response;
 
 static WasmEdge_String name(const char *s) {
   return WasmEdge_StringWrap(s, (uint32_t)strlen(s));
@@ -150,6 +164,121 @@ static WasmEdge_ModuleInstanceContext *memory_import(Threads *g) {
   return env;
 }
 
+static Bytes read_answer(const char *path) {
+  FILE *file = fopen(path, "rb");
+  if (!file) { fprintf(stderr, "cannot open hostcall answer %s\n", path); exit(2); }
+  Bytes bytes = {0};
+  if (fseek(file, 0, SEEK_END) != 0) exit(2);
+  long size = ftell(file);
+  if (size <= 0 || size > (1L << 30) || fseek(file, 0, SEEK_SET) != 0) { fprintf(stderr, "bad hostcall answer %s\n", path); exit(2); }
+  bytes.size = (uint32_t)size;
+  bytes.data = malloc(bytes.size);
+  if (!bytes.data || fread(bytes.data, 1, bytes.size, file) != bytes.size) { fprintf(stderr, "cannot read hostcall answer %s\n", path); exit(2); }
+  fclose(file);
+  return bytes;
+}
+
+// call(op_ptr, op_len, payload_ptr, payload_len) -> status: the answer is chosen by the operation name.
+static WasmEdge_Result hostcall_call(void *data,
+    const WasmEdge_CallingFrameContext *frame, const WasmEdge_Value *in,
+    WasmEdge_Value *out) {
+  (void)data;
+  static const char config_op[] = "plugin.getConfig";
+  WasmEdge_MemoryInstanceContext *memory = WasmEdge_CallingFrameGetMemoryInstance(frame, 0);
+  uint32_t op_ptr = (uint32_t)WasmEdge_ValueGetI32(in[0]);
+  uint32_t op_len = (uint32_t)WasmEdge_ValueGetI32(in[1]);
+  const uint8_t *op = memory && op_len ? WasmEdge_MemoryInstanceGetPointerConst(memory, op_ptr, op_len) : NULL;
+  bool config = op && op_len == sizeof(config_op) - 1 && memcmp(op, config_op, op_len) == 0;
+  hostcall_response = config ? &hostcall_config : &hostcall_unsupported;
+  out[0] = WasmEdge_ValueGenI32(0);
+  return WasmEdge_Result_Success;
+}
+
+static WasmEdge_Result hostcall_response_len(void *data,
+    const WasmEdge_CallingFrameContext *frame, const WasmEdge_Value *in,
+    WasmEdge_Value *out) {
+  (void)data; (void)frame; (void)in;
+  out[0] = WasmEdge_ValueGenI32(hostcall_response ? (int32_t)hostcall_response->size : 0);
+  return WasmEdge_Result_Success;
+}
+
+// read_response(dst_ptr, dst_len) -> bytes copied (out of bounds traps, as in the JS bridge).
+static WasmEdge_Result hostcall_read_response(void *data,
+    const WasmEdge_CallingFrameContext *frame, const WasmEdge_Value *in,
+    WasmEdge_Value *out) {
+  (void)data;
+  WasmEdge_MemoryInstanceContext *memory = WasmEdge_CallingFrameGetMemoryInstance(frame, 0);
+  int32_t dst_len = WasmEdge_ValueGetI32(in[1]);
+  uint32_t size = hostcall_response ? hostcall_response->size : 0;
+  if (dst_len < 0) return WasmEdge_Result_Fail;
+  uint32_t n = (uint32_t)dst_len < size ? (uint32_t)dst_len : size;
+  if (n) {
+    if (!memory) return WasmEdge_Result_Fail;
+    WasmEdge_Result result = WasmEdge_MemoryInstanceSetData(memory, hostcall_response->data, (uint32_t)WasmEdge_ValueGetI32(in[0]), n);
+    if (!WasmEdge_ResultOK(result)) return result;
+  }
+  out[0] = WasmEdge_ValueGenI32((int32_t)n);
+  return WasmEdge_Result_Success;
+}
+
+static WasmEdge_Result hostcall_clear_response(void *data,
+    const WasmEdge_CallingFrameContext *frame, const WasmEdge_Value *in,
+    WasmEdge_Value *out) {
+  (void)data; (void)frame; (void)in;
+  hostcall_response = NULL;
+  out[0] = WasmEdge_ValueGenI32(0);
+  return WasmEdge_Result_Success;
+}
+
+static WasmEdge_Result hostcall_last_status(void *data,
+    const WasmEdge_CallingFrameContext *frame, const WasmEdge_Value *in,
+    WasmEdge_Value *out) {
+  (void)data; (void)frame; (void)in;
+  out[0] = WasmEdge_ValueGenI32(0);
+  return WasmEdge_Result_Success;
+}
+
+static void add_host_function(WasmEdge_ModuleInstanceContext *module, const char *field,
+    uint32_t params, WasmEdge_HostFunc_t function) {
+  WasmEdge_ValType i32[4] = {WasmEdge_ValTypeGenI32(), WasmEdge_ValTypeGenI32(),
+                             WasmEdge_ValTypeGenI32(), WasmEdge_ValTypeGenI32()};
+  WasmEdge_FunctionTypeContext *type = WasmEdge_FunctionTypeCreate(i32, params, i32, 1);
+  WasmEdge_FunctionInstanceContext *instance = WasmEdge_FunctionInstanceCreate(type, function, NULL, 0);
+  WasmEdge_FunctionTypeDelete(type);
+  if (!instance) exit(1);
+  WasmEdge_ModuleInstanceAddFunction(module, name(field), instance);
+}
+
+// The bridge, registered when the module imports space_data_module_host; NULL otherwise.
+static WasmEdge_ModuleInstanceContext *hostcall_import(Threads *g,
+    const char *config_path, const char *unsupported_path) {
+  uint32_t count = WasmEdge_ASTModuleListImportsLength(g->ast);
+  const WasmEdge_ImportTypeContext **imports = calloc(count, sizeof(*imports));
+  if (count && !imports) exit(1);
+  WasmEdge_ASTModuleListImports(g->ast, imports, count);
+  bool bridged = false;
+  for (uint32_t i = 0; i < count; ++i) {
+    if (WasmEdge_StringIsEqual(WasmEdge_ImportTypeGetModuleName(imports[i]), name("space_data_module_host"))) bridged = true;
+  }
+  free(imports);
+  if (!bridged) return NULL;
+  if (!config_path || !unsupported_path) {
+    fprintf(stderr, "module imports space_data_module_host: pass --sdm-hostcall-config and --sdm-hostcall-unsupported\n");
+    exit(2);
+  }
+  hostcall_config = read_answer(config_path);
+  hostcall_unsupported = read_answer(unsupported_path);
+  WasmEdge_ModuleInstanceContext *host = WasmEdge_ModuleInstanceCreate(name("space_data_module_host"));
+  if (!host) exit(1);
+  add_host_function(host, "call", 4, hostcall_call);
+  add_host_function(host, "response_len", 0, hostcall_response_len);
+  add_host_function(host, "read_response", 2, hostcall_read_response);
+  add_host_function(host, "clear_response", 0, hostcall_clear_response);
+  add_host_function(host, "last_status_code", 0, hostcall_last_status);
+  require_result("register hostcall bridge", WasmEdge_ExecutorRegisterImport(g->executor, g->store, host));
+  return host;
+}
+
 // Direct calls use the same PIV request/response bytes as commands. Stage the
 // request through the public allocator, then monitor the direct call with the
 // same worker-group lifecycle as _start. No guest ABI is reimplemented. The
@@ -217,7 +346,7 @@ int main(int argc, char **argv) {
     return 2;
   }
   if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-    printf("wasmedge version %s\nsdm-wasi-threads-runner 1\n",
+    printf("wasmedge version %s\nsdm-wasi-threads-runner 2\n",
            WasmEdge_VersionGet());
     return 0;
   }
@@ -229,11 +358,20 @@ int main(int argc, char **argv) {
   uint32_t env_count = 0;
   bool stats = false;
   bool force_direct = false;
+  const char *hostcall_config_path = NULL, *hostcall_unsupported_path = NULL;
   int first = 1;
   for (; first < argc; ++first) {
     if (strcmp(argv[first], "--enable-threads") == 0) continue;
     if (strcmp(argv[first], "--sdm-thread-stats") == 0) { stats = true; continue; }
     if (strcmp(argv[first], "--sdm-direct") == 0) { force_direct = true; continue; }
+    if (strcmp(argv[first], "--sdm-hostcall-config") == 0 && first + 1 < argc) {
+      hostcall_config_path = argv[++first];
+      continue;
+    }
+    if (strcmp(argv[first], "--sdm-hostcall-unsupported") == 0 && first + 1 < argc) {
+      hostcall_unsupported_path = argv[++first];
+      continue;
+    }
     if (strcmp(argv[first], "--env") == 0 && first + 1 < argc) {
       envs[env_count++] = argv[++first];
       continue;
@@ -241,7 +379,7 @@ int main(int argc, char **argv) {
     break;
   }
   if (first >= argc || argv[first][0] == '-') {
-    fprintf(stderr, "usage: %s [--sdm-direct] [--env NAME=VALUE] module.wasm [args...]\n", argv[0]);
+    fprintf(stderr, "usage: %s [--sdm-direct] [--sdm-hostcall-config FILE --sdm-hostcall-unsupported FILE] [--env NAME=VALUE] module.wasm [args...]\n", argv[0]);
     free(envs);
     return 2;
   }
@@ -262,6 +400,7 @@ int main(int argc, char **argv) {
   require_result("register WASI", WasmEdge_ExecutorRegisterImport(
       g.executor, g.store, wasi));
   WasmEdge_ModuleInstanceContext *env = memory_import(&g);
+  WasmEdge_ModuleInstanceContext *host = hostcall_import(&g, hostcall_config_path, hostcall_unsupported_path);
   WasmEdge_ModuleInstanceContext *threads = WasmEdge_ModuleInstanceCreate(name("wasi"));
   WasmEdge_ValType i32 = WasmEdge_ValTypeGenI32();
   WasmEdge_FunctionTypeContext *type = WasmEdge_FunctionTypeCreate(&i32, 1, &i32, 1);
@@ -341,6 +480,9 @@ int main(int argc, char **argv) {
   WasmEdge_ModuleInstanceDelete(instance);
   WasmEdge_ModuleInstanceDelete(threads);
   if (env) WasmEdge_ModuleInstanceDelete(env);
+  if (host) WasmEdge_ModuleInstanceDelete(host);
+  free(hostcall_config.data);
+  free(hostcall_unsupported.data);
   WasmEdge_ModuleInstanceDelete(wasi);
   WasmEdge_StoreDelete(g.store);
   WasmEdge_ASTModuleDelete(g.ast);

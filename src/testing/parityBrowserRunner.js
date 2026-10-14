@@ -7,12 +7,13 @@
  * realities, which is exactly what this lane exists to catch.
  *
  * Protocol with the lane server (same origin):
- *   GET  /plan        -> {threadEnvVar, cases:[{id, stdinBase64, env, args, threadCounts}]}
+ *   GET  /plan        -> {threadEnvVar, cases:[{id, stdinBase64, env, args, threadCounts, config}]}
  *   GET  /module.wasm -> the ONE isomorphic artifact
  *   POST /done        -> {runs:[...]} on completion or {fatal} on runner failure
  */
 
 import { createBrowserModuleHarness } from "../host/browserModuleHarness.js";
+import { parityHostcallDispatch } from "./parityHostcalls.js";
 
 const OK = "ok";
 const GUEST_ERROR = "guest-error";
@@ -107,6 +108,9 @@ export async function runParityPlanInBrowser({ baseUrl = "" } = {}) {
           maxThreads: threadCount,
           wasiThreadWorkerUrl: new URL("/wasi-thread-worker.js", globalThis.location.href).href,
           args: planCase.args,
+          // the hostcall bridge (an artifact that imports it): plugin.getConfig answers the case's config, any other
+          // operation is unsupported - the answers the WasmEdge lanes' runner replays
+          hostcallDispatch: parityHostcallDispatch(planCase.config),
           env: {
             ...planCase.env,
             [plan.threadEnvVar]: String(threadCount),

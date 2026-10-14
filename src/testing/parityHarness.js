@@ -162,6 +162,14 @@ function normalizeEnv(env, label) {
   return normalized;
 }
 
+function normalizeConfig(config, label) {
+  if (config === undefined || config === null) return null;
+  if (typeof config !== "object" || Array.isArray(config)) {
+    throw new Error(`Parity fixture ${label}: config must be an object.`);
+  }
+  return Object.freeze(structuredClone(config));
+}
+
 function normalizeExpect(expect, label) {
   if (expect === undefined || expect === null) return null;
   const value = String(expect);
@@ -208,9 +216,14 @@ function normalizeThreadCounts(threadCounts, label) {
  *     id,
  *     request?: {methodId, inputs:[{portId, payloadFile|payloadBase64|payloadHex|payloadUtf8, typeRef?}], ...},
  *     stdinFile? | stdinBase64? | stdinHex? | stdinUtf8?,
- *     env?, args?, expect?: "ok"|"guest-error"|"trap", threadCounts?
- *   }]
+ *     env?, args?, expect?: "ok"|"guest-error"|"trap", threadCounts?,
+ *     config?
+ *   }],
+ *   config?
  * }
+ *
+ * config (an object; the case's replaces the fixture's, default {}) is what
+ * the module's plugin.getConfig hostcall answers in every lane.
  */
 export async function normalizeParityFixture(fixture, options = {}) {
   if (!fixture || typeof fixture !== "object") {
@@ -222,6 +235,7 @@ export async function normalizeParityFixture(fixture, options = {}) {
   const fixtureThreadCounts =
     normalizeThreadCounts(fixture.threadCounts, name) ?? DEFAULT_THREAD_COUNTS;
   const fixtureEnv = normalizeEnv(fixture.env, name);
+  const fixtureConfig = normalizeConfig(fixture.config, name) ?? {};
   const fixtureArgs = Array.isArray(fixture.args)
     ? fixture.args.map(String)
     : [];
@@ -281,6 +295,7 @@ export async function normalizeParityFixture(fixture, options = {}) {
           Array.isArray(caseSpec.args) ? caseSpec.args.map(String) : fixtureArgs,
         ),
         expect: normalizeExpect(caseSpec.expect, label),
+        config: normalizeConfig(caseSpec.config, label) ?? fixtureConfig,
         threadCounts:
           normalizeThreadCounts(caseSpec.threadCounts, label) ??
           fixtureThreadCounts,

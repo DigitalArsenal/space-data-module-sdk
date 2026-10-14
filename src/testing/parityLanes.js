@@ -32,6 +32,7 @@ import { ExitClass, assertWasmEdgeVersionMatchesPin } from "./parityHarness.js";
 import { normalizeWasmEdgeOutcome } from "./wasmedgeOutput.js";
 import { isWasiThreadsModule } from "../host/wasiThreadHost.js";
 import { resolveWasmEdgeWasiThreadsRunner } from "./buildWasmEdgeRunner.js";
+import { PARITY_HOSTCALL_FILES, encodeParityHostcallAnswers, importsHostcallBridge } from "./parityHostcalls.js";
 
 const execFile = promisify(execFileCallback);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -134,15 +135,33 @@ function wasmedgeInvocationArgs(planCase, plan, threadCount) {
 // direct surface of an artifact with a command entry; the WasmEdge CLI runs
 // `_start` or nothing, so a direct-surface comparison on it would silently
 // compare two different surfaces.
-function surfaceArgs(context, threaded, lane) {
+function surfaceArgs(context, useRunner, lane) {
   if (context.surface !== "direct") return [];
-  if (!threaded) {
+  if (!useRunner) {
     throw new Error(
       `${lane}: the WasmEdge CLI serves only the command surface of a single-thread artifact; ` +
         "it cannot take part in a direct-surface parity run.",
     );
   }
   return ["--sdm-direct"];
+}
+
+// How a WasmEdge lane runs the artifact. The plain CLI provides no host imports,
+// so an artifact that imports the hostcall bridge (space_data_module_host) runs
+// on the SDK runner too, threaded or not; the runner replays the staged answers.
+async function wasmEdgeArtifact(context) {
+  const wasmModule = await WebAssembly.compile(context.loadableBytes ?? context.wasmBytes);
+  const threaded = isWasiThreadsModule(wasmModule);
+  const bridged = importsHostcallBridge(wasmModule);
+  return { threaded, bridged, useRunner: threaded || bridged };
+}
+
+// Stage the case's hostcall answers beside the module; the runner flags that name them.
+async function stageHostcallAnswers(workdir, planCase) {
+  const answers = encodeParityHostcallAnswers(planCase.config ?? {});
+  await writeFile(path.join(workdir, PARITY_HOSTCALL_FILES.config), answers.config);
+  await writeFile(path.join(workdir, PARITY_HOSTCALL_FILES.unsupported), answers.unsupported);
+  return ["--sdm-hostcall-config", PARITY_HOSTCALL_FILES.config, "--sdm-hostcall-unsupported", PARITY_HOSTCALL_FILES.unsupported];
 }
 
 async function stageModuleWorkdir(context, label) {
@@ -179,8 +198,8 @@ export async function resolveWasmEdgeBinary(context = {}) {
 }
 
 export async function runNativeWasmEdgeLane(context) {
-  const threaded = isWasiThreadsModule(await WebAssembly.compile(context.loadableBytes ?? context.wasmBytes));
-  const binary = threaded
+  const { threaded, bridged, useRunner } = await wasmEdgeArtifact(context);
+  const binary = useRunner
     ? await resolveWasmEdgeWasiThreadsRunner(context)
     : await resolveWasmEdgeBinary(context);
   let versionOutput;
@@ -198,16 +217,18 @@ export async function runNativeWasmEdgeLane(context) {
     `native binary ${binary}`,
   );
 
-  const directArgs = surfaceArgs(context, threaded, "native WasmEdge lane");
+  const directArgs = surfaceArgs(context, useRunner, "native WasmEdge lane");
   const workdir = await stageModuleWorkdir(context, "native");
   const runs = [];
   try {
     for (const planCase of context.plan.cases) {
+      const hostcallArgs = bridged ? await stageHostcallAnswers(workdir, planCase) : [];
       for (const threadCount of planCase.threadCounts) {
         const outcome = await spawnWithStdin(
           binary,
           [...(threaded ? ["--sdm-thread-stats"] : []),
             ...directArgs,
+            ...hostcallArgs,
             ...wasmedgeInvocationArgs(planCase, context.plan, threadCount)],
           {
             cwd: workdir,
@@ -295,8 +316,8 @@ export async function ensureDockerParityImage(context) {
 }
 
 export async function runDockerWasmEdgeLane(context) {
-  const threaded = isWasiThreadsModule(await WebAssembly.compile(context.loadableBytes ?? context.wasmBytes));
-  if (threaded) context = { ...context, pin: { ...context.pin, dockerImage: context.pin.dockerRunnerImage } };
+  const { threaded, bridged, useRunner } = await wasmEdgeArtifact(context);
+  if (useRunner) context = { ...context, pin: { ...context.pin, dockerImage: context.pin.dockerRunnerImage } };
   const dockerBinary = context.dockerBinary ?? "docker";
   try {
     await execFile(dockerBinary, ["--version"]);
@@ -305,13 +326,14 @@ export async function runDockerWasmEdgeLane(context) {
       `docker WasmEdge lane: cannot execute "${dockerBinary}" (${error.message}).`,
     );
   }
-  const directArgs = surfaceArgs(context, threaded, "docker WasmEdge lane");
+  const directArgs = surfaceArgs(context, useRunner, "docker WasmEdge lane");
   const image = await ensureDockerParityImage(context);
 
   const workdir = await stageModuleWorkdir(context, "docker");
   const runs = [];
   try {
     for (const planCase of context.plan.cases) {
+      const hostcallArgs = bridged ? await stageHostcallAnswers(workdir, planCase) : [];
       for (const threadCount of planCase.threadCounts) {
         const dockerArgs = [
           "run",
@@ -327,11 +349,12 @@ export async function runDockerWasmEdgeLane(context) {
         if (context.dockerPlatform) {
           dockerArgs.push("--platform", String(context.dockerPlatform));
         }
-        if (threaded) dockerArgs.push("--entrypoint", "/opt/wasmedge/bin/sdm-wasi-threads-runner");
+        if (useRunner) dockerArgs.push("--entrypoint", "/opt/wasmedge/bin/sdm-wasi-threads-runner");
         dockerArgs.push(
           image,
           ...(threaded ? ["--sdm-thread-stats"] : []),
           ...directArgs,
+          ...hostcallArgs,
           ...wasmedgeInvocationArgs(planCase, context.plan, threadCount),
         );
         const outcome = await spawnWithStdin(dockerBinary, dockerArgs, {
@@ -422,6 +445,7 @@ function browserPlanPayload(context) {
       env: planCase.env,
       args: [MODULE_BASENAME, ...planCase.args],
       threadCounts: planCase.threadCounts,
+      config: planCase.config ?? {},
     })),
   });
 }
