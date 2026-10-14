@@ -76,6 +76,8 @@ export async function createStandaloneHarness(runtimeKind, wasmPath, options = {
       args: options.args,
       env: options.env,
       cwd: options.cwd,
+      // plugin.getConfig answers the same config the browser lane's host serves (hostOptions.config).
+      config: options.config ?? options.hostOptions?.config ?? options.host?.plugin?.getConfig?.(),
     });
   }
 

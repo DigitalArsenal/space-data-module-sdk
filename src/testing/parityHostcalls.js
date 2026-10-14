@@ -27,8 +27,11 @@ export function parityHostcallDispatch(config) {
   };
 }
 
-/** The $PIV answers the WasmEdge runner replays for one case: {config, unsupported} bytes. */
-export function encodeParityHostcallAnswers(config) {
+/**
+ * The $PIV answers the WasmEdge runner replays for one case: {config, unsupported} bytes. `message` is the unsupported
+ * failure's text (the parity harness's by default).
+ */
+export function encodeParityHostcallAnswers(config, message = PARITY_UNSUPPORTED_MESSAGE) {
   const failure = (error) => encodeHostCallResult({ ok: false, error: { code: hostcallErrorCode(error), message: String(error?.message ?? error) } });
   let answer;
   try {
@@ -36,5 +39,5 @@ export function encodeParityHostcallAnswers(config) {
   } catch (error) {
     answer = failure(error);
   }
-  return { config: answer, unsupported: failure(unsupported()) };
+  return { config: answer, unsupported: failure(Object.assign(new Error(message), { hostcallCode: "unsupported" })) };
 }
