@@ -1151,11 +1151,15 @@ test("deployment authorizations are ECDSA over sha256(bytes), hashed once: node:
   assert.equal(await verifyAuthorization({ envelope: signed, verifier }), true);
   assert.equal(nodeVerifies(canonicalBytes(signed.payload), signed), true);
 
-  // a double-hashed signature (a sha256 digest through the wallet's secp256k1.sign, which hashes again - what SDKs
-  // before 0.9.5 made) is ECDSA over sha256(sha256(bytes)): refused
+  // a double-hashed signature (what SDKs before 0.9.5 made) is ECDSA over sha256(sha256(bytes)): refused. It is
+  // built here as exactly that, signRecoverable over the explicit sha256(sha256(bytes)) digest; nothing passes a
+  // digest to the wallet's secp256k1.sign, which hashes its input
   const doubled = await signAuthorization({
     authorization,
-    signer: { algorithm: "secp256k1-sha256", curve: "secp256k1", publicKeyHex, sign: async (bytes) => wallet.curves.secp256k1.sign(sha256(bytes), privateKey) },
+    signer: {
+      algorithm: "secp256k1-sha256", curve: "secp256k1", publicKeyHex,
+      sign: async (bytes) => wallet.curves.secp256k1.signRecoverable(sha256(sha256(bytes)), privateKey).signature,
+    },
   });
   assert.equal(nodeVerifies(sha256(canonicalBytes(doubled.payload)), doubled), true, "the doubled form is ECDSA over sha256(sha256(bytes))");
   assert.equal(nodeVerifies(canonicalBytes(doubled.payload), doubled), false);
