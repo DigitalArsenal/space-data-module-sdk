@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.6
+
+### hd-wallet-wasm 2.1.0: every ECDSA signature hashes once
+
+- `hd-wallet-wasm` is pinned at exactly 2.1.0. In 2.1.0 every ECDSA signature the wallet makes hashes once: EPM
+  secp256k1 signatures are strict DER over SHA-256 of the content, chain proofs use the Bitcoin signed-message and
+  EIP-191 hashes, and the sdn-plugin signs the message. `curves.*.sign` / `verify` hash their input (secp256k1 and
+  P-256 SHA-256, P-384 SHA-384); `secp256k1.signRecoverable` / `recover` take the 32-byte hash as given. The SDK's
+  0.9.5 single-hash paths are unchanged.
+- The docs' consumer assets load hd-wallet-ui 2.1.0 (the public client, style and callback bytes are identical to
+  2.0.28, so the SRI digests are unchanged).
+- The double-hash negative control in the deployment-authorization test builds ECDSA over sha256(sha256(bytes))
+  with `signRecoverable` over that explicit digest, instead of passing a digest to `secp256k1.sign`.
+
 ## 0.9.5
 
 ### secp256k1 hashes once, everywhere
