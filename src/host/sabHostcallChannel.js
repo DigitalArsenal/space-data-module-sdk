@@ -65,6 +65,8 @@ function serializeChannelError(error, operation) {
     code: error?.code ?? null,
     operation: error?.operation ?? operation ?? null,
     capability: error?.capability ?? null,
+    // the typed hostcall's error code (typedDispatch.js hostcallErrorCode), so it survives the channel
+    hostcallCode: error?.hostcallCode ?? null,
   };
 }
 
@@ -141,6 +143,7 @@ export function createSabHostcallClientDispatch(options = {}) {
       error.code = value?.code ?? null;
       error.operation = value?.operation ?? operation;
       error.capability = value?.capability ?? null;
+      if (value?.hostcallCode) error.hostcallCode = value.hostcallCode;
       throw error;
     }
     return value;

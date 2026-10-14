@@ -1397,11 +1397,12 @@ export async function protectModuleArtifact(options = {}) {
     publicKeyHex: bytesToHex(identity.signingKey.publicKey),
     derivationPath: identity.signingKey.path,
     keyId: artifactId,
+    // the digest as given: signRecoverable signs its 32-byte input, secp256k1.sign would hash it again
     async signDigest(digest) {
-      return identity.wallet.curves.secp256k1.sign(
+      return identity.wallet.curves.secp256k1.signRecoverable(
         digest,
         identity.signingKey.privateKey,
-      );
+      ).signature;
     },
   });
 

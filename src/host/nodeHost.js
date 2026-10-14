@@ -29,7 +29,9 @@ import {
   hkdfBytes,
   secp256k1PublicKey,
   secp256k1SignDigest,
+  secp256k1SignMessage,
   secp256k1VerifyDigest,
+  secp256k1VerifyMessage,
   sha512Bytes,
   x25519PublicKey,
   x25519SharedSecret,
@@ -2521,13 +2523,12 @@ export class NodeHost {
             ),
         ),
       // Message-based ECDSA-DER contract (parity with the Go/C++ hosts and the
-      // synchronous host-crypto ABI): sha256 the message internally, then use
-      // the digest-based primitives with DER <-> raw conversion.
+      // synchronous host-crypto ABI): ECDSA over sha256(message) - the wallet's
+      // message API hashes once - with DER <-> raw conversion.
       sign: async (message, privateKey) =>
         this.#withCapability("crypto_sign", "crypto.secp256k1.sign", async () => {
-          const digest = await sha256Bytes(toUint8Array(message));
-          const rawSignature = await secp256k1SignDigest(
-            toUint8Array(digest),
+          const rawSignature = await secp256k1SignMessage(
+            toUint8Array(message),
             toUint8Array(privateKey),
           );
           return rawSignatureToDer(rawSignature);
@@ -2537,9 +2538,8 @@ export class NodeHost {
           "crypto_verify",
           "crypto.secp256k1.verify",
           async () => {
-            const digest = await sha256Bytes(toUint8Array(message));
-            const result = await secp256k1VerifyDigest(
-              toUint8Array(digest),
+            const result = await secp256k1VerifyMessage(
+              toUint8Array(message),
               derSignatureToRaw(signature),
               toUint8Array(publicKey),
             );
@@ -2651,8 +2651,9 @@ export class NodeHost {
           `keyslot "${slotId}" is not a 32-byte secp256k1 private key`,
         );
       }
-      const digest = await sha256Bytes(payload);
-      const rawSignature = await secp256k1SignDigest(digest, keyMaterial);
+      // ECDSA over sha256(payload), as the Go node's ecdsa.Sign(sha256(payload)):
+      // the wallet's message API hashes once.
+      const rawSignature = await secp256k1SignMessage(payload, keyMaterial);
       return {
         signature: bytesToBase64(rawSignatureToDer(rawSignature)),
         algorithm: "secp256k1",

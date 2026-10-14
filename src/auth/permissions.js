@@ -52,6 +52,14 @@ export async function createDeploymentAuthorization(options = {}) {
   };
 }
 
+// Authorization signatures ("secp256k1-sha256"): ECDSA over sha256(canonical bytes), hashed exactly once; the
+// signature is 64 raw bytes (r || s). node:crypto verifies it with crypto.verify("sha256", bytes, ...).
+
+/**
+ * A signer for authorizations: `signDigest(digest)` signs the 32-byte sha256 of the canonical bytes AS GIVEN, with no
+ * further hashing - e.g. hd-wallet-wasm's secp256k1.signRecoverable(digest, key).signature, or the SDK's
+ * secp256k1SignDigest. Never hd-wallet-wasm's secp256k1.sign(digest): it hashes its input again.
+ */
 export function createHdWalletSigner(options = {}) {
   if (typeof options.signDigest !== "function") {
     throw new Error("createHdWalletSigner requires signDigest.");
@@ -73,6 +81,10 @@ export function createHdWalletSigner(options = {}) {
   };
 }
 
+/**
+ * A verifier for authorizations: `verifyDigest(digest, signature, header, payload)` checks a signature over the
+ * 32-byte sha256 of the canonical bytes AS GIVEN, with no further hashing (e.g. the SDK's secp256k1VerifyDigest).
+ */
 export function createHdWalletVerifier(options = {}) {
   if (typeof options.verifyDigest !== "function") {
     throw new Error("createHdWalletVerifier requires verifyDigest.");
@@ -80,7 +92,7 @@ export function createHdWalletVerifier(options = {}) {
   return {
     async verify(bytes, signature, header, payload) {
       const digest = await sha256Bytes(bytes);
-      return options.verifyDigest(digest, signature, header, payload);
+      return Boolean(await options.verifyDigest(digest, signature, header, payload));
     },
   };
 }

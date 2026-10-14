@@ -316,7 +316,7 @@ async function keyslotSign(walletSignAdapter, wasmWallet, params = {}) {
   }
 
   if (algorithm === "secp256k1") {
-    if (!wasmWallet?.utils?.sha256 || !wasmWallet?.curves?.secp256k1?.sign) {
+    if (!wasmWallet?.curves?.secp256k1?.sign) {
       throw new Error(
         "Browser host keyslot.sign requires a preloaded wasmWallet.",
       );
@@ -326,9 +326,9 @@ async function keyslotSign(walletSignAdapter, wasmWallet, params = {}) {
         `keyslot "${slotId}" is not a 32-byte secp256k1 private key`,
       );
     }
-    const digest = new Uint8Array(wasmWallet.utils.sha256(payload));
+    // ECDSA over sha256(payload), as the Go node: the wallet's sign hashes once.
     const rawSignature = new Uint8Array(
-      wasmWallet.curves.secp256k1.sign(digest, keyMaterial),
+      wasmWallet.curves.secp256k1.sign(payload, keyMaterial),
     );
     return {
       signature: bytesToBase64(rawSignatureToDer(rawSignature)),
@@ -918,37 +918,26 @@ export class BrowserHost {
         },
         sign: (message, privateKey) => {
           this.#assertCapability("crypto_sign", "crypto.secp256k1.sign");
-          if (
-            !wasmWallet?.utils?.sha256 ||
-            !wasmWallet?.curves?.secp256k1?.sign
-          ) {
+          if (!wasmWallet?.curves?.secp256k1?.sign) {
             throw new Error(
               "Browser host crypto.secp256k1.sign requires a preloaded wasmWallet.",
             );
           }
-          const digest = new Uint8Array(
-            wasmWallet.utils.sha256(toUint8Array(message)),
-          );
+          // ECDSA over sha256(message): the wallet's sign hashes once
           const rawSignature = new Uint8Array(
-            wasmWallet.curves.secp256k1.sign(digest, toUint8Array(privateKey)),
+            wasmWallet.curves.secp256k1.sign(toUint8Array(message), toUint8Array(privateKey)),
           );
           return rawSignatureToDer(rawSignature);
         },
         verify: (message, signature, publicKey) => {
           this.#assertCapability("crypto_verify", "crypto.secp256k1.verify");
-          if (
-            !wasmWallet?.utils?.sha256 ||
-            !wasmWallet?.curves?.secp256k1?.verify
-          ) {
+          if (!wasmWallet?.curves?.secp256k1?.verify) {
             throw new Error(
               "Browser host crypto.secp256k1.verify requires a preloaded wasmWallet.",
             );
           }
-          const digest = new Uint8Array(
-            wasmWallet.utils.sha256(toUint8Array(message)),
-          );
           const result = wasmWallet.curves.secp256k1.verify(
-            digest,
+            toUint8Array(message),
             derSignatureToRaw(signature),
             toUint8Array(publicKey),
           );

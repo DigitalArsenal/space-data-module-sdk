@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { WASI } from "node:wasi";
-import { createCipheriv, createPrivateKey, createPublicKey, diffieHellman, hkdfSync, sign as createSignature } from "node:crypto";
+import { createCipheriv, createHash, createPrivateKey, createPublicKey, diffieHellman, hkdfSync, sign as createSignature, verify as verifySignature } from "node:crypto";
 
 import { cleanupCompilation, compileModuleFromSource } from "../src/index.js";
 import { createNodeHost } from "../src/host/nodeHost.js";
@@ -387,6 +387,35 @@ int t_keyslot_sign(void) {
   FAILED(k1);
   return report("1 %s %s", hex(ed.raw("data")).c_str(), hex(k1.raw("data")).c_str());
 }
+// crypto.secp256k1.*: the key and node:crypto's signatures, made by the test: "<private> <public 65> <public 33>
+// <digest> <DER over sha256(message)> <raw over sha256(message)> <DER over sha256(sha256(message))>" (hex): the last a
+// double-hashed signature, which must be refused. Reports what each operation answers.
+static std::string unhex(const std::string& h) {
+  std::string b;
+  for (size_t i = 0; i + 1 < h.size(); i += 2) b += (char)std::stoi(h.substr(i, 2), nullptr, 16);
+  return b;
+}
+static std::string answer_of(const sdm_piv::Response& r, bool boolean) {
+  if (!r.ok()) return r.error_code();
+  if (boolean) { const auto* v = r.result<A::BoolValue>("BoolValue"); return v && v->VALUE ? "true" : "false"; }
+  return hex(r.raw("data"));
+}
+int t_secp256k1(void) {
+  std::string staged("@K1@"), part[7];
+  for (int i = 0, at = 0; i < 7; ++i) { size_t sp = staged.find(' ', at); part[i] = staged.substr(at, sp == std::string::npos ? std::string::npos : sp - at); at = (int)sp + 1; }
+  const std::string key = unhex(part[0]), pub65 = unhex(part[1]), pub33 = unhex(part[2]), digest = unhex(part[3]), der = unhex(part[4]), rs = unhex(part[5]), doubled = unhex(part[6]);
+  const std::string message = "sign me", other = "sign me!";
+  std::string s = "1 ";
+  s += answer_of(sdm_piv::call("crypto.secp256k1.sign", {sdm_piv::raw("data", message), sdm_piv::raw("private_key", key)}), false) + "|";
+  s += answer_of(sdm_piv::call("crypto.secp256k1.verify", {sdm_piv::raw("data", message), sdm_piv::raw("signature", der), sdm_piv::raw("public_key", pub33)}), true) + "|";
+  s += answer_of(sdm_piv::call("crypto.secp256k1.verify", {sdm_piv::raw("data", other), sdm_piv::raw("signature", der), sdm_piv::raw("public_key", pub33)}), true) + "|";
+  s += answer_of(sdm_piv::call("crypto.secp256k1.verify", {sdm_piv::raw("data", message), sdm_piv::raw("signature", doubled), sdm_piv::raw("public_key", pub33)}), true) + "|";
+  s += answer_of(sdm_piv::call("crypto.secp256k1.signDigest", {sdm_piv::raw("data", digest), sdm_piv::raw("private_key", key)}), false) + "|";
+  s += answer_of(sdm_piv::call("crypto.secp256k1.verifyDigest", {sdm_piv::raw("data", digest), sdm_piv::raw("signature", rs), sdm_piv::raw("public_key", pub65)}), true) + "|";
+  s += answer_of(sdm_piv::call("crypto.secp256k1.verifyDigest", {sdm_piv::raw("data", digest), sdm_piv::raw("signature", rs), sdm_piv::raw("public_key", pub33)}), true) + "|";
+  s += answer_of(sdm_piv::call("crypto.secp256k1.verifyDigest", {sdm_piv::raw("data", message), sdm_piv::raw("signature", rs), sdm_piv::raw("public_key", pub33)}), true);
+  return report("%s", s.c_str());
+}
 int t_keyslot_unwrap(void) {
   A::KeyslotParams p{};
   TEXT(p, SLOT_ID, "wrap");
@@ -485,7 +514,7 @@ int t_topics(void) {
 `;
 
 const METHODS = ["t_config", "t_big_config", "t_node", "t_secrets", "t_write", "t_query", "t_delete", "t_expire", "t_ingest", "t_sql_stream", "t_epoch", "t_sandboxed",
-  "t_surface", "t_cache_key", "t_peers", "t_standards", "t_history", "t_latest", "t_status", "t_activity", "t_keyslot_sign", "t_keyslot_unwrap",
+  "t_surface", "t_cache_key", "t_peers", "t_standards", "t_history", "t_latest", "t_status", "t_activity", "t_keyslot_sign", "t_secp256k1", "t_keyslot_unwrap",
   "t_protocol", "t_ipfs_cat", "t_ipfs_dag", "t_ipfs_ls", "t_ipfs_pins", "t_ipfs_id", "t_ipfs_swarm", "t_topics", "guest_out_ptr", "guest_out_len"];
 const GRANTED = ["secrets", "storage_query", "storage_write", "storage_ingest", "p2p_read", "node_status_read", "node_activity_read"];
 
@@ -656,6 +685,20 @@ const range = (from) => Uint8Array.from({ length: 32 }, (_, i) => from + i);
 const KEYS = { "sign-ed": range(1), "sign-k1": range(33), wrap: range(65) };
 const pkcs8 = (prefix, key) => createPrivateKey({ key: Buffer.concat([Buffer.from(prefix, "hex"), key]), format: "der", type: "pkcs8" });
 const edKey = pkcs8("302e020100300506032b657004220420", KEYS["sign-ed"]);
+// secp256k1, cross-checked with node:crypto (the Go node's semantics): sign / verify / keyslot.sign are ECDSA over
+// sha256(message); signDigest / verifyDigest over the 32-byte digest as given. Here digest = sha256(message), so a
+// signature over the digest as given is a node:crypto "sha256" signature over the message.
+const K1_MESSAGE = Buffer.from("sign me");
+const k1Key = createPrivateKey({ key: Buffer.concat([Buffer.from("302e0201010420", "hex"), KEYS["sign-k1"], Buffer.from("a00706052b8104000a", "hex")]), format: "der", type: "sec1" });
+const k1Public = createPublicKey(k1Key);
+const K1_PUB65 = k1Public.export({ format: "der", type: "spki" }).subarray(-65);
+const K1_PUB33 = Buffer.concat([Buffer.from([K1_PUB65[64] & 1 ? 3 : 2]), K1_PUB65.subarray(1, 33)]);
+const K1_DIGEST = createHash("sha256").update(K1_MESSAGE).digest();
+const K1_STAGED = [KEYS["sign-k1"], K1_PUB65, K1_PUB33, K1_DIGEST,
+  createSignature("sha256", K1_MESSAGE, { key: k1Key, dsaEncoding: "der" }),
+  createSignature("sha256", K1_MESSAGE, { key: k1Key, dsaEncoding: "ieee-p1363" }),
+  createSignature("sha256", K1_DIGEST, { key: k1Key, dsaEncoding: "der" })].map(hexOf).join(" ");
+const k1Verifies = (signature, dsaEncoding) => verifySignature("sha256", K1_MESSAGE, { key: k1Public, dsaEncoding }, Buffer.from(signature, "hex"));
 // a content key wrapped to the "wrap" slot the way the Go node's keyslot.unwrap takes it: X25519 -> HKDF-SHA256 -> AES-256-GCM
 const CONTENT_KEY = "content-key-0123";
 const WRAPPED = (() => {
@@ -698,7 +741,7 @@ function oracleAdapters(wrap) {
     },
   };
 }
-const ORACLE_GRANTED = ["ipfs", "wallet_sign", "protocol_dial", "pubsub"];
+const ORACLE_GRANTED = ["ipfs", "wallet_sign", "protocol_dial", "pubsub", "crypto_sign", "crypto_verify"];
 const EXPECTED_ORACLE = {
   t_keyslot_unwrap: `1 ${CONTENT_KEY}`,
   t_protocol: "1 fa020100",
@@ -710,15 +753,28 @@ const EXPECTED_ORACLE = {
   t_ipfs_swarm: "1 3 12D3Other:/ip4/10.0.0.2/tcp/4001:12.5,12D3Far:/ip4/10.0.0.3/udp/4001/quic-v1:62500,12D3Unknown::0,",
 };
 async function assertOracle(label, run, calls) {
-  // keyslot.sign: ed25519 is deterministic; the secp256k1 signature (DER) is the one the host's own oracle makes for
-  // that slot and payload (it verifies with the host's crypto.secp256k1.verify)
+  // keyslot.sign: ed25519 is deterministic; the secp256k1 signature (DER) is ECDSA over sha256(payload), as the Go
+  // node's: node:crypto verifies it over the payload with "sha256" (one hash), not over sha256(payload)
   const [ok, ed, k1] = (await run("t_keyslot_sign")).split(" ");
   assert.equal(ok, "1");
   assert.equal(ed, hexOf(cryptoSign(edKey)));
-  assert.equal(k1.slice(0, 2), "30");
-  const checker = createNodeHost({ capabilities: ["crypto_verify", "crypto_sign"] });
-  const k1Public = await checker.crypto.secp256k1.publicKeyFromPrivate(KEYS["sign-k1"]);
-  assert.deepEqual(await checker.crypto.secp256k1.verify(new TextEncoder().encode("sign me"), Buffer.from(k1, "hex"), k1Public), { result: true }, `${label} secp256k1 signature`);
+  assert.ok(k1Verifies(k1, "der"), `${label} keyslot.sign secp256k1 is ECDSA over sha256(payload)`);
+  assert.ok(!verifySignature("sha256", K1_DIGEST, { key: k1Public, dsaEncoding: "der" }, Buffer.from(k1, "hex")), `${label} keyslot.sign is not double-hashed`);
+  // crypto.secp256k1.*: sign over sha256(message), verify accepting node:crypto's signature (and refusing another
+  // message), signDigest over the digest as given, verifyDigest accepting node:crypto's signature over it with a 65- or
+  // 33-byte key; a digest that is not 32 bytes is refused. The browser host has no digest operations.
+  const [head, verified, otherMessage, doubledRefused, digestSig, digest65, digest33, notDigest] = (await run("t_secp256k1")).split("|");
+  assert.match(head, /^1 30/);
+  assert.ok(k1Verifies(head.slice(2), "der"), `${label} crypto.secp256k1.sign is ECDSA over sha256(message)`);
+  assert.deepEqual([verified, otherMessage, doubledRefused], ["true", "false", "false"], `${label} crypto.secp256k1.verify (a double-hashed signature is refused)`);
+  if (label === "NodeHost") {
+    assert.equal(digestSig.length, 128);
+    assert.ok(k1Verifies(digestSig, "ieee-p1363"), "NodeHost crypto.secp256k1.signDigest signs the digest as given");
+    assert.deepEqual([digest65, digest33], ["true", "true"], "NodeHost crypto.secp256k1.verifyDigest");
+    assert.equal(notDigest, "invalid-params");
+  } else {
+    assert.deepEqual([digestSig, digest65, digest33, notDigest], ["unsupported", "unsupported", "unsupported", "unsupported"]);
+  }
   for (const [name, expected] of Object.entries(EXPECTED_ORACLE)) assert.equal(await run(name), expected, `${label} ${name}`);
   if (label === "BrowserHost") assert.equal(await run("t_topics"), "1 sdn/omm,sdn/wx,");
   else assert.match(await run("t_topics"), /^0 unsupported /);
@@ -742,7 +798,7 @@ const HOSTS = {
 
 let compilation;
 test.before(async () => {
-  compilation = await compileModuleFromSource({ manifest: manifest(), sourceCode: GUEST_SOURCE.replace("@WRAPPED@", WRAPPED), language: "c++", allowUndefinedImports: true });
+  compilation = await compileModuleFromSource({ manifest: manifest(), sourceCode: GUEST_SOURCE.replace("@WRAPPED@", WRAPPED).replace("@K1@", K1_STAGED), language: "c++", allowUndefinedImports: true });
 });
 test.after(async () => { if (compilation) await cleanupCompilation(compilation); });
 

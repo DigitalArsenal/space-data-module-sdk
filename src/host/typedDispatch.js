@@ -625,7 +625,8 @@ const ADAPTERS = {
   },
 };
 function data(v) { return { raw: { data: bytesOf(v) ?? new Uint8Array(0) } }; }
-function bool(v) { return { result: { VALUE: Boolean(v) } }; }
+// a verify's answer: a boolean, or the hosts' {result: boolean} (the secp256k1 verifies) - an object is not "true"
+function bool(v) { return { result: { VALUE: v !== null && typeof v === "object" ? v.result === true : Boolean(v) } }; }
 function socket(extra = () => ({})) {
   return {
     in: (call) => {
@@ -666,7 +667,8 @@ export function hostcallErrorCode(error) {
   if (/^Unknown .* operation|not available in the synchronous hostcall ABI|does not implement/.test(error?.message ?? "")) return "unsupported";
   // a string or list that does not fit its aligned record (the Go node's recordErr)
   if (/exceeds? the record/.test(error?.message ?? "")) return "too-large";
-  if (error instanceof RangeError || error instanceof TypeError) return "invalid-params";
+  // (by name too: an error that crossed the worker harness's channel is a plain Error carrying the name)
+  if (error instanceof RangeError || error instanceof TypeError || name === "RangeError" || name === "TypeError") return "invalid-params";
   return "failed";
 }
 

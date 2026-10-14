@@ -680,6 +680,7 @@ export function assertDeploymentAuthorization(options: {
   now?: number;
 }): boolean;
 
+/** signDigest signs the 32-byte digest as given (no further hashing). */
 export function createHdWalletSigner(options: {
   signDigest: (digest: Uint8Array) => Promise<Uint8Array>;
   publicKeyHex: string;
@@ -689,6 +690,7 @@ export function createHdWalletSigner(options: {
   curve?: string;
 }): Signer;
 
+/** verifyDigest checks a signature over sha256(canonical bytes) as given (no further hashing). */
 export function createHdWalletVerifier(options: {
   verifyDigest: (
     digest: Uint8Array,
