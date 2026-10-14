@@ -76,14 +76,6 @@ enum reconcileKind : uint8_t {
   reconcileKind_Current = 2,
 };
 
-enum sqlValueKind : uint8_t {
-  sqlValueKind_Null = 0,
-  sqlValueKind_Bool = 1,
-  sqlValueKind_I64 = 2,
-  sqlValueKind_F64 = 3,
-  sqlValueKind_Str = 4,
-};
-
 enum sandboxWant : uint8_t {
   sandboxWant_Stream = 0,
   sandboxWant_Rows = 1,
@@ -537,7 +529,7 @@ struct StoredRecordMeta {
   ::flatbuffers::aligned_runtime::AlignedString<128> SOURCE_NAME;
   ::flatbuffers::aligned_runtime::AlignedString<128> BATCH_ID;
   ::flatbuffers::aligned_runtime::AlignedString<128> PRODUCER_PEER_ID;
-  ::flatbuffers::aligned_runtime::AlignedString<64> LICENSE;
+  ::flatbuffers::aligned_runtime::AlignedString<128> LICENSE;
 
   bool has_CID() const {
     return (__presence[0] & 1) != 0;
@@ -595,10 +587,10 @@ struct StoredRecordMeta {
   static const StoredRecordMeta* fromBytes(const void* data) {
     return reinterpret_cast<const StoredRecordMeta*>(data);
   }
-  void copyTo(void* dest) const { std::memcpy(dest, this, 888); }
-  void copyFrom(const StoredRecordMeta& src) { std::memcpy(this, &src, 888); }
+  void copyTo(void* dest) const { std::memcpy(dest, this, 952); }
+  void copyFrom(const StoredRecordMeta& src) { std::memcpy(this, &src, 952); }
 };
-static_assert(sizeof(StoredRecordMeta) == 888, "StoredRecordMeta size mismatch");
+static_assert(sizeof(StoredRecordMeta) == 952, "StoredRecordMeta size mismatch");
 static_assert(alignof(StoredRecordMeta) == 8, "StoredRecordMeta alignment mismatch");
 static_assert(offsetof(StoredRecordMeta, CID) == 1, "StoredRecordMeta.CID offset mismatch");
 static_assert(offsetof(StoredRecordMeta, ROW_ID) == 136, "StoredRecordMeta.ROW_ID offset mismatch");
@@ -611,7 +603,7 @@ static_assert(offsetof(StoredRecordMeta, SOURCE_NAME) == 429, "StoredRecordMeta.
 static_assert(offsetof(StoredRecordMeta, BATCH_ID) == 558, "StoredRecordMeta.BATCH_ID offset mismatch");
 static_assert(offsetof(StoredRecordMeta, PRODUCER_PEER_ID) == 687, "StoredRecordMeta.PRODUCER_PEER_ID offset mismatch");
 static_assert(offsetof(StoredRecordMeta, LICENSE) == 816, "StoredRecordMeta.LICENSE offset mismatch");
-constexpr size_t StoredRecordMeta_SIZE = 888;
+constexpr size_t StoredRecordMeta_SIZE = 952;
 constexpr size_t StoredRecordMeta_ALIGN = 8;
 
 }  // namespace Aligned
@@ -833,9 +825,9 @@ struct StorageIngestParams {
   ::flatbuffers::aligned_runtime::AlignedString<128> SOURCE_NAME;
   ::flatbuffers::aligned_runtime::AlignedString<128> BATCH_ID;
   ::flatbuffers::aligned_runtime::AlignedString<255> SOURCE_URL;
-  ::flatbuffers::aligned_runtime::AlignedString<64> CONTENT_KEY_ID;
+  ::flatbuffers::aligned_runtime::AlignedString<128> CONTENT_KEY_ID;
   ::flatbuffers::aligned_runtime::AlignedString<128> SOURCE_PEER;
-  ::flatbuffers::aligned_runtime::AlignedString<64> LICENSE;
+  ::flatbuffers::aligned_runtime::AlignedString<128> LICENSE;
   ::flatbuffers::aligned_runtime::AlignedString<255> LICENSE_URL;
   ::flatbuffers::aligned_runtime::AlignedString<255> CITATION;
   bool SHARE_ALIKE;
@@ -934,10 +926,10 @@ struct StorageIngestParams {
   static const StorageIngestParams* fromBytes(const void* data) {
     return reinterpret_cast<const StorageIngestParams*>(data);
   }
-  void copyTo(void* dest) const { std::memcpy(dest, this, 1868); }
-  void copyFrom(const StorageIngestParams& src) { std::memcpy(this, &src, 1868); }
+  void copyTo(void* dest) const { std::memcpy(dest, this, 1996); }
+  void copyFrom(const StorageIngestParams& src) { std::memcpy(this, &src, 1996); }
 };
-static_assert(sizeof(StorageIngestParams) == 1868, "StorageIngestParams size mismatch");
+static_assert(sizeof(StorageIngestParams) == 1996, "StorageIngestParams size mismatch");
 static_assert(alignof(StorageIngestParams) == 1, "StorageIngestParams alignment mismatch");
 static_assert(offsetof(StorageIngestParams, SCHEMA) == 2, "StorageIngestParams.SCHEMA offset mismatch");
 static_assert(offsetof(StorageIngestParams, PROVIDER_ID) == 67, "StorageIngestParams.PROVIDER_ID offset mismatch");
@@ -945,15 +937,15 @@ static_assert(offsetof(StorageIngestParams, SOURCE_NAME) == 196, "StorageIngestP
 static_assert(offsetof(StorageIngestParams, BATCH_ID) == 325, "StorageIngestParams.BATCH_ID offset mismatch");
 static_assert(offsetof(StorageIngestParams, SOURCE_URL) == 454, "StorageIngestParams.SOURCE_URL offset mismatch");
 static_assert(offsetof(StorageIngestParams, CONTENT_KEY_ID) == 710, "StorageIngestParams.CONTENT_KEY_ID offset mismatch");
-static_assert(offsetof(StorageIngestParams, SOURCE_PEER) == 775, "StorageIngestParams.SOURCE_PEER offset mismatch");
-static_assert(offsetof(StorageIngestParams, LICENSE) == 904, "StorageIngestParams.LICENSE offset mismatch");
-static_assert(offsetof(StorageIngestParams, LICENSE_URL) == 969, "StorageIngestParams.LICENSE_URL offset mismatch");
-static_assert(offsetof(StorageIngestParams, CITATION) == 1225, "StorageIngestParams.CITATION offset mismatch");
-static_assert(offsetof(StorageIngestParams, SHARE_ALIKE) == 1481, "StorageIngestParams.SHARE_ALIKE offset mismatch");
-static_assert(offsetof(StorageIngestParams, RECONCILE) == 1482, "StorageIngestParams.RECONCILE offset mismatch");
-static_assert(offsetof(StorageIngestParams, ARCHIVE_SOURCE) == 1483, "StorageIngestParams.ARCHIVE_SOURCE offset mismatch");
-static_assert(offsetof(StorageIngestParams, ARCHIVE_NAME) == 1612, "StorageIngestParams.ARCHIVE_NAME offset mismatch");
-constexpr size_t StorageIngestParams_SIZE = 1868;
+static_assert(offsetof(StorageIngestParams, SOURCE_PEER) == 839, "StorageIngestParams.SOURCE_PEER offset mismatch");
+static_assert(offsetof(StorageIngestParams, LICENSE) == 968, "StorageIngestParams.LICENSE offset mismatch");
+static_assert(offsetof(StorageIngestParams, LICENSE_URL) == 1097, "StorageIngestParams.LICENSE_URL offset mismatch");
+static_assert(offsetof(StorageIngestParams, CITATION) == 1353, "StorageIngestParams.CITATION offset mismatch");
+static_assert(offsetof(StorageIngestParams, SHARE_ALIKE) == 1609, "StorageIngestParams.SHARE_ALIKE offset mismatch");
+static_assert(offsetof(StorageIngestParams, RECONCILE) == 1610, "StorageIngestParams.RECONCILE offset mismatch");
+static_assert(offsetof(StorageIngestParams, ARCHIVE_SOURCE) == 1611, "StorageIngestParams.ARCHIVE_SOURCE offset mismatch");
+static_assert(offsetof(StorageIngestParams, ARCHIVE_NAME) == 1740, "StorageIngestParams.ARCHIVE_NAME offset mismatch");
+constexpr size_t StorageIngestParams_SIZE = 1996;
 constexpr size_t StorageIngestParams_ALIGN = 1;
 
 }  // namespace Aligned
@@ -968,12 +960,12 @@ struct Provenance {
   uint8_t __presence[1];
   ::flatbuffers::aligned_runtime::AlignedString<255> SOURCE_URL;
   int32_t HTTP_STATUS;
-  ::flatbuffers::aligned_runtime::AlignedString<128> ETAG;
+  ::flatbuffers::aligned_runtime::AlignedString<255> ETAG;
   ::flatbuffers::aligned_runtime::AlignedString<64> LAST_MODIFIED;
   ::flatbuffers::aligned_runtime::AlignedString<128> CONTENT_TYPE;
   uint64_t RETRIEVED_MS;
-  ::flatbuffers::aligned_runtime::AlignedString<64> PARSER;
-  ::flatbuffers::aligned_runtime::AlignedString<32> PARSER_VERSION;
+  ::flatbuffers::aligned_runtime::AlignedString<128> PARSER;
+  ::flatbuffers::aligned_runtime::AlignedString<64> PARSER_VERSION;
   ::flatbuffers::aligned_runtime::AlignedString<64> SOURCE_SHA256;
   ::flatbuffers::aligned_runtime::AlignedString<64> NORMALIZED_SHA256;
   uint64_t NORMALIZED_COUNT;
@@ -1042,25 +1034,69 @@ struct Provenance {
   static const Provenance* fromBytes(const void* data) {
     return reinterpret_cast<const Provenance*>(data);
   }
-  void copyTo(void* dest) const { std::memcpy(dest, this, 848); }
-  void copyFrom(const Provenance& src) { std::memcpy(this, &src, 848); }
+  void copyTo(void* dest) const { std::memcpy(dest, this, 1072); }
+  void copyFrom(const Provenance& src) { std::memcpy(this, &src, 1072); }
 };
-static_assert(sizeof(Provenance) == 848, "Provenance size mismatch");
+static_assert(sizeof(Provenance) == 1072, "Provenance size mismatch");
 static_assert(alignof(Provenance) == 8, "Provenance alignment mismatch");
 static_assert(offsetof(Provenance, SOURCE_URL) == 1, "Provenance.SOURCE_URL offset mismatch");
 static_assert(offsetof(Provenance, HTTP_STATUS) == 260, "Provenance.HTTP_STATUS offset mismatch");
 static_assert(offsetof(Provenance, ETAG) == 264, "Provenance.ETAG offset mismatch");
-static_assert(offsetof(Provenance, LAST_MODIFIED) == 393, "Provenance.LAST_MODIFIED offset mismatch");
-static_assert(offsetof(Provenance, CONTENT_TYPE) == 458, "Provenance.CONTENT_TYPE offset mismatch");
-static_assert(offsetof(Provenance, RETRIEVED_MS) == 592, "Provenance.RETRIEVED_MS offset mismatch");
-static_assert(offsetof(Provenance, PARSER) == 600, "Provenance.PARSER offset mismatch");
-static_assert(offsetof(Provenance, PARSER_VERSION) == 665, "Provenance.PARSER_VERSION offset mismatch");
-static_assert(offsetof(Provenance, SOURCE_SHA256) == 698, "Provenance.SOURCE_SHA256 offset mismatch");
-static_assert(offsetof(Provenance, NORMALIZED_SHA256) == 763, "Provenance.NORMALIZED_SHA256 offset mismatch");
-static_assert(offsetof(Provenance, NORMALIZED_COUNT) == 832, "Provenance.NORMALIZED_COUNT offset mismatch");
-static_assert(offsetof(Provenance, FROM_CACHE) == 840, "Provenance.FROM_CACHE offset mismatch");
-constexpr size_t Provenance_SIZE = 848;
+static_assert(offsetof(Provenance, LAST_MODIFIED) == 520, "Provenance.LAST_MODIFIED offset mismatch");
+static_assert(offsetof(Provenance, CONTENT_TYPE) == 585, "Provenance.CONTENT_TYPE offset mismatch");
+static_assert(offsetof(Provenance, RETRIEVED_MS) == 720, "Provenance.RETRIEVED_MS offset mismatch");
+static_assert(offsetof(Provenance, PARSER) == 728, "Provenance.PARSER offset mismatch");
+static_assert(offsetof(Provenance, PARSER_VERSION) == 857, "Provenance.PARSER_VERSION offset mismatch");
+static_assert(offsetof(Provenance, SOURCE_SHA256) == 922, "Provenance.SOURCE_SHA256 offset mismatch");
+static_assert(offsetof(Provenance, NORMALIZED_SHA256) == 987, "Provenance.NORMALIZED_SHA256 offset mismatch");
+static_assert(offsetof(Provenance, NORMALIZED_COUNT) == 1056, "Provenance.NORMALIZED_COUNT offset mismatch");
+static_assert(offsetof(Provenance, FROM_CACHE) == 1064, "Provenance.FROM_CACHE offset mismatch");
+constexpr size_t Provenance_SIZE = 1072;
 constexpr size_t Provenance_ALIGN = 8;
+
+}  // namespace Aligned
+}  // namespace runtime
+}  // namespace sdn
+
+namespace sdn {
+namespace runtime {
+namespace Aligned {
+
+struct ProvenanceAttribute {
+  uint8_t __presence[1];
+  ::flatbuffers::aligned_runtime::AlignedString<128> NAME;
+  ::flatbuffers::aligned_runtime::AlignedString<255> VALUE;
+
+  bool has_NAME() const {
+    return (__presence[0] & 1) != 0;
+  }
+  void set_has_NAME(bool value) {
+    if (value) __presence[0] |= 1;
+    else __presence[0] &= ~1;
+  }
+  bool has_VALUE() const {
+    return (__presence[0] & 2) != 0;
+  }
+  void set_has_VALUE(bool value) {
+    if (value) __presence[0] |= 2;
+    else __presence[0] &= ~2;
+  }
+
+  static ProvenanceAttribute* fromBytes(void* data) {
+    return reinterpret_cast<ProvenanceAttribute*>(data);
+  }
+  static const ProvenanceAttribute* fromBytes(const void* data) {
+    return reinterpret_cast<const ProvenanceAttribute*>(data);
+  }
+  void copyTo(void* dest) const { std::memcpy(dest, this, 386); }
+  void copyFrom(const ProvenanceAttribute& src) { std::memcpy(this, &src, 386); }
+};
+static_assert(sizeof(ProvenanceAttribute) == 386, "ProvenanceAttribute size mismatch");
+static_assert(alignof(ProvenanceAttribute) == 1, "ProvenanceAttribute alignment mismatch");
+static_assert(offsetof(ProvenanceAttribute, NAME) == 1, "ProvenanceAttribute.NAME offset mismatch");
+static_assert(offsetof(ProvenanceAttribute, VALUE) == 130, "ProvenanceAttribute.VALUE offset mismatch");
+constexpr size_t ProvenanceAttribute_SIZE = 386;
+constexpr size_t ProvenanceAttribute_ALIGN = 1;
 
 }  // namespace Aligned
 }  // namespace runtime
@@ -1129,49 +1165,6 @@ static_assert(offsetof(StorageIngestResult, ARCHIVED) == 224, "StorageIngestResu
 static_assert(offsetof(StorageIngestResult, PROVENANCE_FILE) == 480, "StorageIngestResult.PROVENANCE_FILE offset mismatch");
 constexpr size_t StorageIngestResult_SIZE = 736;
 constexpr size_t StorageIngestResult_ALIGN = 8;
-
-}  // namespace Aligned
-}  // namespace runtime
-}  // namespace sdn
-
-namespace sdn {
-namespace runtime {
-namespace Aligned {
-
-struct SqlValue {
-  uint8_t __presence[1];
-  sqlValueKind KIND;
-  bool BOOL_VALUE;
-  int64_t I64_VALUE;
-  double F64_VALUE;
-  ::flatbuffers::aligned_runtime::AlignedString<255> STR_VALUE;
-
-  bool has_STR_VALUE() const {
-    return (__presence[0] & 1) != 0;
-  }
-  void set_has_STR_VALUE(bool value) {
-    if (value) __presence[0] |= 1;
-    else __presence[0] &= ~1;
-  }
-
-  static SqlValue* fromBytes(void* data) {
-    return reinterpret_cast<SqlValue*>(data);
-  }
-  static const SqlValue* fromBytes(const void* data) {
-    return reinterpret_cast<const SqlValue*>(data);
-  }
-  void copyTo(void* dest) const { std::memcpy(dest, this, 280); }
-  void copyFrom(const SqlValue& src) { std::memcpy(this, &src, 280); }
-};
-static_assert(sizeof(SqlValue) == 280, "SqlValue size mismatch");
-static_assert(alignof(SqlValue) == 8, "SqlValue alignment mismatch");
-static_assert(offsetof(SqlValue, KIND) == 1, "SqlValue.KIND offset mismatch");
-static_assert(offsetof(SqlValue, BOOL_VALUE) == 2, "SqlValue.BOOL_VALUE offset mismatch");
-static_assert(offsetof(SqlValue, I64_VALUE) == 8, "SqlValue.I64_VALUE offset mismatch");
-static_assert(offsetof(SqlValue, F64_VALUE) == 16, "SqlValue.F64_VALUE offset mismatch");
-static_assert(offsetof(SqlValue, STR_VALUE) == 24, "SqlValue.STR_VALUE offset mismatch");
-constexpr size_t SqlValue_SIZE = 280;
-constexpr size_t SqlValue_ALIGN = 8;
 
 }  // namespace Aligned
 }  // namespace runtime
@@ -2337,7 +2330,7 @@ struct P2pPnmEntry {
   ::flatbuffers::aligned_runtime::AlignedString<128> GOSSIP_PEER_ID;
   ::flatbuffers::aligned_runtime::AlignedString<16> STANDARD;
   ::flatbuffers::aligned_runtime::AlignedString<64> SCHEMA;
-  ::flatbuffers::aligned_runtime::AlignedString<16> FILE_ID;
+  ::flatbuffers::aligned_runtime::AlignedString<255> FILE_ID;
   ::flatbuffers::aligned_runtime::AlignedString<255> FILE_NAME;
   ::flatbuffers::aligned_runtime::AlignedString<128> CID;
   uint64_t PUBLISH_MS;
@@ -2447,10 +2440,10 @@ struct P2pPnmEntry {
   static const P2pPnmEntry* fromBytes(const void* data) {
     return reinterpret_cast<const P2pPnmEntry*>(data);
   }
-  void copyTo(void* dest) const { std::memcpy(dest, this, 1400); }
-  void copyFrom(const P2pPnmEntry& src) { std::memcpy(this, &src, 1400); }
+  void copyTo(void* dest) const { std::memcpy(dest, this, 1632); }
+  void copyFrom(const P2pPnmEntry& src) { std::memcpy(this, &src, 1632); }
 };
-static_assert(sizeof(P2pPnmEntry) == 1400, "P2pPnmEntry size mismatch");
+static_assert(sizeof(P2pPnmEntry) == 1632, "P2pPnmEntry size mismatch");
 static_assert(alignof(P2pPnmEntry) == 8, "P2pPnmEntry alignment mismatch");
 static_assert(offsetof(P2pPnmEntry, PEER_ID) == 2, "P2pPnmEntry.PEER_ID offset mismatch");
 static_assert(offsetof(P2pPnmEntry, PUBLISHER_PEER_ID) == 131, "P2pPnmEntry.PUBLISHER_PEER_ID offset mismatch");
@@ -2458,17 +2451,17 @@ static_assert(offsetof(P2pPnmEntry, GOSSIP_PEER_ID) == 260, "P2pPnmEntry.GOSSIP_
 static_assert(offsetof(P2pPnmEntry, STANDARD) == 389, "P2pPnmEntry.STANDARD offset mismatch");
 static_assert(offsetof(P2pPnmEntry, SCHEMA) == 406, "P2pPnmEntry.SCHEMA offset mismatch");
 static_assert(offsetof(P2pPnmEntry, FILE_ID) == 471, "P2pPnmEntry.FILE_ID offset mismatch");
-static_assert(offsetof(P2pPnmEntry, FILE_NAME) == 488, "P2pPnmEntry.FILE_NAME offset mismatch");
-static_assert(offsetof(P2pPnmEntry, CID) == 744, "P2pPnmEntry.CID offset mismatch");
-static_assert(offsetof(P2pPnmEntry, PUBLISH_MS) == 880, "P2pPnmEntry.PUBLISH_MS offset mismatch");
-static_assert(offsetof(P2pPnmEntry, SIGNATURE_TYPE) == 888, "P2pPnmEntry.SIGNATURE_TYPE offset mismatch");
-static_assert(offsetof(P2pPnmEntry, SIGNATURE_HEX) == 921, "P2pPnmEntry.SIGNATURE_HEX offset mismatch");
-static_assert(offsetof(P2pPnmEntry, SIGNATURE_VERIFIED) == 1177, "P2pPnmEntry.SIGNATURE_VERIFIED offset mismatch");
-static_assert(offsetof(P2pPnmEntry, ATTRIBUTION) == 1178, "P2pPnmEntry.ATTRIBUTION offset mismatch");
-static_assert(offsetof(P2pPnmEntry, PNM_INDEX) == 1196, "P2pPnmEntry.PNM_INDEX offset mismatch");
-static_assert(offsetof(P2pPnmEntry, PUBLISHER_KEY_HEX) == 1200, "P2pPnmEntry.PUBLISHER_KEY_HEX offset mismatch");
-static_assert(offsetof(P2pPnmEntry, PUBLISHER_KEY_SOURCE) == 1329, "P2pPnmEntry.PUBLISHER_KEY_SOURCE offset mismatch");
-constexpr size_t P2pPnmEntry_SIZE = 1400;
+static_assert(offsetof(P2pPnmEntry, FILE_NAME) == 727, "P2pPnmEntry.FILE_NAME offset mismatch");
+static_assert(offsetof(P2pPnmEntry, CID) == 983, "P2pPnmEntry.CID offset mismatch");
+static_assert(offsetof(P2pPnmEntry, PUBLISH_MS) == 1112, "P2pPnmEntry.PUBLISH_MS offset mismatch");
+static_assert(offsetof(P2pPnmEntry, SIGNATURE_TYPE) == 1120, "P2pPnmEntry.SIGNATURE_TYPE offset mismatch");
+static_assert(offsetof(P2pPnmEntry, SIGNATURE_HEX) == 1153, "P2pPnmEntry.SIGNATURE_HEX offset mismatch");
+static_assert(offsetof(P2pPnmEntry, SIGNATURE_VERIFIED) == 1409, "P2pPnmEntry.SIGNATURE_VERIFIED offset mismatch");
+static_assert(offsetof(P2pPnmEntry, ATTRIBUTION) == 1410, "P2pPnmEntry.ATTRIBUTION offset mismatch");
+static_assert(offsetof(P2pPnmEntry, PNM_INDEX) == 1428, "P2pPnmEntry.PNM_INDEX offset mismatch");
+static_assert(offsetof(P2pPnmEntry, PUBLISHER_KEY_HEX) == 1432, "P2pPnmEntry.PUBLISHER_KEY_HEX offset mismatch");
+static_assert(offsetof(P2pPnmEntry, PUBLISHER_KEY_SOURCE) == 1561, "P2pPnmEntry.PUBLISHER_KEY_SOURCE offset mismatch");
+constexpr size_t P2pPnmEntry_SIZE = 1632;
 constexpr size_t P2pPnmEntry_ALIGN = 8;
 
 }  // namespace Aligned
@@ -2489,7 +2482,7 @@ struct P2pLatestDataset {
   ::flatbuffers::aligned_runtime::AlignedString<16> STANDARD;
   ::flatbuffers::aligned_runtime::AlignedString<64> SCHEMA;
   ::flatbuffers::aligned_runtime::AlignedString<128> PNM_CID;
-  ::flatbuffers::aligned_runtime::AlignedString<16> PNM_FILE_ID;
+  ::flatbuffers::aligned_runtime::AlignedString<255> PNM_FILE_ID;
   uint64_t PNM_PUBLISH_MS;
   bool PNM_SIGNATURE_VERIFIED;
   ::flatbuffers::aligned_runtime::AlignedString<16> PNM_ATTRIBUTION;
@@ -2587,10 +2580,10 @@ struct P2pLatestDataset {
   static const P2pLatestDataset* fromBytes(const void* data) {
     return reinterpret_cast<const P2pLatestDataset*>(data);
   }
-  void copyTo(void* dest) const { std::memcpy(dest, this, 832); }
-  void copyFrom(const P2pLatestDataset& src) { std::memcpy(this, &src, 832); }
+  void copyTo(void* dest) const { std::memcpy(dest, this, 1072); }
+  void copyFrom(const P2pLatestDataset& src) { std::memcpy(this, &src, 1072); }
 };
-static_assert(sizeof(P2pLatestDataset) == 832, "P2pLatestDataset size mismatch");
+static_assert(sizeof(P2pLatestDataset) == 1072, "P2pLatestDataset size mismatch");
 static_assert(alignof(P2pLatestDataset) == 8, "P2pLatestDataset alignment mismatch");
 static_assert(offsetof(P2pLatestDataset, KNOWN) == 2, "P2pLatestDataset.KNOWN offset mismatch");
 static_assert(offsetof(P2pLatestDataset, REASON) == 3, "P2pLatestDataset.REASON offset mismatch");
@@ -2601,19 +2594,19 @@ static_assert(offsetof(P2pLatestDataset, STANDARD) == 71, "P2pLatestDataset.STAN
 static_assert(offsetof(P2pLatestDataset, SCHEMA) == 88, "P2pLatestDataset.SCHEMA offset mismatch");
 static_assert(offsetof(P2pLatestDataset, PNM_CID) == 153, "P2pLatestDataset.PNM_CID offset mismatch");
 static_assert(offsetof(P2pLatestDataset, PNM_FILE_ID) == 282, "P2pLatestDataset.PNM_FILE_ID offset mismatch");
-static_assert(offsetof(P2pLatestDataset, PNM_PUBLISH_MS) == 304, "P2pLatestDataset.PNM_PUBLISH_MS offset mismatch");
-static_assert(offsetof(P2pLatestDataset, PNM_SIGNATURE_VERIFIED) == 312, "P2pLatestDataset.PNM_SIGNATURE_VERIFIED offset mismatch");
-static_assert(offsetof(P2pLatestDataset, PNM_ATTRIBUTION) == 313, "P2pLatestDataset.PNM_ATTRIBUTION offset mismatch");
-static_assert(offsetof(P2pLatestDataset, BATCH_ID) == 330, "P2pLatestDataset.BATCH_ID offset mismatch");
-static_assert(offsetof(P2pLatestDataset, PROVIDER_ID) == 459, "P2pLatestDataset.PROVIDER_ID offset mismatch");
-static_assert(offsetof(P2pLatestDataset, SOURCE_NAME) == 588, "P2pLatestDataset.SOURCE_NAME offset mismatch");
-static_assert(offsetof(P2pLatestDataset, RECORD_COUNT) == 720, "P2pLatestDataset.RECORD_COUNT offset mismatch");
-static_assert(offsetof(P2pLatestDataset, BYTE_COUNT) == 728, "P2pLatestDataset.BYTE_COUNT offset mismatch");
-static_assert(offsetof(P2pLatestDataset, PARTS) == 736, "P2pLatestDataset.PARTS offset mismatch");
-static_assert(offsetof(P2pLatestDataset, PUBLISHED_MS) == 744, "P2pLatestDataset.PUBLISHED_MS offset mismatch");
-static_assert(offsetof(P2pLatestDataset, ETAG_FNV1A64) == 752, "P2pLatestDataset.ETAG_FNV1A64 offset mismatch");
-static_assert(offsetof(P2pLatestDataset, REF) == 776, "P2pLatestDataset.REF offset mismatch");
-constexpr size_t P2pLatestDataset_SIZE = 832;
+static_assert(offsetof(P2pLatestDataset, PNM_PUBLISH_MS) == 544, "P2pLatestDataset.PNM_PUBLISH_MS offset mismatch");
+static_assert(offsetof(P2pLatestDataset, PNM_SIGNATURE_VERIFIED) == 552, "P2pLatestDataset.PNM_SIGNATURE_VERIFIED offset mismatch");
+static_assert(offsetof(P2pLatestDataset, PNM_ATTRIBUTION) == 553, "P2pLatestDataset.PNM_ATTRIBUTION offset mismatch");
+static_assert(offsetof(P2pLatestDataset, BATCH_ID) == 570, "P2pLatestDataset.BATCH_ID offset mismatch");
+static_assert(offsetof(P2pLatestDataset, PROVIDER_ID) == 699, "P2pLatestDataset.PROVIDER_ID offset mismatch");
+static_assert(offsetof(P2pLatestDataset, SOURCE_NAME) == 828, "P2pLatestDataset.SOURCE_NAME offset mismatch");
+static_assert(offsetof(P2pLatestDataset, RECORD_COUNT) == 960, "P2pLatestDataset.RECORD_COUNT offset mismatch");
+static_assert(offsetof(P2pLatestDataset, BYTE_COUNT) == 968, "P2pLatestDataset.BYTE_COUNT offset mismatch");
+static_assert(offsetof(P2pLatestDataset, PARTS) == 976, "P2pLatestDataset.PARTS offset mismatch");
+static_assert(offsetof(P2pLatestDataset, PUBLISHED_MS) == 984, "P2pLatestDataset.PUBLISHED_MS offset mismatch");
+static_assert(offsetof(P2pLatestDataset, ETAG_FNV1A64) == 992, "P2pLatestDataset.ETAG_FNV1A64 offset mismatch");
+static_assert(offsetof(P2pLatestDataset, REF) == 1016, "P2pLatestDataset.REF offset mismatch");
+constexpr size_t P2pLatestDataset_SIZE = 1072;
 constexpr size_t P2pLatestDataset_ALIGN = 8;
 
 }  // namespace Aligned

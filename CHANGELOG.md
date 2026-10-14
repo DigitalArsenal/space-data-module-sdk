@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.9.1
+
+### The JS hosts answer the Go node's operations completely
+
+- `src/host/typedDispatch.js` has adapters for `plugin.getConfig`, `node.peerId` / `node.publicKey`, `secrets.*`,
+  every `storage.*` operation (`write`, `query`, `delete`, `expire`, `ingest_with_source`, `flatsql_query_stream`,
+  `flatsql_epoch_stream`, `query_sandboxed`, `query_surface`, `flatsql_cache_key`), `p2p.peers_snapshot` /
+  `standards_snapshot` / `pnm_history` / `latest_dataset`, `node_status_read.status` and
+  `node_activity_read.activity`. They used to take the generic path, which dropped their list and raw ports. The
+  mapping mirrors the Go node's typed path (`sdn-server/internal/modulert/typed_hostcall_ops.go`): the same
+  handler-shaped requests and answers, with bytes as `Uint8Array` instead of base64. `plugin.getConfig` flattens the
+  config into dotted `ConfigEntry` keys (`targets.0.provider_id`).
+- NodeHost and BrowserHost serve `plugin.getConfig` from a new `config` option (default `{}`), and serve the secrets,
+  storage, p2p and node operations through capability adapters (`capabilityAdapters.secrets` / `storage` / `p2p` /
+  `node`, see `src/host/adapterOperations.js`). An adapter method can answer synchronously, in which case it also works on
+  the sync bridge, or with a Promise. Both hosts list the operations and their capabilities (`secrets`,
+  `storage_ingest`, `p2p_read`, `node_status_read`, `node_activity_read`, and on NodeHost also `storage_query` /
+  `storage_write`).
+- Typed error codes: a BrowserHost capability refusal is `not-authorized`, and a string or list that does not fit
+  its aligned record is `too-large` (as on the Go node).
+
+### HostOps changes (the Go node mirrors these)
+
+- SQL values travel in FlatSQL's own tagged parameter encoding: value after value, a u8 tag (0 null, 1 bool, 2 i64,
+  3 f64, 4 string, 5 bytes), a u32 little-endian payload length, then the payload. Text and bytes can be any length.
+  `storage.flatsql_query_stream`, `storage.query_sandboxed` and `storage.flatsql_cache_key` take raw `params` in
+  place of the list `sql_params`. A `query_sandboxed` rows answer carries raw `cells` (row-major) in place of the list
+  `cells`. The `SqlValue` table and the `sqlValueKind` enum are gone. `encodeSqlValues` / `decodeSqlValues` and
+  `SQL_VALUE_TAGS` (`space-data-module-sdk/runtime-contracts`), and `sdm_piv::SqlValues` / `read_sql_values`
+  (`typedHostcall.hpp`), write and read the encoding.
+- `storage.ingest_with_source` takes a new list `provenance_attributes` (`ProvenanceAttribute {NAME 128, VALUE
+  255}`) for descriptive provenance (method, units, date range, counts). The runtime `IngestRequest` Provenance has
+  the same information as `ATTRIBUTES: [Header]`.
+- Wider identity fields: `P2pPnmEntry.FILE_ID` and `P2pLatestDataset.PNM_FILE_ID` 16 -> 255;
+  `StoredRecordMeta.LICENSE` and `StorageIngestParams.LICENSE` 64 -> 128; `StorageIngestParams.CONTENT_KEY_ID`
+  64 -> 128; `Provenance.ETAG` 128 -> 255, `PARSER` 64 -> 128, `PARSER_VERSION` 32 -> 64.
+- `secrets`, `node_status_read` and `node_activity_read` are in `RecommendedCapabilityIds`.
+
 ## 0.9.0
 
 Typed contracts 1.0: the module runtime's frames and hostcalls are SDS FlatBuffers; the JSON hostcall envelope is

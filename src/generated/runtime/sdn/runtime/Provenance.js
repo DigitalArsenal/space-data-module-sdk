@@ -2,6 +2,7 @@ var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 import * as flatbuffers from "flatbuffers";
+import { Header } from "./Header.js";
 class Provenance {
   constructor() {
     __publicField(this, "bb", null);
@@ -94,8 +95,20 @@ class Provenance {
     const offset = this.bb.__offset(this.bb_pos, 32);
     return offset ? !!this.bb.readInt8(this.bb_pos + offset) : false;
   }
+  /**
+   * Descriptive provenance the parser has no field above for - the method, units, the date range covered, counts
+   * of what was dropped or filled - as name / value pairs, kept in order (a name may repeat). Values are text.
+   */
+  ATTRIBUTES(index, obj) {
+    const offset = this.bb.__offset(this.bb_pos, 34);
+    return offset ? (obj || new Header()).__init(this.bb.__indirect(this.bb.__vector(this.bb_pos + offset) + index * 4), this.bb) : null;
+  }
+  attributesLength() {
+    const offset = this.bb.__offset(this.bb_pos, 34);
+    return offset ? this.bb.__vector_len(this.bb_pos + offset) : 0;
+  }
   static startProvenance(builder) {
-    builder.startObject(15);
+    builder.startObject(16);
   }
   static addSourceUrl(builder, SOURCE_URLOffset) {
     builder.addFieldOffset(0, SOURCE_URLOffset, 0);
@@ -172,11 +185,24 @@ class Provenance {
   static addFromCache(builder, FROM_CACHE) {
     builder.addFieldInt8(14, +FROM_CACHE, 0);
   }
+  static addAttributes(builder, ATTRIBUTESOffset) {
+    builder.addFieldOffset(15, ATTRIBUTESOffset, 0);
+  }
+  static createAttributesVector(builder, data) {
+    builder.startVector(4, data.length, 4);
+    for (let i = data.length - 1; i >= 0; i--) {
+      builder.addOffset(data[i]);
+    }
+    return builder.endVector();
+  }
+  static startAttributesVector(builder, numElems) {
+    builder.startVector(4, numElems, 4);
+  }
   static endProvenance(builder) {
     const offset = builder.endObject();
     return offset;
   }
-  static createProvenance(builder, SOURCE_URLOffset, HTTP_STATUS, ETAGOffset, LAST_MODIFIEDOffset, CONTENT_TYPEOffset, RETRIEVED_MS, PARSEROffset, PARSER_VERSIONOffset, SOURCE_SHA256Offset, NORMALIZED_SHA256Offset, NORMALIZED_COUNT, SCHEMASOffset, SCHEMA_COUNTSOffset, WARNINGSOffset, FROM_CACHE) {
+  static createProvenance(builder, SOURCE_URLOffset, HTTP_STATUS, ETAGOffset, LAST_MODIFIEDOffset, CONTENT_TYPEOffset, RETRIEVED_MS, PARSEROffset, PARSER_VERSIONOffset, SOURCE_SHA256Offset, NORMALIZED_SHA256Offset, NORMALIZED_COUNT, SCHEMASOffset, SCHEMA_COUNTSOffset, WARNINGSOffset, FROM_CACHE, ATTRIBUTESOffset) {
     Provenance.startProvenance(builder);
     Provenance.addSourceUrl(builder, SOURCE_URLOffset);
     Provenance.addHttpStatus(builder, HTTP_STATUS);
@@ -193,6 +219,7 @@ class Provenance {
     Provenance.addSchemaCounts(builder, SCHEMA_COUNTSOffset);
     Provenance.addWarnings(builder, WARNINGSOffset);
     Provenance.addFromCache(builder, FROM_CACHE);
+    Provenance.addAttributes(builder, ATTRIBUTESOffset);
     return Provenance.endProvenance(builder);
   }
   unpack() {
@@ -211,7 +238,8 @@ class Provenance {
       this.bb.createScalarList(this.SCHEMAS.bind(this), this.schemasLength()),
       this.bb.createScalarList(this.SCHEMA_COUNTS.bind(this), this.schemaCountsLength()),
       this.bb.createScalarList(this.WARNINGS.bind(this), this.warningsLength()),
-      this.FROM_CACHE()
+      this.FROM_CACHE(),
+      this.bb.createObjList(this.ATTRIBUTES.bind(this), this.attributesLength())
     );
   }
   unpackTo(_o) {
@@ -230,10 +258,11 @@ class Provenance {
     _o.SCHEMA_COUNTS = this.bb.createScalarList(this.SCHEMA_COUNTS.bind(this), this.schemaCountsLength());
     _o.WARNINGS = this.bb.createScalarList(this.WARNINGS.bind(this), this.warningsLength());
     _o.FROM_CACHE = this.FROM_CACHE();
+    _o.ATTRIBUTES = this.bb.createObjList(this.ATTRIBUTES.bind(this), this.attributesLength());
   }
 }
 class ProvenanceT {
-  constructor(SOURCE_URL = null, HTTP_STATUS = 0, ETAG = null, LAST_MODIFIED = null, CONTENT_TYPE = null, RETRIEVED_MS = BigInt("0"), PARSER = null, PARSER_VERSION = null, SOURCE_SHA256 = null, NORMALIZED_SHA256 = null, NORMALIZED_COUNT = BigInt("0"), SCHEMAS = [], SCHEMA_COUNTS = [], WARNINGS = [], FROM_CACHE = false) {
+  constructor(SOURCE_URL = null, HTTP_STATUS = 0, ETAG = null, LAST_MODIFIED = null, CONTENT_TYPE = null, RETRIEVED_MS = BigInt("0"), PARSER = null, PARSER_VERSION = null, SOURCE_SHA256 = null, NORMALIZED_SHA256 = null, NORMALIZED_COUNT = BigInt("0"), SCHEMAS = [], SCHEMA_COUNTS = [], WARNINGS = [], FROM_CACHE = false, ATTRIBUTES = []) {
     __publicField(this, "SOURCE_URL", SOURCE_URL);
     __publicField(this, "HTTP_STATUS", HTTP_STATUS);
     __publicField(this, "ETAG", ETAG);
@@ -249,6 +278,7 @@ class ProvenanceT {
     __publicField(this, "SCHEMA_COUNTS", SCHEMA_COUNTS);
     __publicField(this, "WARNINGS", WARNINGS);
     __publicField(this, "FROM_CACHE", FROM_CACHE);
+    __publicField(this, "ATTRIBUTES", ATTRIBUTES);
   }
   pack(builder) {
     const SOURCE_URL = this.SOURCE_URL !== null ? builder.createString(this.SOURCE_URL) : 0;
@@ -262,6 +292,7 @@ class ProvenanceT {
     const SCHEMAS = Provenance.createSchemasVector(builder, builder.createObjectOffsetList(this.SCHEMAS));
     const SCHEMA_COUNTS = Provenance.createSchemaCountsVector(builder, this.SCHEMA_COUNTS);
     const WARNINGS = Provenance.createWarningsVector(builder, builder.createObjectOffsetList(this.WARNINGS));
+    const ATTRIBUTES = Provenance.createAttributesVector(builder, builder.createObjectOffsetList(this.ATTRIBUTES));
     return Provenance.createProvenance(
       builder,
       SOURCE_URL,
@@ -278,7 +309,8 @@ class ProvenanceT {
       SCHEMAS,
       SCHEMA_COUNTS,
       WARNINGS,
-      this.FROM_CACHE
+      this.FROM_CACHE,
+      ATTRIBUTES
     );
   }
 }

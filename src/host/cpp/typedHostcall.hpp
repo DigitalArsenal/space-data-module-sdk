@@ -196,6 +196,57 @@ inline Response call(const char* op, const char* params_type, const Params& para
 /// Call an operation without a "params" record (clock.now, plugin.getConfig, filesystem.readFile with raw "path", ...).
 inline Response call(const char* op, std::initializer_list<Frame> frames = {}) { return call_frames(op, std::vector<Frame>(frames)); }
 
+/// SQL values (raw "params" of storage.flatsql_query_stream / query_sandboxed / flatsql_cache_key, raw "cells" of a
+/// query_sandboxed rows answer) in FlatSQL's tagged parameter encoding: value after value, a u8 tag, a u32
+/// little-endian payload length, the payload. Text and bytes of any length.
+///   sdm_piv::SqlValues p; p.i64(25544).str("ISS (ZARYA)").bytes(key, 32);
+///   sdm_piv::call("storage.flatsql_query_stream", "SqlStreamParams", s, {sdm_piv::raw("sql", sql), p.frame()});
+enum SqlTag : uint8_t { kSqlNull = 0, kSqlBool = 1, kSqlI64 = 2, kSqlF64 = 3, kSqlStr = 4, kSqlBytes = 5 };
+class SqlValues {
+ public:
+  SqlValues& null() { return put(kSqlNull, nullptr, 0); }
+  SqlValues& boolean(bool v) { const uint8_t b = v ? 1 : 0; return put(kSqlBool, &b, 1); }
+  SqlValues& i64(int64_t v) { uint8_t b[8]; for (int i = 0; i < 8; ++i) b[i] = static_cast<uint8_t>(static_cast<uint64_t>(v) >> (8 * i)); return put(kSqlI64, b, 8); }
+  SqlValues& f64(double v) { uint64_t u; std::memcpy(&u, &v, 8); return i64_bits(kSqlF64, u); }
+  SqlValues& str(std::string_view v) { return put(kSqlStr, reinterpret_cast<const uint8_t*>(v.data()), v.size()); }
+  SqlValues& bytes(const uint8_t* data, size_t size) { return put(kSqlBytes, data, size); }
+  std::string_view view() const { return bytes_; }
+  /// The raw frame (default port "params"); the values must outlive the call.
+  Frame frame(const char* port = "params") const { return raw(port, bytes_); }
+
+ private:
+  SqlValues& i64_bits(uint8_t tag, uint64_t u) { uint8_t b[8]; for (int i = 0; i < 8; ++i) b[i] = static_cast<uint8_t>(u >> (8 * i)); return put(tag, b, 8); }
+  SqlValues& put(uint8_t tag, const uint8_t* data, size_t size) {
+    bytes_.push_back(static_cast<char>(tag));
+    for (int i = 0; i < 4; ++i) bytes_.push_back(static_cast<char>((static_cast<uint32_t>(size) >> (8 * i)) & 0xff));
+    if (size) bytes_.append(reinterpret_cast<const char*>(data), size);
+    return *this;
+  }
+  std::string bytes_;
+};
+/// One decoded SQL value: its tag and payload (in place).
+struct SqlValue {
+  uint8_t tag;
+  std::string_view payload;
+  bool as_bool() const { return !payload.empty() && payload[0] != 0; }
+  int64_t as_i64() const { uint64_t u = 0; for (size_t i = 0; i < 8 && i < payload.size(); ++i) u |= static_cast<uint64_t>(static_cast<uint8_t>(payload[i])) << (8 * i); return static_cast<int64_t>(u); }
+  double as_f64() const { const uint64_t u = static_cast<uint64_t>(as_i64()); double d; std::memcpy(&d, &u, 8); return d; }
+};
+/// The values of a tagged SQL value run; false when it is malformed.
+inline bool read_sql_values(std::string_view bytes, std::vector<SqlValue>& out) {
+  out.clear();
+  size_t at = 0;
+  while (at < bytes.size()) {
+    if (bytes.size() - at < 5) return false;
+    uint32_t size = 0;
+    for (int i = 0; i < 4; ++i) size |= static_cast<uint32_t>(static_cast<uint8_t>(bytes[at + 1 + i])) << (8 * i);
+    if (bytes.size() - at - 5 < size) return false;
+    out.push_back({static_cast<uint8_t>(bytes[at]), bytes.substr(at + 5, size)});
+    at += 5 + size;
+  }
+  return true;
+}
+
 }  // namespace sdm_piv
 
 #endif  // SDM_PIV_HOSTCALL_HPP

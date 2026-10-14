@@ -52,7 +52,8 @@ test("runtime contracts: every frame round-trips and carries its file identifier
       reconcile: "duplicates", archive: { source: "noaa-ncep", name: "gfs.grib2" },
       provenance: { sourceUrl: "https://noaa-gfs-bdp-pds.s3.amazonaws.com/x", httpStatus: 206, etag: "\"e\"", lastModified: "Tue, 13 Oct 2026 09:30:00 GMT", contentType: "application/octet-stream",
         retrievedMs: 1791900002000, parser: "nwp-grib2-parser", parserVersion: "0.2.0", sourceSha256: "a".repeat(64), normalizedSha256: "b".repeat(64), normalizedCount: 9,
-        schemaCounts: { "WXF.fbs": 9 }, warnings: [], fromCache: false },
+        schemaCounts: { "WXF.fbs": 9 }, warnings: [], fromCache: false,
+        attributes: [{ name: "method", value: "nearest-neighbour regrid to 0.25 deg" }, { name: "units", value: "m s-1" }, { name: "units", value: "K" }] },
     }],
     ["IngestResult", encodeIngestResult, decodeIngestResult, {
       schema: "WXF.fbs", providerId: "noaa-ncep", sourceName: "gfs-0p25-sea", batchId: "c".repeat(64), inserted: 9, reconciledDuplicates: 0, reconciledOldBatches: 0, archived: "", refused: "",

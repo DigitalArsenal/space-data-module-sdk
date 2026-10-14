@@ -165,6 +165,11 @@ struct ProvenanceT : public ::flatbuffers::NativeTable {
   std::vector<uint64_t> SCHEMA_COUNTS{};
   std::vector<std::string> WARNINGS{};
   bool FROM_CACHE = false;
+  std::vector<std::unique_ptr<sdn::runtime::HeaderT>> ATTRIBUTES{};
+  ProvenanceT() = default;
+  ProvenanceT(const ProvenanceT &o);
+  ProvenanceT(ProvenanceT&&) FLATBUFFERS_NOEXCEPT = default;
+  ProvenanceT &operator=(ProvenanceT o) FLATBUFFERS_NOEXCEPT;
 };
 
 /// How a batch was produced: what was fetched, what came of it.
@@ -186,7 +191,8 @@ struct Provenance FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_SCHEMAS = 26,
     VT_SCHEMA_COUNTS = 28,
     VT_WARNINGS = 30,
-    VT_FROM_CACHE = 32
+    VT_FROM_CACHE = 32,
+    VT_ATTRIBUTES = 34
   };
   const ::flatbuffers::String *SOURCE_URL() const {
     return GetPointer<const ::flatbuffers::String *>(VT_SOURCE_URL);
@@ -237,6 +243,11 @@ struct Provenance FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool FROM_CACHE() const {
     return GetField<uint8_t>(VT_FROM_CACHE, 0) != 0;
   }
+  /// Descriptive provenance the parser has no field above for - the method, units, the date range covered, counts
+  /// of what was dropped or filled - as name / value pairs, kept in order (a name may repeat). Values are text.
+  const ::flatbuffers::Vector<::flatbuffers::Offset<sdn::runtime::Header>> *ATTRIBUTES() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<sdn::runtime::Header>> *>(VT_ATTRIBUTES);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -268,6 +279,9 @@ struct Provenance FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyVector(WARNINGS()) &&
            verifier.VerifyVectorOfStrings(WARNINGS()) &&
            VerifyField<uint8_t>(verifier, VT_FROM_CACHE, 1) &&
+           VerifyOffset(verifier, VT_ATTRIBUTES) &&
+           verifier.VerifyVector(ATTRIBUTES()) &&
+           verifier.VerifyVectorOfTables(ATTRIBUTES()) &&
            verifier.EndTable();
   }
   ProvenanceT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -324,6 +338,9 @@ struct ProvenanceBuilder {
   void add_FROM_CACHE(bool FROM_CACHE) {
     fbb_.AddElement<uint8_t>(Provenance::VT_FROM_CACHE, static_cast<uint8_t>(FROM_CACHE), 0);
   }
+  void add_ATTRIBUTES(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<sdn::runtime::Header>>> ATTRIBUTES) {
+    fbb_.AddOffset(Provenance::VT_ATTRIBUTES, ATTRIBUTES);
+  }
   explicit ProvenanceBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -351,10 +368,12 @@ inline ::flatbuffers::Offset<Provenance> CreateProvenance(
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> SCHEMAS = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<uint64_t>> SCHEMA_COUNTS = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> WARNINGS = 0,
-    bool FROM_CACHE = false) {
+    bool FROM_CACHE = false,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<sdn::runtime::Header>>> ATTRIBUTES = 0) {
   ProvenanceBuilder builder_(_fbb);
   builder_.add_NORMALIZED_COUNT(NORMALIZED_COUNT);
   builder_.add_RETRIEVED_MS(RETRIEVED_MS);
+  builder_.add_ATTRIBUTES(ATTRIBUTES);
   builder_.add_WARNINGS(WARNINGS);
   builder_.add_SCHEMA_COUNTS(SCHEMA_COUNTS);
   builder_.add_SCHEMAS(SCHEMAS);
@@ -387,7 +406,8 @@ inline ::flatbuffers::Offset<Provenance> CreateProvenanceDirect(
     const std::vector<::flatbuffers::Offset<::flatbuffers::String>> *SCHEMAS = nullptr,
     const std::vector<uint64_t> *SCHEMA_COUNTS = nullptr,
     const std::vector<::flatbuffers::Offset<::flatbuffers::String>> *WARNINGS = nullptr,
-    bool FROM_CACHE = false) {
+    bool FROM_CACHE = false,
+    std::vector<::flatbuffers::Offset<sdn::runtime::Header>> *ATTRIBUTES = nullptr) {
   auto SOURCE_URL__ = SOURCE_URL ? _fbb.CreateString(SOURCE_URL) : 0;
   auto ETAG__ = ETAG ? _fbb.CreateString(ETAG) : 0;
   auto LAST_MODIFIED__ = LAST_MODIFIED ? _fbb.CreateString(LAST_MODIFIED) : 0;
@@ -399,6 +419,7 @@ inline ::flatbuffers::Offset<Provenance> CreateProvenanceDirect(
   auto SCHEMAS__ = SCHEMAS ? _fbb.CreateVector<::flatbuffers::Offset<::flatbuffers::String>>(*SCHEMAS) : 0;
   auto SCHEMA_COUNTS__ = SCHEMA_COUNTS ? _fbb.CreateVector<uint64_t>(*SCHEMA_COUNTS) : 0;
   auto WARNINGS__ = WARNINGS ? _fbb.CreateVector<::flatbuffers::Offset<::flatbuffers::String>>(*WARNINGS) : 0;
+  auto ATTRIBUTES__ = ATTRIBUTES ? _fbb.CreateVectorOfSortedTables<sdn::runtime::Header>(ATTRIBUTES) : 0;
   return sdn::runtime::CreateProvenance(
       _fbb,
       SOURCE_URL__,
@@ -415,7 +436,8 @@ inline ::flatbuffers::Offset<Provenance> CreateProvenanceDirect(
       SCHEMAS__,
       SCHEMA_COUNTS__,
       WARNINGS__,
-      FROM_CACHE);
+      FROM_CACHE,
+      ATTRIBUTES__);
 }
 
 ::flatbuffers::Offset<Provenance> CreateProvenance(::flatbuffers::FlatBufferBuilder &_fbb, const ProvenanceT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -577,6 +599,46 @@ inline ::flatbuffers::Offset<ArchiveTarget> ArchiveTarget::Pack(::flatbuffers::F
       _NAME);
 }
 
+inline ProvenanceT::ProvenanceT(const ProvenanceT &o)
+      : SOURCE_URL(o.SOURCE_URL),
+        HTTP_STATUS(o.HTTP_STATUS),
+        ETAG(o.ETAG),
+        LAST_MODIFIED(o.LAST_MODIFIED),
+        CONTENT_TYPE(o.CONTENT_TYPE),
+        RETRIEVED_MS(o.RETRIEVED_MS),
+        PARSER(o.PARSER),
+        PARSER_VERSION(o.PARSER_VERSION),
+        SOURCE_SHA256(o.SOURCE_SHA256),
+        NORMALIZED_SHA256(o.NORMALIZED_SHA256),
+        NORMALIZED_COUNT(o.NORMALIZED_COUNT),
+        SCHEMAS(o.SCHEMAS),
+        SCHEMA_COUNTS(o.SCHEMA_COUNTS),
+        WARNINGS(o.WARNINGS),
+        FROM_CACHE(o.FROM_CACHE) {
+  ATTRIBUTES.reserve(o.ATTRIBUTES.size());
+  for (const auto &ATTRIBUTES_ : o.ATTRIBUTES) { ATTRIBUTES.emplace_back((ATTRIBUTES_) ? new sdn::runtime::HeaderT(*ATTRIBUTES_) : nullptr); }
+}
+
+inline ProvenanceT &ProvenanceT::operator=(ProvenanceT o) FLATBUFFERS_NOEXCEPT {
+  std::swap(SOURCE_URL, o.SOURCE_URL);
+  std::swap(HTTP_STATUS, o.HTTP_STATUS);
+  std::swap(ETAG, o.ETAG);
+  std::swap(LAST_MODIFIED, o.LAST_MODIFIED);
+  std::swap(CONTENT_TYPE, o.CONTENT_TYPE);
+  std::swap(RETRIEVED_MS, o.RETRIEVED_MS);
+  std::swap(PARSER, o.PARSER);
+  std::swap(PARSER_VERSION, o.PARSER_VERSION);
+  std::swap(SOURCE_SHA256, o.SOURCE_SHA256);
+  std::swap(NORMALIZED_SHA256, o.NORMALIZED_SHA256);
+  std::swap(NORMALIZED_COUNT, o.NORMALIZED_COUNT);
+  std::swap(SCHEMAS, o.SCHEMAS);
+  std::swap(SCHEMA_COUNTS, o.SCHEMA_COUNTS);
+  std::swap(WARNINGS, o.WARNINGS);
+  std::swap(FROM_CACHE, o.FROM_CACHE);
+  std::swap(ATTRIBUTES, o.ATTRIBUTES);
+  return *this;
+}
+
 inline ProvenanceT *Provenance::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
   auto _o = std::unique_ptr<ProvenanceT>(new ProvenanceT());
   UnPackTo(_o.get(), _resolver);
@@ -601,6 +663,7 @@ inline void Provenance::UnPackTo(ProvenanceT *_o, const ::flatbuffers::resolver_
   { auto _e = SCHEMA_COUNTS(); if (_e) { _o->SCHEMA_COUNTS.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->SCHEMA_COUNTS[_i] = _e->Get(_i); } } else { _o->SCHEMA_COUNTS.resize(0); } }
   { auto _e = WARNINGS(); if (_e) { _o->WARNINGS.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->WARNINGS[_i] = _e->Get(_i)->str(); } } else { _o->WARNINGS.resize(0); } }
   { auto _e = FROM_CACHE(); _o->FROM_CACHE = _e; }
+  { auto _e = ATTRIBUTES(); if (_e) { _o->ATTRIBUTES.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->ATTRIBUTES[_i]) { _e->Get(_i)->UnPackTo(_o->ATTRIBUTES[_i].get(), _resolver); } else { _o->ATTRIBUTES[_i] = std::unique_ptr<sdn::runtime::HeaderT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->ATTRIBUTES.resize(0); } }
 }
 
 inline ::flatbuffers::Offset<Provenance> CreateProvenance(::flatbuffers::FlatBufferBuilder &_fbb, const ProvenanceT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -626,6 +689,7 @@ inline ::flatbuffers::Offset<Provenance> Provenance::Pack(::flatbuffers::FlatBuf
   auto _SCHEMA_COUNTS = _o->SCHEMA_COUNTS.size() ? _fbb.CreateVector(_o->SCHEMA_COUNTS) : 0;
   auto _WARNINGS = _o->WARNINGS.size() ? _fbb.CreateVectorOfStrings(_o->WARNINGS) : 0;
   auto _FROM_CACHE = _o->FROM_CACHE;
+  auto _ATTRIBUTES = _o->ATTRIBUTES.size() ? _fbb.CreateVector<::flatbuffers::Offset<sdn::runtime::Header>> (_o->ATTRIBUTES.size(), [](size_t i, _VectorArgs *__va) { return sdn::runtime::CreateHeader(*__va->__fbb, __va->__o->ATTRIBUTES[i].get(), __va->__rehasher); }, &_va ) : 0;
   return sdn::runtime::CreateProvenance(
       _fbb,
       _SOURCE_URL,
@@ -642,7 +706,8 @@ inline ::flatbuffers::Offset<Provenance> Provenance::Pack(::flatbuffers::FlatBuf
       _SCHEMAS,
       _SCHEMA_COUNTS,
       _WARNINGS,
-      _FROM_CACHE);
+      _FROM_CACHE,
+      _ATTRIBUTES);
 }
 
 inline IngestRequestT::IngestRequestT(const IngestRequestT &o)

@@ -538,14 +538,14 @@ const _StoredRecordMeta = class _StoredRecordMeta {
     __writePresence(this.view, this.offset, 6, value);
   }
   lICENSE() {
-    return __decodeString(this.view, this.offset + 816, 64);
+    return __decodeString(this.view, this.offset + 816, 128);
   }
   setLICENSE(value) {
-    __encodeString(this.view, this.offset + 816, 64, value);
+    __encodeString(this.view, this.offset + 816, 128, value);
     this.setHasLICENSE(true);
   }
 };
-__publicField(_StoredRecordMeta, "SIZE", 888);
+__publicField(_StoredRecordMeta, "SIZE", 952);
 __publicField(_StoredRecordMeta, "ALIGN", 8);
 let StoredRecordMeta = _StoredRecordMeta;
 const _StorageWriteParams = class _StorageWriteParams {
@@ -827,10 +827,10 @@ const _StorageIngestParams = class _StorageIngestParams {
     __writePresence(this.view, this.offset, 5, value);
   }
   cONTENT_KEY_ID() {
-    return __decodeString(this.view, this.offset + 710, 64);
+    return __decodeString(this.view, this.offset + 710, 128);
   }
   setCONTENT_KEY_ID(value) {
-    __encodeString(this.view, this.offset + 710, 64, value);
+    __encodeString(this.view, this.offset + 710, 128, value);
     this.setHasCONTENT_KEY_ID(true);
   }
   hasSOURCE_PEER() {
@@ -840,10 +840,10 @@ const _StorageIngestParams = class _StorageIngestParams {
     __writePresence(this.view, this.offset, 6, value);
   }
   sOURCE_PEER() {
-    return __decodeString(this.view, this.offset + 775, 128);
+    return __decodeString(this.view, this.offset + 839, 128);
   }
   setSOURCE_PEER(value) {
-    __encodeString(this.view, this.offset + 775, 128, value);
+    __encodeString(this.view, this.offset + 839, 128, value);
     this.setHasSOURCE_PEER(true);
   }
   hasLICENSE() {
@@ -853,10 +853,10 @@ const _StorageIngestParams = class _StorageIngestParams {
     __writePresence(this.view, this.offset, 7, value);
   }
   lICENSE() {
-    return __decodeString(this.view, this.offset + 904, 64);
+    return __decodeString(this.view, this.offset + 968, 128);
   }
   setLICENSE(value) {
-    __encodeString(this.view, this.offset + 904, 64, value);
+    __encodeString(this.view, this.offset + 968, 128, value);
     this.setHasLICENSE(true);
   }
   hasLICENSE_URL() {
@@ -866,10 +866,10 @@ const _StorageIngestParams = class _StorageIngestParams {
     __writePresence(this.view, this.offset, 8, value);
   }
   lICENSE_URL() {
-    return __decodeString(this.view, this.offset + 969, 255);
+    return __decodeString(this.view, this.offset + 1097, 255);
   }
   setLICENSE_URL(value) {
-    __encodeString(this.view, this.offset + 969, 255, value);
+    __encodeString(this.view, this.offset + 1097, 255, value);
     this.setHasLICENSE_URL(true);
   }
   hasCITATION() {
@@ -879,23 +879,23 @@ const _StorageIngestParams = class _StorageIngestParams {
     __writePresence(this.view, this.offset, 9, value);
   }
   cITATION() {
-    return __decodeString(this.view, this.offset + 1225, 255);
+    return __decodeString(this.view, this.offset + 1353, 255);
   }
   setCITATION(value) {
-    __encodeString(this.view, this.offset + 1225, 255, value);
+    __encodeString(this.view, this.offset + 1353, 255, value);
     this.setHasCITATION(true);
   }
   sHARE_ALIKE() {
-    return this.view.getUint8(this.offset + 1481) !== 0;
+    return this.view.getUint8(this.offset + 1609) !== 0;
   }
   setSHARE_ALIKE(value) {
-    this.view.setUint8(this.offset + 1481, value ? 1 : 0);
+    this.view.setUint8(this.offset + 1609, value ? 1 : 0);
   }
   rECONCILE() {
-    return this.view.getUint8(this.offset + 1482);
+    return this.view.getUint8(this.offset + 1610);
   }
   setRECONCILE(value) {
-    this.view.setUint8(this.offset + 1482, value);
+    this.view.setUint8(this.offset + 1610, value);
   }
   hasARCHIVE_SOURCE() {
     return __readPresence(this.view, this.offset, 10);
@@ -904,10 +904,10 @@ const _StorageIngestParams = class _StorageIngestParams {
     __writePresence(this.view, this.offset, 10, value);
   }
   aRCHIVE_SOURCE() {
-    return __decodeString(this.view, this.offset + 1483, 128);
+    return __decodeString(this.view, this.offset + 1611, 128);
   }
   setARCHIVE_SOURCE(value) {
-    __encodeString(this.view, this.offset + 1483, 128, value);
+    __encodeString(this.view, this.offset + 1611, 128, value);
     this.setHasARCHIVE_SOURCE(true);
   }
   hasARCHIVE_NAME() {
@@ -917,14 +917,14 @@ const _StorageIngestParams = class _StorageIngestParams {
     __writePresence(this.view, this.offset, 11, value);
   }
   aRCHIVE_NAME() {
-    return __decodeString(this.view, this.offset + 1612, 255);
+    return __decodeString(this.view, this.offset + 1740, 255);
   }
   setARCHIVE_NAME(value) {
-    __encodeString(this.view, this.offset + 1612, 255, value);
+    __encodeString(this.view, this.offset + 1740, 255, value);
     this.setHasARCHIVE_NAME(true);
   }
 };
-__publicField(_StorageIngestParams, "SIZE", 1868);
+__publicField(_StorageIngestParams, "SIZE", 1996);
 __publicField(_StorageIngestParams, "ALIGN", 1);
 let StorageIngestParams = _StorageIngestParams;
 const _Provenance = class _Provenance {
@@ -963,10 +963,10 @@ const _Provenance = class _Provenance {
     __writePresence(this.view, this.offset, 1, value);
   }
   eTAG() {
-    return __decodeString(this.view, this.offset + 264, 128);
+    return __decodeString(this.view, this.offset + 264, 255);
   }
   setETAG(value) {
-    __encodeString(this.view, this.offset + 264, 128, value);
+    __encodeString(this.view, this.offset + 264, 255, value);
     this.setHasETAG(true);
   }
   hasLAST_MODIFIED() {
@@ -976,10 +976,10 @@ const _Provenance = class _Provenance {
     __writePresence(this.view, this.offset, 2, value);
   }
   lAST_MODIFIED() {
-    return __decodeString(this.view, this.offset + 393, 64);
+    return __decodeString(this.view, this.offset + 520, 64);
   }
   setLAST_MODIFIED(value) {
-    __encodeString(this.view, this.offset + 393, 64, value);
+    __encodeString(this.view, this.offset + 520, 64, value);
     this.setHasLAST_MODIFIED(true);
   }
   hasCONTENT_TYPE() {
@@ -989,17 +989,17 @@ const _Provenance = class _Provenance {
     __writePresence(this.view, this.offset, 3, value);
   }
   cONTENT_TYPE() {
-    return __decodeString(this.view, this.offset + 458, 128);
+    return __decodeString(this.view, this.offset + 585, 128);
   }
   setCONTENT_TYPE(value) {
-    __encodeString(this.view, this.offset + 458, 128, value);
+    __encodeString(this.view, this.offset + 585, 128, value);
     this.setHasCONTENT_TYPE(true);
   }
   rETRIEVED_MS() {
-    return this.view.getBigUint64(this.offset + 592, true);
+    return this.view.getBigUint64(this.offset + 720, true);
   }
   setRETRIEVED_MS(value) {
-    this.view.setBigUint64(this.offset + 592, value, true);
+    this.view.setBigUint64(this.offset + 720, value, true);
   }
   hasPARSER() {
     return __readPresence(this.view, this.offset, 4);
@@ -1008,10 +1008,10 @@ const _Provenance = class _Provenance {
     __writePresence(this.view, this.offset, 4, value);
   }
   pARSER() {
-    return __decodeString(this.view, this.offset + 600, 64);
+    return __decodeString(this.view, this.offset + 728, 128);
   }
   setPARSER(value) {
-    __encodeString(this.view, this.offset + 600, 64, value);
+    __encodeString(this.view, this.offset + 728, 128, value);
     this.setHasPARSER(true);
   }
   hasPARSER_VERSION() {
@@ -1021,10 +1021,10 @@ const _Provenance = class _Provenance {
     __writePresence(this.view, this.offset, 5, value);
   }
   pARSER_VERSION() {
-    return __decodeString(this.view, this.offset + 665, 32);
+    return __decodeString(this.view, this.offset + 857, 64);
   }
   setPARSER_VERSION(value) {
-    __encodeString(this.view, this.offset + 665, 32, value);
+    __encodeString(this.view, this.offset + 857, 64, value);
     this.setHasPARSER_VERSION(true);
   }
   hasSOURCE_SHA256() {
@@ -1034,10 +1034,10 @@ const _Provenance = class _Provenance {
     __writePresence(this.view, this.offset, 6, value);
   }
   sOURCE_SHA256() {
-    return __decodeString(this.view, this.offset + 698, 64);
+    return __decodeString(this.view, this.offset + 922, 64);
   }
   setSOURCE_SHA256(value) {
-    __encodeString(this.view, this.offset + 698, 64, value);
+    __encodeString(this.view, this.offset + 922, 64, value);
     this.setHasSOURCE_SHA256(true);
   }
   hasNORMALIZED_SHA256() {
@@ -1047,28 +1047,68 @@ const _Provenance = class _Provenance {
     __writePresence(this.view, this.offset, 7, value);
   }
   nORMALIZED_SHA256() {
-    return __decodeString(this.view, this.offset + 763, 64);
+    return __decodeString(this.view, this.offset + 987, 64);
   }
   setNORMALIZED_SHA256(value) {
-    __encodeString(this.view, this.offset + 763, 64, value);
+    __encodeString(this.view, this.offset + 987, 64, value);
     this.setHasNORMALIZED_SHA256(true);
   }
   nORMALIZED_COUNT() {
-    return this.view.getBigUint64(this.offset + 832, true);
+    return this.view.getBigUint64(this.offset + 1056, true);
   }
   setNORMALIZED_COUNT(value) {
-    this.view.setBigUint64(this.offset + 832, value, true);
+    this.view.setBigUint64(this.offset + 1056, value, true);
   }
   fROM_CACHE() {
-    return this.view.getUint8(this.offset + 840) !== 0;
+    return this.view.getUint8(this.offset + 1064) !== 0;
   }
   setFROM_CACHE(value) {
-    this.view.setUint8(this.offset + 840, value ? 1 : 0);
+    this.view.setUint8(this.offset + 1064, value ? 1 : 0);
   }
 };
-__publicField(_Provenance, "SIZE", 848);
+__publicField(_Provenance, "SIZE", 1072);
 __publicField(_Provenance, "ALIGN", 8);
 let Provenance = _Provenance;
+const _ProvenanceAttribute = class _ProvenanceAttribute {
+  constructor(buffer, offset = 0) {
+    __publicField(this, "buffer", buffer);
+    __publicField(this, "offset", offset);
+    __publicField(this, "view");
+    this.view = new DataView(buffer);
+  }
+  static fromPointer(buffer, offset = 0) {
+    return new _ProvenanceAttribute(buffer, offset);
+  }
+  hasNAME() {
+    return __readPresence(this.view, this.offset, 0);
+  }
+  setHasNAME(value) {
+    __writePresence(this.view, this.offset, 0, value);
+  }
+  nAME() {
+    return __decodeString(this.view, this.offset + 1, 128);
+  }
+  setNAME(value) {
+    __encodeString(this.view, this.offset + 1, 128, value);
+    this.setHasNAME(true);
+  }
+  hasVALUE() {
+    return __readPresence(this.view, this.offset, 1);
+  }
+  setHasVALUE(value) {
+    __writePresence(this.view, this.offset, 1, value);
+  }
+  vALUE() {
+    return __decodeString(this.view, this.offset + 130, 255);
+  }
+  setVALUE(value) {
+    __encodeString(this.view, this.offset + 130, 255, value);
+    this.setHasVALUE(true);
+  }
+};
+__publicField(_ProvenanceAttribute, "SIZE", 386);
+__publicField(_ProvenanceAttribute, "ALIGN", 1);
+let ProvenanceAttribute = _ProvenanceAttribute;
 const _StorageIngestResult = class _StorageIngestResult {
   constructor(buffer, offset = 0) {
     __publicField(this, "buffer", buffer);
@@ -1153,57 +1193,6 @@ const _StorageIngestResult = class _StorageIngestResult {
 __publicField(_StorageIngestResult, "SIZE", 736);
 __publicField(_StorageIngestResult, "ALIGN", 8);
 let StorageIngestResult = _StorageIngestResult;
-const _SqlValue = class _SqlValue {
-  constructor(buffer, offset = 0) {
-    __publicField(this, "buffer", buffer);
-    __publicField(this, "offset", offset);
-    __publicField(this, "view");
-    this.view = new DataView(buffer);
-  }
-  static fromPointer(buffer, offset = 0) {
-    return new _SqlValue(buffer, offset);
-  }
-  kIND() {
-    return this.view.getUint8(this.offset + 1);
-  }
-  setKIND(value) {
-    this.view.setUint8(this.offset + 1, value);
-  }
-  bOOL_VALUE() {
-    return this.view.getUint8(this.offset + 2) !== 0;
-  }
-  setBOOL_VALUE(value) {
-    this.view.setUint8(this.offset + 2, value ? 1 : 0);
-  }
-  i64_VALUE() {
-    return this.view.getBigInt64(this.offset + 8, true);
-  }
-  setI64_VALUE(value) {
-    this.view.setBigInt64(this.offset + 8, value, true);
-  }
-  f64_VALUE() {
-    return this.view.getFloat64(this.offset + 16, true);
-  }
-  setF64_VALUE(value) {
-    this.view.setFloat64(this.offset + 16, value, true);
-  }
-  hasSTR_VALUE() {
-    return __readPresence(this.view, this.offset, 0);
-  }
-  setHasSTR_VALUE(value) {
-    __writePresence(this.view, this.offset, 0, value);
-  }
-  sTR_VALUE() {
-    return __decodeString(this.view, this.offset + 24, 255);
-  }
-  setSTR_VALUE(value) {
-    __encodeString(this.view, this.offset + 24, 255, value);
-    this.setHasSTR_VALUE(true);
-  }
-};
-__publicField(_SqlValue, "SIZE", 280);
-__publicField(_SqlValue, "ALIGN", 8);
-let SqlValue = _SqlValue;
 const _SqlStreamParams = class _SqlStreamParams {
   constructor(buffer, offset = 0) {
     __publicField(this, "buffer", buffer);
@@ -2468,10 +2457,10 @@ const _P2pPnmEntry = class _P2pPnmEntry {
     __writePresence(this.view, this.offset, 5, value);
   }
   fILE_ID() {
-    return __decodeString(this.view, this.offset + 471, 16);
+    return __decodeString(this.view, this.offset + 471, 255);
   }
   setFILE_ID(value) {
-    __encodeString(this.view, this.offset + 471, 16, value);
+    __encodeString(this.view, this.offset + 471, 255, value);
     this.setHasFILE_ID(true);
   }
   hasFILE_NAME() {
@@ -2481,10 +2470,10 @@ const _P2pPnmEntry = class _P2pPnmEntry {
     __writePresence(this.view, this.offset, 6, value);
   }
   fILE_NAME() {
-    return __decodeString(this.view, this.offset + 488, 255);
+    return __decodeString(this.view, this.offset + 727, 255);
   }
   setFILE_NAME(value) {
-    __encodeString(this.view, this.offset + 488, 255, value);
+    __encodeString(this.view, this.offset + 727, 255, value);
     this.setHasFILE_NAME(true);
   }
   hasCID() {
@@ -2494,17 +2483,17 @@ const _P2pPnmEntry = class _P2pPnmEntry {
     __writePresence(this.view, this.offset, 7, value);
   }
   cID() {
-    return __decodeString(this.view, this.offset + 744, 128);
+    return __decodeString(this.view, this.offset + 983, 128);
   }
   setCID(value) {
-    __encodeString(this.view, this.offset + 744, 128, value);
+    __encodeString(this.view, this.offset + 983, 128, value);
     this.setHasCID(true);
   }
   pUBLISH_MS() {
-    return this.view.getBigUint64(this.offset + 880, true);
+    return this.view.getBigUint64(this.offset + 1112, true);
   }
   setPUBLISH_MS(value) {
-    this.view.setBigUint64(this.offset + 880, value, true);
+    this.view.setBigUint64(this.offset + 1112, value, true);
   }
   hasSIGNATURE_TYPE() {
     return __readPresence(this.view, this.offset, 8);
@@ -2513,10 +2502,10 @@ const _P2pPnmEntry = class _P2pPnmEntry {
     __writePresence(this.view, this.offset, 8, value);
   }
   sIGNATURE_TYPE() {
-    return __decodeString(this.view, this.offset + 888, 32);
+    return __decodeString(this.view, this.offset + 1120, 32);
   }
   setSIGNATURE_TYPE(value) {
-    __encodeString(this.view, this.offset + 888, 32, value);
+    __encodeString(this.view, this.offset + 1120, 32, value);
     this.setHasSIGNATURE_TYPE(true);
   }
   hasSIGNATURE_HEX() {
@@ -2526,17 +2515,17 @@ const _P2pPnmEntry = class _P2pPnmEntry {
     __writePresence(this.view, this.offset, 9, value);
   }
   sIGNATURE_HEX() {
-    return __decodeString(this.view, this.offset + 921, 255);
+    return __decodeString(this.view, this.offset + 1153, 255);
   }
   setSIGNATURE_HEX(value) {
-    __encodeString(this.view, this.offset + 921, 255, value);
+    __encodeString(this.view, this.offset + 1153, 255, value);
     this.setHasSIGNATURE_HEX(true);
   }
   sIGNATURE_VERIFIED() {
-    return this.view.getUint8(this.offset + 1177) !== 0;
+    return this.view.getUint8(this.offset + 1409) !== 0;
   }
   setSIGNATURE_VERIFIED(value) {
-    this.view.setUint8(this.offset + 1177, value ? 1 : 0);
+    this.view.setUint8(this.offset + 1409, value ? 1 : 0);
   }
   hasATTRIBUTION() {
     return __readPresence(this.view, this.offset, 10);
@@ -2545,17 +2534,17 @@ const _P2pPnmEntry = class _P2pPnmEntry {
     __writePresence(this.view, this.offset, 10, value);
   }
   aTTRIBUTION() {
-    return __decodeString(this.view, this.offset + 1178, 16);
+    return __decodeString(this.view, this.offset + 1410, 16);
   }
   setATTRIBUTION(value) {
-    __encodeString(this.view, this.offset + 1178, 16, value);
+    __encodeString(this.view, this.offset + 1410, 16, value);
     this.setHasATTRIBUTION(true);
   }
   pNM_INDEX() {
-    return this.view.getInt32(this.offset + 1196, true);
+    return this.view.getInt32(this.offset + 1428, true);
   }
   setPNM_INDEX(value) {
-    this.view.setInt32(this.offset + 1196, value, true);
+    this.view.setInt32(this.offset + 1428, value, true);
   }
   hasPUBLISHER_KEY_HEX() {
     return __readPresence(this.view, this.offset, 11);
@@ -2564,10 +2553,10 @@ const _P2pPnmEntry = class _P2pPnmEntry {
     __writePresence(this.view, this.offset, 11, value);
   }
   pUBLISHER_KEY_HEX() {
-    return __decodeString(this.view, this.offset + 1200, 128);
+    return __decodeString(this.view, this.offset + 1432, 128);
   }
   setPUBLISHER_KEY_HEX(value) {
-    __encodeString(this.view, this.offset + 1200, 128, value);
+    __encodeString(this.view, this.offset + 1432, 128, value);
     this.setHasPUBLISHER_KEY_HEX(true);
   }
   hasPUBLISHER_KEY_SOURCE() {
@@ -2577,14 +2566,14 @@ const _P2pPnmEntry = class _P2pPnmEntry {
     __writePresence(this.view, this.offset, 12, value);
   }
   pUBLISHER_KEY_SOURCE() {
-    return __decodeString(this.view, this.offset + 1329, 64);
+    return __decodeString(this.view, this.offset + 1561, 64);
   }
   setPUBLISHER_KEY_SOURCE(value) {
-    __encodeString(this.view, this.offset + 1329, 64, value);
+    __encodeString(this.view, this.offset + 1561, 64, value);
     this.setHasPUBLISHER_KEY_SOURCE(true);
   }
 };
-__publicField(_P2pPnmEntry, "SIZE", 1400);
+__publicField(_P2pPnmEntry, "SIZE", 1632);
 __publicField(_P2pPnmEntry, "ALIGN", 8);
 let P2pPnmEntry = _P2pPnmEntry;
 const _P2pLatestDataset = class _P2pLatestDataset {
@@ -2680,23 +2669,23 @@ const _P2pLatestDataset = class _P2pLatestDataset {
     __writePresence(this.view, this.offset, 4, value);
   }
   pNM_FILE_ID() {
-    return __decodeString(this.view, this.offset + 282, 16);
+    return __decodeString(this.view, this.offset + 282, 255);
   }
   setPNM_FILE_ID(value) {
-    __encodeString(this.view, this.offset + 282, 16, value);
+    __encodeString(this.view, this.offset + 282, 255, value);
     this.setHasPNM_FILE_ID(true);
   }
   pNM_PUBLISH_MS() {
-    return this.view.getBigUint64(this.offset + 304, true);
+    return this.view.getBigUint64(this.offset + 544, true);
   }
   setPNM_PUBLISH_MS(value) {
-    this.view.setBigUint64(this.offset + 304, value, true);
+    this.view.setBigUint64(this.offset + 544, value, true);
   }
   pNM_SIGNATURE_VERIFIED() {
-    return this.view.getUint8(this.offset + 312) !== 0;
+    return this.view.getUint8(this.offset + 552) !== 0;
   }
   setPNM_SIGNATURE_VERIFIED(value) {
-    this.view.setUint8(this.offset + 312, value ? 1 : 0);
+    this.view.setUint8(this.offset + 552, value ? 1 : 0);
   }
   hasPNM_ATTRIBUTION() {
     return __readPresence(this.view, this.offset, 5);
@@ -2705,10 +2694,10 @@ const _P2pLatestDataset = class _P2pLatestDataset {
     __writePresence(this.view, this.offset, 5, value);
   }
   pNM_ATTRIBUTION() {
-    return __decodeString(this.view, this.offset + 313, 16);
+    return __decodeString(this.view, this.offset + 553, 16);
   }
   setPNM_ATTRIBUTION(value) {
-    __encodeString(this.view, this.offset + 313, 16, value);
+    __encodeString(this.view, this.offset + 553, 16, value);
     this.setHasPNM_ATTRIBUTION(true);
   }
   hasBATCH_ID() {
@@ -2718,10 +2707,10 @@ const _P2pLatestDataset = class _P2pLatestDataset {
     __writePresence(this.view, this.offset, 6, value);
   }
   bATCH_ID() {
-    return __decodeString(this.view, this.offset + 330, 128);
+    return __decodeString(this.view, this.offset + 570, 128);
   }
   setBATCH_ID(value) {
-    __encodeString(this.view, this.offset + 330, 128, value);
+    __encodeString(this.view, this.offset + 570, 128, value);
     this.setHasBATCH_ID(true);
   }
   hasPROVIDER_ID() {
@@ -2731,10 +2720,10 @@ const _P2pLatestDataset = class _P2pLatestDataset {
     __writePresence(this.view, this.offset, 7, value);
   }
   pROVIDER_ID() {
-    return __decodeString(this.view, this.offset + 459, 128);
+    return __decodeString(this.view, this.offset + 699, 128);
   }
   setPROVIDER_ID(value) {
-    __encodeString(this.view, this.offset + 459, 128, value);
+    __encodeString(this.view, this.offset + 699, 128, value);
     this.setHasPROVIDER_ID(true);
   }
   hasSOURCE_NAME() {
@@ -2744,35 +2733,35 @@ const _P2pLatestDataset = class _P2pLatestDataset {
     __writePresence(this.view, this.offset, 8, value);
   }
   sOURCE_NAME() {
-    return __decodeString(this.view, this.offset + 588, 128);
+    return __decodeString(this.view, this.offset + 828, 128);
   }
   setSOURCE_NAME(value) {
-    __encodeString(this.view, this.offset + 588, 128, value);
+    __encodeString(this.view, this.offset + 828, 128, value);
     this.setHasSOURCE_NAME(true);
   }
   rECORD_COUNT() {
-    return this.view.getBigUint64(this.offset + 720, true);
+    return this.view.getBigUint64(this.offset + 960, true);
   }
   setRECORD_COUNT(value) {
-    this.view.setBigUint64(this.offset + 720, value, true);
+    this.view.setBigUint64(this.offset + 960, value, true);
   }
   bYTE_COUNT() {
-    return this.view.getBigUint64(this.offset + 728, true);
+    return this.view.getBigUint64(this.offset + 968, true);
   }
   setBYTE_COUNT(value) {
-    this.view.setBigUint64(this.offset + 728, value, true);
+    this.view.setBigUint64(this.offset + 968, value, true);
   }
   pARTS() {
-    return this.view.getUint32(this.offset + 736, true);
+    return this.view.getUint32(this.offset + 976, true);
   }
   setPARTS(value) {
-    this.view.setUint32(this.offset + 736, value, true);
+    this.view.setUint32(this.offset + 976, value, true);
   }
   pUBLISHED_MS() {
-    return this.view.getBigUint64(this.offset + 744, true);
+    return this.view.getBigUint64(this.offset + 984, true);
   }
   setPUBLISHED_MS(value) {
-    this.view.setBigUint64(this.offset + 744, value, true);
+    this.view.setBigUint64(this.offset + 984, value, true);
   }
   hasETAG_FNV1A64() {
     return __readPresence(this.view, this.offset, 9);
@@ -2781,10 +2770,10 @@ const _P2pLatestDataset = class _P2pLatestDataset {
     __writePresence(this.view, this.offset, 9, value);
   }
   eTAG_FNV1A64() {
-    return __decodeString(this.view, this.offset + 752, 16);
+    return __decodeString(this.view, this.offset + 992, 16);
   }
   setETAG_FNV1A64(value) {
-    __encodeString(this.view, this.offset + 752, 16, value);
+    __encodeString(this.view, this.offset + 992, 16, value);
     this.setHasETAG_FNV1A64(true);
   }
   hasREF() {
@@ -2794,10 +2783,10 @@ const _P2pLatestDataset = class _P2pLatestDataset {
     __writePresence(this.view, this.offset, 10, value);
   }
   rEF() {
-    return new BodyRef(this.buffer, this.offset + 776);
+    return new BodyRef(this.buffer, this.offset + 1016);
   }
 };
-__publicField(_P2pLatestDataset, "SIZE", 832);
+__publicField(_P2pLatestDataset, "SIZE", 1072);
 __publicField(_P2pLatestDataset, "ALIGN", 8);
 let P2pLatestDataset = _P2pLatestDataset;
 const _NodeStatusReport = class _NodeStatusReport {
@@ -3891,6 +3880,7 @@ export {
   P2pSummary,
   ProtocolParams,
   Provenance,
+  ProvenanceAttribute,
   PubsubParams,
   PubsubSubscribed,
   QuerySurfaceLimits,
@@ -3903,7 +3893,6 @@ export {
   SocketParams,
   SocketResult,
   SqlStreamParams,
-  SqlValue,
   StorageDeleteParams,
   StorageExpireParams,
   StorageExpireResult,

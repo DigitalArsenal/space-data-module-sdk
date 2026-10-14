@@ -19,6 +19,13 @@ import {
   nextCronOccurrence,
 } from "./cron.js";
 import { createBrowserEdgeShims } from "./browserEdgeShims.js";
+import {
+  ADAPTER_CAPABILITIES,
+  ADAPTER_OPERATIONS,
+  callServiceAdapter,
+  normalizePluginConfig,
+  resolveServiceAdapters,
+} from "./adapterOperations.js";
 
 export const BrowserHostSupportedCapabilities = Object.freeze([
   "clock",
@@ -46,6 +53,8 @@ export const BrowserHostSupportedCapabilities = Object.freeze([
   "storage_query",
   "storage_write",
   "logging",
+  // served through the embedder's capability adapters (adapterOperations.js)
+  ...ADAPTER_CAPABILITIES.filter((c) => c !== "storage_query" && c !== "storage_write"),
 ]);
 
 export const BrowserHostSupportedOperations = Object.freeze([
@@ -54,6 +63,7 @@ export const BrowserHostSupportedOperations = Object.freeze([
   "host.listSupportedCapabilities",
   "host.listOperations",
   "host.hasCapability",
+  "plugin.getConfig",
   "clock.now",
   "clock.monotonicNow",
   "clock.nowIso",
@@ -109,6 +119,9 @@ export const BrowserHostSupportedOperations = Object.freeze([
   "crypto.ed25519.publicKeyFromSeed",
   "crypto.ed25519.sign",
   "crypto.ed25519.verify",
+  ...Object.keys(ADAPTER_OPERATIONS).filter(
+    (op) => !["storage.write", "storage.query", "storage.delete"].includes(op),
+  ),
 ]);
 
 export class BrowserHostCapabilityError extends Error {
@@ -434,6 +447,18 @@ export class BrowserHost {
 
     this._grantedCapabilities = granted;
     this._contextStore = options.contextStore ?? new Map();
+    this._serviceAdapters = resolveServiceAdapters(options);
+    this._config = normalizePluginConfig(options.config);
+
+    // The module's config (options.config), as the Go node's plugin.getConfig serves it: no capability needed.
+    this.plugin = Object.freeze({
+      getConfig: () => structuredClone(this._config),
+    });
+    // The node's identity, from the embedder's node adapter (values or functions): no capability needed.
+    this.node = Object.freeze({
+      peerId: () => this.serveAdapterOperation("node.peerId"),
+      publicKey: () => this.serveAdapterOperation("node.publicKey"),
+    });
     this.filesystemRoot = filesystem?.filesystemRoot ?? "/";
 
     // --- Capability objects (frozen, browser-native) ---
@@ -678,10 +703,20 @@ export class BrowserHost {
     });
 
     // Storage + pubsub mirror the Go node's module capability contract
-    // (sdn-server internal/modulert/caps): storage.write {schema, data:base64}
-    // -> {cid}; storage.query {schema, day, entity_id, norad_cat_id, limit};
+    // (sdn-server internal/modulert/caps), with bytes as Uint8Array, never
+    // base64: storage.write {schema, data: Uint8Array} -> {cid};
+    // storage.query {schema, day, entity_id, norad_cat_id, limit} -> [{CID,
+    // RowID, PeerID, Timestamp, MaterializedAt, SourceTags: {ProviderID,
+    // SourceName, BatchID, ProducerPeerID, License}, Data: Uint8Array}];
     // storage.delete {schema, cid}; pubsub.publish {topic, data:utf8};
     // pubsub.subscribe/unsubscribe {topic}; pubsub.list_topics {} -> {topics}.
+    // The storage adapter's other methods (storage.expire, ingest_with_source,
+    // flatsql_query_stream, flatsql_epoch_stream, query_sandboxed,
+    // query_surface, flatsql_cache_key) are served by serveAdapterOperation()
+    // with the same handler shapes: record streams, archives, provenance JSON
+    // and answered streams ({rows, columns, stream: Uint8Array} or
+    // {ref: {token, size, frames, fnv1a64}}) are Uint8Array too. See
+    // adapterOperations.js and the typed mapping in typedDispatch.js.
     this.storage = Object.freeze({
       write: async (params = {}) => {
         this.#assertCapability("storage_write", "storage.write");
@@ -1022,9 +1057,32 @@ export class BrowserHost {
     this.#assertCapability(capability, operation);
   }
 
+  /**
+   * Serve one of the operations the embedder's capability adapters answer (ADAPTER_OPERATIONS: secrets, storage,
+   * p2p, node): the capability check, then the adapter's method with the handler-shaped params. Synchronous when
+   * the adapter answers synchronously.
+   */
+  serveAdapterOperation(operation, params = {}) {
+    const served = ADAPTER_OPERATIONS[operation];
+    if (!served) {
+      throw new Error(`Unknown browser host operation "${operation}".`);
+    }
+    if (served.capability) {
+      this.#assertCapability(served.capability, operation);
+    }
+    return callServiceAdapter(
+      this._serviceAdapters[served.adapter],
+      served.adapter,
+      served.method,
+      params ?? {},
+    );
+  }
+
   async invoke(operation, params = {}) {
     const normalized = String(operation ?? "").trim();
     switch (normalized) {
+      case "plugin.getConfig":
+        return this.plugin.getConfig();
       case "host.runtimeTarget":
         return this.runtimeTarget;
       case "host.listCapabilities":
@@ -1165,6 +1223,9 @@ export class BrowserHost {
           params.publicKey,
         );
       default:
+        if (ADAPTER_OPERATIONS[normalized]) {
+          return this.serveAdapterOperation(normalized, params);
+        }
         throw new Error(`Unknown browser host operation "${normalized}".`);
     }
   }

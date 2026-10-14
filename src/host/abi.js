@@ -6,6 +6,7 @@ import {
 } from "./hostcallWire.js";
 import { isTypedHostCall } from "../standards/runtimeContracts.js";
 import { answerTypedHostCall } from "./typedDispatch.js";
+import { ADAPTER_OPERATIONS } from "./adapterOperations.js";
 
 const textDecoder = new TextDecoder();
 
@@ -19,6 +20,7 @@ export const SyncHostcallOperations = Object.freeze([
   "host.listSupportedCapabilities",
   "host.listOperations",
   "host.hasCapability",
+  "plugin.getConfig",
   "clock.now",
   "clock.monotonicNow",
   "clock.nowIso",
@@ -209,6 +211,9 @@ export function dispatchHostSyncOperation(host, operation, params = null) {
       return host.listOperations();
     case "host.hasCapability":
       return host.hasCapability(params?.capability);
+    case "plugin.getConfig":
+      if (typeof host.plugin?.getConfig !== "function") break;
+      return host.plugin.getConfig();
     case "clock.now":
       return host.clock.now();
     case "clock.monotonicNow":
@@ -304,10 +309,14 @@ export function dispatchHostSyncOperation(host, operation, params = null) {
         normalized,
       );
     default:
-      throw new Error(
-        `Operation "${normalized}" is not available in the synchronous hostcall ABI.`,
-      );
+      // the embedder adapters' operations (secrets, storage, p2p, node): synchronous when the adapter answers so
+      if (ADAPTER_OPERATIONS[normalized] && typeof host.serveAdapterOperation === "function") {
+        return host.serveAdapterOperation(normalized, params ?? {});
+      }
   }
+  throw new Error(
+    `Operation "${normalized}" is not available in the synchronous hostcall ABI.`,
+  );
 }
 
 export function dispatchNodeHostSyncOperation(host, operation, params = null) {

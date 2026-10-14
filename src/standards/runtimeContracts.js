@@ -164,7 +164,7 @@ const RECONCILE_NAME = Object.fromEntries(Object.entries(RECONCILE).map(([k, v])
 /**
  * @param {{schema:string, tags:{providerId?:string, sourceName?:string, batchId?:string, sourceUrl?:string, contentKeyId?:string,
  *   sourcePeer?:string, license?:string, licenseUrl?:string, citation?:string, shareAlike?:boolean}, reconcile?:"duplicates"|"none"|"current",
- *   archive?:{source:string, name:string}, provenance?:object}} r
+ *   archive?:{source:string, name:string}, provenance?:object}} r  provenance.attributes: [{name, value}] in order
  */
 export function encodeIngestRequest(r) {
   if (!r?.schema || !r?.tags) throw new Error("IngestRequest: schema and tags are required");
@@ -173,7 +173,8 @@ export function encodeIngestRequest(r) {
   const p = r.provenance;
   const provenance = p
     ? new ProvenanceT(str(p.sourceUrl), p.httpStatus | 0, str(p.etag), str(p.lastModified), str(p.contentType), big(p.retrievedMs), str(p.parser), str(p.parserVersion),
-        str(p.sourceSha256), str(p.normalizedSha256), big(p.normalizedCount), Object.keys(p.schemaCounts || {}), Object.values(p.schemaCounts || {}).map(big), (p.warnings || []).map(String), !!p.fromCache)
+        str(p.sourceSha256), str(p.normalizedSha256), big(p.normalizedCount), Object.keys(p.schemaCounts || {}), Object.values(p.schemaCounts || {}).map(big), (p.warnings || []).map(String), !!p.fromCache,
+        (p.attributes || []).map((a) => new HeaderT(String(a.name), String(a.value))))
     : null;
   const reconcile = RECONCILE[r.reconcile || "duplicates"];
   if (reconcile === undefined) throw new Error(`IngestRequest: unknown reconcile ${r.reconcile}`);
@@ -194,7 +195,8 @@ export function decodeIngestRequest(bytes) {
     provenance: p
       ? { sourceUrl: p.SOURCE_URL || "", httpStatus: p.HTTP_STATUS, etag: p.ETAG || "", lastModified: p.LAST_MODIFIED || "", contentType: p.CONTENT_TYPE || "", retrievedMs: num(p.RETRIEVED_MS),
           parser: p.PARSER || "", parserVersion: p.PARSER_VERSION || "", sourceSha256: p.SOURCE_SHA256 || "", normalizedSha256: p.NORMALIZED_SHA256 || "", normalizedCount: num(p.NORMALIZED_COUNT),
-          schemaCounts: Object.fromEntries((p.SCHEMAS || []).map((s, i) => [s, num(p.SCHEMA_COUNTS[i])])), warnings: (p.WARNINGS || []).slice(), fromCache: p.FROM_CACHE }
+          schemaCounts: Object.fromEntries((p.SCHEMAS || []).map((s, i) => [s, num(p.SCHEMA_COUNTS[i])])), warnings: (p.WARNINGS || []).slice(), fromCache: p.FROM_CACHE,
+          attributes: (p.ATTRIBUTES || []).map((a) => ({ name: a.NAME || "", value: a.VALUE || "" })) }
       : null,
   };
 }
@@ -361,6 +363,64 @@ export function decodeHostCall(bytes) {
   return { op, params: records.params?.value ?? null, lists: Object.fromEntries(Object.entries(lists).map(([k, v]) => [k, v.values])), raw };
 }
 
+// ---- SQL values: FlatSQL's tagged parameter encoding (flatsql capi decodeParamsNoThrow) ---------------------------------
+
+/** The tags of FlatSQL's parameter encoding. */
+export const SQL_VALUE_TAGS = Object.freeze({ null: 0, bool: 1, i64: 2, f64: 3, str: 4, bytes: 5 });
+const SQL_TAG_NAME = Object.fromEntries(Object.entries(SQL_VALUE_TAGS).map(([k, v]) => [v, k]));
+
+/**
+ * SQL values (raw "params" in, raw "cells" out) in FlatSQL's tagged parameter encoding: value after value, a u8 tag,
+ * a u32 little-endian payload length, the payload. Values are tagged {t, v} (t: null | bool | i64 | f64 | str |
+ * bytes; i64 as a BigInt, a safe integer number or decimal text), or plain JS values: null, boolean, bigint, number
+ * (an integer is i64, else f64), string, Uint8Array.
+ */
+export function encodeSqlValues(values) {
+  const parts = (values || []).map((value) => {
+    const tagged = value && typeof value === "object" && !(value instanceof Uint8Array) && "t" in value ? value : null;
+    const t = tagged ? tagged.t : value === null || value === undefined ? "null" : typeof value === "boolean" ? "bool"
+      : typeof value === "bigint" ? "i64" : typeof value === "number" ? (Number.isInteger(value) ? "i64" : "f64")
+      : typeof value === "string" ? "str" : value instanceof Uint8Array ? "bytes" : null;
+    const v = tagged ? tagged.v : value;
+    let payload;
+    switch (t) {
+      case "null": payload = new Uint8Array(0); break;
+      case "bool": payload = Uint8Array.of(v ? 1 : 0); break;
+      case "i64": payload = new Uint8Array(8); new DataView(payload.buffer).setBigInt64(0, BigInt(v), true); break;
+      case "f64": payload = new Uint8Array(8); new DataView(payload.buffer).setFloat64(0, Number(v), true); break;
+      case "str": payload = new TextEncoder().encode(String(v)); break;
+      case "bytes": payload = v instanceof Uint8Array ? v : new Uint8Array(v); break;
+      default: throw new TypeError(`SQL value ${String(value)} has no FlatSQL parameter tag`);
+    }
+    return [SQL_VALUE_TAGS[t], payload];
+  });
+  const out = new Uint8Array(parts.reduce((n, [, p]) => n + 5 + p.length, 0));
+  const view = new DataView(out.buffer);
+  let at = 0;
+  for (const [tag, payload] of parts) { out[at] = tag; view.setUint32(at + 1, payload.length, true); out.set(payload, at + 5); at += 5 + payload.length; }
+  return out;
+}
+/** The tagged values ({t, v}; i64 as a BigInt, bytes as Uint8Array) of a FlatSQL parameter encoding. */
+export function decodeSqlValues(bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength), out = [];
+  let at = 0;
+  while (at < b.length) {
+    if (at + 5 > b.length) throw new RangeError("SQL values: truncated value header");
+    const tag = b[at], size = view.getUint32(at + 1, true), start = at + 5;
+    if (start + size > b.length) throw new RangeError("SQL values: payload exceeds the buffer");
+    const t = SQL_TAG_NAME[tag];
+    const fixed = { null: 0, bool: 1, i64: 8, f64: 8 }[t];
+    if (t === undefined) throw new RangeError(`SQL values: unknown tag ${tag}`);
+    if (fixed !== undefined && size !== fixed) throw new RangeError(`SQL values: a ${t} carries ${fixed} bytes, not ${size}`);
+    const payload = b.subarray(start, start + size);
+    out.push({ t, v: t === "null" ? null : t === "bool" ? payload[0] !== 0 : t === "i64" ? view.getBigInt64(start, true)
+      : t === "f64" ? view.getFloat64(start, true) : t === "str" ? new TextDecoder().decode(payload) : payload.slice() });
+    at = start + size;
+  }
+  return out;
+}
+
 /** The error codes a host answers with (PIVResponse.ERROR_CODE). */
 export const HOSTCALL_ERROR_CODES = Object.freeze(["unsupported", "not-authorized", "invalid-params", "failed", "refused", "sandbox", "timeout", "too-large"]);
 
@@ -415,7 +475,7 @@ const CRYPTO_IN = ["data", "key", "private_key", "public_key", "signature", "non
 const CRYPTO_OUT = ["data", "nonce", "private_key", "public_key"];
 const crypto = (result, capability) => op("CryptoParams", result, capability, { rawIn: CRYPTO_IN, rawOut: CRYPTO_OUT });
 const STREAM = { rawOut: ["stream"] };
-const SQL_IN = { rawIn: ["sql"], listsIn: { sql_params: "SqlValue" } };
+const SQL_IN = { rawIn: ["sql", "params"] };
 export const HOST_OPERATIONS = Object.freeze({
   // host, clock, random, node, config
   "host.runtimeTarget": op(null, null, null, { rawOut: ["value"] }),
@@ -443,12 +503,12 @@ export const HOST_OPERATIONS = Object.freeze({
   "storage.write": op("StorageWriteParams", "StorageWriteResult", "storage_write", { rawIn: ["data"] }),
   "storage.delete": op("StorageDeleteParams", null, "storage_write"),
   "storage.expire": op("StorageExpireParams", "StorageExpireResult", "storage_write"),
-  "storage.ingest_with_source": op("StorageIngestParams", "StorageIngestResult", "storage_ingest", { rawIn: ["records", "archive"], listsIn: { provenance: "Provenance" } }),
+  "storage.ingest_with_source": op("StorageIngestParams", "StorageIngestResult", "storage_ingest", { rawIn: ["records", "archive"], listsIn: { provenance: "Provenance", provenance_attributes: "ProvenanceAttribute" } }),
   "storage.flatsql_query_stream": op("SqlStreamParams", "StreamResult", "storage_query", { ...SQL_IN, ...STREAM }),
   "storage.flatsql_epoch_stream": op("EpochStreamParams", "StreamResult", "storage_query", STREAM),
-  "storage.query_sandboxed": op("SandboxQueryParams", "SandboxQueryResult", "storage_query", { ...SQL_IN, rawOut: ["stream"], listsOut: { columns: "TextValue", cells: "SqlValue" } }),
+  "storage.query_sandboxed": op("SandboxQueryParams", "SandboxQueryResult", "storage_query", { ...SQL_IN, rawOut: ["stream", "cells"], listsOut: { columns: "TextValue" } }),
   "storage.query_surface": op(null, "QuerySurfaceLimits", "storage_query", { listsOut: { tables: "SurfaceTable", columns: "SurfaceColumn" } }),
-  "storage.flatsql_cache_key": op("CacheKeyParams", null, "storage_query", { ...SQL_IN, listsIn: { ...SQL_IN.listsIn, projection: "TextValue" }, rawOut: ["value"] }),
+  "storage.flatsql_cache_key": op("CacheKeyParams", null, "storage_query", { ...SQL_IN, listsIn: { projection: "TextValue" }, rawOut: ["value"] }),
   // crypto: the node's operations
   "crypto.hash": crypto(null, "crypto_hash"),
   "crypto.sign": crypto(null, "crypto_sign"),

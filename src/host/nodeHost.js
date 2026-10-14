@@ -40,6 +40,13 @@ import {
   nextCronOccurrence,
   parseCronExpression,
 } from "./cron.js";
+import {
+  ADAPTER_CAPABILITIES,
+  ADAPTER_OPERATIONS,
+  callServiceAdapter,
+  normalizePluginConfig,
+  resolveServiceAdapters,
+} from "./adapterOperations.js";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -71,9 +78,12 @@ export const NodeHostSupportedCapabilities = Object.freeze([
   "crypto_kdf",
   "wallet_sign",
   "process_exec",
+  // served through the embedder's capability adapters (adapterOperations.js)
+  ...ADAPTER_CAPABILITIES,
 ]);
 
 export const NodeHostSupportedOperations = Object.freeze([
+  "plugin.getConfig",
   "clock.now",
   "clock.monotonicNow",
   "clock.nowIso",
@@ -132,6 +142,7 @@ export const NodeHostSupportedOperations = Object.freeze([
   "crypto.ed25519.publicKeyFromSeed",
   "crypto.ed25519.sign",
   "crypto.ed25519.verify",
+  ...Object.keys(ADAPTER_OPERATIONS),
 ]);
 
 function cloneValue(value) {
@@ -1544,6 +1555,8 @@ export class NodeHost {
     this._walletSignAdapter = capabilityAdapters.walletSign;
     this._protocolHandleAdapter = capabilityAdapters.protocolHandle;
     this._protocolDialAdapter = capabilityAdapters.protocolDial;
+    this._serviceAdapters = resolveServiceAdapters(options);
+    this._config = normalizePluginConfig(options.config);
     if (typeof this.fetch !== "function") {
       throw new TypeError(
         "A fetch implementation is required to create a Node host.",
@@ -1557,6 +1570,16 @@ export class NodeHost {
       : options.contextFilePath
         ? createFileContextStore(options.contextFilePath)
         : createInMemoryContextStore();
+
+    // The module's config (options.config), as the Go node's plugin.getConfig serves it: no capability needed.
+    this.plugin = Object.freeze({
+      getConfig: () => structuredClone(this._config),
+    });
+    // The node's identity, from the embedder's node adapter (values or functions): no capability needed.
+    this.node = Object.freeze({
+      peerId: () => this.serveAdapterOperation("node.peerId"),
+      publicKey: () => this.serveAdapterOperation("node.publicKey"),
+    });
 
     this.clock = Object.freeze({
       now: () => this.#withCapability("clock", "clock.now", () => Date.now()),
@@ -2185,9 +2208,32 @@ export class NodeHost {
     return normalized;
   }
 
+  /**
+   * Serve one of the operations the embedder's capability adapters answer (ADAPTER_OPERATIONS: secrets, storage,
+   * p2p, node): the capability check, then the adapter's method with the handler-shaped params. Synchronous when
+   * the adapter answers synchronously.
+   */
+  serveAdapterOperation(operation, params = {}) {
+    const served = ADAPTER_OPERATIONS[operation];
+    if (!served) {
+      throw new Error(`Unknown Node host operation "${operation}".`);
+    }
+    if (served.capability) {
+      this.assertCapability(served.capability, operation);
+    }
+    return callServiceAdapter(
+      this._serviceAdapters[served.adapter],
+      served.adapter,
+      served.method,
+      params ?? {},
+    );
+  }
+
   async invoke(operation, params = {}) {
     const normalized = assertNonEmptyString(operation, "Host operation");
     switch (normalized) {
+      case "plugin.getConfig":
+        return this.plugin.getConfig();
       case "host.runtimeTarget":
         return this.runtimeTarget;
       case "host.listCapabilities":
@@ -2343,6 +2389,9 @@ export class NodeHost {
           params.publicKey,
         );
       default:
+        if (ADAPTER_OPERATIONS[normalized]) {
+          return this.serveAdapterOperation(normalized, params);
+        }
         throw new Error(`Unknown Node host operation "${normalized}".`);
     }
   }

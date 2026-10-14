@@ -40,6 +40,9 @@ table Provenance {
   SCHEMA_COUNTS: [uint64];
   WARNINGS: [string];
   FROM_CACHE: bool;
+  /// Descriptive provenance the parser has no field above for - the method, units, the date range covered, counts
+  /// of what was dropped or filled - as name / value pairs, kept in order (a name may repeat). Values are text.
+  ATTRIBUTES: [Header];
 }
 
 /// A request to store one batch of records with its source tags (the storage-ingest host connector). The records

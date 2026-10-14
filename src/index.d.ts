@@ -1424,6 +1424,9 @@ export interface BrowserEdgeShims {
   capabilityAdapters?: Record<string, Record<string, (...args: any[]) => unknown>>;
 }
 
+/** An embedder's capability adapter: methods (sync or async) or plain values by operation method, or invoke(). */
+export type HostServiceAdapter = Record<string, unknown>;
+
 export interface BrowserHostOptions {
   capabilities?: string[];
   edgeShims?: BrowserEdgeShims;
@@ -1443,7 +1446,14 @@ export interface BrowserHostOptions {
   walletSign?: Record<string, (...args: any[]) => unknown> | null;
   protocolHandle?: Record<string, (...args: any[]) => unknown> | null;
   protocolDial?: Record<string, (...args: any[]) => unknown> | null;
-  capabilityAdapters?: Record<string, Record<string, (...args: any[]) => unknown>>;
+  /** The Go node's capability handlers (secrets, storage, p2p, node), bytes as Uint8Array. */
+  secrets?: HostServiceAdapter | null;
+  storage?: HostServiceAdapter | null;
+  p2p?: HostServiceAdapter | null;
+  node?: HostServiceAdapter | null;
+  capabilityAdapters?: Record<string, HostServiceAdapter>;
+  /** The module's config, served by plugin.getConfig (default {}). */
+  config?: Record<string, unknown>;
 }
 
 export interface NodeHostOptions {
@@ -1500,7 +1510,14 @@ export interface NodeHostOptions {
   walletSign?: Record<string, (...args: any[]) => unknown> | null;
   protocolHandle?: Record<string, (...args: any[]) => unknown> | null;
   protocolDial?: Record<string, (...args: any[]) => unknown> | null;
-  capabilityAdapters?: Record<string, Record<string, (...args: any[]) => unknown>>;
+  /** The Go node's capability handlers (secrets, storage, p2p, node), bytes as Uint8Array. */
+  secrets?: HostServiceAdapter | null;
+  storage?: HostServiceAdapter | null;
+  p2p?: HostServiceAdapter | null;
+  node?: HostServiceAdapter | null;
+  capabilityAdapters?: Record<string, HostServiceAdapter>;
+  /** The module's config, served by plugin.getConfig (default {}). */
+  config?: Record<string, unknown>;
 }
 
 export class HostCapabilityError extends Error {
@@ -1768,6 +1785,9 @@ export class NodeHost {
   listOperations(): string[];
   hasCapability(capability: string): boolean;
   assertCapability(capability: string, operation?: string | null): string;
+  plugin: { getConfig(): Record<string, unknown> };
+  node: { peerId(): unknown; publicKey(): unknown };
+  serveAdapterOperation(operation: string, params?: Record<string, any>): unknown;
   invoke(operation: string, params?: Record<string, any>): Promise<any>;
 }
 
@@ -1866,6 +1886,9 @@ export class BrowserHost {
   listOperations(): string[];
   hasCapability(capability: string): boolean;
   assertCapability(capability: string, operation?: string | null): void;
+  plugin: { getConfig(): Record<string, unknown> };
+  node: { peerId(): unknown; publicKey(): unknown };
+  serveAdapterOperation(operation: string, params?: Record<string, any>): unknown;
 }
 
 export const NodeHostSupportedCapabilities: readonly string[];

@@ -11,6 +11,10 @@
 //   - a list port (e.g. "entries"): a run of aligned records of one table, back to back at a fixed stride;
 //   - a raw port (e.g. "body", "records", "url", "sql", "path"): unbounded bytes, verbatim - bodies, keys, record
 //     streams (size-prefixed frames concatenated), and text that may exceed an aligned string (UTF-8).
+//   - SQL values (raw "params" in, raw "cells" out) use FlatSQL's own tagged parameter encoding (flatsql capi
+//     decodeParamsNoThrow), value after value with no count: u8 tag, u32 little-endian payload length, payload.
+//     Tags: 0 null (length 0), 1 bool (1 byte, 0 / 1), 2 i64 (8 bytes LE), 3 f64 (8 bytes LE), 4 string (UTF-8),
+//     5 bytes.
 // Aligned strings hold at most 255 bytes; a value that does not fit is refused, never truncated. Times are Unix
 // milliseconds UTC. A zero or an empty string means "not given" and the host applies the documented default: aligned records have no
 // schema defaults (an unset field reads zero), so every field here is phrased so that zero is the default.
@@ -86,7 +90,7 @@ table StoredRecordMeta {
   SOURCE_NAME: string (aligned_max_length: 128);
   BATCH_ID: string (aligned_max_length: 128);
   PRODUCER_PEER_ID: string (aligned_max_length: 128);
-  LICENSE: string (aligned_max_length: 64);
+  LICENSE: string (aligned_max_length: 128);
 }
 
 /// One record on raw "data"; the result names its CID.
@@ -110,16 +114,17 @@ table StorageExpireResult { DELETED: uint64; MISSING: uint64; CAPPED: bool; }
 
 enum reconcileKind : ubyte { Duplicates, None, Current }
 /// One batch: raw "records" (size-prefixed record stream), optional raw "archive" (the source document, kept under
-/// ARCHIVE_SOURCE/ARCHIVE_NAME when the host has an archive root), optional "provenance" record.
+/// ARCHIVE_SOURCE/ARCHIVE_NAME when the host has an archive root), optional list "provenance" (one Provenance) and
+/// optional list "provenance_attributes" (ProvenanceAttribute, in order).
 table StorageIngestParams {
   SCHEMA: string (aligned_max_length: 64);
   PROVIDER_ID: string (aligned_max_length: 128);
   SOURCE_NAME: string (aligned_max_length: 128);
   BATCH_ID: string (aligned_max_length: 128);
   SOURCE_URL: string (aligned_max_length: 255);
-  CONTENT_KEY_ID: string (aligned_max_length: 64);
+  CONTENT_KEY_ID: string (aligned_max_length: 128);
   SOURCE_PEER: string (aligned_max_length: 128);
-  LICENSE: string (aligned_max_length: 64);
+  LICENSE: string (aligned_max_length: 128);
   LICENSE_URL: string (aligned_max_length: 255);
   CITATION: string (aligned_max_length: 255);
   SHARE_ALIKE: bool;
@@ -130,16 +135,22 @@ table StorageIngestParams {
 table Provenance {
   SOURCE_URL: string (aligned_max_length: 255);
   HTTP_STATUS: int32;
-  ETAG: string (aligned_max_length: 128);
+  ETAG: string (aligned_max_length: 255);
   LAST_MODIFIED: string (aligned_max_length: 64);
   CONTENT_TYPE: string (aligned_max_length: 128);
   RETRIEVED_MS: uint64;
-  PARSER: string (aligned_max_length: 64);
-  PARSER_VERSION: string (aligned_max_length: 32);
+  PARSER: string (aligned_max_length: 128);
+  PARSER_VERSION: string (aligned_max_length: 64);
   SOURCE_SHA256: string (aligned_max_length: 64);
   NORMALIZED_SHA256: string (aligned_max_length: 64);
   NORMALIZED_COUNT: uint64;
   FROM_CACHE: bool;
+}
+/// Descriptive provenance a parser has no Provenance field for (method, units, date range, counts), as name / value
+/// pairs in order (list "provenance_attributes"; the runtime IngestRequest's Provenance.ATTRIBUTES).
+table ProvenanceAttribute {
+  NAME: string (aligned_max_length: 128);
+  VALUE: string (aligned_max_length: 255);
 }
 table StorageIngestResult {
   SCHEMA: string (aligned_max_length: 64);
@@ -151,16 +162,7 @@ table StorageIngestResult {
   PROVENANCE_FILE: string (aligned_max_length: 255);
 }
 
-enum sqlValueKind : ubyte { Null, Bool, I64, F64, Str }
-/// One SQL parameter (list "sql_params") or result cell (list "cells", row-major).
-table SqlValue {
-  KIND: sqlValueKind;
-  BOOL_VALUE: bool;
-  I64_VALUE: int64;
-  F64_VALUE: double;
-  STR_VALUE: string (aligned_max_length: 255);
-}
-/// raw "sql", list "sql_params"; the answer: a StreamResult with raw "stream" (deliver Inline) or its BodyRef.
+/// raw "sql", raw "params" (tagged SQL values); the answer: a StreamResult with raw "stream" (deliver Inline) or its BodyRef.
 table SqlStreamParams { DELIVER: deliverMode; }
 table StreamResult {
   ROWS: uint64;
@@ -176,8 +178,8 @@ table EpochStreamParams {
   DELIVER: deliverMode;
 }
 enum sandboxWant : ubyte { Stream, Rows, Auto }
-/// raw "sql", list "sql_params"; Stream answers like SqlStream, Rows with list "columns" (TextValue) and list
-/// "cells" (SqlValue, row-major).
+/// raw "sql", raw "params" (tagged SQL values); Stream answers like SqlStream, Rows with list "columns" (TextValue)
+/// and raw "cells" (tagged SQL values, row-major: ROWS x COLUMNS of them).
 table SandboxQueryParams { WANT: sandboxWant; DELIVER: deliverMode; }
 table SandboxQueryResult { KIND: sandboxWant; ROWS: uint64; COLUMNS: uint32; REF: BodyRef; }
 /// storage.query_surface: list "tables", list "columns".
@@ -193,7 +195,7 @@ table SurfaceColumn {
   PLACEHOLDER: bool;
 }
 table QuerySurfaceLimits { TIMEOUT_MS: uint32; MAX_ROWS: uint64; MAX_BYTES: uint64; }
-/// raw "sql", list "sql_params", list "projection" (TextValue); the key comes back as a TextValue.
+/// raw "sql", raw "params" (tagged SQL values), list "projection" (TextValue); the key comes back as a TextValue.
 table CacheKeyParams {
   SCHEMA_NAME: string (aligned_max_length: 64);
   SCHEMA_VERSION: string (aligned_max_length: 32);
@@ -302,7 +304,7 @@ table P2pPnmEntry {
   GOSSIP_PEER_ID: string (aligned_max_length: 128);
   STANDARD: string (aligned_max_length: 16);
   SCHEMA: string (aligned_max_length: 64);
-  FILE_ID: string (aligned_max_length: 16);
+  FILE_ID: string (aligned_max_length: 255);
   FILE_NAME: string (aligned_max_length: 255);
   CID: string (aligned_max_length: 128);
   PUBLISH_MS: uint64;
@@ -324,7 +326,7 @@ table P2pLatestDataset {
   STANDARD: string (aligned_max_length: 16);
   SCHEMA: string (aligned_max_length: 64);
   PNM_CID: string (aligned_max_length: 128);
-  PNM_FILE_ID: string (aligned_max_length: 16);
+  PNM_FILE_ID: string (aligned_max_length: 255);
   PNM_PUBLISH_MS: uint64;
   PNM_SIGNATURE_VERIFIED: bool;
   PNM_ATTRIBUTION: string (aligned_max_length: 16);

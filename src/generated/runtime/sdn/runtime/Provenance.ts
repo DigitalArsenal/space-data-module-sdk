@@ -4,6 +4,7 @@
 
 import * as flatbuffers from 'flatbuffers';
 
+import { Header, HeaderT } from './Header.js';
 
 
 /**
@@ -149,8 +150,22 @@ FROM_CACHE():boolean {
   return offset ? !!this.bb!.readInt8(this.bb_pos + offset) : false;
 }
 
+/**
+ * Descriptive provenance the parser has no field above for - the method, units, the date range covered, counts
+ * of what was dropped or filled - as name / value pairs, kept in order (a name may repeat). Values are text.
+ */
+ATTRIBUTES(index: number, obj?:Header):Header|null {
+  const offset = this.bb!.__offset(this.bb_pos, 34);
+  return offset ? (obj || new Header()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+}
+
+attributesLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 34);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
+
 static startProvenance(builder:flatbuffers.Builder) {
-  builder.startObject(15);
+  builder.startObject(16);
 }
 
 static addSourceUrl(builder:flatbuffers.Builder, SOURCE_URLOffset:flatbuffers.Offset) {
@@ -249,12 +264,28 @@ static addFromCache(builder:flatbuffers.Builder, FROM_CACHE:boolean) {
   builder.addFieldInt8(14, +FROM_CACHE, +false);
 }
 
+static addAttributes(builder:flatbuffers.Builder, ATTRIBUTESOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(15, ATTRIBUTESOffset, 0);
+}
+
+static createAttributesVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
+  }
+  return builder.endVector();
+}
+
+static startAttributesVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
+
 static endProvenance(builder:flatbuffers.Builder):flatbuffers.Offset {
   const offset = builder.endObject();
   return offset;
 }
 
-static createProvenance(builder:flatbuffers.Builder, SOURCE_URLOffset:flatbuffers.Offset, HTTP_STATUS:number, ETAGOffset:flatbuffers.Offset, LAST_MODIFIEDOffset:flatbuffers.Offset, CONTENT_TYPEOffset:flatbuffers.Offset, RETRIEVED_MS:bigint, PARSEROffset:flatbuffers.Offset, PARSER_VERSIONOffset:flatbuffers.Offset, SOURCE_SHA256Offset:flatbuffers.Offset, NORMALIZED_SHA256Offset:flatbuffers.Offset, NORMALIZED_COUNT:bigint, SCHEMASOffset:flatbuffers.Offset, SCHEMA_COUNTSOffset:flatbuffers.Offset, WARNINGSOffset:flatbuffers.Offset, FROM_CACHE:boolean):flatbuffers.Offset {
+static createProvenance(builder:flatbuffers.Builder, SOURCE_URLOffset:flatbuffers.Offset, HTTP_STATUS:number, ETAGOffset:flatbuffers.Offset, LAST_MODIFIEDOffset:flatbuffers.Offset, CONTENT_TYPEOffset:flatbuffers.Offset, RETRIEVED_MS:bigint, PARSEROffset:flatbuffers.Offset, PARSER_VERSIONOffset:flatbuffers.Offset, SOURCE_SHA256Offset:flatbuffers.Offset, NORMALIZED_SHA256Offset:flatbuffers.Offset, NORMALIZED_COUNT:bigint, SCHEMASOffset:flatbuffers.Offset, SCHEMA_COUNTSOffset:flatbuffers.Offset, WARNINGSOffset:flatbuffers.Offset, FROM_CACHE:boolean, ATTRIBUTESOffset:flatbuffers.Offset):flatbuffers.Offset {
   Provenance.startProvenance(builder);
   Provenance.addSourceUrl(builder, SOURCE_URLOffset);
   Provenance.addHttpStatus(builder, HTTP_STATUS);
@@ -271,6 +302,7 @@ static createProvenance(builder:flatbuffers.Builder, SOURCE_URLOffset:flatbuffer
   Provenance.addSchemaCounts(builder, SCHEMA_COUNTSOffset);
   Provenance.addWarnings(builder, WARNINGSOffset);
   Provenance.addFromCache(builder, FROM_CACHE);
+  Provenance.addAttributes(builder, ATTRIBUTESOffset);
   return Provenance.endProvenance(builder);
 }
 
@@ -290,7 +322,8 @@ unpack(): ProvenanceT {
     this.bb!.createScalarList<string>(this.SCHEMAS.bind(this), this.schemasLength()),
     this.bb!.createScalarList<bigint>(this.SCHEMA_COUNTS.bind(this), this.schemaCountsLength()),
     this.bb!.createScalarList<string>(this.WARNINGS.bind(this), this.warningsLength()),
-    this.FROM_CACHE()
+    this.FROM_CACHE(),
+    this.bb!.createObjList<Header, HeaderT>(this.ATTRIBUTES.bind(this), this.attributesLength())
   );
 }
 
@@ -311,6 +344,7 @@ unpackTo(_o: ProvenanceT): void {
   _o.SCHEMA_COUNTS = this.bb!.createScalarList<bigint>(this.SCHEMA_COUNTS.bind(this), this.schemaCountsLength());
   _o.WARNINGS = this.bb!.createScalarList<string>(this.WARNINGS.bind(this), this.warningsLength());
   _o.FROM_CACHE = this.FROM_CACHE();
+  _o.ATTRIBUTES = this.bb!.createObjList<Header, HeaderT>(this.ATTRIBUTES.bind(this), this.attributesLength());
 }
 }
 
@@ -330,7 +364,8 @@ constructor(
   public SCHEMAS: (string)[] = [],
   public SCHEMA_COUNTS: (bigint)[] = [],
   public WARNINGS: (string)[] = [],
-  public FROM_CACHE: boolean = false
+  public FROM_CACHE: boolean = false,
+  public ATTRIBUTES: (HeaderT)[] = []
 ){}
 
 
@@ -346,6 +381,7 @@ pack(builder:flatbuffers.Builder): flatbuffers.Offset {
   const SCHEMAS = Provenance.createSchemasVector(builder, builder.createObjectOffsetList(this.SCHEMAS));
   const SCHEMA_COUNTS = Provenance.createSchemaCountsVector(builder, this.SCHEMA_COUNTS);
   const WARNINGS = Provenance.createWarningsVector(builder, builder.createObjectOffsetList(this.WARNINGS));
+  const ATTRIBUTES = Provenance.createAttributesVector(builder, builder.createObjectOffsetList(this.ATTRIBUTES));
 
   return Provenance.createProvenance(builder,
     SOURCE_URL,
@@ -362,7 +398,8 @@ pack(builder:flatbuffers.Builder): flatbuffers.Offset {
     SCHEMAS,
     SCHEMA_COUNTS,
     WARNINGS,
-    this.FROM_CACHE
+    this.FROM_CACHE,
+    ATTRIBUTES
   );
 }
 }
