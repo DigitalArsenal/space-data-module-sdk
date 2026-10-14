@@ -11,11 +11,12 @@ import { encodeHostcallEnvelope } from "../src/host/hostcallWire.js";
 import { decodePluginInvokeRequest } from "../src/invoke/codec.js";
 import {
   HOST_OPERATIONS,
-  configEntryKind,
   decodeHostCall,
   decodeHostCallResult,
+  decodeModuleConfig,
   encodeHostCall,
   encodeHostCallResult,
+  encodeModuleConfig,
   identifierOf,
   isTypedHostCall,
   reconcileKind,
@@ -57,12 +58,14 @@ test("hostcall: unbounded bytes travel on raw ports; lists are runs of aligned r
   const http = decodeHostCall(encodeHostCall("http.request", { params: { METHOD: "GET" }, raw: { url, headers: "range: bytes=0-1023\r\n" } }));
   assert.deepEqual([http.params.METHOD, http.params.NO_REDIRECTS, new TextDecoder().decode(http.raw.url)], ["GET", false, url]);
 
-  const config = decodeHostCallResult(encodeHostCallResult({ op: "plugin.getConfig", ok: true, lists: { entries: [
-    { KEY: "nwp_max_lead", KIND: configEntryKind.Number, NUMBER_VALUE: 72 },
-    { KEY: "targets.0.provider_id", KIND: configEntryKind.String, STRING_VALUE: "noaa-ncep" },
-  ] } }));
-  assert.deepEqual(config.lists.entries.map((e) => [e.KEY, e.NUMBER_VALUE, e.STRING_VALUE]), [["nwp_max_lead", 72, null], ["targets.0.provider_id", 0, "noaa-ncep"]]);
-  assert.deepEqual(decodeHostCallResult(encodeHostCallResult({ op: "plugin.getConfig", ok: true, lists: { entries: [] } })).lists.entries, []);
+  // plugin.getConfig answers raw "config": one ModuleConfig FlatBuffer (MCFG), not size-prefixed
+  const settings = { nwp_max_lead: 72, targets: [{ provider_id: "noaa-ncep", sources: ["gfs", "hrrr"] }], widths: [1, 2.5] };
+  const config = decodeHostCallResult(encodeHostCallResult({ op: "plugin.getConfig", ok: true, raw: { config: encodeModuleConfig(settings) } }));
+  assert.equal(identifierOf(config.raw.config), "MCFG");
+  assert.deepEqual(decodeModuleConfig(config.raw.config), settings);
+  assert.deepEqual(config.lists, {});
+  assert.deepEqual(HOST_OPERATIONS["plugin.getConfig"].rawOut, ["config"]);
+  assert.throws(() => encodeHostCallResult({ op: "plugin.getConfig", ok: true, lists: { entries: [] } }), /no list port entries/);
   assert.deepEqual(decodeHostCall(encodeHostCall("plugin.getConfig")), { op: "plugin.getConfig", params: null, lists: {}, raw: {} });
 });
 
@@ -109,7 +112,10 @@ test("hostcall: the C++ guest sends aligned records and raw frames the JS decode
   fs.mkdirSync(sent);
   fs.writeFileSync(path.join(answers, "0"), encodeHostCallResult({ ok: true, op: "storage.expire", result: { DELETED: 4608n } }));
   fs.writeFileSync(path.join(answers, "1"), encodeHostCallResult({ ok: true, op: "http.request", result: { STATUS: 206 }, raw: { body: "0:0:d=2026101306:PRMSL" } }));
-  fs.writeFileSync(path.join(answers, "2"), encodeHostCallResult({ ok: true, op: "plugin.getConfig", lists: { entries: [{ KEY: "nwp_max_lead", KIND: configEntryKind.Number, NUMBER_VALUE: 72 }, { KEY: "a", STRING_VALUE: "b" }] } }));
+  fs.writeFileSync(path.join(answers, "2"), encodeHostCallResult({ ok: true, op: "plugin.getConfig", raw: { config: encodeModuleConfig({
+    nwp_max_lead: 72, a: "b", "dotted.key": true, widths: [1, 2.5], names: ["x", "y"],
+    targets: [{ provider_id: "noaa-ncep", sources: ["gfs"] }, { provider_id: "dwd", limits: { days: 3 } }],
+  }) } }));
   fs.writeFileSync(path.join(answers, "3"), encodeHostCallResult({ ok: false, error: { code: "not-authorized", message: "no grant" } }));
   fs.writeFileSync(src, `
 #include <cstdio>
@@ -148,19 +154,28 @@ int main(int argc, char** argv) {
   sdm_piv::put(h.METHOD, "GET"); h.set_has_METHOD(true);
   const std::string url = "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20261013/06/atmos/gfs.t06z.pgrb2.0p25.f006.idx";
   auto g = sdm_piv::call("http.request", "HttpParams", h, {sdm_piv::raw("url", url), sdm_piv::raw("headers", "range: bytes=0-63\\r\\n")});
-  auto c = sdm_piv::call("plugin.getConfig");
-  const auto entries = c.list<A::ConfigEntry>("entries", "ConfigEntry");
+  const sdm_piv::Config c = sdm_piv::get_config();
+  const auto widths = c.numbers("widths");
+  const auto names = c.strings("names");
+  const sdm_piv::ConfigTable t1 = c.table("targets", 1);
   auto f = sdm_piv::call("clock.now");
-  std::printf("%d %d %llu|%d %d %s|%zu %s %g|%d %s %s\\n", too_long, r.ok(), out ? (unsigned long long)out->DELETED : 0ull,
+  std::printf("%d %d %llu|%d %d %s|%d %zu %g %s %d %g,%g %g %zu %s %s %s %s %g %g %zu %s %g %d %s|%d %s %s\\n", too_long, r.ok(),
+              out ? (unsigned long long)out->DELETED : 0ull,
               g.ok(), g.result<A::HttpResult>() ? g.result<A::HttpResult>()->STATUS : 0, std::string(g.raw("body")).c_str(),
-              entries.second, entries.second ? entries.first[0].KEY.str().c_str() : "", entries.second ? entries.first[0].NUMBER_VALUE : 0.0,
+              c.ok(), c.size(), c.number("nwp_max_lead", -1), std::string(c.string("a")).c_str(), c.boolean("dotted.key"),
+              widths.size() ? widths[0] : -1.0, widths.size() > 1 ? widths[1] : -1.0, c.number("widths.1", -1), names.size(),
+              names.size() ? std::string(names[1]).c_str() : "", std::string(c.string("names.0")).c_str(),
+              std::string(c.string("targets.0.provider_id")).c_str(), std::string(c.string("targets.0.sources.0")).c_str(),
+              c.number("targets.1.limits.days", -1), t1.number("limits.days", -1), c.tables("targets"),
+              std::string(c.string("missing", "def")).c_str(), c.number("a", -7), (int)(c.root() != nullptr),
+              std::string(t1.string("provider_id")).c_str(),
               f.ok(), f.error_code().c_str(), f.error_message().c_str());
   return 0;
 }
 `);
   execFileSync(cxx, ["-std=c++17", "-I", dir, "-I", path.join(ROOT, "src/generated/runtime/cpp"), "-I", path.join(ROOT, "src/host/cpp"), "-I", fbInclude, src, "-o", exe], { stdio: "pipe" });
   assert.equal(execFileSync(exe, [answers, sent], { encoding: "utf8" }).trim(),
-    "1 1 4608|1 206 0:0:d=2026101306:PRMSL|2 nwp_max_lead 72|0 not-authorized no grant");
+    "1 1 4608|1 206 0:0:d=2026101306:PRMSL|1 6 72 b 1 1,2.5 2.5 2 y x noaa-ncep gfs 3 3 2 def -7 1 dwd|0 not-authorized no grant");
   const expire = decodeHostCall(fs.readFileSync(path.join(sent, "0")));
   assert.deepEqual([expire.op, expire.params.SCHEMA, expire.params.PROVIDER_ID, expire.params.SOURCE_NAME, expire.params.BEFORE_MS, expire.params.BATCH],
     ["storage.expire", "WXF.fbs", "noaa-ncep", null, 1791900000000n, 500]);

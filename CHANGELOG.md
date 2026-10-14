@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.9.2
+
+### plugin.getConfig answers with one ModuleConfig FlatBuffer
+
+- `plugin.getConfig` answers on raw `config` with one `ModuleConfig` FlatBuffer (`schemas/runtime/ModuleConfig.fbs`,
+  file identifier `MCFG`, not size-prefixed) in place of the list `entries` of aligned `ConfigEntry` records. Each
+  aligned record was about 536 bytes whatever it held, and nested values were flattened to dotted keys. A
+  terrain-serving module with a 2.8 MB number index went from 601 to 2,422 wasm memory pages per instance. The
+  FlatBuffer stores values compactly: a list of 1,000,000 numbers is 8 MB, and the guest's heap grows by that much.
+- HostOps changes (the Go node mirrors these): the HostOps `ConfigEntry` table and the `configEntryKind` enum are
+  gone, and `HOST_OPERATIONS["plugin.getConfig"]` is `{ rawOut: ["config"] }`.
+- The JS hosts (`src/host/typedDispatch.js`) encode the host's `config` option with `encodeModuleConfig`. Number
+  arrays become `NumberList`, string arrays `StringList`, and nested objects or arrays of objects `TableList`. Keys are
+  sorted and `null` / `undefined` values are left out. A value with no config kind (a Date, or a list mixing kinds) is
+  a typed `failed`.
+- `typedHostcall.hpp` gains `sdm_piv::get_config()`. It returns an `sdm_piv::Config` that keeps the response, verifies
+  the `ModuleConfig` and reads it in place: `ok()`, `error_code()`, `error_message()`, `root()` (the verified
+  `sdn::runtime::ModuleConfig`), `byte_size()`. Lookups by key or dotted path are `string(key, def)`,
+  `number(key, def)`, `boolean(key, def)`, `numbers(key)` (an `sdm_piv::Span<double>` in place), `strings(key)`,
+  `tables(key)`, `table(key, i)` / `table(key)` (an `sdm_piv::ConfigTable` with the same lookups), `entry(key)`,
+  `has(key)` and `kind(key)`. Dotted paths keep the old flattened names working: `targets.0.provider_id`,
+  `widths.1`, and `settings.depth` for a nested object. Modules that read `entries` port mechanically.
+
 ## 0.9.1
 
 ### The JS hosts answer the Go node's operations completely

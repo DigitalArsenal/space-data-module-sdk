@@ -9,8 +9,9 @@
 //   - "params" / "result": one aligned record of the operation's table here (TAB WIRE_FORMAT ALIGNED_BINARY, TYPE_REF
 //     SCHEMA_NAME "HostOps.fbs", ROOT_TYPE the table, BYTE_LENGTH its size);
 //   - a list port (e.g. "entries"): a run of aligned records of one table, back to back at a fixed stride;
-//   - a raw port (e.g. "body", "records", "url", "sql", "path"): unbounded bytes, verbatim - bodies, keys, record
-//     streams (size-prefixed frames concatenated), and text that may exceed an aligned string (UTF-8).
+//   - a raw port (e.g. "body", "records", "url", "sql", "path", "config"): unbounded bytes, verbatim - bodies, keys,
+//     record streams (size-prefixed frames concatenated), typed FlatBuffers (plugin.getConfig's ModuleConfig), and
+//     text that may exceed an aligned string (UTF-8).
 //   - SQL values (raw "params" in, raw "cells" out) use FlatSQL's own tagged parameter encoding (flatsql capi
 //     decodeParamsNoThrow), value after value with no count: u8 tag, u32 little-endian payload length, payload.
 //     Tags: 0 null (length 0), 1 bool (1 byte, 0 / 1), 2 i64 (8 bytes LE), 3 f64 (8 bytes LE), 4 string (UTF-8),
@@ -41,16 +42,9 @@ table HasCapabilityParams { CAPABILITY: string (aligned_max_length: 64); }
 /// LENGTH 1..8192 (0 = 32); the bytes come back on raw "data".
 table RandomBytesParams { LENGTH: uint32; }
 
-enum configEntryKind : ubyte { String, Number, Bool }
-/// One configured value; nested tables and lists are flattened into dotted paths ("targets.0.provider_id",
-/// "widths.1"). plugin.getConfig answers with a run of these on list "entries".
-table ConfigEntry {
-  KEY: string (aligned_max_length: 255);
-  KIND: configEntryKind;
-  STRING_VALUE: string (aligned_max_length: 255);
-  NUMBER_VALUE: double;
-  BOOL_VALUE: bool;
-}
+// plugin.getConfig answers on raw "config" with one ModuleConfig FlatBuffer (schemas/runtime/ModuleConfig.fbs, file
+// identifier MCFG, not size-prefixed): typed values, number and string lists, nested tables - one compact buffer, read
+// in place (typedHostcall.hpp sdm_piv::get_config()).
 
 // ---- http (raw in: "url", "headers" (an HTTP header block, "name: value" lines), "body"; raw out: the same) --------
 

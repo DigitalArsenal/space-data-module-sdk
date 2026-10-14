@@ -225,64 +225,6 @@ const _RandomBytesParams = class _RandomBytesParams {
 __publicField(_RandomBytesParams, "SIZE", 4);
 __publicField(_RandomBytesParams, "ALIGN", 4);
 let RandomBytesParams = _RandomBytesParams;
-const _ConfigEntry = class _ConfigEntry {
-  constructor(buffer, offset = 0) {
-    __publicField(this, "buffer", buffer);
-    __publicField(this, "offset", offset);
-    __publicField(this, "view");
-    this.view = new DataView(buffer);
-  }
-  static fromPointer(buffer, offset = 0) {
-    return new _ConfigEntry(buffer, offset);
-  }
-  hasKEY() {
-    return __readPresence(this.view, this.offset, 0);
-  }
-  setHasKEY(value) {
-    __writePresence(this.view, this.offset, 0, value);
-  }
-  kEY() {
-    return __decodeString(this.view, this.offset + 1, 255);
-  }
-  setKEY(value) {
-    __encodeString(this.view, this.offset + 1, 255, value);
-    this.setHasKEY(true);
-  }
-  kIND() {
-    return this.view.getUint8(this.offset + 257);
-  }
-  setKIND(value) {
-    this.view.setUint8(this.offset + 257, value);
-  }
-  hasSTRING_VALUE() {
-    return __readPresence(this.view, this.offset, 1);
-  }
-  setHasSTRING_VALUE(value) {
-    __writePresence(this.view, this.offset, 1, value);
-  }
-  sTRING_VALUE() {
-    return __decodeString(this.view, this.offset + 258, 255);
-  }
-  setSTRING_VALUE(value) {
-    __encodeString(this.view, this.offset + 258, 255, value);
-    this.setHasSTRING_VALUE(true);
-  }
-  nUMBER_VALUE() {
-    return this.view.getFloat64(this.offset + 520, true);
-  }
-  setNUMBER_VALUE(value) {
-    this.view.setFloat64(this.offset + 520, value, true);
-  }
-  bOOL_VALUE() {
-    return this.view.getUint8(this.offset + 528) !== 0;
-  }
-  setBOOL_VALUE(value) {
-    this.view.setUint8(this.offset + 528, value ? 1 : 0);
-  }
-};
-__publicField(_ConfigEntry, "SIZE", 536);
-__publicField(_ConfigEntry, "ALIGN", 8);
-let ConfigEntry = _ConfigEntry;
 const _HttpParams = class _HttpParams {
   constructor(buffer, offset = 0) {
     __publicField(this, "buffer", buffer);
@@ -3844,7 +3786,6 @@ export {
   BodyRef,
   BoolValue,
   CacheKeyParams,
-  ConfigEntry,
   ContextParams,
   CountValue,
   CronField,

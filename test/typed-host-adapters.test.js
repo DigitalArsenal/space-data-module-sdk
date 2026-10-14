@@ -19,6 +19,7 @@ const GUEST_SOURCE = `
 #include <cstring>
 #include <string>
 #include <vector>
+#include <unistd.h>
 #include "typedHostcall.hpp"
 #include "HostOps_aligned.h"
 
@@ -47,21 +48,55 @@ extern "C" {
 int guest_out_ptr(void) { return (int)(intptr_t)out_buffer; }
 int guest_out_len(void) { return out_length; }
 
-int t_config(void) {
-  auto r = sdm_piv::call("plugin.getConfig");
-  FAILED(r);
-  auto e = r.list<A::ConfigEntry>("entries", "ConfigEntry");
-  std::string s;
+static void dump(const sdm_piv::ConfigTable& t, std::string& s) {
   char number[64];
-  for (size_t i = 0; i < e.second; ++i) {
-    const auto& entry = e.first[i];
-    s += entry.KEY.str() + "=";
-    if (entry.KIND == A::configEntryKind_String) s += "s:" + entry.STRING_VALUE.str();
-    else if (entry.KIND == A::configEntryKind_Number) { std::snprintf(number, sizeof number, "n:%g", entry.NUMBER_VALUE); s += number; }
-    else s += entry.BOOL_VALUE ? "b:true" : "b:false";
+  if (!t.entries()) return;
+  for (const auto* e : *t.entries()) {
+    s += e->KEY()->str() + "=";
+    switch (e->KIND()) {
+      case sdn::runtime::configValueKind_String: s += "s:" + (e->STRING_VALUE() ? e->STRING_VALUE()->str() : std::string()); break;
+      case sdn::runtime::configValueKind_Number: std::snprintf(number, sizeof number, "n:%g", e->NUMBER_VALUE()); s += number; break;
+      case sdn::runtime::configValueKind_Bool: s += e->BOOL_VALUE() ? "b:true" : "b:false"; break;
+      case sdn::runtime::configValueKind_NumberList:
+        s += "n[";
+        for (double v : t.numbers(e->KEY()->c_str())) { std::snprintf(number, sizeof number, "%g,", v); s += number; }
+        s += "]";
+        break;
+      case sdn::runtime::configValueKind_StringList:
+        s += "s[";
+        for (auto v : t.strings(e->KEY()->c_str())) { s += std::string(v) + ","; }
+        s += "]";
+        break;
+      case sdn::runtime::configValueKind_TableList:
+        s += "[";
+        for (size_t i = 0; i < t.tables(e->KEY()->c_str()); ++i) { s += "{"; dump(t.table(e->KEY()->c_str(), i), s); s += "}"; }
+        s += "]";
+        break;
+    }
     s += ";";
   }
-  return report("1 %zu %s", e.second, s.c_str());
+}
+int t_config(void) {
+  const sdm_piv::Config c = sdm_piv::get_config();
+  FAILED(c);
+  std::string s;
+  dump(c, s);
+  return report("1 %zu %s|%s|%g|%d", c.size(), s.c_str(), std::string(c.string("targets.0.provider_id")).c_str(),
+                c.number("targets.0.widths.1"), (int)c.boolean("enabled"));
+}
+// A large config (a 1,000,000-number index): the module's memory grows by about the payload, not by a record per
+// value. Reports the count, the sum, the payload size and the growth in bytes.
+int t_big_config(void) {
+  const uintptr_t before = (uintptr_t)sbrk(0);
+  const size_t pages_before = __builtin_wasm_memory_size(0);
+  const sdm_piv::Config c = sdm_piv::get_config();
+  FAILED(c);
+  const uintptr_t after = (uintptr_t)sbrk(0);
+  const size_t pages_after = __builtin_wasm_memory_size(0);
+  const auto index = c.numbers("index");
+  double sum = 0;
+  for (double v : index) sum += v;
+  return report("1 %zu %.0f %zu %zu %zu %zu", index.size(), sum, c.byte_size(), (size_t)(after - before), pages_before, pages_after);
 }
 int t_node(void) {
   auto p = sdm_piv::call("node.peerId");
@@ -332,7 +367,7 @@ int t_activity(void) {
 }
 `;
 
-const METHODS = ["t_config", "t_node", "t_secrets", "t_write", "t_query", "t_delete", "t_expire", "t_ingest", "t_sql_stream", "t_epoch", "t_sandboxed",
+const METHODS = ["t_config", "t_big_config", "t_node", "t_secrets", "t_write", "t_query", "t_delete", "t_expire", "t_ingest", "t_sql_stream", "t_epoch", "t_sandboxed",
   "t_surface", "t_cache_key", "t_peers", "t_standards", "t_history", "t_latest", "t_status", "t_activity", "guest_out_ptr", "guest_out_len"];
 const GRANTED = ["secrets", "storage_query", "storage_write", "storage_ingest", "p2p_read", "node_status_read", "node_activity_read"];
 
@@ -428,7 +463,7 @@ function adapters(wrap) {
 
 // What the module reads back, whichever host and bridge answer it.
 const EXPECTED = {
-  t_config: "1 5 enabled=b:true;name=s:gfs;targets.0.provider_id=s:noaa;targets.0.widths.0=n:1;targets.0.widths.1=n:2.5;",
+  t_config: "1 3 enabled=b:true;name=s:gfs;targets=[{provider_id=s:noaa;widths=n[1,2.5,];}];|noaa|2.5|1",
   t_node: "1 12D3KooWSelf 08011220abcd",
   t_secrets: `1 noaa-key tj 1 s3cr3t|1 t* ${T0_MS}|1|1`,
   t_write: "1 bafy-1",
@@ -533,12 +568,29 @@ for (const [label, createHost] of Object.entries(HOSTS)) {
     // capability-gated (typed not-authorized), adapter-gated (unsupported), config defaults to {}
     const bare = await syncGuest(createHost({ capabilities: ["clock"], capabilityAdapters: { p2p: a.p2p } }));
     assert.match(await bare("t_peers"), /^0 not-authorized /);
-    assert.equal(await bare("t_config"), "1 0 ");
+    assert.equal(await bare("t_config"), "1 0 ||0|0");
+    // a config the encoder has no kind for is a typed failure, not a trap
+    assert.match(await (await syncGuest(createHost({ config: { mixed: [1, "a"] } })))("t_config"), /^0 failed plugin.getConfig: ModuleConfig: mixed mixes value kinds/);
     const noAdapter = await syncGuest(createHost({ capabilities: GRANTED }));
     assert.match(await noAdapter("t_expire"), /^0 unsupported storage adapter is not configured/);
     // an async adapter on the sync bridge is refused with a code, not a trap
     const asyncOnSync = await syncGuest(createHost({ capabilities: GRANTED, capabilityAdapters: { storage: adapters((v) => Promise.resolve(v)).storage } }));
     assert.match(await asyncOnSync("t_expire"), /^0 unsupported /);
+  });
+
+  test(`typed host adapters: ${label} serves a 1,000,000-number config as one ModuleConfig; the module grows by about its size`, { timeout: 300_000 }, async (t) => {
+    const N = 1_000_000;
+    const index = Array.from({ length: N }, (_, i) => i);
+    const host = createHost({ config: { name: "terrain", index } });
+    const run = await syncGuest(host);
+    const [ok, count, sum, payload, growth, pagesBefore, pagesAfter] = (await run("t_big_config")).split(" ").map(Number);
+    assert.deepEqual([ok, count, sum], [1, N, (N * (N - 1)) / 2]);
+    assert.ok(payload >= N * 8 && payload < N * 8 + 4096, `payload ${payload}`);
+    // the response is kept whole (one copy of the payload) and read in place: the heap grows by about the payload, never
+    // a record per value (the old aligned ConfigEntry list was ~536 bytes a value - 536 MB here)
+    assert.ok(growth >= payload && growth <= payload * 1.25 + (1 << 20), `the heap grew ${growth} bytes for a ${payload}-byte config`);
+    assert.ok((pagesAfter - pagesBefore) * 65536 <= payload * 1.25 + (1 << 20), `memory grew ${pagesBefore} -> ${pagesAfter} pages`);
+    t.diagnostic(`${label}: ModuleConfig ${payload} bytes; heap grew ${growth} bytes; memory ${pagesBefore} -> ${pagesAfter} pages`);
   });
 
   test(`typed host adapters: ${label} answers them through the worker harness from async adapters`, { timeout: 300_000 }, async (t) => {

@@ -489,7 +489,7 @@ export const HOST_OPERATIONS = Object.freeze({
   "random.bytes": op("RandomBytesParams", null, "random", { rawOut: ["data"] }),
   "node.publicKey": op(null, null, null, { rawOut: ["value"] }),
   "node.peerId": op(null, null, null, { rawOut: ["value"] }),
-  "plugin.getConfig": op(null, null, null, { listsOut: { entries: "ConfigEntry" } }),
+  "plugin.getConfig": op(null, null, null, { rawOut: ["config"] }),
   // network
   "http.request": op("HttpParams", "HttpResult", "http", { rawIn: ["url", "headers", "body"], rawOut: ["url", "headers", "body"] }),
   "websocket.exchange": op("WebsocketParams", "WebsocketResult", "websocket", { rawIn: ["url", "protocols", "message"], rawOut: ["url", "body"] }),

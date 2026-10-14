@@ -116,6 +116,12 @@ int t_runtime_types(void) {
   const auto* request = sdn::runtime::GetHttpRequest(b.GetBufferPointer());
   return report("%s %s", sdn::runtime::HttpRequestIdentifier(), request->URL()->c_str());
 }
+int t_config(void) {
+  const sdm_piv::Config c = sdm_piv::get_config();
+  const auto index = c.numbers("index");
+  return report("%d %zu %s %zu %.1f %s", c.ok(), c.size(), std::string(c.string("targets.0.provider_id")).c_str(), index.size(),
+                c.number("index.999999", -1), c.root() ? "MCFG" : c.error_message().c_str());
+}
 int t_sync_async(void) {
   auto r = sdm_piv::call("crypto.sha256", {sdm_piv::raw("data", "abc")});
   return report("%d %s", r.ok(), r.error_code().c_str());
@@ -123,7 +129,7 @@ int t_sync_async(void) {
 }
 `;
 
-const METHODS = ["t_clock", "t_random", "t_ops", "t_schedule", "t_denied", "t_files", "t_sha", "t_http", "t_context", "t_runtime_types", "t_sync_async", "guest_out_ptr", "guest_out_len"];
+const METHODS = ["t_clock", "t_random", "t_ops", "t_schedule", "t_denied", "t_files", "t_sha", "t_http", "t_context", "t_runtime_types", "t_config", "t_sync_async", "guest_out_ptr", "guest_out_len"];
 function manifest() {
   return {
     pluginId: "com.digitalarsenal.examples.typed-hostcalls",
@@ -144,7 +150,7 @@ test.before(async () => {
 test.after(async () => { if (compilation) await cleanupCompilation(compilation); });
 
 test("typed hostcalls: a C++ module on the sync bridge reads records, lists and raw frames from the Node host", async () => {
-  const host = createNodeHost({ capabilities: ["clock", "random", "schedule_cron"] });
+  const host = createNodeHost({ capabilities: ["clock", "random", "schedule_cron"], config: { targets: [{ provider_id: "noaa" }], index: [1, 2] } });
   let exports = null;
   const wasi = new WASI({ version: "preview1", args: ["typed"], env: {}, preopens: {}, returnOnExit: true });
   const bridge = createNodeHostSyncHostcallBridge({ host, getMemory: () => exports.memory });
@@ -162,6 +168,8 @@ test("typed hostcalls: a C++ module on the sync bridge reads records, lists and 
   assert.equal(run("t_schedule"), "1 1");
   // the compiler stages the runtime types a module's ports carry
   assert.equal(run("t_runtime_types"), "HREQ https://example.org/x.idx");
+  // plugin.getConfig: one ModuleConfig on raw "config"; "index.999999" is past the end (the default)
+  assert.equal(run("t_config"), "1 2 noaa 2 -1.0 MCFG");
   assert.equal(run("t_denied"), "0 not-authorized");
   // an async-only operation on the sync bridge is refused with a code, not a trap
   assert.equal(run("t_sync_async"), "0 unsupported");
@@ -179,8 +187,10 @@ test("typed hostcalls: through the worker harness the async operations answer ty
     response.end("0:0:d=2026101306:PRMSL");
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const host = createNodeHost({ capabilities: ["filesystem", "crypto_hash", "http", "context_read", "context_write"], filesystemRoot: root });
-  const harness = await createWorkerModuleHarness({ wasmSource: compilation.wasmBytes, host });
+  const index = Array.from({ length: 1_000_000 }, (_, i) => i * 0.5);
+  const host = createNodeHost({ capabilities: ["filesystem", "crypto_hash", "http", "context_read", "context_write"], filesystemRoot: root, config: { targets: [{ provider_id: "noaa" }], index } });
+  // the harness carries the host's config object across its SAB channel in its value envelope (~8 MB here; default 4 MiB)
+  const harness = await createWorkerModuleHarness({ wasmSource: compilation.wasmBytes, host, maxHostcallResponseBytes: 32 << 20 });
   const run = async (name, ...args) => {
     assert.equal(await harness.callExport(name, ...args), 0, name);
     const ptr = await harness.callExport("guest_out_ptr");
@@ -195,6 +205,8 @@ test("typed hostcalls: through the worker harness the async operations answer ty
     assert.equal(await run("t_http", server.address().port), "1 206 0:0:d=2026101306:PRMSL");
     assert.equal(range, "bytes=0-63");
     assert.equal(await run("t_context"), "1 1 1 v1");
+    // a 1,000,000-number config (8 MB) crosses the worker harness as one ModuleConfig
+    assert.equal(await run("t_config"), "1 2 noaa 1000000 499999.5 MCFG");
     // clock is not granted to this host: refused, typed
     assert.equal(await run("t_clock"), "0 0");
   } finally {

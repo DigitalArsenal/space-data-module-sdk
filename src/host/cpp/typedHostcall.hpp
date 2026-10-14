@@ -16,6 +16,12 @@
 //
 //   auto get = sdm_piv::call("http.request", "HttpParams", http, {sdm_piv::raw("url", url)});
 //   std::string_view body = get.raw("body");
+//
+//   const sdm_piv::Config config = sdm_piv::get_config();   // plugin.getConfig: one ModuleConfig (MCFG), read in place
+//   if (!config.ok()) { config.error_message(); }
+//   double lead = config.number("nwp_max_lead", 72);
+//   std::string_view provider = config.string("targets.0.provider_id");
+//   sdm_piv::Span<double> index = config.numbers("index");
 #ifndef SDM_PIV_HOSTCALL_HPP
 #define SDM_PIV_HOSTCALL_HPP
 
@@ -29,6 +35,7 @@
 
 #include "sds/PIV/main_generated.h"
 #include "HostOps_aligned.h"
+#include "ModuleConfig_generated.h"
 
 extern "C" {
 #if defined(__wasm__)
@@ -195,6 +202,231 @@ inline Response call(const char* op, const char* params_type, const Params& para
 }
 /// Call an operation without a "params" record (clock.now, plugin.getConfig, filesystem.readFile with raw "path", ...).
 inline Response call(const char* op, std::initializer_list<Frame> frames = {}) { return call_frames(op, std::vector<Frame>(frames)); }
+
+// ---- plugin.getConfig: the module's config as one ModuleConfig FlatBuffer (schemas/runtime/ModuleConfig.fbs, MCFG) --
+
+/// A read-only run of T in place (C++17 has no std::span).
+template <typename T>
+class Span {
+ public:
+  Span() = default;
+  Span(const T* data, size_t size) : data_(data), size_(size) {}
+  const T* data() const { return data_; }
+  size_t size() const { return size_; }
+  bool empty() const { return size_ == 0; }
+  const T& operator[](size_t i) const { return data_[i]; }
+  const T* begin() const { return data_; }
+  const T* end() const { return data_ + size_; }
+
+ private:
+  const T* data_ = nullptr;
+  size_t size_ = 0;
+};
+
+using ConfigEntries = flatbuffers::Vector<flatbuffers::Offset<sdn::runtime::ConfigEntry>>;
+
+/// A table of config entries (the ModuleConfig root, or one nested ConfigTable of a TableList), sorted by KEY.
+///
+/// Every lookup takes a key or a dotted path into nested tables and lists, the way the old flattened entries were
+/// named: "targets.0.provider_id" (table 0 of TableList "targets", then its "provider_id"), "targets.provider_id"
+/// (a TableList holding one table - a nested object - needs no index), "widths.1" (item 1 of a NumberList or
+/// StringList). A key that itself contains dots is found too: the longest key that matches is taken first.
+/// A missing key, or a value of another kind, answers the default (or an empty list / table).
+class ConfigTable {
+ public:
+  ConfigTable() = default;
+  explicit ConfigTable(const ConfigEntries* entries) : entries_(entries) {}
+
+  explicit operator bool() const { return entries_ != nullptr; }
+  /// The entries, in place (nullptr for an empty table).
+  const ConfigEntries* entries() const { return entries_; }
+  size_t size() const { return entries_ ? entries_->size() : 0; }
+
+  /// The entry a key or dotted path names (nullptr when there is none; a path ending in a list index names the
+  /// list's entry - use the typed lookups to read the item).
+  const sdn::runtime::ConfigEntry* entry(std::string_view key) const { return find(key).entry; }
+  bool has(std::string_view key) const { return find(key).entry != nullptr; }
+  /// The value's kind, or `fallback` when the key is missing.
+  sdn::runtime::configValueKind kind(std::string_view key, sdn::runtime::configValueKind fallback = sdn::runtime::configValueKind_String) const {
+    const Found f = find(key);
+    return f.entry ? f.entry->KIND() : fallback;
+  }
+
+  /// A String (or an item of a StringList: "names.2"); the view lives as long as the Config.
+  std::string_view string(std::string_view key, std::string_view def = {}) const {
+    const Found f = find(key);
+    if (!f.entry) return def;
+    if (f.index < 0 && f.entry->KIND() == sdn::runtime::configValueKind_String) return view(f.entry->STRING_VALUE());
+    if (f.index >= 0 && f.entry->KIND() == sdn::runtime::configValueKind_StringList && f.entry->STRINGS() &&
+        static_cast<size_t>(f.index) < f.entry->STRINGS()->size()) {
+      return view(f.entry->STRINGS()->Get(static_cast<flatbuffers::uoffset_t>(f.index)));
+    }
+    return def;
+  }
+  /// A Number (or an item of a NumberList: "widths.1").
+  double number(std::string_view key, double def = 0) const {
+    const Found f = find(key);
+    if (!f.entry) return def;
+    if (f.index < 0 && f.entry->KIND() == sdn::runtime::configValueKind_Number) return f.entry->NUMBER_VALUE();
+    if (f.index >= 0 && f.entry->KIND() == sdn::runtime::configValueKind_NumberList && f.entry->NUMBERS() &&
+        static_cast<size_t>(f.index) < f.entry->NUMBERS()->size()) {
+      return f.entry->NUMBERS()->Get(static_cast<flatbuffers::uoffset_t>(f.index));
+    }
+    return def;
+  }
+  bool boolean(std::string_view key, bool def = false) const {
+    const Found f = find(key);
+    return f.entry && f.index < 0 && f.entry->KIND() == sdn::runtime::configValueKind_Bool ? f.entry->BOOL_VALUE() : def;
+  }
+  /// A NumberList in place, no copy (empty when missing or another kind).
+  Span<double> numbers(std::string_view key) const {
+    const Found f = find(key);
+    if (!f.entry || f.index >= 0 || f.entry->KIND() != sdn::runtime::configValueKind_NumberList || !f.entry->NUMBERS()) return {};
+    return {f.entry->NUMBERS()->data(), f.entry->NUMBERS()->size()};
+  }
+  /// A StringList's items (views into the config; empty when missing or another kind).
+  std::vector<std::string_view> strings(std::string_view key) const {
+    std::vector<std::string_view> out;
+    const Found f = find(key);
+    if (!f.entry || f.index >= 0 || f.entry->KIND() != sdn::runtime::configValueKind_StringList || !f.entry->STRINGS()) return out;
+    out.reserve(f.entry->STRINGS()->size());
+    for (const auto* s : *f.entry->STRINGS()) out.push_back(view(s));
+    return out;
+  }
+  /// How many tables a TableList holds (0 when missing or another kind).
+  size_t tables(std::string_view key) const {
+    const Found f = find(key);
+    return f.entry && f.index < 0 && f.entry->KIND() == sdn::runtime::configValueKind_TableList && f.entry->TABLES() ? f.entry->TABLES()->size() : 0;
+  }
+  /// Table `i` of a TableList ("targets", 2), or the table a path names ("targets.2"; "settings" for a nested object).
+  ConfigTable table(std::string_view key, size_t i) const {
+    const Found f = find(key);
+    if (!f.entry || f.index >= 0 || f.entry->KIND() != sdn::runtime::configValueKind_TableList || !f.entry->TABLES() || i >= f.entry->TABLES()->size()) return {};
+    return ConfigTable(f.entry->TABLES()->Get(static_cast<flatbuffers::uoffset_t>(i))->ENTRIES());
+  }
+  ConfigTable table(std::string_view key) const {
+    const Found f = find(key);
+    if (!f.entry || f.entry->KIND() != sdn::runtime::configValueKind_TableList || !f.entry->TABLES()) return {};
+    const size_t i = f.index >= 0 ? static_cast<size_t>(f.index) : 0;
+    if (i >= f.entry->TABLES()->size() || (f.index < 0 && f.entry->TABLES()->size() != 1)) return {};
+    return ConfigTable(f.entry->TABLES()->Get(static_cast<flatbuffers::uoffset_t>(i))->ENTRIES());
+  }
+
+ private:
+  struct Found {
+    const sdn::runtime::ConfigEntry* entry = nullptr;
+    int64_t index = -1;  // an item of a list, when the path ends in an index
+  };
+  static std::string_view view(const flatbuffers::String* s) { return s ? std::string_view(s->c_str(), s->size()) : std::string_view(); }
+  static bool index_of(std::string_view s, int64_t& out) {
+    if (s.empty() || s.size() > 18) return false;
+    int64_t v = 0;
+    for (char c : s) { if (c < '0' || c > '9') return false; v = v * 10 + (c - '0'); }
+    out = v;
+    return true;
+  }
+  /// The entry with exactly this key: a binary search (the entries are sorted by KEY), then a scan in case a writer
+  /// sorted by another collation.
+  static const sdn::runtime::ConfigEntry* lookup(const ConfigEntries* entries, std::string_view key) {
+    if (!entries) return nullptr;
+    size_t lo = 0, hi = entries->size();
+    while (lo < hi) {
+      const size_t mid = lo + (hi - lo) / 2;
+      const auto* e = entries->Get(static_cast<flatbuffers::uoffset_t>(mid));
+      const int c = view(e->KEY()).compare(key);
+      if (c == 0) return e;
+      if (c < 0) lo = mid + 1; else hi = mid;
+    }
+    for (const auto* e : *entries) if (view(e->KEY()) == key) return e;
+    return nullptr;
+  }
+  static Found resolve(const ConfigEntries* entries, std::string_view path, int depth) {
+    if (!entries || path.empty() || depth > 64) return {};
+    if (const auto* e = lookup(entries, path)) return {e, -1};
+    // the longest key before a dot first, so keys that contain dots win over nesting
+    for (size_t dot = path.rfind('.'); dot != std::string_view::npos && dot > 0; dot = path.rfind('.', dot - 1)) {
+      const auto* e = lookup(entries, path.substr(0, dot));
+      if (!e) continue;
+      std::string_view rest = path.substr(dot + 1);
+      const size_t next = rest.find('.');
+      const std::string_view head = rest.substr(0, next);
+      int64_t index = -1;
+      const bool indexed = index_of(head, index);
+      switch (e->KIND()) {
+        case sdn::runtime::configValueKind_NumberList:
+        case sdn::runtime::configValueKind_StringList:
+          if (indexed && next == std::string_view::npos) return {e, index};
+          return {};
+        case sdn::runtime::configValueKind_TableList: {
+          const auto* tables = e->TABLES();
+          if (!tables) return {};
+          if (indexed) {
+            if (static_cast<uint64_t>(index) >= tables->size()) return {};
+            if (next == std::string_view::npos) return {e, index};  // "targets.0": the table itself
+            return resolve(tables->Get(static_cast<flatbuffers::uoffset_t>(index))->ENTRIES(), rest.substr(next + 1), depth + 1);
+          }
+          if (tables->size() != 1) return {};
+          return resolve(tables->Get(0)->ENTRIES(), rest, depth + 1);  // a nested object: one table, no index
+        }
+        default:
+          return {};
+      }
+    }
+    return {};
+  }
+  Found find(std::string_view key) const { return resolve(entries_, key, 0); }
+
+  const ConfigEntries* entries_ = nullptr;
+};
+
+/// The module's config, as plugin.getConfig answers it: the host's $PIV response kept whole and its raw "config"
+/// frame - one ModuleConfig FlatBuffer (MCFG) - verified and read in place. Lookups are ConfigTable's. Move-only
+/// (the views point into the kept bytes).
+class Config : public ConfigTable {
+ public:
+  explicit Config(Response response) : response_(std::move(response)) {
+    if (!response_.ok()) { error_ = response_.error_message(); code_ = response_.error_code(); return; }
+    std::string_view frame = response_.raw("config");
+    if (frame.empty()) { fail("plugin.getConfig answered without a \"config\" frame"); return; }
+    const uint8_t* data = reinterpret_cast<const uint8_t*>(frame.data());
+    if (reinterpret_cast<uintptr_t>(data) % 8) {  // the invoke arena aligns frames to 8; copy only if a host did not
+      aligned_.resize((frame.size() + 7) / 8);
+      std::memcpy(aligned_.data(), frame.data(), frame.size());
+      data = reinterpret_cast<const uint8_t*>(aligned_.data());
+    }
+    flatbuffers::Verifier::Options options;
+    options.max_tables = 100000000;  // TableList-heavy configs: the buffer size bounds the work anyway
+    flatbuffers::Verifier verifier(data, frame.size(), options);
+    if (!sdn::runtime::VerifyModuleConfigBuffer(verifier)) { fail("plugin.getConfig: \"config\" is not a ModuleConfig (MCFG) FlatBuffer"); return; }
+    root_ = sdn::runtime::GetModuleConfig(data);
+    size_ = frame.size();
+    static_cast<ConfigTable&>(*this) = ConfigTable(root_->ENTRIES());
+  }
+  Config(Config&&) = default;
+  Config& operator=(Config&&) = default;
+  Config(const Config&) = delete;
+  Config& operator=(const Config&) = delete;
+
+  bool ok() const { return root_ != nullptr; }
+  std::string error_code() const { return code_; }
+  std::string error_message() const { return error_; }
+  /// The verified ModuleConfig root (nullptr when the call failed).
+  const sdn::runtime::ModuleConfig* root() const { return root_; }
+  /// The ModuleConfig bytes' length.
+  size_t byte_size() const { return size_; }
+
+ private:
+  void fail(const char* message) { error_ = message; code_ = "failed"; }
+  Response response_;
+  std::vector<uint64_t> aligned_;
+  const sdn::runtime::ModuleConfig* root_ = nullptr;
+  size_t size_ = 0;
+  std::string error_;
+  std::string code_;
+};
+
+/// plugin.getConfig: the module's config (no capability needed).
+inline Config get_config() { return Config(call("plugin.getConfig")); }
 
 /// SQL values (raw "params" of storage.flatsql_query_stream / query_sandboxed / flatsql_cache_key, raw "cells" of a
 /// query_sandboxed rows answer) in FlatSQL's tagged parameter encoding: value after value, a u8 tag, a u32

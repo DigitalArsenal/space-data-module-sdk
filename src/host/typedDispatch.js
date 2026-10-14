@@ -7,6 +7,7 @@ import {
   decodeHostCall,
   decodeSqlValues,
   encodeHostCallResult,
+  encodeModuleConfig,
   encodeSqlValues,
 } from "../standards/runtimeContracts.js";
 import * as hostOps from "../generated/runtime/aligned/HostOps_aligned.js";
@@ -192,28 +193,32 @@ function sqlCell(v) {
   if (typeof v === "string") return { t: "str", v };
   throw failed(`storage.query_sandboxed: a cell is a ${Array.isArray(v) ? "list" : typeof v} (nested values are not SQL values)`);
 }
-/** plugin.getConfig: the config flattened into dotted-path entries ("targets.0.provider_id"), keys sorted. */
-function configEntries(config) {
-  const entries = [];
-  const walk = (prefix, value) => {
-    if (value === null || value === undefined) return;
-    if (Array.isArray(value)) { value.forEach((item, i) => walk(`${prefix}.${i}`, item)); return; }
-    if (typeof value === "object" && !(value instanceof Date)) {
-      for (const key of Object.keys(value).sort()) walk(prefix ? `${prefix}.${key}` : key, value[key]);
-      return;
-    }
-    if (typeof value === "boolean") entries.push({ KEY: prefix, KIND: 2, BOOL_VALUE: value });
-    else if (typeof value === "string") entries.push({ KEY: prefix, KIND: 0, STRING_VALUE: value });
-    else if (typeof value === "number" || typeof value === "bigint") entries.push({ KEY: prefix, KIND: 1, NUMBER_VALUE: Number(value) });
-    else throw failed(`plugin.getConfig: ${prefix} is a ${value instanceof Date ? "Date" : typeof value}`);
-  };
-  walk("", config ?? {});
-  for (const e of entries) {
-    if (textEncoder.encode(e.KEY).length > 255 || textEncoder.encode(e.STRING_VALUE ?? "").length > 255) {
-      throw failed(`plugin.getConfig: ${e.KEY} does not fit a ConfigEntry (255 bytes)`, "too-large");
-    }
+/**
+ * plugin.getConfig: the config as one ModuleConfig FlatBuffer (MCFG) on raw "config" - number arrays NumberList, string
+ * arrays StringList, nested objects and arrays of objects TableList, keys sorted (encodeModuleConfig). Unset values
+ * (null / undefined) are left out; a value with no config kind (a Date, a function, a list mixing kinds) is refused.
+ */
+function configOf(value, path) {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === "bigint") return Number(value);
+  if (Array.isArray(value)) return value.filter((v) => v !== null && v !== undefined).map((v, i) => configOf(v, `${path}.${i}`));
+  if (typeof value === "object") {
+    if (value instanceof Date || ArrayBuffer.isView(value) || value instanceof ArrayBuffer) throw failed(`plugin.getConfig: ${path} is a ${value.constructor?.name ?? "object"}`);
+    const out = {};
+    for (const key of Object.keys(value)) { const v = configOf(value[key], path ? `${path}.${key}` : key); if (v !== undefined) out[key] = v; }
+    return out;
   }
-  return entries;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  throw failed(`plugin.getConfig: ${path} is a ${typeof value}`);
+}
+function moduleConfig(config) {
+  const plain = configOf(config ?? {}, "") ?? {};
+  if (Array.isArray(plain) || typeof plain !== "object") throw failed("plugin.getConfig: the config is not an object");
+  try {
+    return encodeModuleConfig(plain);
+  } catch (error) {
+    throw failed(`plugin.getConfig: ${error.message}`);
+  }
 }
 function secretRequest({ params, raw }) {
   const request = { id: str(params?.ID) };
@@ -333,7 +338,7 @@ const ADAPTERS = {
   "crypto.ed25519.verify": { in: ({ raw }) => ({ message: raw.data, signature: raw.signature, publicKey: raw.public_key }), out: bool },
 
   // ---- the Go node's operations, through the embedder's adapters (adapterOperations.js) ------------------------------
-  "plugin.getConfig": { in: () => ({}), out: (v) => ({ lists: { entries: configEntries(v) } }) },
+  "plugin.getConfig": { in: () => ({}), out: (v) => ({ raw: { config: moduleConfig(v) } }) },
   "node.peerId": { in: () => ({}), out: nodeText("peer ID") },
   "node.publicKey": { in: () => ({}), out: nodeText("public key") },
   "secrets.get": { in: secretRequest, out: (v) => ({ result: fit("SecretResult", { ID: str(v?.id), USERNAME: str(v?.username), CONFIGURED: true }), raw: { secret: bytesOf(v?.secret) ?? new Uint8Array(0) } }) },

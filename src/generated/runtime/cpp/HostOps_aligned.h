@@ -64,12 +64,6 @@ enum deliverMode : uint8_t {
   deliverMode_Ref = 1,
 };
 
-enum configEntryKind : uint8_t {
-  configEntryKind_String = 0,
-  configEntryKind_Number = 1,
-  configEntryKind_Bool = 2,
-};
-
 enum reconcileKind : uint8_t {
   reconcileKind_Duplicates = 0,
   reconcileKind_None = 1,
@@ -331,56 +325,6 @@ static_assert(alignof(RandomBytesParams) == 4, "RandomBytesParams alignment mism
 static_assert(offsetof(RandomBytesParams, LENGTH) == 0, "RandomBytesParams.LENGTH offset mismatch");
 constexpr size_t RandomBytesParams_SIZE = 4;
 constexpr size_t RandomBytesParams_ALIGN = 4;
-
-}  // namespace Aligned
-}  // namespace runtime
-}  // namespace sdn
-
-namespace sdn {
-namespace runtime {
-namespace Aligned {
-
-struct ConfigEntry {
-  uint8_t __presence[1];
-  ::flatbuffers::aligned_runtime::AlignedString<255> KEY;
-  configEntryKind KIND;
-  ::flatbuffers::aligned_runtime::AlignedString<255> STRING_VALUE;
-  double NUMBER_VALUE;
-  bool BOOL_VALUE;
-
-  bool has_KEY() const {
-    return (__presence[0] & 1) != 0;
-  }
-  void set_has_KEY(bool value) {
-    if (value) __presence[0] |= 1;
-    else __presence[0] &= ~1;
-  }
-  bool has_STRING_VALUE() const {
-    return (__presence[0] & 2) != 0;
-  }
-  void set_has_STRING_VALUE(bool value) {
-    if (value) __presence[0] |= 2;
-    else __presence[0] &= ~2;
-  }
-
-  static ConfigEntry* fromBytes(void* data) {
-    return reinterpret_cast<ConfigEntry*>(data);
-  }
-  static const ConfigEntry* fromBytes(const void* data) {
-    return reinterpret_cast<const ConfigEntry*>(data);
-  }
-  void copyTo(void* dest) const { std::memcpy(dest, this, 536); }
-  void copyFrom(const ConfigEntry& src) { std::memcpy(this, &src, 536); }
-};
-static_assert(sizeof(ConfigEntry) == 536, "ConfigEntry size mismatch");
-static_assert(alignof(ConfigEntry) == 8, "ConfigEntry alignment mismatch");
-static_assert(offsetof(ConfigEntry, KEY) == 1, "ConfigEntry.KEY offset mismatch");
-static_assert(offsetof(ConfigEntry, KIND) == 257, "ConfigEntry.KIND offset mismatch");
-static_assert(offsetof(ConfigEntry, STRING_VALUE) == 258, "ConfigEntry.STRING_VALUE offset mismatch");
-static_assert(offsetof(ConfigEntry, NUMBER_VALUE) == 520, "ConfigEntry.NUMBER_VALUE offset mismatch");
-static_assert(offsetof(ConfigEntry, BOOL_VALUE) == 528, "ConfigEntry.BOOL_VALUE offset mismatch");
-constexpr size_t ConfigEntry_SIZE = 536;
-constexpr size_t ConfigEntry_ALIGN = 8;
 
 }  // namespace Aligned
 }  // namespace runtime
