@@ -37,7 +37,8 @@ jobs:
         with:
           python-version: "3.x"
       - name: Install Python FlatBuffers runtime
-        run: python3 -m pip install flatbuffers
+        # Hash-pinned (SEC-042): only the reviewed wheel installs.
+        run: python3 -m pip install --require-hashes -r .github/requirements/flatbuffers.txt
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24
