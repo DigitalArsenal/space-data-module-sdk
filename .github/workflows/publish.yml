@@ -5,9 +5,9 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: read
-  id-token: write
+# Least privilege (security audit SEC-042/SEC-044): only the publish job holds
+# the OIDC id-token npm provenance needs.
+permissions: {}
 
 env:
   # MUST match .github/workflows/ci.yml — the tag gate and the merge gate have
@@ -20,15 +20,25 @@ env:
 
 jobs:
   publish:
+    # Publishes with npm provenance from a v* tag, in the npm-publish environment
+    # (owner's required reviewers). npm's trusted publisher for
+    # space-data-module-sdk should require this environment.
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write # npm provenance / trusted publishing
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.x"
       - name: Install Python FlatBuffers runtime
         run: python3 -m pip install flatbuffers
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -36,6 +46,10 @@ jobs:
         run: |
           git clone https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
           cd "$RUNNER_TEMP/emsdk"
+          # The emsdk scripts and release manifest at the commit emsdk's
+          # 6.0.5 tag names, never emsdk's moving HEAD (security audit
+          # SEC-042). Bump together with EMSDK_VERSION, in both workflows.
+          git checkout --detach dfb9d1a46c3bb8f52e1e6324be23123b9d73c190
           ./emsdk install "$EMSDK_VERSION"
           ./emsdk activate "$EMSDK_VERSION"
       - name: Install pinned wasi-sdk

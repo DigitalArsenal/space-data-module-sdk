@@ -18,8 +18,14 @@ env:
   WASI_SDK_VERSION: "33"
   WASI_SDK_SHA256: "0ba8b5bfaeb2adf3f29bab5841d76cf5318ab8e1642ea195f88baba1abd47bce"
 
+# Least privilege (security audit SEC-042/SEC-044): the workflow token gets
+# nothing by default and every job names exactly the scopes it needs.
+permissions: {}
+
 jobs:
   test:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     strategy:
       # A matrix lane is EVIDENCE, not a race. With fail-fast the first lane to
@@ -37,13 +43,15 @@ jobs:
         # the suite its own runner and its own complete TAP verdict.
         shard: [0, 1, 2, 3]
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.x"
       - name: Install Python FlatBuffers runtime
         run: python3 -m pip install flatbuffers
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: ${{ matrix.node-version }}
       # PINNED, never "latest". This repo enforces a pinned compile contract
@@ -56,6 +64,10 @@ jobs:
         run: |
           git clone https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
           cd "$RUNNER_TEMP/emsdk"
+          # The emsdk scripts and release manifest at the commit emsdk's
+          # 6.0.5 tag names, never emsdk's moving HEAD (security audit
+          # SEC-042). Bump together with EMSDK_VERSION, in both workflows.
+          git checkout --detach dfb9d1a46c3bb8f52e1e6324be23123b9d73c190
           ./emsdk install "$EMSDK_VERSION"
           ./emsdk activate "$EMSDK_VERSION"
       - name: Install pinned wasi-sdk
@@ -90,12 +102,22 @@ jobs:
           test "$selected" -gt 0
 
   compliance:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
+      # Supply-chain gate on the workflows themselves (security audit
+      # SEC-042/SEC-044); dependency-free, so it runs before npm ci.
+      - name: Check workflow hardening
+        run: |
+          node scripts/check-workflow-hardening.mjs
+          node --test scripts/check-workflow-hardening.test.mjs
       - run: npm ci
       - run: npm run check:compliance
       - run: npm run check:generated-bindings
