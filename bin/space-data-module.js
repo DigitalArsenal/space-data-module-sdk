@@ -235,8 +235,20 @@ function parseArgs(argv) {
       case "--expect-fail":
         options.expectFailure = true;
         break;
-      default:
-        throw new Error(`Unknown argument: ${value}`);
+      default: {
+        // Never echo an argument's value: "--mnemonic=<words>" or a mistyped
+        // flag followed by a secret would land in logs and terminals.
+        const flag = String(value ?? "").split("=")[0];
+        if (/^--?mnemonic$/i.test(flag)) {
+          throw new Error(
+            "--mnemonic is not accepted on the command line; use --mnemonic-file <path> or the SDN_MODULE_SIGNING_MNEMONIC environment variable.",
+          );
+        }
+        if (!flag.startsWith("-") || !/^-{1,2}[A-Za-z0-9][A-Za-z0-9-]{0,63}$/.test(flag)) {
+          throw new Error("Unknown argument (value not shown).");
+        }
+        throw new Error(`Unknown argument: ${flag}${flag.length < String(value).length ? "=<value not shown>" : ""}`);
+      }
     }
   }
 

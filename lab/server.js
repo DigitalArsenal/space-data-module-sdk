@@ -47,6 +47,14 @@ export function resolveContainedWasmPath(rootDir, relativePath) {
     return null;
   }
   if (!resolved.startsWith(root + path.sep)) return null;
+  // the file actually opened must itself be a .wasm regular file, not a
+  // .wasm-named link to something else inside the directory
+  if (!resolved.endsWith(".wasm")) return null;
+  try {
+    if (!fs.statSync(resolved).isFile()) return null;
+  } catch {
+    return null;
+  }
   return resolved;
 }
 
@@ -77,6 +85,11 @@ function cookieToken(request) {
 export function createLabApp(options = {}) {
   const token = options.token ?? randomBytes(24).toString("hex");
   const app = express();
+  // "/API/protect" must not be a different path from "/api/protect" to one
+  // check and the same route to the router (SEC-059 round 2).
+  app.set("case sensitive routing", true);
+  app.set("strict routing", true);
+  app.disable("x-powered-by");
 
   app.use((request, response, next) => {
     const host = String(request.headers.host ?? "").toLowerCase();
@@ -94,16 +107,8 @@ export function createLabApp(options = {}) {
       );
       return response.redirect(302, "/");
     }
-    if (request.path.startsWith("/api/") || request.path.startsWith("/plugins/")) {
-      const presented = request.headers["x-lab-token"] ?? cookieToken(request);
-      if (!tokenMatches(token, presented)) {
-        return response.status(401).json({ ok: false, error: "Missing or wrong lab token." });
-      }
-    }
     next();
   });
-
-  app.use(express.json({ limit: "20mb" }));
 
   // Cross-origin isolation headers for SharedArrayBuffer (needed by pthread builds)
   app.use((_req, res, next) => {
@@ -112,9 +117,27 @@ export function createLabApp(options = {}) {
     next();
   });
 
-  app.use(express.static(path.join(__dirname, "public")));
+  // The lab UI's own static files are the ONLY thing served without the
+  // token (GET/HEAD, files that exist under lab/public, no dotfiles).
+  // Everything after this line requires it, whatever the path's case,
+  // spelling or encoding: the gate is default-deny, not a prefix list.
+  app.use(express.static(path.join(__dirname, "public"), {
+    dotfiles: "deny",
+    fallthrough: true,
+    redirect: false,
+  }));
+  app.use((request, response, next) => {
+    const presented = request.headers["x-lab-token"] ?? cookieToken(request);
+    if (!tokenMatches(token, presented)) {
+      return response.status(401).json({ ok: false, error: "Missing or wrong lab token." });
+    }
+    next();
+  });
 
-  // Serve WASM plugin artifacts from the plugins directory
+  app.use(express.json({ limit: "20mb" }));
+
+  // Serve WASM plugin artifacts from the plugins directory: .wasm files whose
+  // REAL path is inside it (no symlink out, no "..", no case games).
   const pluginsDir = options.pluginsDir ?? resolvePluginsDir();
   if (!fs.existsSync(pluginsDir)) {
     console.warn(
@@ -122,11 +145,21 @@ export function createLabApp(options = {}) {
         "Set SPACE_DATA_NETWORK_PLUGINS_ROOT to a space-data-network-plugins checkout to enable /plugins and /api/plugins.",
     );
   }
-  app.use("/plugins", express.static(pluginsDir, {
-    setHeaders(res) {
-      res.setHeader("Content-Type", "application/wasm");
-    },
-  }));
+  app.get(/^\/plugins\/(.+)$/, (request, response) => {
+    let relativePath;
+    try {
+      relativePath = decodeURIComponent(request.params[0]);
+    } catch {
+      return response.status(400).json({ ok: false, error: "Malformed plugin path." });
+    }
+    const resolved = resolveContainedWasmPath(pluginsDir, relativePath);
+    if (!resolved) {
+      return response.status(404).json({ ok: false, error: "No such plugin artifact." });
+    }
+    response.setHeader("Content-Type", "application/wasm");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    return response.sendFile(resolved, { dotfiles: "deny" });
+  });
 
   function parseManifest(input) {
     if (typeof input === "string") {
@@ -296,6 +329,9 @@ export function createLabApp(options = {}) {
     }
   });
 
+  app.use((_request, response) => {
+    response.status(404).json({ ok: false, error: "Not found." });
+  });
 
   return { app, token };
 }

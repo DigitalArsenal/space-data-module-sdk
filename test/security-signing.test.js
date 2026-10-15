@@ -19,12 +19,6 @@ import { promisify } from "node:util";
 
 import { signModuleArtifact, verifyModuleArtifact } from "../src/bundle/signing.js";
 import {
-  DENYLISTED_MODULE_SIGNER_PUBLIC_KEYS,
-  parseTrustedModuleSigners,
-  resolveTrustedModuleSignaturePolicy,
-  verifyTrustedModuleArtifact,
-} from "../src/bundle/trustPolicy.js";
-import {
   appendWasmCustomSection,
   createSingleFileBundle,
   parseSingleFileBundle,
@@ -35,6 +29,12 @@ import { encodePluginManifest } from "../src/manifest/index.js";
 import { ed25519PublicKey } from "../src/utils/wasmCrypto.js";
 
 const run = promisify(execFile);
+// trustPolicy.js is the fail-closed API this branch adds. It is imported in
+// each test that exercises it, so the tests that reach the fix through code
+// that already existed (the CLI, verifyModuleArtifact, the manifest locator,
+// the runtime-target gate) fail on their security assertions on a tree
+// without it rather than all at once on a missing module.
+const trustPolicy = () => import("../src/bundle/trustPolicy.js");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(__dirname, "..", "bin", "space-data-module.js");
 const DEV_KEYPAIR_PATH = path.join(__dirname, "support", "dev-module-signing-keypair.json");
@@ -62,6 +62,7 @@ async function cli(args, options = {}) {
 }
 
 test("SEC-008: a configured trust set always requires a signature; unsigned and stripped artifacts are refused", async () => {
+  const { resolveTrustedModuleSignaturePolicy, verifyTrustedModuleArtifact } = await trustPolicy();
   const signer = await randomSigner();
   const signed = await signModuleArtifact(buildTestWasm(), { privateKeySeedHex: signer.privateKeySeedHex, signatureScope: "bundle" });
   const policy = resolveTrustedModuleSignaturePolicy({ verifySignature: { trustedPublicKeys: [signer.publicKeyHex] } });
@@ -98,6 +99,7 @@ test("SEC-008: a configured trust set always requires a signature; unsigned and 
 });
 
 test("SEC-008: trusted-key lists are parsed strictly; a malformed or empty list never becomes 'no policy'", async () => {
+  const { parseTrustedModuleSigners, resolveTrustedModuleSignaturePolicy } = await trustPolicy();
   const a = (await randomSigner()).publicKeyHex;
   const b = (await randomSigner()).publicKeyHex;
   assert.deepEqual(parseTrustedModuleSigners(`0x${a}`), [a]);
@@ -144,6 +146,7 @@ test("SEC-008: a signed artifact whose record trailer is corrupted is an error, 
 });
 
 test("SEC-005: the published development signer is denylisted unless a test opts in explicitly", async () => {
+  const { DENYLISTED_MODULE_SIGNER_PUBLIC_KEYS, parseTrustedModuleSigners, resolveTrustedModuleSignaturePolicy, verifyTrustedModuleArtifact } = await trustPolicy();
   assert.deepEqual([...DENYLISTED_MODULE_SIGNER_PUBLIC_KEYS], [DEV_PUBLIC_KEY]);
   assert.throws(() => parseTrustedModuleSigners([DEV_PUBLIC_KEY]), (error) => error.code === "denylisted_signer");
   assert.throws(
@@ -229,8 +232,16 @@ test("SEC-021: the unsigned MBL manifest of a module-scope artifact is not read 
   for (const options of [{}, { verification }]) {
     const located = locateEmbeddedPlgManifest(tampered, options);
     assert.notEqual(located?.source, "bundle-manifest");
-    const names = (located?.decoded?.capabilities ?? []).map((c) => c?.name ?? c);
-    assert.ok(!names.includes("wallet_sign"), "the swapped capabilities are never read");
+    // the payload carries no manifest (bundling moved it to the trailer), so
+    // the only declaration is the unsigned one: it comes back marked
+    // untrusted, for refusal-only use (runtime-target gates), never as the
+    // artifact's manifest
+    assert.equal(located?.source, "bundle-manifest-unverified");
+    assert.equal(located?.trusted, false);
+    // a caller that grants from a manifest asks for none rather than that one
+    const strict = locateEmbeddedPlgManifest(tampered, { ...options, refuseUnverifiedTrailer: true });
+    const names = (strict?.decoded?.capabilities ?? []).map((c) => c?.name ?? c);
+    assert.ok(!names.includes("wallet_sign"), "the swapped capabilities are never read as trusted");
   }
 
   // bundle scope: the trailer IS signed, and a verified result unlocks it
@@ -239,4 +250,41 @@ test("SEC-021: the unsigned MBL manifest of a module-scope artifact is not read 
   const located = locateEmbeddedPlgManifest(bundleScope.wasmBytes, { verification: bundleVerification });
   assert.equal(located?.source, "bundle-manifest");
   assert.deepEqual(located.decoded.capabilities.map((c) => c?.name ?? c), ["clock"]);
+});
+
+test("SEC-021 (round 2): a bundle-signed artifact's runtimeTargets still refuse the WasmEdge leg when the caller passes no verification", async () => {
+  const { resolveRuntimeTargetRefusal } = await import("../src/host/runtimeTargetGate.js");
+  const { declaredRuntimeTargets } = await import("../src/testing/parityGate.js");
+  const signer = await randomSigner();
+  const manifest = {
+    pluginId: "com.digitalarsenal.tests.gate",
+    name: "Gate",
+    version: "1.0.0",
+    pluginFamily: "foundation",
+    capabilities: [],
+    externalInterfaces: [],
+    invokeSurfaces: ["direct"],
+    runtimeTargets: ["browser"],
+    methods: [],
+    schemasUsed: [],
+    abiVersion: 1,
+  };
+  // the verifier's vgate: a manifest that exists only in the MBL trailer
+  const bundle = await createSingleFileBundle({ wasmBytes: new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]), manifest });
+  for (const signatureScope of ["bundle", "module"]) {
+    const signed = await signModuleArtifact(bundle.wasmBytes, { privateKeySeedHex: signer.privateKeySeedHex, signatureScope });
+    // isomorphicLoader and parityGate call the locator with bytes only
+    const located = locateEmbeddedPlgManifest(signed.wasmBytes);
+    assert.deepEqual(located?.decoded?.runtimeTargets, ["browser"], signatureScope);
+    const refusal = resolveRuntimeTargetRefusal({ embeddedManifest: located?.decoded ?? null, manifest: null, leg: "wasmedge" });
+    assert.deepEqual(refusal, { targets: ["browser"], source: "embedded" }, signatureScope);
+    assert.deepEqual(declaredRuntimeTargets(signed.wasmBytes), ["browser"], signatureScope);
+    // with the loader's verification the bundle-scope trailer is the trusted source
+    if (signatureScope === "bundle") {
+      const verification = await verifyModuleArtifact(signed.wasmBytes, { trustedPublicKeys: [signer.publicKeyHex], requireSignature: true });
+      const trusted = locateEmbeddedPlgManifest(signed.wasmBytes, { verification });
+      assert.equal(trusted.source, "bundle-manifest");
+      assert.equal(trusted.trusted, true);
+    }
+  }
 });

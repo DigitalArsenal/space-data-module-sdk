@@ -169,6 +169,36 @@ function normalizeBrowserNetworkTransport(params = {}) {
   );
 }
 
+function browserNetworkSchemeTransport(url) {
+  if (url === null || url === undefined || url === "") return null;
+  let protocol;
+  try {
+    // absolute URLs only: a relative path names no scheme
+    protocol = new URL(String(url)).protocol.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (protocol === "http:" || protocol === "https:") return "http";
+  if (protocol === "ws:" || protocol === "wss:") return "websocket";
+  return null;
+}
+
+function normalizeWebSocketOriginList(origins) {
+  if (origins === undefined || origins === null) return null;
+  if (!Array.isArray(origins)) {
+    throw new TypeError("allowedWebSocketOrigins must be an array of origin strings.");
+  }
+  const normalized = new Set();
+  for (const origin of origins) {
+    const parsed = new URL(String(origin ?? ""));
+    if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+      throw new TypeError(`allowedWebSocketOrigins entry "${origin}" must use ws: or wss:.`);
+    }
+    normalized.add(parsed.origin);
+  }
+  return normalized;
+}
+
 function resolveCapabilityAdapters(options = {}) {
   const adapters =
     options.capabilityAdapters && typeof options.capabilityAdapters === "object"
@@ -440,6 +470,67 @@ export class BrowserHost {
     // allowAnyHttpOrigin: true). Every redirect hop is re-checked (SEC-022).
     const allowedHttpOrigins = normalizeHttpOriginList(options.allowedHttpOrigins);
     const allowAnyHttpOrigin = options.allowAnyHttpOrigin === true;
+    // websocket is its own opt-in too, never implied by "network": a browser
+    // WebSocket carries the page's cookies to whatever it dials, so it goes
+    // only to listed ws:/wss: origins (or anywhere, with an explicit
+    // allowAnyWebSocketOrigin: true). Round-2 verification of SEC-009.
+    const allowedWebSocketOrigins = normalizeWebSocketOriginList(options.allowedWebSocketOrigins);
+    const allowAnyWebSocketOrigin = options.allowAnyWebSocketOrigin === true;
+    const assertHttpOriginAllowed = (url, operation = "http.request") => {
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new BrowserHostCapabilityError(
+          "http",
+          operation,
+          `Unsupported HTTP protocol "${url.protocol}". Expected http: or https:.`,
+        );
+      }
+      if (allowAnyHttpOrigin) return;
+      if (!allowedHttpOrigins) {
+        throw new BrowserHostCapabilityError(
+          "http",
+          operation,
+          "Browser host http.request needs allowedHttpOrigins (or allowAnyHttpOrigin: true).",
+        );
+      }
+      if (!allowedHttpOrigins.has(url.origin)) {
+        throw new BrowserHostCapabilityError(
+          "http",
+          operation,
+          `HTTP origin "${url.origin}" is not permitted by this host.`,
+        );
+      }
+    };
+    const assertWebSocketOriginAllowed = (rawUrl, operation = "websocket.exchange") => {
+      let url;
+      try {
+        url = new URL(String(rawUrl ?? ""));
+      } catch {
+        throw new BrowserHostCapabilityError("websocket", operation, "WebSocket url must be an absolute ws: or wss: URL.");
+      }
+      if (url.protocol !== "ws:" && url.protocol !== "wss:") {
+        throw new BrowserHostCapabilityError(
+          "websocket",
+          operation,
+          `Unsupported WebSocket protocol "${url.protocol}". Expected ws: or wss:.`,
+        );
+      }
+      if (allowAnyWebSocketOrigin) return url;
+      if (!allowedWebSocketOrigins) {
+        throw new BrowserHostCapabilityError(
+          "websocket",
+          operation,
+          "Browser host websocket.exchange needs allowedWebSocketOrigins (or allowAnyWebSocketOrigin: true).",
+        );
+      }
+      if (!allowedWebSocketOrigins.has(url.origin)) {
+        throw new BrowserHostCapabilityError(
+          "websocket",
+          operation,
+          `WebSocket origin "${url.origin}" is not permitted by this host.`,
+        );
+      }
+      return url;
+    };
     const keySlotPolicy = normalizeKeySlotPolicy(options.allowedKeySlots);
     const edgeShims = createBrowserEdgeShims({
       ...options.edgeShims,
@@ -566,25 +657,7 @@ export class BrowserHost {
               credentials: "omit",
               signal: controller.signal,
             },
-            {
-              assertAllowed: (url) => {
-                if (allowAnyHttpOrigin) return;
-                if (!allowedHttpOrigins) {
-                  throw new BrowserHostCapabilityError(
-                    "http",
-                    "http.request",
-                    "Browser host http.request needs allowedHttpOrigins (or allowAnyHttpOrigin: true).",
-                  );
-                }
-                if (!allowedHttpOrigins.has(url.origin)) {
-                  throw new BrowserHostCapabilityError(
-                    "http",
-                    "http.request",
-                    `HTTP origin "${url.origin}" is not permitted by this host.`,
-                  );
-                }
-              },
-            },
+            { assertAllowed: (url) => assertHttpOriginAllowed(url) },
           );
           const responseType = params.responseType ?? "utf8";
           let body;
@@ -608,11 +681,12 @@ export class BrowserHost {
     this.websocket = Object.freeze({
       exchange: async (params) => {
         this.#assertCapability("websocket", "websocket.exchange");
+        const wsUrl = assertWebSocketOriginAllowed(params?.url);
         if (!WebSocketImpl) {
           throw new Error("No WebSocket implementation is available for the browser host.");
         }
         return new Promise((resolve, reject) => {
-          const ws = new WebSocketImpl(params.url, params.protocols ?? undefined);
+          const ws = new WebSocketImpl(wsUrl.toString(), params.protocols ?? undefined);
           const timeout = params.timeoutMs
             ? setTimeout(() => {
                 ws.close();
@@ -660,6 +734,32 @@ export class BrowserHost {
         this.#assertCapability("network", "network.request");
         const transport = normalizeBrowserNetworkTransport(params);
         const request = params.request ?? params;
+        // The transport's own capability and origin rules hold whether the
+        // host or an embedder adapter carries the request: "network" alone
+        // reaches neither http nor websocket, and a URL whose scheme names
+        // another transport than the one declared is refused.
+        const requestUrl = request?.url ?? params.url ?? null;
+        const schemeTransport = browserNetworkSchemeTransport(requestUrl);
+        if (schemeTransport && schemeTransport !== transport) {
+          throw new BrowserHostCapabilityError(
+            "network",
+            "network.request",
+            `network.request transport "${transport}" does not match its ${schemeTransport} URL.`,
+          );
+        }
+        if (transport === "http") {
+          this.#assertCapability("http", "network.request");
+          let url;
+          try {
+            url = new URL(String(requestUrl ?? ""));
+          } catch {
+            throw new BrowserHostCapabilityError("http", "network.request", "network.request http needs an absolute URL.");
+          }
+          assertHttpOriginAllowed(url, "network.request");
+        } else if (transport === "websocket") {
+          this.#assertCapability("websocket", "network.request");
+          assertWebSocketOriginAllowed(requestUrl, "network.request");
+        }
         if (networkAdapter) {
           return invokeAdapterMethod(networkAdapter, "request", {
             ...request,
@@ -1099,10 +1199,7 @@ export class BrowserHost {
 
   hasCapability(capability) {
     const normalized = String(capability ?? "").trim();
-    return (
-      this._grantedCapabilities.has(normalized) ||
-      (this._grantedCapabilities.has("network") && normalized === "websocket")
-    );
+    return this._grantedCapabilities.has(normalized);
   }
 
   assertCapability(capability, operation) {
@@ -1289,15 +1386,9 @@ export class BrowserHost {
 
   #assertCapability(capability, operation) {
     const normalized = String(capability ?? "").trim();
-    // "network" no longer implies "http": http is a separate opt-in (SEC-009).
-    const networkBackedCapabilities = new Set(["websocket"]);
-    if (
-      !this._grantedCapabilities.has(normalized) &&
-      !(
-        this._grantedCapabilities.has("network") &&
-        networkBackedCapabilities.has(normalized)
-      )
-    ) {
+    // "network" implies neither "http" nor "websocket": each is its own
+    // opt-in with its own origin list (SEC-009).
+    if (!this._grantedCapabilities.has(normalized)) {
       throw new BrowserHostCapabilityError(capability, operation);
     }
   }

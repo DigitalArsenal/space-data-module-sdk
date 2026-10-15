@@ -2342,6 +2342,7 @@ export function locateEmbeddedPlgManifest(wasmBytes, options = {}) {
       return {
         ...located,
         source: trailerVerified ? "bundle-manifest" : "bundle-manifest-unverified",
+        trusted: trailerVerified,
       };
     }
   }
@@ -2376,8 +2377,27 @@ export function locateEmbeddedPlgManifest(wasmBytes, options = {}) {
       return { ...located, source: "data-memory" };
     }
   }
-  const located = scanForEmbeddedPlgManifest(bytes, options);
-  return located ? { ...located, source: "raw-wasm" } : null;
+  const rawLocated = scanForEmbeddedPlgManifest(bytes, options);
+  if (rawLocated) {
+    return { ...rawLocated, source: "raw-wasm" };
+  }
+  // The payload declares nothing; only the unverified trailer does. That
+  // declaration may still NARROW what the artifact is admitted to (the
+  // runtime-target gates refuse on it), and an attacker who can rewrite the
+  // trailer can as easily drop it, so honouring it for refusals costs nothing.
+  // It must never GRANT: the result says so, and a caller that grants from a
+  // manifest must refuse `trusted: false` (or pass `refuseUnverifiedTrailer`).
+  if (
+    trailerManifestBytes &&
+    !trailerAllowed &&
+    options.refuseUnverifiedTrailer !== true
+  ) {
+    const unverified = decodeManifestCandidate(trailerManifestBytes, options);
+    if (unverified) {
+      return { ...unverified, source: "bundle-manifest-unverified", trusted: false };
+    }
+  }
+  return null;
 }
 
 export function hasLegacyPmanManifest(wasmBytes) {

@@ -493,9 +493,17 @@ function assertNetworkTargetAllowed(
   port,
   allowedHosts,
   allowedPorts,
+  allowAnyHost = false,
 ) {
   const normalizedHost = assertNonEmptyString(host, `${kind} host`).toLowerCase();
   const normalizedPort = assertPort(port, `${kind} port`);
+  // FAIL CLOSED (round-2 verification of SEC-022): no host list means no
+  // host, unless the embedder opts in with allowAnyNetworkHost: true.
+  if (!allowedHosts && !allowAnyHost) {
+    throw new Error(
+      `${kind} host "${host}" is not permitted: this host lists no allowed ${kind} hosts (set allowed${kind[0]}${kind.slice(1).toLowerCase()}Hosts, or allowAnyNetworkHost: true).`,
+    );
+  }
   if (allowedHosts && !allowedHosts.has(normalizedHost)) {
     throw new Error(`${kind} host "${host}" is not permitted by this host.`);
   }
@@ -1559,10 +1567,16 @@ export class NodeHost {
     this.filesystemRoot = normalizeFilesystemRoot(
       options.filesystemRoot ?? options.fsRoot,
     );
+    // Outbound destinations FAIL CLOSED: a transport with no allow-list
+    // reaches nothing unless the embedder says "anywhere" explicitly
+    // (round-2 verification of SEC-022; mirrors BrowserHost).
     this.allowedHttpOrigins = normalizeAllowedOrigins(options.allowedHttpOrigins);
+    this.allowAnyHttpOrigin = options.allowAnyHttpOrigin === true;
     this.allowedWebSocketOrigins = normalizeAllowedWebSocketOrigins(
       options.allowedWebSocketOrigins,
     );
+    this.allowAnyWebSocketOrigin = options.allowAnyWebSocketOrigin === true;
+    this.allowAnyNetworkHost = options.allowAnyNetworkHost === true;
     this.allowedCommands = normalizeAllowedCommands(options.allowedCommands);
     // Children start from this environment ONLY (never process.env). A guest
     // may add variables whose names the operator lists in allowedExecEnv.
@@ -1719,14 +1733,7 @@ export class NodeHost {
               `Unsupported HTTP protocol "${url.protocol}". Expected http: or https:.`,
             );
           }
-          const assertAllowed = (candidate) => {
-            if (
-              this.allowedHttpOrigins &&
-              !this.allowedHttpOrigins.has(candidate.origin)
-            ) {
-              throw new Error(`HTTP origin "${candidate.origin}" is not permitted by this host.`);
-            }
-          };
+          const assertAllowed = (candidate) => this.#assertHttpOriginAllowed(candidate);
 
           const timeout = createTimeoutSignal(requestOptions.timeoutMs);
           try {
@@ -1771,14 +1778,7 @@ export class NodeHost {
       exchange: async (websocketOptions = {}) =>
         this.#withCapability("websocket", "websocket.exchange", async () => {
           const url = normalizeWebSocketUrl(websocketOptions.url);
-          if (
-            this.allowedWebSocketOrigins &&
-            !this.allowedWebSocketOrigins.has(url.origin)
-          ) {
-            throw new Error(
-              `WebSocket origin "${url.origin}" is not permitted by this host.`,
-            );
-          }
+          this.#assertWebSocketOriginAllowed(url);
           return runWebSocketExchange({
             url: url.toString(),
             protocols: websocketOptions.protocols,
@@ -1797,6 +1797,9 @@ export class NodeHost {
           const transport = normalizeNetworkTransport(params);
           const request = params.request ?? params;
           if (this._networkAdapter) {
+            // an embedder adapter carries the request, but the transport's
+            // capability and destination rules still apply first
+            this.#assertAdapterNetworkTarget(transport, request);
             return invokeAdapterMethod(this._networkAdapter, "request", {
               ...request,
               transport,
@@ -1915,6 +1918,7 @@ export class NodeHost {
             mqttOptions.port,
             this.allowedMqttHosts,
             this.allowedMqttPorts,
+            this.allowAnyNetworkHost,
           );
           return runMqttPublish({
             host,
@@ -1937,6 +1941,7 @@ export class NodeHost {
             mqttOptions.port,
             this.allowedMqttHosts,
             this.allowedMqttPorts,
+            this.allowAnyNetworkHost,
           );
           return runMqttSubscribeOnce({
             host,
@@ -2002,6 +2007,7 @@ export class NodeHost {
             tcpOptions.port,
             this.allowedTcpHosts,
             this.allowedTcpPorts,
+            this.allowAnyNetworkHost,
           );
           return runTcpRequest({
             host,
@@ -2022,6 +2028,7 @@ export class NodeHost {
             udpOptions.port,
             this.allowedUdpHosts,
             this.allowedUdpPorts,
+            this.allowAnyNetworkHost,
           );
           return runUdpRequest({
             host,
@@ -2051,6 +2058,7 @@ export class NodeHost {
             tlsOptions.port,
             this.allowedTlsHosts,
             this.allowedTlsPorts,
+            this.allowAnyNetworkHost,
           );
           return runTlsRequest({
             host,
@@ -2658,6 +2666,67 @@ export class NodeHost {
   #withCapability(capability, operation, callback) {
     this.assertCapability(capability, operation);
     return callback();
+  }
+
+  #assertHttpOriginAllowed(candidate) {
+    if (this.allowAnyHttpOrigin) return;
+    if (!this.allowedHttpOrigins) {
+      throw new Error(
+        `HTTP origin "${candidate.origin}" is not permitted: this host lists no allowedHttpOrigins (or set allowAnyHttpOrigin: true).`,
+      );
+    }
+    if (!this.allowedHttpOrigins.has(candidate.origin)) {
+      throw new Error(`HTTP origin "${candidate.origin}" is not permitted by this host.`);
+    }
+  }
+
+  #assertWebSocketOriginAllowed(url) {
+    if (this.allowAnyWebSocketOrigin) return;
+    if (!this.allowedWebSocketOrigins) {
+      throw new Error(
+        `WebSocket origin "${url.origin}" is not permitted: this host lists no allowedWebSocketOrigins (or set allowAnyWebSocketOrigin: true).`,
+      );
+    }
+    if (!this.allowedWebSocketOrigins.has(url.origin)) {
+      throw new Error(`WebSocket origin "${url.origin}" is not permitted by this host.`);
+    }
+  }
+
+  #assertAdapterNetworkTarget(transport, request = {}) {
+    switch (transport) {
+      case "http": {
+        this.assertCapability("http", "network.request");
+        const url = new URL(assertNonEmptyString(request.url, "HTTP url"));
+        if (!["http:", "https:"].includes(url.protocol)) {
+          throw new Error(`Unsupported HTTP protocol "${url.protocol}". Expected http: or https:.`);
+        }
+        this.#assertHttpOriginAllowed(url);
+        return;
+      }
+      case "websocket":
+        this.assertCapability("websocket", "network.request");
+        this.#assertWebSocketOriginAllowed(normalizeWebSocketUrl(request.url));
+        return;
+      case "mqtt":
+        this.assertCapability("mqtt", "network.request");
+        assertNetworkTargetAllowed("MQTT", request.host, request.port, this.allowedMqttHosts, this.allowedMqttPorts, this.allowAnyNetworkHost);
+        return;
+      case "tcp":
+        this.assertCapability("tcp", "network.request");
+        assertNetworkTargetAllowed("TCP", request.host, request.port, this.allowedTcpHosts, this.allowedTcpPorts, this.allowAnyNetworkHost);
+        return;
+      case "udp":
+        this.assertCapability("udp", "network.request");
+        assertNetworkTargetAllowed("UDP", request.host, request.port, this.allowedUdpHosts, this.allowedUdpPorts, this.allowAnyNetworkHost);
+        return;
+      case "tls":
+        this.assertCapability("tls", "network.request");
+        assertNetworkTargetAllowed("TLS", request.host, request.port, this.allowedTlsHosts, this.allowedTlsPorts, this.allowAnyNetworkHost);
+        return;
+      default:
+        // a transport only the embedder's adapter knows: its own policy
+        return;
+    }
   }
 
   // A child's working directory: the filesystem root, or a directory the

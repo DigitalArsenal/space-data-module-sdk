@@ -343,10 +343,12 @@ test("browser module harness exposes awaited host dispatch alongside module invo
       capabilities: [
         "filesystem",
         "network",
+        "http",
         "ipfs",
         "protocol_handle",
         "protocol_dial",
       ],
+      allowedHttpOrigins: ["https://example.test"],
       capabilityAdapters: {
         filesystem: {
           resolvePath(path) {

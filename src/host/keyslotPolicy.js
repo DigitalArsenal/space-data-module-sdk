@@ -20,7 +20,11 @@
  * never signs a preimage this stack reserves for its own signatures:
  *   - anything starting with a registered statement-domain label and NUL;
  *   - a bare 32-byte payload (the legacy bare-digest module signature form);
- *   - a canonical deployment authorization (`{"action":"deploy-flow"...`).
+ *   - any JSON object or array (UTF-8, optionally with a BOM or leading
+ *     whitespace). Deployment authorizations, and every other statement this
+ *     stack signs as canonical JSON, are JSON objects; a prefix match on
+ *     `{"action":"deploy-flow"` was bypassed by one extra key that sorts
+ *     before "action" (round-2 verification), so the whole class is refused.
  * A slot bound to `fileIdentifiers` signs only FlatBuffers carrying one of
  * those 4-byte file identifiers.
  */
@@ -36,8 +40,31 @@ const RESERVED_PREFIXES = [
     out.set(label, 0);
     return out;
   }),
-  textEncoder.encode('{"action":"deploy-flow"'),
 ];
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
+
+/**
+ * True when `payload` is UTF-8 text whose JSON value is an object or array:
+ * the shape of every canonical-JSON statement (deployment authorizations
+ * first). Leading whitespace and a BOM are skipped the way JSON.parse and
+ * TextDecoder do, so no spelling of such a statement gets through.
+ */
+function isJsonStructure(payload) {
+  let text;
+  try {
+    text = strictUtf8.decode(payload);
+  } catch {
+    return false;
+  }
+  const trimmed = text.replace(/^[\uFEFF\s]+/, "");
+  if (trimmed[0] !== "{" && trimmed[0] !== "[") return false;
+  try {
+    const value = JSON.parse(trimmed);
+    return value !== null && typeof value === "object";
+  } catch {
+    return false;
+  }
+}
 
 function denied(message) {
   return Object.assign(new Error(message), {
@@ -129,13 +156,21 @@ export function assertKeySlotOperation(policy, slotId, operation) {
  */
 export function assertKeySlotSignPayload(policy, slotId, payload, algorithm = "ed25519") {
   const rule = assertKeySlotOperation(policy, slotId, "sign");
-  if (algorithm === "ed25519" && payload.length === 32) {
+  // Fail closed on the algorithm too: only exactly "secp256k1" (ECDSA over
+  // sha256(payload)) is exempt from the bare-digest refusal; any other
+  // spelling is treated as Ed25519 here.
+  if (algorithm !== "secp256k1" && payload.length === 32) {
     throw denied("keyslot.sign refuses a bare 32-byte payload: it is indistinguishable from a signed digest.");
   }
   for (const prefix of RESERVED_PREFIXES) {
     if (startsWith(payload, prefix)) {
       throw denied("keyslot.sign refuses a payload in a reserved signature domain.");
     }
+  }
+  if (isJsonStructure(payload)) {
+    throw denied(
+      "keyslot.sign refuses a JSON object or array: canonical-JSON statements (deployment authorizations) are signed only by their own signers.",
+    );
   }
   if (rule.fileIdentifiers) {
     const id = payload.length >= 8 ? payload.subarray(4, 8) : null;

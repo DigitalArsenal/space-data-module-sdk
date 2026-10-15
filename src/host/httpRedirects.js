@@ -18,6 +18,23 @@
 
 export const DEFAULT_MAX_HTTP_REDIRECTS = 5;
 
+// A response that reports a URL must report the one requested (fragment
+// aside). An empty or absent url (synthetic Responses, some shims) says
+// nothing and is accepted; `redirected` still applies.
+function sameResource(responseUrl, requested) {
+  if (typeof responseUrl !== "string" || responseUrl.length === 0) return true;
+  let reported;
+  try {
+    reported = new URL(responseUrl);
+  } catch {
+    return false;
+  }
+  const expected = new URL(requested.href);
+  reported.hash = "";
+  expected.hash = "";
+  return reported.href === expected.href;
+}
+
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 function notAuthorized(message) {
@@ -64,6 +81,19 @@ export async function fetchWithCheckedRedirects(fetchImpl, url, init = {}, polic
     if (response?.type === "opaqueredirect") {
       throw notAuthorized(
         "HTTP request was redirected to a target this runtime does not reveal; refusing to follow an unchecked redirect.",
+      );
+    }
+    // An embedder fetch that follows redirects itself (ignoring
+    // redirect: "manual") has already gone wherever the Location said. Its
+    // response must not reach the guest: the hop it took was never checked.
+    if (response?.redirected === true || !sameResource(response?.url, current)) {
+      try {
+        await response?.body?.cancel?.();
+      } catch {
+        // discarded either way
+      }
+      throw notAuthorized(
+        "HTTP request was redirected by the fetch implementation itself; refusing a response from an unchecked hop.",
       );
     }
     const location = response?.headers?.get?.("location");

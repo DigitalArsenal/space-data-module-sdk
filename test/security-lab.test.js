@@ -143,4 +143,42 @@ test("SEC-059: the module lab is loopback-only, token-gated, contained, and retu
   });
   assert.equal(protectedResponse.status, 200, protectedResponse.body);
   assert.doesNotMatch(protectedResponse.body, /mnemonic|abandon/);
+
+  // ROUND 2 (the verifier's v059/v059b): Express routes ignore case, so a
+  // case-sensitive prefix gate was bypassed. Every spelling needs the token.
+  const outsideLink = path.join(packages, "link.wasm");
+  await symlink(outside, outsideLink);
+  for (const [method, urlPath] of [
+    ["POST", "/API/wasmedge-invoke"],
+    ["POST", "/API/protect"],
+    ["POST", "/Api/compile"],
+    ["GET", "/API/plugins"],
+    ["GET", "/aPi/standards"],
+    ["GET", "/api/standards/"],
+    ["GET", "//api/standards"],
+    ["GET", "/%61pi/standards"],
+    ["GET", "/./api/standards"],
+    ["GET", "/Plugins/demo/dist/module.wasm"],
+    ["GET", "/PLUGINS/link.wasm"],
+    ["GET", "/plugins/link.wasm"],
+    ["HEAD", "/plugins/demo/dist/module.wasm"],
+    ["GET", "/no-such-route"],
+  ]) {
+    const response = await request({ port, method, urlPath, headers: { "content-type": "application/json" }, body: method === "POST" ? "{}" : undefined });
+    assert.ok([401].includes(response.status), `${method} ${urlPath} without a token -> ${response.status} ${response.body.slice(0, 80)}`);
+  }
+  // the UI itself still loads without a token
+  assert.equal((await request({ port, urlPath: "/" })).status, 200);
+  assert.equal((await request({ port, urlPath: "/app.js" })).status, 200);
+
+  // with the token: the contained plugin file is served, nothing outside is
+  const withToken = (urlPath) => request({ port, urlPath, headers: { "x-lab-token": token } });
+  const served = await withToken("/plugins/demo/dist/module.wasm");
+  assert.equal(served.status, 200);
+  assert.equal(served.headers["content-type"], "application/wasm");
+  for (const urlPath of ["/plugins/link.wasm", "/PLUGINS/link.wasm", "/plugins/demo/dist/escape.wasm", "/plugins/%2e%2e/outside.wasm", "/plugins/..%2foutside.wasm", "/Plugins/demo/dist/module.wasm"]) {
+    const response = await withToken(urlPath);
+    assert.notEqual(response.status, 200, `${urlPath} -> ${response.status}`);
+    assert.doesNotMatch(response.body, /asm/, urlPath);
+  }
 });

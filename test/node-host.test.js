@@ -597,11 +597,14 @@ test("node host routes awaited filesystem, network, ipfs, and protocol operation
     capabilities: [
       "filesystem",
       "network",
+      "http",
       "ipfs",
       "wallet_sign",
       "protocol_handle",
       "protocol_dial",
     ],
+    // an adapter-carried http request still needs the http grant and origin
+    allowedHttpOrigins: ["https://example.test"],
     allowedKeySlots: ["node-provider-signing"],
     capabilityAdapters: {
       filesystem: {

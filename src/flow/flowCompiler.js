@@ -59,6 +59,7 @@ import {
 import { resolveWasiThreadsToolchain } from "../compiler/wasiThreadsToolchain.js";
 import {
   LegIncompatibleCapabilityIds,
+  locateEmbeddedPlgManifest,
   validateArtifactWithStandards,
   validatePluginManifest,
 } from "../compliance/index.js";
@@ -367,6 +368,161 @@ async function verifyIsomorphicNodeArtifacts({
 }
 
 /**
+ * The manifest a verified artifact's signature covers (SEC-026). Bundle scope
+ * covers the MBL manifest entry and nothing in the payload's sds.* sections
+ * (the canonical module hash strips them); a module signature under the
+ * publication domain covers the whole trailer-stripped payload and not the
+ * trailer. Anything else, or no manifest, or a manifest for another plugin,
+ * is refused.
+ */
+function signedArtifactManifest({ artifactBytes, verification, nodeId, pluginId, what }) {
+  let located;
+  try {
+    located = locateEmbeddedPlgManifest(artifactBytes, {
+      verification,
+      refuseUnverifiedTrailer: true,
+    });
+  } catch (error) {
+    throw new Error(`${what} node "${nodeId}" artifact manifest is ambiguous: ${error?.message ?? error}`);
+  }
+  const covered =
+    verification?.verified === true &&
+    located?.decoded &&
+    (verification.signatureScope === "bundle"
+      ? located.source === "bundle-manifest"
+      : verification.signatureScope === "module" &&
+        located.source !== "bundle-manifest" &&
+        located.source !== "bundle-manifest-unverified");
+  if (!covered) {
+    throw new Error(
+      `${what} node "${nodeId}" artifact carries no manifest its ${verification?.signatureScope ?? "missing"}-scope signature covers.`,
+    );
+  }
+  if (located.decoded.pluginId !== pluginId) {
+    throw new Error(
+      `${what} node "${nodeId}" signed manifest declares plugin "${located.decoded.pluginId}", not "${pluginId}".`,
+    );
+  }
+  return located.decoded;
+}
+
+/**
+ * The dependency manifest a verified build uses: every field the signed PLG
+ * carries and the compiler acts on (identity, capabilities, runtime targets,
+ * component dependencies, invoke surfaces, methods and their ports) comes
+ * from the signed manifest; the on-disk JSON contributes only what the PLG
+ * does not encode (pluginFamily, externalInterfaces, schemasUsed, prose),
+ * all of which compliance re-checks against the signed capabilities.
+ */
+// The PLG decoder yields byte vectors as Uint8Array and 64-bit fields as
+// BigInt; the manifest JSON (and the flow manifest built from it) uses plain
+// arrays and numbers.
+function plainManifestValue(value) {
+  if (value instanceof Uint8Array) return Array.from(value);
+  if (typeof value === "bigint") {
+    return value <= BigInt(Number.MAX_SAFE_INTEGER) && value >= BigInt(Number.MIN_SAFE_INTEGER)
+      ? Number(value)
+      : value.toString();
+  }
+  if (Array.isArray(value)) return value.map(plainManifestValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, nested]) => nested !== undefined)
+        .map(([key, nested]) => [key, plainManifestValue(nested)]),
+    );
+  }
+  return value;
+}
+
+function boundDependencyManifest(diskManifest, signedManifest) {
+  const capabilityName = (entry) =>
+    typeof entry === "string" ? entry : entry?.name ?? entry?.capability ?? entry?.id ?? null;
+  return {
+    ...(diskManifest && typeof diskManifest === "object" ? diskManifest : {}),
+    pluginId: signedManifest.pluginId,
+    name: signedManifest.name ?? diskManifest?.name,
+    version: signedManifest.version,
+    capabilities: (signedManifest.capabilities ?? []).map(capabilityName).filter(Boolean),
+    runtimeTargets: [...(signedManifest.runtimeTargets ?? [])],
+    dependencies: plainManifestValue(signedManifest.dependencies ?? []),
+    invokeSurfaces: [...(signedManifest.invokeSurfaces ?? [])],
+    methods: plainManifestValue(signedManifest.methods ?? []),
+  };
+}
+
+/**
+ * An isomorphic node's capabilities and runtime targets feed the flow's
+ * manifest just as a linked-direct node's do, so they too come from the
+ * manifest its locked, signed artifact carries (SEC-026). The signature rules
+ * are verifyIsomorphicNodeArtifacts', which still runs after the check; a
+ * node without a well-formed lock is left for the check to report.
+ */
+async function adoptSignedIsomorphicManifest({ node, dependency, verified, byPluginId, flowSourcePath }) {
+  const lock = node?.artifact;
+  if (
+    !lock ||
+    typeof lock !== "object" ||
+    typeof lock.path !== "string" ||
+    !lock.path.trim() ||
+    typeof lock.publisher !== "string" ||
+    !lock.publisher.trim() ||
+    typeof lock.sha256 !== "string" ||
+    !/^[0-9a-f]{64}$/.test(lock.sha256)
+  ) {
+    // no lock: checkFlowProgram reports missing-isomorphic-artifact-lock
+    return;
+  }
+  const nodeId = node?.nodeId ?? "?";
+  const prior = byPluginId.get(node.pluginId);
+  if (prior) {
+    if (prior !== lock.sha256) {
+      throw new Error(`Isomorphic plugin "${node.pluginId}" is bound to conflicting artifact hashes.`);
+    }
+    return;
+  }
+  const flowBase = flowSourcePath
+    ? path.dirname(path.resolve(flowSourcePath))
+    : dependency.dir ?? process.cwd();
+  const artifactPath = path.isAbsolute(lock.path) ? lock.path : path.resolve(flowBase, lock.path);
+  const artifactBytes = dependency.artifactBytes
+    ? new Uint8Array(dependency.artifactBytes)
+    : new Uint8Array(await readFile(artifactPath));
+  const exactSha256 = bytesToHex(await sha256Bytes(artifactBytes));
+  if (exactSha256 !== lock.sha256) {
+    throw new Error(
+      `Isomorphic node "${nodeId}" artifact hash mismatch: expected ${lock.sha256}, received ${exactSha256}.`,
+    );
+  }
+  const publisherPath = path.isAbsolute(lock.publisher) ? lock.publisher : path.resolve(flowBase, lock.publisher);
+  const publisher = dependency.publisherRecord
+    ? dependency.publisherRecord
+    : JSON.parse(await readFile(publisherPath, "utf8"));
+  if (!/^[0-9a-f]{64}$/.test(publisher?.publicKeyHex ?? "") || isDenylistedModuleSigner(publisher.publicKeyHex)) {
+    throw new Error(`Isomorphic node "${nodeId}" publisher has no valid, non-development Ed25519 public key.`);
+  }
+  const verification = await verifyModuleArtifact(artifactBytes, {
+    trustedPublicKeys: [publisher.publicKeyHex],
+    requireSignature: true,
+  });
+  const signedManifest = signedArtifactManifest({
+    artifactBytes,
+    verification,
+    nodeId,
+    pluginId: node.pluginId,
+    what: "Isomorphic",
+  });
+  const boundManifest = boundDependencyManifest(dependency.manifest, signedManifest);
+  verified.set(node.pluginId, {
+    ...dependency,
+    manifest: boundManifest,
+    normalized: normalizeManifestForSdnFlow(boundManifest),
+    manifestSource: "signed-artifact",
+  });
+  byPluginId.set(node.pluginId, lock.sha256);
+}
+
+/**
  * LINKED-DIRECT dependencies come from a verified, signed bundle (security
  * audit 2026-10-15, SEC-026).
  *
@@ -393,7 +549,10 @@ async function verifyLinkedDirectDependencies({ flow, dependencies, flowSourcePa
   for (const node of flow?.nodes ?? []) {
     const dependency = dependencies.get(node?.pluginId);
     if (!dependency) continue; // host-dispatched node
-    if (requestedNodeDispatchModel(node) === "isomorphic") continue;
+    if (requestedNodeDispatchModel(node) === "isomorphic") {
+      await adoptSignedIsomorphicManifest({ node, dependency, verified, byPluginId, flowSourcePath });
+      continue;
+    }
     const nodeId = node?.nodeId ?? "?";
     const lock = node?.artifact;
     const lockValid =
@@ -476,8 +635,22 @@ async function verifyLinkedDirectDependencies({ flow, dependencies, flowSourcePa
       );
     }
     const objectBytes = new Uint8Array(objectEntry.payloadBytes);
+    // The manifest, too, is the one the signature covers: its capabilities
+    // become the flow's, so the unsigned dist/ plugin-manifest.json is never
+    // the root manifest of a verified dependency.
+    const signedManifest = signedArtifactManifest({
+      artifactBytes,
+      verification,
+      nodeId,
+      pluginId: node.pluginId,
+      what: "Linked-direct",
+    });
+    const boundManifest = boundDependencyManifest(dependency.manifest, signedManifest);
     verified.set(node.pluginId, {
       ...dependency,
+      manifest: boundManifest,
+      normalized: normalizeManifestForSdnFlow(boundManifest),
+      manifestSource: "signed-artifact",
       guestLink: { objectBytes, metadata },
       guestLinkLinked: null,
       linkedArtifactLock: {
@@ -489,6 +662,14 @@ async function verifyLinkedDirectDependencies({ flow, dependencies, flowSourcePa
       },
     });
     byPluginId.set(node.pluginId, lock.sha256);
+  }
+  // Everything else in the dependency set (component dependencies a node's
+  // signed manifest names) still has only its unsigned on-disk manifest. It
+  // must not add capabilities or runtime targets to a verified flow.
+  for (const [pluginId, dependency] of verified) {
+    if (dependency?.manifestSource !== "signed-artifact") {
+      verified.set(pluginId, { ...dependency, unverifiedManifest: true });
+    }
   }
   return verified;
 }
@@ -1000,7 +1181,20 @@ function collectComponentDependencies({ nodePluginIds, dependencies, issues, cap
       }
       continue;
     }
-    const resolved = dependencies.get(declared.pluginId) ?? null;
+    const candidate = dependencies.get(declared.pluginId) ?? null;
+    // a verified build never takes a component's capabilities from an
+    // unsigned manifest (SEC-026)
+    const resolved = candidate?.unverifiedManifest === true ? null : candidate;
+    if (candidate && !resolved) {
+      pushIssue(
+        issues,
+        "warning",
+        "unverified-component-dependency",
+        `Component dependency "${declared.pluginId}" (declared by "${declaredBy}") has only an unsigned manifest; ` +
+          "its capabilities and runtimeTargets are not taken into this verified flow.",
+        "flow.dependencies",
+      );
+    }
     const record = {
       pluginId: declared.pluginId,
       minVersion: declared.minVersion ?? resolved?.manifest?.version ?? null,
@@ -1020,7 +1214,7 @@ function collectComponentDependencies({ nodePluginIds, dependencies, issues, cap
           queue.push({ declared: transitive, declaredBy: declared.pluginId });
         }
       }
-    } else {
+    } else if (!candidate) {
       pushIssue(
         issues,
         "warning",

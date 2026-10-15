@@ -25,11 +25,14 @@ test("browser host exposes awaited filesystem, network, ipfs, and protocol adapt
     capabilities: [
       "filesystem",
       "network",
+      "http",
       "ipfs",
       "wallet_sign",
       "protocol_handle",
       "protocol_dial",
     ],
+    // an adapter-carried http request still needs the http grant and origin
+    allowedHttpOrigins: ["https://example.test"],
     allowedKeySlots: ["browser-provider-signing"],
     wasmWallet,
     capabilityAdapters: {
@@ -169,8 +172,10 @@ test("browser host exposes awaited filesystem, network, ipfs, and protocol adapt
     ),
   });
 
-  // "network" no longer implies "http": http is its own opt-in (SEC-009).
-  assert.equal(host.hasCapability("http"), false);
+  // "network" implies neither "http" nor "websocket": each is its own opt-in
+  // (SEC-009); this host grants http explicitly.
+  assert.equal(host.hasCapability("http"), true);
+  assert.equal(host.hasCapability("websocket"), false);
   assert.equal(host.listOperations().includes("network.request"), true);
   assert.deepEqual(mkdirResponse, {
     path: "/virtual/cache",

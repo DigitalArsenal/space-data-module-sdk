@@ -122,6 +122,85 @@ export const DEFAULT_MAX_AUTHORIZATION_TTL_MS = 60 * 60 * 1000;
 /** Clock skew tolerated on issuedAt. */
 export const AUTHORIZATION_CLOCK_SKEW_MS = 60 * 1000;
 
+/**
+ * The exact payload a deployment authorization carries (createDeploymentAuthorization).
+ * Any other key is refused. A payload with an extra key whose name sorts before
+ * "action" no longer starts with `{"action":"deploy-flow"`, which is how a
+ * guest got a host key slot to sign one (round-2 verification of SEC-024).
+ */
+export const DEPLOYMENT_AUTHORIZATION_PAYLOAD_KEYS = Object.freeze([
+  "action",
+  "artifactId",
+  "capabilities",
+  "constraints",
+  "expiresAt",
+  "graphHash",
+  "issuedAt",
+  "manifestHash",
+  "nonce",
+  "programId",
+  "target",
+  "version",
+]);
+const DEPLOYMENT_AUTHORIZATION_TARGET_KEYS = Object.freeze(["audience", "id", "kind", "url"]);
+
+function isPlainObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
+  );
+}
+
+/** Why `payload` is not the deployment-authorization shape, or null when it is. */
+function deploymentPayloadShapeProblem(payload) {
+  if (!isPlainObject(payload)) return "payload is not a plain object";
+  for (const key of Object.keys(payload)) {
+    if (!DEPLOYMENT_AUTHORIZATION_PAYLOAD_KEYS.includes(key)) {
+      return `payload carries unknown key ${JSON.stringify(key)}`;
+    }
+  }
+  if (payload.version !== 1) return "payload version is not 1";
+  if (payload.action !== "deploy-flow") return `payload action is not "deploy-flow"`;
+  if (payload.target !== undefined && payload.target !== null) {
+    if (!isPlainObject(payload.target)) return "payload target is not an object";
+    for (const key of Object.keys(payload.target)) {
+      if (!DEPLOYMENT_AUTHORIZATION_TARGET_KEYS.includes(key)) {
+        return `payload target carries unknown key ${JSON.stringify(key)}`;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Accept `nonce` once. A store with `claim(nonce, expiresAt)` decides
+ * atomically (it returns true for the first claim only); that is the form a
+ * shared or asynchronous store must provide. A synchronous `{has, add}` store
+ * (a Map or Set wrapper) is checked and updated in one step with no await in
+ * between. An asynchronous `{has, add}` store cannot be made atomic here and
+ * is refused.
+ */
+async function claimAuthorizationNonce(nonceStore, nonce, expiresAt) {
+  if (typeof nonceStore.claim === "function") {
+    return (await nonceStore.claim(nonce, expiresAt)) === true;
+  }
+  if (typeof nonceStore.has !== "function" || typeof nonceStore.add !== "function") {
+    throw new TypeError("nonceStore must provide claim(nonce, expiresAt), or synchronous has(nonce) and add(nonce, expiresAt).");
+  }
+  const seen = nonceStore.has(nonce);
+  if (seen && typeof seen.then === "function") {
+    throw new TypeError(
+      "An asynchronous nonceStore must provide an atomic claim(nonce, expiresAt); has-then-add across an await lets a replay through.",
+    );
+  }
+  if (seen) return false;
+  const added = nonceStore.add(nonce, expiresAt);
+  if (added && typeof added.then === "function") await added;
+  return true;
+}
+
 function normalizeTrustedAuthorizationKeys(trustedPublicKeys) {
   const list = Array.isArray(trustedPublicKeys)
     ? trustedPublicKeys
@@ -150,9 +229,10 @@ function normalizeTrustedAuthorizationKeys(trustedPublicKeys) {
  * claim, not trust. The key must be one of `trustedPublicKeys`, and the
  * verifier is handed the TRUSTED key, so a self-signed envelope never
  * verifies. The payload must carry a nonce, an issuedAt not in the future, an
- * expiresAt not in the past, and a lifetime no longer than `maxTtlMs`. When a
- * `nonceStore` ({has(nonce), add(nonce, expiresAt)}) is given, a nonce is
- * accepted once.
+ * expiresAt not in the past, and a lifetime no longer than `maxTtlMs`. The
+ * payload must be exactly the deployment-authorization shape (no unknown
+ * keys). When a `nonceStore` is given ({claim(nonce, expiresAt)}, or a
+ * synchronous {has, add}), a nonce is accepted once, atomically.
  *
  * @returns {Promise<boolean>}
  */
@@ -194,8 +274,18 @@ export async function verifyAuthorization({
   if (typeof payload.nonce !== "string" || payload.nonce.trim().length < 16) {
     return false;
   }
-  if (nonceStore && (await nonceStore.has(payload.nonce))) {
+  if (deploymentPayloadShapeProblem(payload)) {
     return false;
+  }
+  if (nonceStore && typeof nonceStore.claim !== "function") {
+    // fail fast on a store that cannot claim atomically
+    const probe = typeof nonceStore.has === "function" ? nonceStore.has(payload.nonce) : undefined;
+    if (probe && typeof probe.then === "function") {
+      throw new TypeError(
+        "An asynchronous nonceStore must provide an atomic claim(nonce, expiresAt); has-then-add across an await lets a replay through.",
+      );
+    }
+    if (probe) return false;
   }
   const payloadBytes = canonicalBytes(payload);
   const valid = Boolean(
@@ -207,7 +297,8 @@ export async function verifyAuthorization({
     ),
   );
   if (valid && nonceStore) {
-    await nonceStore.add(payload.nonce, payload.expiresAt);
+    // claimed only once the signature holds, and atomically
+    return claimAuthorizationNonce(nonceStore, payload.nonce, payload.expiresAt);
   }
   return valid;
 }
@@ -238,6 +329,10 @@ export function assertDeploymentAuthorization({
   }
   if (payload.action !== "deploy-flow") {
     throw new Error(`Unexpected authorization action "${payload.action}".`);
+  }
+  const shapeProblem = deploymentPayloadShapeProblem(payload);
+  if (shapeProblem) {
+    throw new Error(`Deployment authorization is not canonical: ${shapeProblem}.`);
   }
   if (typeof payload.expiresAt !== "number" || payload.expiresAt < now) {
     throw new Error("Deployment authorization has expired or has no expiry.");

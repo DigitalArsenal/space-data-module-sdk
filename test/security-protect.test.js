@@ -104,6 +104,12 @@ test("SEC-035: the CLI takes no mnemonic on argv and never prints one", async (t
   assert.notEqual(onArgv.code, 0);
   assert.match(onArgv.stderr, /not accepted on the command line/);
   assert.doesNotMatch(onArgv.stdout, /abandon/);
+  // round 2: no argv spelling of a secret is echoed back in an error
+  for (const args of [[`--mnemonic=${VECTOR}`], [`--MNEMONIC=${VECTOR}`], [`--mnemnoic=${VECTOR}`], [VECTOR], ["--mnemonic-fil", VECTOR]]) {
+    const result = await cli([...base, ...args]);
+    assert.notEqual(result.code, 0, args.join(" "));
+    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /abandon/, args.join(" "));
+  }
 
   const typo = await cli(base, { SDN_MODULE_SIGNING_MNEMONIC: BROKEN_CHECKSUM });
   assert.notEqual(typo.code, 0, "a mistyped mnemonic fails the run");
@@ -166,6 +172,45 @@ test("SEC-058: a deployment authorization verifies only against a trusted key, f
   const nonceStore = { has: (nonce) => seen.has(nonce), add: (nonce, expiresAt) => seen.set(nonce, expiresAt) };
   assert.equal(await verifyAuthorization({ envelope, verifier, trustedPublicKeys: [authority.publicKeyHex], nonceStore }), true);
   assert.equal(await verifyAuthorization({ envelope, verifier, trustedPublicKeys: [authority.publicKeyHex], nonceStore }), false, "replay refused");
+});
+
+test("SEC-058/SEC-024 (round 2): only the exact authorization shape verifies, and a nonce is claimed atomically", async () => {
+  const authority = await authorityKeys();
+  const trustedPublicKeys = [authority.publicKeyHex];
+  const authorization = await createDeploymentAuthorization({ artifactId: "a", programId: "p", target: { id: "node-1" }, capabilities: ["clock"] });
+
+  // the verifier's v024: an extra key sorting before "action" moved the
+  // canonical bytes off the prefix a key slot refused; such a payload is not
+  // an authorization at all
+  for (const extra of [{ aa: 1 }, { _: "x" }, { "!!$LGR": 1 }, { Action: "deploy-flow" }, { action: "deploy-flow", zz: 1 }]) {
+    const payload = { ...extra, ...authorization };
+    const signed = await signAuthorization({ authorization: payload, signer: authority.signer });
+    assert.equal(await verifyAuthorization({ envelope: signed, verifier, trustedPublicKeys }), false, JSON.stringify(extra));
+    assert.throws(() => assertDeploymentAuthorization({ envelope: signed, verified: true }), /not canonical|unknown key/, JSON.stringify(extra));
+  }
+  const withTargetExtra = await signAuthorization({ authorization: { ...authorization, target: { ...authorization.target, aa: 1 } }, signer: authority.signer });
+  assert.equal(await verifyAuthorization({ envelope: withTargetExtra, verifier, trustedPublicKeys }), false);
+  for (const change of [{ version: 2 }, { action: "deploy-flow-v2" }]) {
+    const signed = await signAuthorization({ authorization: { ...authorization, ...change }, signer: authority.signer });
+    assert.equal(await verifyAuthorization({ envelope: signed, verifier, trustedPublicKeys }), false, JSON.stringify(change));
+  }
+
+  const envelope = await signAuthorization({ authorization, signer: authority.signer });
+  // an asynchronous has/add store cannot be checked-and-set atomically: refused
+  const asyncStore = { has: async () => false, add: async () => {} };
+  await assert.rejects(verifyAuthorization({ envelope, verifier, trustedPublicKeys, nonceStore: asyncStore }), /atomic claim/);
+
+  // concurrent replays: exactly one wins, with a claim store and with a synchronous Map store
+  const claimed = new Set();
+  const claimStore = { claim: async (nonce) => { await null; if (claimed.has(nonce)) return false; claimed.add(nonce); return true; } };
+  const seen = new Map();
+  const mapStore = { has: (nonce) => seen.has(nonce), add: (nonce, expiresAt) => { seen.set(nonce, expiresAt); } };
+  for (const nonceStore of [claimStore, mapStore]) {
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => verifyAuthorization({ envelope, verifier, trustedPublicKeys, nonceStore })),
+    );
+    assert.equal(results.filter(Boolean).length, 1, `exactly one of 8 concurrent verifications accepted: ${results}`);
+  }
 });
 
 test("SEC-058: assertDeploymentAuthorization checks claims only on a verified envelope, and an expected target must be present", async () => {

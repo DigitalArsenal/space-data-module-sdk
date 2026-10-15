@@ -188,7 +188,7 @@ test("typed hostcalls: through the worker harness the async operations answer ty
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const index = Array.from({ length: 1_000_000 }, (_, i) => i * 0.5);
-  const host = createNodeHost({ capabilities: ["filesystem", "crypto_hash", "http", "context_read", "context_write"], filesystemRoot: root, config: { targets: [{ provider_id: "noaa" }], index } });
+  const host = createNodeHost({ capabilities: ["filesystem", "crypto_hash", "http", "context_read", "context_write"], allowedHttpOrigins: [`http://127.0.0.1:${server.address().port}`], filesystemRoot: root, config: { targets: [{ provider_id: "noaa" }], index } });
   // the harness carries the host's config object across its SAB channel in its value envelope (~8 MB here; default 4 MiB)
   const harness = await createWorkerModuleHarness({ wasmSource: compilation.wasmBytes, host, maxHostcallResponseBytes: 32 << 20 });
   const run = async (name, ...args) => {

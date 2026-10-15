@@ -24,8 +24,12 @@ import {
   secp256k1VerifyDigest,
 } from "../src/utils/wasmCrypto.js";
 import { bytesToBase64 } from "../src/utils/encoding.js";
+import { canonicalBytes } from "../src/auth/canonicalize.js";
 import { DOMAIN_MODULE_PUBLICATION_V1, statement } from "../src/bundle/sigdomain.js";
-import { secp256k1EcdsaVerifyDigest } from "../src/utils/secp256k1Ecdsa.js";
+// Modules this branch adds are imported where they are used, so that on a
+// tree without the fix each test fails on its security assertion, not on a
+// missing module at load time.
+const secp256k1Ecdsa = () => import("../src/utils/secp256k1Ecdsa.js");
 
 const N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 const hex32 = (value) => Buffer.from(value.toString(16).padStart(64, "0"), "hex");
@@ -186,6 +190,118 @@ test("SEC-022: NodeHost re-checks every redirect hop against allowedHttpOrigins"
   assert.equal(hop.body, "partner:GET:/landing", "a 303 continues as GET");
 });
 
+// --- round 2 (verifier variants) ----------------------------------------------
+
+function recordingWebSocket(dialed) {
+  return class FakeWebSocket {
+    constructor(url) {
+      dialed.push(String(url));
+      this.url = String(url);
+      this.protocol = "";
+      this.extensions = "";
+      setTimeout(() => this.onopen?.(), 0);
+    }
+    send() {}
+    close() {}
+  };
+}
+
+test("SEC-009 (round 2): BrowserHost websocket is its own grant with an origin list; network implies neither", async () => {
+  const dialed = [];
+  const WebSocket = recordingWebSocket(dialed);
+  const adapterCalls = [];
+  const networkAdapter = { request: async (params) => { adapterCalls.push(params); return { ok: true }; } };
+
+  // the verifier's v009ws: a guest with only "network" dialing a loopback admin socket
+  const networkOnly = createBrowserHost({ capabilities: ["network"], WebSocket, allowAnyWebSocketOrigin: true });
+  assert.equal(networkOnly.hasCapability("websocket"), false);
+  await assert.rejects(networkOnly.invoke("websocket.exchange", { url: "ws://127.0.0.1:9999/admin" }), BrowserHostCapabilityError);
+  await assert.rejects(networkOnly.invoke("network.request", { url: "ws://127.0.0.1:9999/admin" }), BrowserHostCapabilityError);
+  await assert.rejects(networkOnly.invoke("network.request", { transport: "websocket", url: "ws://127.0.0.1:9999/admin" }), BrowserHostCapabilityError);
+
+  // granted, but no origin list: refused
+  const noList = createBrowserHost({ capabilities: ["websocket"], WebSocket });
+  await assert.rejects(noList.invoke("websocket.exchange", { url: "ws://127.0.0.1:9999/admin" }), /allowedWebSocketOrigins/);
+
+  const host = createBrowserHost({ capabilities: ["websocket"], WebSocket, allowedWebSocketOrigins: ["wss://feed.example.test"] });
+  for (const url of ["ws://127.0.0.1:9999/admin", "wss://feed.example.test.evil.example/", "ws://feed.example.test/", "https://feed.example.test/", "wss://user@127.0.0.1/"]) {
+    await assert.rejects(host.invoke("websocket.exchange", { url }), BrowserHostCapabilityError, url);
+  }
+  assert.deepEqual(dialed, [], "no socket was opened");
+  const ok = await host.invoke("websocket.exchange", { url: "wss://feed.example.test/stream" });
+  assert.equal(ok.url, "wss://feed.example.test/stream");
+  assert.deepEqual(dialed, ["wss://feed.example.test/stream"]);
+
+  // an embedder network adapter does not lift the transport's grant or origin rules
+  const adapted = createBrowserHost({ capabilities: ["network"], capabilityAdapters: { network: networkAdapter } });
+  await assert.rejects(adapted.invoke("network.request", { transport: "http", url: "http://127.0.0.1:47123/api/me" }), BrowserHostCapabilityError);
+  await assert.rejects(adapted.invoke("network.request", { transport: "websocket", url: "ws://127.0.0.1:9999/admin" }), BrowserHostCapabilityError);
+  // a transport label that disagrees with the URL's scheme is refused
+  await assert.rejects(adapted.invoke("network.request", { transport: "libp2p", url: "http://127.0.0.1:47123/api/me" }), /does not match/);
+  const adaptedHttp = createBrowserHost({
+    capabilities: ["network", "http"],
+    allowedHttpOrigins: ["https://api.example.test"],
+    capabilityAdapters: { network: networkAdapter },
+  });
+  await assert.rejects(adaptedHttp.invoke("network.request", { transport: "http", url: "http://127.0.0.1:47123/api/me" }), /not permitted/);
+  assert.deepEqual(adapterCalls, [], "the adapter was never reached");
+  await adaptedHttp.invoke("network.request", { transport: "http", url: "https://api.example.test/x" });
+  // an adapter-only transport still needs only "network"
+  await adapted.invoke("network.request", { transport: "libp2p", peer: "12D3KooW" });
+  assert.equal(adapterCalls.length, 2);
+});
+
+test("SEC-022 (round 2): NodeHost outbound transports fail closed without an allow-list", async (t) => {
+  const hits = [];
+  const internal = await listen((req, res) => { hits.push(req.url); res.end("INTERNAL"); });
+  t.after(() => internal.server.close());
+
+  // the verifier's v022: http granted, no allowedHttpOrigins, internal origin
+  const noList = createNodeHost({ capabilities: ["http", "websocket", "tcp", "udp", "tls", "mqtt"] });
+  await assert.rejects(noList.invoke("http.request", { url: `${internal.origin}/secret` }), /allowedHttpOrigins/);
+  await assert.rejects(noList.invoke("websocket.exchange", { url: "ws://127.0.0.1:9/admin" }), /allowedWebSocketOrigins/);
+  await assert.rejects(noList.invoke("tcp.request", { host: "127.0.0.1", port: 9 }), /no allowed TCP hosts/);
+  await assert.rejects(noList.invoke("udp.request", { host: "127.0.0.1", port: 9 }), /no allowed UDP hosts/);
+  await assert.rejects(noList.invoke("tls.request", { host: "127.0.0.1", port: 9 }), /no allowed TLS hosts/);
+  const networkOnly = createNodeHost({ capabilities: ["network"] });
+  await assert.rejects(networkOnly.invoke("network.request", { transport: "http", url: `${internal.origin}/secret` }), /allowedHttpOrigins/);
+  const adapterCalls = [];
+  const adapted = createNodeHost({ capabilities: ["network"], capabilityAdapters: { network: { request: async (p) => { adapterCalls.push(p); return {}; } } } });
+  await assert.rejects(adapted.invoke("network.request", { transport: "http", url: `${internal.origin}/secret` }), /allowedHttpOrigins/);
+  await assert.rejects(adapted.invoke("network.request", { transport: "tcp", host: "127.0.0.1", port: 9 }), /no allowed TCP hosts/);
+  assert.deepEqual(adapterCalls, []);
+  assert.deepEqual(hits, [], "nothing was reached");
+
+  // the explicit opt-in still works
+  const anywhere = createNodeHost({ capabilities: ["http"], allowAnyHttpOrigin: true });
+  assert.equal((await anywhere.invoke("http.request", { url: `${internal.origin}/ok`, responseType: "text" })).body, "INTERNAL");
+});
+
+test("SEC-022 (round 2): a fetch implementation that follows redirects itself is refused on both hosts", async () => {
+  // what an embedder fetch that ignores redirect: "manual" returns after it
+  // has already followed a hop to an internal origin
+  const selfFollowing = (flag) => async () => {
+    const response = new Response("INTERNAL", { status: 200 });
+    if (flag === "redirected") Object.defineProperty(response, "redirected", { value: true });
+    if (flag === "url") Object.defineProperty(response, "url", { value: "http://169.254.169.254/latest/meta-data/" });
+    return response;
+  };
+  for (const flag of ["redirected", "url"]) {
+    const browser = createBrowserHost({ capabilities: ["http"], allowedHttpOrigins: ["https://api.example.test"], fetch: selfFollowing(flag) });
+    await assert.rejects(browser.invoke("http.request", { url: "https://api.example.test/redirect" }), /unchecked hop/, `browser ${flag}`);
+    const node = createNodeHost({ capabilities: ["http"], allowedHttpOrigins: ["https://api.example.test"], fetch: selfFollowing(flag) });
+    await assert.rejects(node.invoke("http.request", { url: "https://api.example.test/redirect" }), /unchecked hop/, `node ${flag}`);
+  }
+  // a response that reports the URL it was asked for is fine
+  const honest = async (url) => {
+    const response = new Response("ok", { status: 200 });
+    Object.defineProperty(response, "url", { value: `${url}#fragment` });
+    return response;
+  };
+  const node = createNodeHost({ capabilities: ["http"], allowedHttpOrigins: ["https://api.example.test"], fetch: honest });
+  assert.equal((await node.invoke("http.request", { url: "https://api.example.test/a", responseType: "text" })).body, "ok");
+});
+
 test("SEC-023: exec requires an allow-list, never inherits the host env, refuses loader variables, and stays in the filesystem root", async (t) => {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "sdm-exec-root-")));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -284,8 +400,32 @@ for (const [label, makeHost] of [
     await assert.rejects(sign(host, "publisher", evilHash), /bare 32-byte/);
     // a canonical deployment authorization, under either algorithm
     const authorization = Buffer.from('{"action":"deploy-flow","artifactId":"evil"}');
-    await assert.rejects(sign(host, "publisher", authorization), /reserved signature domain/);
-    await assert.rejects(sign(host, "publisher", authorization, "secp256k1"), /reserved signature domain/);
+    const REFUSED = /reserved signature domain|refuses a JSON object/;
+    await assert.rejects(sign(host, "publisher", authorization), REFUSED);
+    await assert.rejects(sign(host, "publisher", authorization, "secp256k1"), REFUSED);
+    // round-2 variants: an extra key that sorts before "action" moved the
+    // canonical bytes off the old prefix; whitespace, a BOM and arrays too
+    const deployPayload = {
+      version: 1, action: "deploy-flow", artifactId: "evil", programId: "evil", graphHash: null, manifestHash: null,
+      target: { kind: "remote", id: null, audience: null, url: null }, capabilities: ["secrets"],
+      issuedAt: Date.now(), expiresAt: Date.now() + 60_000, nonce: "n".repeat(32), constraints: null,
+    };
+    for (const variant of [
+      canonicalBytes({ aa: 1, ...deployPayload }),
+      canonicalBytes({ _: 1, ...deployPayload }),
+      canonicalBytes({ "!": 1, ...deployPayload }),
+      Buffer.concat([Buffer.from(" \n\t"), canonicalBytes(deployPayload)]),
+      Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), canonicalBytes(deployPayload)]),
+      Buffer.from(JSON.stringify([deployPayload])),
+    ]) {
+      await assert.rejects(sign(host, "publisher", variant, "secp256k1"), REFUSED, Buffer.from(variant).toString("utf8").slice(0, 24));
+      await assert.rejects(sign(host, "publisher", variant), REFUSED);
+    }
+    // a slot bound to $LGR is not satisfied by JSON whose bytes 4..8 spell it
+    await assert.rejects(sign(host, "grant-key", canonicalBytes({ "!!$LGR": 1, ...deployPayload }), "secp256k1"), REFUSED);
+    await assert.rejects(sign(host, "grant-key", Buffer.from('{"!!$LGR":1}')), REFUSED);
+    // plain text that merely contains braces still signs
+    assert.equal((await sign(host, "publisher", Buffer.from("{not json"))).algorithm, "ed25519");
 
     const lgr = Buffer.concat([Buffer.from([8, 0, 0, 0]), Buffer.from("$LGR"), Buffer.alloc(8)]);
     const other = Buffer.concat([Buffer.from([8, 0, 0, 0]), Buffer.from("$OMM"), Buffer.alloc(8)]);
@@ -311,8 +451,6 @@ test("SEC-002: secp256k1VerifyDigest is real ECDSA with range checks, not recove
   const highS = Buffer.concat([hex32(r), hex32(N - s)]);
   // the high-S encoding is the same signature (node:crypto and the Go node accept it); strict callers opt into low-S
   assert.equal(await secp256k1VerifyDigest(digest, highS, publicKey), true);
-  assert.equal(secp256k1EcdsaVerifyDigest(digest, highS, publicKey, { lowS: true }), false);
-  assert.equal(secp256k1EcdsaVerifyDigest(digest, signature, publicKey, { lowS: true }), true);
   // the same signature under any OTHER key is refused (recover-and-compare could be steered by the recovery export)
   const otherKey = await secp256k1PublicKey(randomBytes(32));
   assert.equal(await secp256k1VerifyDigest(digest, signature, otherKey), false);
@@ -350,6 +488,11 @@ test("SEC-002: secp256k1VerifyDigest is real ECDSA with range checks, not recove
   const host = createNodeHost({ capabilities: ["crypto_verify"] });
   assert.equal(await host.invoke("crypto.secp256k1.verifyDigest", { digest, signature: new Uint8Array(64), publicKey }), false);
   assert.equal(await host.invoke("crypto.secp256k1.verifyDigest", { digest, signature, publicKey }), true);
+
+  // the strict low-S form is available to callers that want it
+  const { secp256k1EcdsaVerifyDigest } = await secp256k1Ecdsa();
+  assert.equal(secp256k1EcdsaVerifyDigest(digest, highS, publicKey, { lowS: true }), false);
+  assert.equal(secp256k1EcdsaVerifyDigest(digest, signature, publicKey, { lowS: true }), true);
 });
 
 test("hd-wallet-wasm 2.1.1 compatibility: secp256k1 public keys are derived with the curve named", async () => {

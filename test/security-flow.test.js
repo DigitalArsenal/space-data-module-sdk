@@ -27,6 +27,7 @@ import { createFlowRuntimeHost } from "../src/flow/flowRuntimeHost.js";
 import { createIsomorphicFlowRuntimeHost } from "../src/flow/isomorphicFlowHost.js";
 import { normalizeManifestForSdnFlow } from "../src/flow/normalize.js";
 import { extractPublicationRecordCollection } from "../src/transport/records.js";
+import { locateEmbeddedPlgManifest } from "../src/compliance/index.js";
 import { ed25519PublicKey, ed25519Sign } from "../src/utils/wasmCrypto.js";
 
 const TYPE_IDENTITY = { schemaName: "Blob.fbs", fileIdentifier: "$BLB", schemaVersion: "1.0.0", schemaHash: [0x10, 0x20, 0x30, 0x40], rootTypeName: "Blob" };
@@ -134,6 +135,23 @@ extern "C" int echo(void) {
       publisherRecord: { algorithm: "ed25519", publicKeyHex: child.signature.publicKeyHex, developmentOnly: false },
     }]]),
   });
+  // ROUND 2 (SEC-026 for isomorphic nodes): an unsigned dependency manifest
+  // that asks for more than the child's signed one adds nothing to the flow
+  const ESCALATED = { ...ECHO_MANIFEST, capabilities: ["http", "secrets"], runtimeTargets: ["browser", "wasmedge"] };
+  const escalated = await compileFlowProgram({
+    flow,
+    catalog: BLB_CATALOG,
+    dependencies: new Map([[ECHO_MANIFEST.pluginId, {
+      pluginId: ECHO_MANIFEST.pluginId,
+      manifest: ESCALATED,
+      normalized: normalizeManifestForSdnFlow(ESCALATED),
+      guestLink: null,
+      wasmPath: "/not-linked/module.wasm",
+      artifactBytes: child.wasmBytes,
+      publisherRecord: { algorithm: "ed25519", publicKeyHex: child.signature.publicKeyHex, developmentOnly: false },
+    }]]),
+  });
+  assert.deepEqual(escalated.check.capabilities, [], "the isomorphic node's capabilities come from its signed manifest");
   const childSpec = {
     pluginId: ECHO_MANIFEST.pluginId,
     wasmSource: child.wasmBytes,
@@ -337,4 +355,72 @@ test("SEC-026: linked-direct nodes link the guest object from a verified bundle,
   // the development escape hatch is explicit and stamps the artifact
   const dev = await compileFlowProgram({ flow: flowFor(relayNode), dependencies, catalog: OMM_CATALOG, flowSourcePath: flowPath, allowUnverifiedLocalDeps: true });
   assert.equal(dev.artifact.developmentOnly, true);
+
+  // ROUND 2 (the verifier's variant): the unsigned dist/ plugin-manifest.json
+  // asks for http and secrets while the lock still pins the signed bundle.
+  // The capability slice and the flow's PLG come from the signed manifest.
+  await writeFile(path.join(dep, "plugin-manifest.json"), JSON.stringify({ ...RELAY_MANIFEST, capabilities: ["http", "secrets"] }, null, 2));
+  const escalatedDeps = await resolveFlowDependencies({ depsPath: root });
+  const escalated = await compileFlowProgram({ flow: flowFor(locked), dependencies: escalatedDeps, catalog: OMM_CATALOG, flowSourcePath: flowPath });
+  assert.deepEqual(escalated.check.capabilities, [], "no capability from the unsigned manifest");
+  const embedded = locateEmbeddedPlgManifest(escalated.wasmBytes);
+  assert.deepEqual((embedded?.decoded?.capabilities ?? []).map((c) => c?.name ?? c), [], "the flow PLG declares none either");
+  assert.equal(escalated.artifact.developmentOnly, false);
+});
+
+test("SEC-026 (round 2): component dependencies with only an unsigned manifest add no capabilities to a verified flow", { timeout: 900_000 }, async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sdm-sec026c-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const SIGNED_MANIFEST = { ...RELAY_MANIFEST, dependencies: [{ pluginId: "test.security.component", minVersion: "1.0.0" }] };
+  const legit = await compileModuleFromSource({
+    manifest: SIGNED_MANIFEST,
+    threadModel: "single-thread",
+    sourceCode: relaySource("LEGIT-OUTPUT"),
+    language: "c++",
+    outputPath: path.join(root, "legit.wasm"),
+    catalog: OMM_CATALOG,
+  });
+  t.after(() => cleanupCompilation(legit));
+  const dep = path.join(root, "relay");
+  await mkdir(dep, { recursive: true });
+  await writeFile(path.join(dep, "plugin-manifest.json"), JSON.stringify(SIGNED_MANIFEST, null, 2));
+  // ATTACKER: a component directory the signed manifest names, asking for secrets
+  const component = path.join(root, "component");
+  await mkdir(component, { recursive: true });
+  await writeFile(path.join(component, "plugin-manifest.json"), JSON.stringify({
+    ...RELAY_MANIFEST, pluginId: "test.security.component", capabilities: ["secrets", "http"], runtimeTargets: ["browser", "wasmedge"],
+  }, null, 2));
+
+  const unsignedBundle = await createSingleFileBundle({
+    wasmBytes: legit.wasmBytes,
+    manifest: SIGNED_MANIFEST,
+    entries: [
+      { entryId: SDS_GUEST_LINK_OBJECT_ENTRY_ID, role: "auxiliary", sectionName: SDS_GUEST_LINK_SECTION_NAME, payloadEncoding: "raw-bytes", mediaType: "application/wasm", payload: legit.guestLink.objectBytes },
+      { entryId: SDS_GUEST_LINK_METADATA_ENTRY_ID, role: "auxiliary", sectionName: SDS_GUEST_LINK_SECTION_NAME, payloadEncoding: "json-utf8", mediaType: "application/json",
+        payload: { version: 1, format: "wasm-object", symbolPrefix: legit.guestLink.symbolPrefix, methodSymbols: legit.guestLink.methodSymbols, methodIds: Object.keys(legit.guestLink.methodSymbols) } },
+    ],
+  });
+  const signed = await signModuleArtifact(unsignedBundle.wasmBytes, { privateKeySeedHex: seedHex(), signatureScope: "bundle" });
+  await writeFile(path.join(dep, "relay.signed.wasm"), signed.wasmBytes);
+  await writeFile(path.join(dep, "publisher.json"), JSON.stringify({ algorithm: "ed25519", publicKeyHex: signed.signature.publicKeyHex, developmentOnly: false }));
+  const flow = {
+    programId: "test.security.linked.component",
+    name: "Linked flow with component",
+    version: "0.1.0",
+    nodes: [
+      { nodeId: "relay", pluginId: RELAY_MANIFEST.pluginId, methodId: "relay", kind: "transform",
+        artifact: { path: "relay/relay.signed.wasm", publisher: "relay/publisher.json", sha256: createHash("sha256").update(signed.wasmBytes).digest("hex") } },
+      { nodeId: "sink", pluginId: "test.sink", methodId: "collect", kind: "sink" },
+    ],
+    edges: [{ fromNodeId: "relay", fromPortId: "out", toNodeId: "sink", toPortId: "result" }],
+    triggers: [{ triggerId: "manual", kind: "manual" }],
+    triggerBindings: [{ triggerId: "manual", targetNodeId: "relay", targetPortId: "start" }],
+    requiredPlugins: [RELAY_MANIFEST.pluginId],
+  };
+  const dependencies = await resolveFlowDependencies({ depsPath: root });
+  assert.ok(dependencies.has("test.security.component"), "the component is in the dependency set");
+  const result = await compileFlowProgram({ flow, dependencies, catalog: OMM_CATALOG, flowSourcePath: path.join(root, "flow.json") });
+  assert.deepEqual(result.check.capabilities, [], "the unsigned component manifest added nothing");
+  assert.ok(result.check.warnings.some((issue) => issue.code === "unverified-component-dependency"));
+  assert.deepEqual(result.check.runtimeTargets, ["browser"]);
 });
