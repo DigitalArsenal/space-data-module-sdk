@@ -1,4 +1,9 @@
 import { toUint8Array } from "./encoding.js";
+import { secp256k1EcdsaVerifyDigest } from "./secp256k1Ecdsa.js";
+
+// hd-wallet-wasm's Curve.SECP256K1. From 2.1.1 publicKeyFromPrivate requires
+// the curve; before, an omitted curve silently meant secp256k1.
+const SECP256K1_CURVE = 0;
 
 let walletPromise = null;
 
@@ -54,7 +59,7 @@ export async function x25519SharedSecret(privateKey, publicKey) {
 
 export async function secp256k1PublicKey(privateKey) {
   const wallet = await getWasmWallet();
-  return wallet.curves.publicKeyFromPrivate(toUint8Array(privateKey));
+  return wallet.curves.publicKeyFromPrivate(toUint8Array(privateKey), SECP256K1_CURVE);
 }
 
 // secp256k1 ECDSA. The wallet's sign / verify hash their input with sha256 (a message API); signRecoverable and
@@ -81,18 +86,6 @@ function assertDigest(digest) {
   return digest;
 }
 
-/** A 33-byte compressed secp256k1 public key (a 65-byte uncompressed 0x04 || X || Y is compressed). */
-function compressedSecp256k1Key(publicKey) {
-  if (publicKey.length === 33) return publicKey;
-  if (publicKey.length === 65 && publicKey[0] === 0x04) {
-    const out = new Uint8Array(33);
-    out[0] = publicKey[64] & 1 ? 0x03 : 0x02;
-    out.set(publicKey.subarray(1, 33), 1);
-    return out;
-  }
-  throw new RangeError(`secp256k1 public key must be 33 or 65 bytes, got ${publicKey.length}.`);
-}
-
 /** ECDSA over the given 32-byte digest (not hashed again): the 64-byte raw (r || s) signature. */
 export async function secp256k1SignDigest(digest, privateKey) {
   const wallet = await getWasmWallet();
@@ -100,25 +93,14 @@ export async function secp256k1SignDigest(digest, privateKey) {
 }
 
 /**
- * Whether a 64-byte raw (r || s) signature is ECDSA over the given 32-byte digest for the public key: the key
- * recovered with recovery id 0 or 1 equals it.
+ * Whether a 64-byte raw (r || s) signature is a valid ECDSA signature over the given 32-byte digest for the public
+ * key (33-byte compressed or 65-byte uncompressed). Real ECDSA verification with r, s in [1, n-1] and the key checked
+ * on the curve, not recover-and-compare: the verdict no longer depends on the wallet's recovery export (security
+ * audit SEC-002). High-S encodings verify, as with node:crypto and the Go node.
  */
 export async function secp256k1VerifyDigest(digest, signature, publicKey) {
-  const wallet = await getWasmWallet();
   const hash = assertDigest(toUint8Array(digest));
-  const sig = toUint8Array(signature);
-  const expected = compressedSecp256k1Key(toUint8Array(publicKey));
-  if (sig.length !== 64) return false;
-  for (const recoveryId of [0, 1]) {
-    let recovered;
-    try {
-      recovered = toUint8Array(wallet.curves.secp256k1.recover(hash, sig, recoveryId));
-    } catch {
-      continue;
-    }
-    if (recovered.length === 33 && recovered.every((b, i) => b === expected[i])) return true;
-  }
-  return false;
+  return secp256k1EcdsaVerifyDigest(hash, toUint8Array(signature), toUint8Array(publicKey));
 }
 
 export async function ed25519PublicKey(seed) {

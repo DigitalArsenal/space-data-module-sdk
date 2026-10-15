@@ -249,15 +249,19 @@ export async function createPublicationProtectionDemoSummary(options = {}) {
       ? options.wasmBytes
       : MINIMAL_WASM_BYTES;
   const recipient = options.recipient ?? (await createRecipientKeypairHex());
+  // A demo: without a supplied mnemonic it signs with a throwaway identity,
+  // and says so explicitly (protectModuleArtifact never invents one silently).
   const signedOnly = await protectModuleArtifact({
     manifest,
     wasmBytes,
     mnemonic: options.mnemonic ?? null,
+    ephemeralIdentity: !options.mnemonic,
   });
   const encryptedDelivery = await protectModuleArtifact({
     manifest,
     wasmBytes,
     mnemonic: options.mnemonic ?? null,
+    ephemeralIdentity: !options.mnemonic,
     recipientPublicKeyHex: recipient.publicKeyHex,
   });
 

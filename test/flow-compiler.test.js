@@ -45,6 +45,10 @@ import {
 } from "../src/compliance/index.js";
 import { createBrowserModuleHarness } from "../src/host/browserModuleHarness.js";
 
+// These tests exercise the compiler's mechanics on purpose-built, unsigned
+// local dependencies, so linked-direct compiles opt into the development path
+// explicitly (allowUnverifiedLocalDeps). The verified linked-direct path is
+// covered by test/security-flow.test.js (security audit 2026-10-15, SEC-026).
 const execFileAsync = promisify(execFile);
 const CLI_PATH = fileURLToPath(new URL("../bin/space-data-module.js", import.meta.url));
 
@@ -595,7 +599,7 @@ test("compiled isomorphic graph dispatches through separate child handlers witho
           },
     ),
   });
-  const result = await compileFlowProgram({
+  const result = await compileFlowProgram({ allowUnverifiedLocalDeps: true, 
     flow,
     dependencies: dependencyMap(producer, consumer),
     catalog: catalogForManifests(producer.manifest, consumer.manifest),
@@ -744,7 +748,7 @@ test("null trigger startup carries the target port canonical identity without gr
     ],
     requiredPlugins: [triggerDependency.pluginId],
   };
-  const result = await compileFlowProgram({
+  const result = await compileFlowProgram({ allowUnverifiedLocalDeps: true, 
     flow,
     dependencies: dependencyMap(triggerDependency),
     catalog: catalogForManifests(triggerDependency.manifest),
@@ -877,7 +881,7 @@ test("explicit trigger type queues the target-bound descriptor instead of an equ
     ],
     requiredPlugins: [dependency.pluginId],
   };
-  const result = await compileFlowProgram({
+  const result = await compileFlowProgram({ allowUnverifiedLocalDeps: true, 
     flow,
     dependencies: dependencyMap(dependency),
     catalog: catalogForManifests(dependency.manifest),
@@ -970,7 +974,7 @@ test("trigger descriptor sentinel cannot collide with or route a declared output
     ],
     requiredPlugins: [dependency.pluginId],
   };
-  const result = await compileFlowProgram({
+  const result = await compileFlowProgram({ allowUnverifiedLocalDeps: true, 
     flow,
     dependencies: dependencyMap(dependency),
     catalog: catalogForManifests(dependency.manifest),
@@ -1059,7 +1063,7 @@ test("explicit trigger type validation is all-or-nothing across fanout bindings"
     ],
     requiredPlugins: [first.pluginId, second.pluginId],
   };
-  const result = await compileFlowProgram({
+  const result = await compileFlowProgram({ allowUnverifiedLocalDeps: true, 
     flow,
     dependencies: dependencyMap(first, second),
     catalog: catalogForManifests(first.manifest, second.manifest),
@@ -1137,7 +1141,7 @@ test("non-empty untyped trigger fanout rejects incompatible SDS identities atomi
     ],
     requiredPlugins: [first.pluginId, second.pluginId],
   };
-  const result = await compileFlowProgram({
+  const result = await compileFlowProgram({ allowUnverifiedLocalDeps: true, 
     flow,
     dependencies: dependencyMap(first, second),
     catalog: catalogForManifests(first.manifest, second.manifest),
@@ -1186,7 +1190,7 @@ test("flow compile rejects an unsigned isomorphic child even when its SHA lock m
 
   await assert.rejects(
     () =>
-      compileFlowProgram({
+      compileFlowProgram({ allowUnverifiedLocalDeps: true, 
         flow,
         dependencies: dependencyMap(dependency),
         catalog: catalogForManifests(dependency.manifest),
@@ -1753,7 +1757,7 @@ test("flow compile rejects an invalid DEPENDENCY manifest before writing outputs
 
   await assert.rejects(
     () =>
-      compileFlowProgram({
+      compileFlowProgram({ allowUnverifiedLocalDeps: true, 
         flow: singleNodeFlow(dependency),
         dependencies: dependencyMap(dependency),
         outDir,
@@ -1787,7 +1791,7 @@ test("flow compile rejects an invalid COMPOSED manifest before writing outputs",
   const flow = { ...singleNodeFlow(dependency), name: "" };
   await assert.rejects(
     () =>
-      compileFlowProgram({
+      compileFlowProgram({ allowUnverifiedLocalDeps: true, 
         flow,
         dependencies: dependencyMap(dependency),
         outDir,
@@ -1910,7 +1914,7 @@ test("flow compile standards-validates internal dependency ports before linking"
   ];
 
   await assert.rejects(
-    () => compileFlowProgram({ flow, dependencies, catalog }),
+    () => compileFlowProgram({ allowUnverifiedLocalDeps: true,  flow, dependencies, catalog }),
     (error) =>
       error?.report?.errors?.some(
         (issue) => issue.code === "standards-root-type-mismatch",
@@ -1982,7 +1986,7 @@ test("flow compile routes an all-wasi guest set through the wasi-threads linker"
     },
     wasmPath: compilation.outputPath,
   };
-  const result = await compileFlowProgram({
+  const result = await compileFlowProgram({ allowUnverifiedLocalDeps: true, 
     flow: singleNodeFlow(dependency, { capabilities: [] }),
     dependencies: dependencyMap(dependency),
     catalog: catalogForManifests(manifest),
@@ -2387,7 +2391,7 @@ extern "C" int second(void) {
   };
 
   const outDir = path.join(await mkdtemp(path.join(os.tmpdir(), "flow-compiler-out-")), "dist");
-  const result = await compileFlowProgram({
+  const result = await compileFlowProgram({ allowUnverifiedLocalDeps: true, 
     flow,
     dependencies,
     outDir,
@@ -2581,7 +2585,7 @@ extern "C" int second(void) {
   changedManifest.methods[0].outputPorts[0].acceptedTypeSets = [changedInternalTypeSet];
   changedManifest.methods[1].inputPorts[0].acceptedTypeSets = [changedInternalTypeSet];
   const originalDependency = dependencies.get("test.contract-chain");
-  const changedResult = await compileFlowProgram({
+  const changedResult = await compileFlowProgram({ allowUnverifiedLocalDeps: true, 
     flow,
     dependencies: dependencyMap({
       ...originalDependency,
@@ -2692,7 +2696,7 @@ extern "C" int produce(void) {
     triggerBindings: [{ triggerId: "manual", targetNodeId: "source", targetPortId: "start" }],
     requiredPlugins: [manifest.pluginId],
   };
-  const result = await compileFlowProgram({
+  const result = await compileFlowProgram({ allowUnverifiedLocalDeps: true, 
     flow,
     dependencies,
     catalog: catalogForManifests(manifest),
@@ -3330,7 +3334,7 @@ test("the composed artifact BAKES, RUNS and is refused by the browser with a was
   };
 
   const dependencies = dependencyMap(stage, mediator);
-  const result = await compileFlowProgram({
+  const result = await compileFlowProgram({ allowUnverifiedLocalDeps: true, 
     flow,
     dependencies,
     catalog: catalogForManifests(stage.manifest, mediator.manifest),
@@ -3428,6 +3432,10 @@ test("the composed artifact BAKES, RUNS and is refused by the browser with a was
     () =>
       createIsomorphicFlowRuntimeHost({
         wasmSource: result.wasmBytes,
+        // unsigned test artifact: the explicit unverified opt-out, so the
+        // runtime-target gate is what refuses it (no policy at all is refused
+        // earlier, by the trust policy: SEC-008)
+        verifySignature: false,
         children: [],
       }),
     (error) => {
@@ -3693,7 +3701,7 @@ test('flow compile keeps an all-sequential WASI artifact self-contained and runn
   const compilation=await compileModuleFromSource({manifest,sourceCode:'extern "C" int sequential_tick(void) { return 0; }',language:'c++',threadModel:ModuleThreadModel.WASI_SEQUENTIAL,catalog:catalogForManifests(manifest),keepTempDir:true});
   t.after(()=>cleanupCompilation(compilation));
   const dependency={pluginId:manifest.pluginId,manifest,normalized:normalizeManifestForSdnFlow(manifest),guestLink:{objectBytes:compilation.guestLink.objectBytes,metadata:{symbolPrefix:compilation.guestLink.symbolPrefix,methodSymbols:compilation.guestLink.methodSymbols,threadModel:compilation.guestLink.threadModel,capabilities:[]}},wasmPath:compilation.outputPath};
-  const result=await compileFlowProgram({flow:singleNodeFlow(dependency,{capabilities:[]}),dependencies:dependencyMap(dependency),catalog:catalogForManifests(manifest)});
+  const result=await compileFlowProgram({ allowUnverifiedLocalDeps: true, flow:singleNodeFlow(dependency,{capabilities:[]}),dependencies:dependencyMap(dependency),catalog:catalogForManifests(manifest)});
   assert.equal(result.check.threadModel,'wasi-sequential');
   assert.equal(result.artifact.threadModel,'wasi-sequential');
   assert.match(result.artifact.compiler,/wasi-sequential/);

@@ -20,6 +20,15 @@ import {
 } from "./cron.js";
 import { createBrowserEdgeShims } from "./browserEdgeShims.js";
 import {
+  fetchWithCheckedRedirects,
+  normalizeHttpOriginList,
+} from "./httpRedirects.js";
+import {
+  assertKeySlotOperation,
+  assertKeySlotSignPayload,
+  normalizeKeySlotPolicy,
+} from "./keyslotPolicy.js";
+import {
   ADAPTER_CAPABILITIES,
   ADAPTER_OPERATIONS,
   IPFS_ADAPTER_OPERATIONS,
@@ -288,17 +297,19 @@ async function resolveKeySlotMaterial(walletSignAdapter, slotId) {
 // algorithm defaults to "ed25519". Response: {signature: base64, algorithm}.
 // The slot's key material never appears in the response. Mirrors
 // handleKeyslotSign() in keyslot.go.
-async function keyslotSign(walletSignAdapter, wasmWallet, params = {}) {
+async function keyslotSign(walletSignAdapter, wasmWallet, keySlotPolicy, params = {}) {
   const slotId = String(params.slotId ?? "").trim();
   if (!slotId) {
     throw new Error("slotId is required.");
   }
-  const keyMaterial = await resolveKeySlotMaterial(walletSignAdapter, slotId);
   const payload =
     params.payload === undefined || params.payload === null
       ? new Uint8Array()
       : base64ToBytes(String(params.payload));
+  // Checked BEFORE the slot's key is even resolved (SEC-024).
   const algorithm = String(params.algorithm ?? "").trim() || "ed25519";
+  assertKeySlotSignPayload(keySlotPolicy, slotId, payload, algorithm);
+  const keyMaterial = await resolveKeySlotMaterial(walletSignAdapter, slotId);
 
   if (algorithm === "ed25519") {
     if (!wasmWallet?.curves?.ed25519?.sign) {
@@ -348,7 +359,8 @@ async function keyslotSign(walletSignAdapter, wasmWallet, params = {}) {
 // Response: {plaintext: base64}. Mirrors handleKeyslotUnwrap() in
 // keyslot.go, including the wire format where `ciphertext` is
 // (ciphertext || 16-byte GCM tag), per Go's crypto/cipher.GCM convention.
-async function keyslotUnwrap(walletSignAdapter, wasmWallet, params = {}) {
+async function keyslotUnwrap(walletSignAdapter, wasmWallet, keySlotPolicy, params = {}) {
+  assertKeySlotOperation(keySlotPolicy, params.slotId, "unwrap");
   const slotId = String(params.slotId ?? "").trim();
   if (!slotId) {
     throw new Error("slotId is required.");
@@ -410,9 +422,25 @@ export class BrowserHost {
     this.runtimeTarget = RuntimeTarget.BROWSER;
     const capabilityAdapters = resolveCapabilityAdapters(options);
 
-    const granted = options.capabilities
-      ? new Set(options.capabilities)
-      : new Set(BrowserHostSupportedCapabilities);
+    // DEFAULT-DENY (security audit 2026-10-15, SEC-009), like NodeHost: a
+    // BrowserHost grants exactly the capabilities its embedder lists. No list,
+    // or an empty one, grants nothing.
+    if (
+      options.capabilities !== undefined &&
+      options.capabilities !== null &&
+      !Array.isArray(options.capabilities)
+    ) {
+      throw new TypeError("Browser host capabilities must be an array when provided.");
+    }
+    const granted = new Set(
+      (options.capabilities ?? []).map((capability) => String(capability ?? "").trim()),
+    );
+    // http is its own opt-in: requests carry no ambient credentials and go only
+    // to origins the embedder lists (or anywhere, with an explicit
+    // allowAnyHttpOrigin: true). Every redirect hop is re-checked (SEC-022).
+    const allowedHttpOrigins = normalizeHttpOriginList(options.allowedHttpOrigins);
+    const allowAnyHttpOrigin = options.allowAnyHttpOrigin === true;
+    const keySlotPolicy = normalizeKeySlotPolicy(options.allowedKeySlots);
     const edgeShims = createBrowserEdgeShims({
       ...options.edgeShims,
       fetch: options.fetch ?? options.edgeShims?.fetch,
@@ -526,20 +554,45 @@ export class BrowserHost {
           ? setTimeout(() => controller.abort(), params.timeoutMs)
           : null;
         try {
-          const response = await fetchImpl(params.url, {
-            method: params.method ?? "GET",
-            headers: params.headers ?? undefined,
-            body: params.body ?? undefined,
-            redirect: params.redirect ?? "follow",
-            signal: controller.signal,
-          });
+          const { response, url: finalUrl } = await fetchWithCheckedRedirects(
+            fetchImpl,
+            String(params.url ?? ""),
+            {
+              method: params.method ?? "GET",
+              headers: params.headers ?? undefined,
+              body: params.body ?? undefined,
+              redirect: params.redirect ?? "follow",
+              // never the page's cookies or HTTP auth
+              credentials: "omit",
+              signal: controller.signal,
+            },
+            {
+              assertAllowed: (url) => {
+                if (allowAnyHttpOrigin) return;
+                if (!allowedHttpOrigins) {
+                  throw new BrowserHostCapabilityError(
+                    "http",
+                    "http.request",
+                    "Browser host http.request needs allowedHttpOrigins (or allowAnyHttpOrigin: true).",
+                  );
+                }
+                if (!allowedHttpOrigins.has(url.origin)) {
+                  throw new BrowserHostCapabilityError(
+                    "http",
+                    "http.request",
+                    `HTTP origin "${url.origin}" is not permitted by this host.`,
+                  );
+                }
+              },
+            },
+          );
           const responseType = params.responseType ?? "utf8";
           let body;
           if (responseType === "json") body = await response.json();
           else if (responseType === "bytes") body = new Uint8Array(await response.arrayBuffer());
           else body = await response.text();
           return {
-            url: response.url || String(params.url),
+            url: finalUrl.toString(),
             status: response.status,
             statusText: response.statusText,
             ok: response.ok,
@@ -701,11 +754,11 @@ export class BrowserHost {
     this.keyslot = Object.freeze({
       sign: async (params = {}) => {
         this.#assertCapability("wallet_sign", "keyslot.sign");
-        return keyslotSign(walletSignAdapter, wasmWallet, params);
+        return keyslotSign(walletSignAdapter, wasmWallet, keySlotPolicy, params);
       },
       unwrap: async (params = {}) => {
         this.#assertCapability("wallet_sign", "keyslot.unwrap");
-        return keyslotUnwrap(walletSignAdapter, wasmWallet, params);
+        return keyslotUnwrap(walletSignAdapter, wasmWallet, keySlotPolicy, params);
       },
     });
 
@@ -913,7 +966,11 @@ export class BrowserHost {
             );
           }
           return new Uint8Array(
-            wasmWallet.curves.publicKeyFromPrivate(toUint8Array(privateKey)),
+            // hd-wallet-wasm >= 2.1.1 requires the curve (0 = secp256k1).
+            wasmWallet.curves.publicKeyFromPrivate(
+              toUint8Array(privateKey),
+              wasmWallet.Curve?.SECP256K1 ?? 0,
+            ),
           );
         },
         sign: (message, privateKey) => {
@@ -1044,8 +1101,7 @@ export class BrowserHost {
     const normalized = String(capability ?? "").trim();
     return (
       this._grantedCapabilities.has(normalized) ||
-      (this._grantedCapabilities.has("network") &&
-        ["http", "websocket"].includes(normalized))
+      (this._grantedCapabilities.has("network") && normalized === "websocket")
     );
   }
 
@@ -1233,10 +1289,8 @@ export class BrowserHost {
 
   #assertCapability(capability, operation) {
     const normalized = String(capability ?? "").trim();
-    const networkBackedCapabilities = new Set([
-      "http",
-      "websocket",
-    ]);
+    // "network" no longer implies "http": http is a separate opt-in (SEC-009).
+    const networkBackedCapabilities = new Set(["websocket"]);
     if (
       !this._grantedCapabilities.has(normalized) &&
       !(

@@ -1,8 +1,9 @@
 import { SDS_MANIFEST_SECTION_NAME } from "../bundle/constants.js";
+import { DOMAIN_MODULE_PUBLICATION_V1 } from "../bundle/sigdomain.js";
 import {
-  resolveModuleSignaturePolicy,
-  verifyModuleArtifact,
-} from "../bundle/signing.js";
+  resolveTrustedModuleSignaturePolicy,
+  verifyTrustedModuleArtifact,
+} from "../bundle/trustPolicy.js";
 import { getWasmCustomSections } from "../bundle/wasm.js";
 import { decodePlgManifest } from "../manifest/plgCodec.js";
 import { createBrowserModuleHarness } from "../host/browserModuleHarness.js";
@@ -45,31 +46,74 @@ function decodeCanonicalPlg(bytes, description) {
   }
 }
 
-function embeddedFlowManifest(artifactBytes) {
+function bytesEqual(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/**
+ * The parent flow's PLG manifest, read ONLY from bytes its signature covers
+ * (security audit 2026-10-15, SEC-021). Per-node CONFIG comes from this
+ * manifest, so reading it from an unsigned place lets a mirror or relay change
+ * what a "verified" flow does without the publisher's key.
+ *
+ *  - bundle scope: the signature binds the MBL, so the MBL "manifest" entry is
+ *    signed. The payload's sds.manifest section is not (the canonical hash
+ *    strips sds.*); if one is present it must be byte-identical.
+ *  - module scope under SDN-MODULE-PUBLICATION-V1 (node-signed): the signature
+ *    binds sha256(portable payload), so the payload's sds.manifest section is
+ *    signed and the trailer is not; a trailer manifest must match it.
+ *  - legacy bare-digest module scope: neither place is signed. Refused.
+ *  - verification null (explicit verifySignature: false, local debugging):
+ *    either source, and two sources must agree.
+ */
+function embeddedFlowManifest(artifactBytes, verification) {
   const publication = extractPublicationRecordCollection(artifactBytes);
+  let trailerManifest = null;
   for (const entry of publication?.mbl?.entries ?? []) {
     if (
       entry?.entryId === "manifest" ||
       entry?.sectionName === SDS_MANIFEST_SECTION_NAME
     ) {
-      return decodeCanonicalPlg(
-        exactArtifactBytes(entry.payload),
-        "Signed flow bundle manifest",
-      );
+      trailerManifest = exactArtifactBytes(entry.payload);
+      break;
     }
   }
-
   const portableBytes = publication?.payloadBytes ?? artifactBytes;
-  const sections = getWasmCustomSections(
-    portableBytes,
-    SDS_MANIFEST_SECTION_NAME,
-  );
-  if (sections.length === 0) {
+  const sectionManifest =
+    getWasmCustomSections(portableBytes, SDS_MANIFEST_SECTION_NAME)[0] ?? null;
+
+  if (trailerManifest && sectionManifest && !bytesEqual(trailerManifest, sectionManifest)) {
     throw new Error(
-      `Isomorphic flow artifact embeds no ${SDS_MANIFEST_SECTION_NAME} PLG manifest.`,
+      `Isomorphic flow artifact carries two different PLG manifests (MBL entry and ${SDS_MANIFEST_SECTION_NAME} section); refusing to choose one.`,
     );
   }
-  return decodeCanonicalPlg(sections[0], "Embedded flow manifest");
+
+  let signedBytes;
+  if (verification === null) {
+    signedBytes = trailerManifest ?? sectionManifest;
+  } else if (verification?.signatureScope === "bundle") {
+    signedBytes = trailerManifest;
+  } else if (
+    verification?.signatureScope === "module" &&
+    verification?.statementDomain === DOMAIN_MODULE_PUBLICATION_V1
+  ) {
+    signedBytes = sectionManifest;
+  } else {
+    throw new Error(
+      "Isomorphic flow artifact is signed with a bare-digest module-scope signature, which covers neither its MBL manifest nor its sds.manifest section; sign the flow with signatureScope \"bundle\".",
+    );
+  }
+  if (!signedBytes) {
+    throw new Error(
+      `Isomorphic flow artifact embeds no signed ${SDS_MANIFEST_SECTION_NAME} PLG manifest for its signature scope.`,
+    );
+  }
+  return decodeCanonicalPlg(
+    signedBytes,
+    verification === null ? "Unverified flow manifest" : "Signed flow manifest",
+  );
 }
 
 function flowManifestNodes(manifest) {
@@ -211,12 +255,15 @@ export async function createIsomorphicFlowRuntimeHost(options = {}) {
   const parentArtifactBytes = exactArtifactBytes(
     options.wasmSource ?? options.wasmBytes,
   );
-  const parentSignaturePolicy = resolveModuleSignaturePolicy(options);
-  if (parentSignaturePolicy) {
-    await verifyModuleArtifact(parentArtifactBytes, parentSignaturePolicy);
-  }
+  // FAIL CLOSED (SEC-008): a trust policy is required, it always requires a
+  // signature, and the result must say verified. The only way to run an
+  // unverified flow is the explicit verifySignature: false (local debugging).
+  const parentSignaturePolicy = resolveTrustedModuleSignaturePolicy(options);
+  const parentVerification = parentSignaturePolicy
+    ? await verifyTrustedModuleArtifact(parentArtifactBytes, parentSignaturePolicy)
+    : null;
   const manifestNodes = flowManifestNodes(
-    embeddedFlowManifest(parentArtifactBytes),
+    embeddedFlowManifest(parentArtifactBytes, parentVerification),
   );
   const parent = await createFlowRuntimeHost({
     wasmSource: parentArtifactBytes,
@@ -302,7 +349,11 @@ export async function createIsomorphicFlowRuntimeHost(options = {}) {
         manifest: child.manifest,
         surface: child.surface ?? "direct",
         verifySignature: child.verifySignature,
+        // A child gets only what its embedder grants: an explicit host, or
+        // hostOptions whose capabilities list BrowserHost enforces. With
+        // neither, BrowserHost is default-deny (SEC-009).
         host: child.host,
+        hostOptions: child.hostOptions,
         hostcallDispatch: child.hostcallDispatch,
         imports: child.imports,
       });

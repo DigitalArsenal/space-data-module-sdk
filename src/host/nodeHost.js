@@ -3,7 +3,7 @@ import net from "node:net";
 import path from "node:path";
 import { randomBytes as nodeRandomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 import nodeTls from "node:tls";
 
@@ -13,6 +13,12 @@ import {
   generateX25519Keypair,
 } from "../transport/pki.js";
 import { RuntimeTarget } from "../runtime/constants.js";
+import { fetchWithCheckedRedirects } from "./httpRedirects.js";
+import {
+  assertKeySlotOperation,
+  assertKeySlotSignPayload,
+  normalizeKeySlotPolicy,
+} from "./keyslotPolicy.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import {
   base64ToBytes,
@@ -266,9 +272,49 @@ function normalizeAllowedCommands(commands) {
   }
   const normalized = new Set();
   for (const command of commands) {
-    normalized.add(assertNonEmptyString(command, "Executable path"));
+    const file = assertNonEmptyString(command, "Executable path");
+    if (!path.isAbsolute(file)) {
+      throw new TypeError(
+        `allowedCommands entry "${file}" must be an absolute path (no PATH lookup).`,
+      );
+    }
+    normalized.add(file);
   }
   return normalized;
+}
+
+// Environment variables a guest may never set for a child process, whatever
+// the operator's allow-list says: each one makes an allow-listed binary load
+// or run code the guest chose (security audit 2026-10-15, SEC-023).
+const DENIED_EXEC_ENV =
+  /^(LD_|DYLD_|GIT_|PYTHON|PERL5|PERLLIB|RUBY|NODE_|BASH_ENV$|ENV$|IFS$|HOME$|XDG_CONFIG_|SHELLOPTS$|PS4$|PROMPT_COMMAND$|JAVA_TOOL_OPTIONS$|_JAVA_OPTIONS$|CLASSPATH$|LUA_|TCL|PATH$)/i;
+const DEFAULT_EXEC_PATH = "/usr/bin:/bin";
+
+function normalizeExecEnvNames(names) {
+  if (names === undefined || names === null) return new Set();
+  if (!Array.isArray(names)) {
+    throw new TypeError("allowedExecEnv must be an array of environment variable names.");
+  }
+  const normalized = new Set();
+  for (const name of names) {
+    const value = assertNonEmptyString(name, "Environment variable name");
+    if (DENIED_EXEC_ENV.test(value)) {
+      throw new TypeError(`allowedExecEnv may not allow "${value}".`);
+    }
+    normalized.add(value);
+  }
+  return normalized;
+}
+
+function normalizeExecBaseEnv(env) {
+  if (env === undefined || env === null) return { PATH: DEFAULT_EXEC_PATH };
+  if (typeof env !== "object" || Array.isArray(env)) {
+    throw new TypeError("execEnv must be an object of environment variables.");
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(env)) out[key] = String(value);
+  if (out.PATH === undefined) out.PATH = DEFAULT_EXEC_PATH;
+  return out;
 }
 
 function normalizeAllowedHosts(hosts, label) {
@@ -1518,6 +1564,12 @@ export class NodeHost {
       options.allowedWebSocketOrigins,
     );
     this.allowedCommands = normalizeAllowedCommands(options.allowedCommands);
+    // Children start from this environment ONLY (never process.env). A guest
+    // may add variables whose names the operator lists in allowedExecEnv.
+    this._execBaseEnv = normalizeExecBaseEnv(options.execEnv);
+    this._allowedExecEnv = normalizeExecEnvNames(options.allowedExecEnv);
+    // Which key slots a guest may use, and for what (SEC-024). None by default.
+    this._keySlotPolicy = normalizeKeySlotPolicy(options.allowedKeySlots);
     this.allowedMqttHosts = normalizeAllowedHosts(
       options.allowedMqttHosts,
       "allowedMqttHosts",
@@ -1569,6 +1621,11 @@ export class NodeHost {
 
     this._supportedCapabilities = new Set(NodeHostSupportedCapabilities);
     this._grantedCapabilities = normalizeGrantedCapabilities(options);
+    if (this._grantedCapabilities.has("process_exec") && !this.allowedCommands) {
+      throw new TypeError(
+        "Granting process_exec requires allowedCommands: an explicit list of absolute executable paths.",
+      );
+    }
     this._contextStore = options.contextStore
       ? assertContextStore(options.contextStore)
       : options.contextFilePath
@@ -1662,22 +1719,31 @@ export class NodeHost {
               `Unsupported HTTP protocol "${url.protocol}". Expected http: or https:.`,
             );
           }
-          if (
-            this.allowedHttpOrigins &&
-            !this.allowedHttpOrigins.has(url.origin)
-          ) {
-            throw new Error(`HTTP origin "${url.origin}" is not permitted by this host.`);
-          }
+          const assertAllowed = (candidate) => {
+            if (
+              this.allowedHttpOrigins &&
+              !this.allowedHttpOrigins.has(candidate.origin)
+            ) {
+              throw new Error(`HTTP origin "${candidate.origin}" is not permitted by this host.`);
+            }
+          };
 
           const timeout = createTimeoutSignal(requestOptions.timeoutMs);
           try {
-            const response = await this.fetch(url, {
-              method: requestOptions.method ?? "GET",
-              headers: requestOptions.headers,
-              body: normalizeRequestBody(requestOptions.body),
-              redirect: requestOptions.redirect ?? "follow",
-              signal: resolveSignals(requestOptions.signal, timeout.signal),
-            });
+            // Every redirect hop is re-checked against allowedHttpOrigins
+            // (SEC-022); fetch never follows a redirect on its own.
+            const { response, url: finalUrl } = await fetchWithCheckedRedirects(
+              this.fetch,
+              url,
+              {
+                method: requestOptions.method ?? "GET",
+                headers: requestOptions.headers,
+                body: normalizeRequestBody(requestOptions.body),
+                redirect: requestOptions.redirect ?? "follow",
+                signal: resolveSignals(requestOptions.signal, timeout.signal),
+              },
+              { assertAllowed },
+            );
             const responseType = normalizeResponseType(requestOptions.responseType);
             let body;
             if (responseType === "json") {
@@ -1688,7 +1754,7 @@ export class NodeHost {
               body = new Uint8Array(await response.arrayBuffer());
             }
             return {
-              url: response.url || url.toString(),
+              url: finalUrl.toString(),
               status: response.status,
               statusText: response.statusText,
               ok: response.ok,
@@ -2005,10 +2071,7 @@ export class NodeHost {
       execFile: async (execOptions = {}) =>
         this.#withCapability("process_exec", "exec.execFile", async () => {
           const file = assertNonEmptyString(execOptions.file, "Executable path");
-          if (
-            this.allowedCommands &&
-            !this.allowedCommands.has(file)
-          ) {
+          if (!this.allowedCommands || !this.allowedCommands.has(file)) {
             throw new Error(
               `Executable "${file}" is not permitted by this host.`,
             );
@@ -2017,11 +2080,8 @@ export class NodeHost {
           return runExecFile({
             file,
             args: normalizeExecArgs(execOptions.args),
-            cwd: execOptions.cwd ?? this.filesystemRoot,
-            env:
-              execOptions.env && typeof execOptions.env === "object"
-                ? { ...process.env, ...execOptions.env }
-                : process.env,
+            cwd: await this.#confinedExecCwd(execOptions.cwd),
+            env: this.#execEnv(execOptions.env),
             input: execOptions.input,
             timeoutMs: execOptions.timeoutMs,
             encoding: execOptions.encoding,
@@ -2600,6 +2660,54 @@ export class NodeHost {
     return callback();
   }
 
+  // A child's working directory: the filesystem root, or a directory the
+  // guest names INSIDE it (resolved through symlinks on both sides). SEC-023.
+  async #confinedExecCwd(requested) {
+    const root = await realpath(this.filesystemRoot);
+    if (requested === undefined || requested === null || requested === "") {
+      return root;
+    }
+    const candidate = path.resolve(root, String(requested));
+    let resolved;
+    try {
+      resolved = await realpath(candidate);
+    } catch {
+      throw new HostFilesystemScopeError(
+        `Exec cwd "${requested}" does not exist inside the host filesystem root.`,
+        { requestedPath: String(requested), filesystemRoot: root },
+      );
+    }
+    const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+    if (resolved !== root && !resolved.startsWith(prefix)) {
+      throw new HostFilesystemScopeError(
+        `Exec cwd "${requested}" is outside the host filesystem root.`,
+        { requestedPath: String(requested), filesystemRoot: root },
+      );
+    }
+    return resolved;
+  }
+
+  // A child's environment: the operator's execEnv (PATH by default) plus the
+  // guest's variables whose names the operator allow-listed. process.env is
+  // never inherited. SEC-023.
+  #execEnv(guestEnv) {
+    const env = { ...this._execBaseEnv };
+    if (guestEnv === undefined || guestEnv === null) return env;
+    if (typeof guestEnv !== "object" || Array.isArray(guestEnv)) {
+      throw new TypeError("Exec env must be an object of environment variables.");
+    }
+    for (const [name, value] of Object.entries(guestEnv)) {
+      if (DENIED_EXEC_ENV.test(name) || !this._allowedExecEnv.has(name)) {
+        throw Object.assign(
+          new Error(`Exec environment variable "${name}" is not permitted by this host.`),
+          { hostcallCode: "not-authorized" },
+        );
+      }
+      env[name] = String(value);
+    }
+    return env;
+  }
+
   // resolveKeySlotMaterial looks up a slot's private key material via the
   // host-supplied walletSign adapter. The returned Uint8Array MUST NOT be
   // mutated (it may alias the adapter's live key store) and MUST NOT be
@@ -2630,12 +2738,14 @@ export class NodeHost {
   // handleKeyslotSign() in keyslot.go.
   async #keyslotSign(params = {}) {
     const slotId = assertNonEmptyString(params.slotId, "slotId");
-    const keyMaterial = await this.#resolveKeySlotMaterial(slotId);
     const payload =
       params.payload === undefined || params.payload === null
         ? new Uint8Array()
         : base64ToBytes(String(params.payload));
+    // Checked BEFORE the slot's key is even resolved (SEC-024).
     const algorithm = String(params.algorithm ?? "").trim() || "ed25519";
+    assertKeySlotSignPayload(this._keySlotPolicy, slotId, payload, algorithm);
+    const keyMaterial = await this.#resolveKeySlotMaterial(slotId);
 
     if (algorithm === "ed25519") {
       if (keyMaterial.length !== 32) {
@@ -2674,6 +2784,7 @@ export class NodeHost {
   // (ciphertext || 16-byte GCM tag), per Go's crypto/cipher.GCM convention.
   async #keyslotUnwrap(params = {}) {
     const slotId = assertNonEmptyString(params.slotId, "slotId");
+    assertKeySlotOperation(this._keySlotPolicy, slotId, "unwrap");
     const keyMaterial = await this.#resolveKeySlotMaterial(slotId);
     if (keyMaterial.length !== 32) {
       throw new Error(

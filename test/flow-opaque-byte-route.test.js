@@ -30,6 +30,10 @@ import { compileFlowProgram } from "../src/flow/flowCompiler.js";
 import { createFlowRuntimeHost } from "../src/flow/flowRuntimeHost.js";
 import { normalizeManifestForSdnFlow } from "../src/flow/normalize.js";
 
+// These tests exercise the compiler's mechanics on purpose-built, unsigned
+// local dependencies, so linked-direct compiles opt into the development path
+// explicitly (allowUnverifiedLocalDeps). The verified linked-direct path is
+// covered by test/security-flow.test.js (security audit 2026-10-15, SEC-026).
 const FLOW_INVALID_INDEX = 0xffffffff;
 
 function opaqueTypeSet(setId) {
@@ -202,7 +206,7 @@ async function buildOpaqueFlow() {
     await mkdtemp(path.join(os.tmpdir(), "opaque-byte-flow-")),
     "dist",
   );
-  const result = await compileFlowProgram({
+  const result = await compileFlowProgram({ allowUnverifiedLocalDeps: true, 
     flow,
     dependencies,
     outDir,

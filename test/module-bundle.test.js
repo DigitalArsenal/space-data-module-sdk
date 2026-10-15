@@ -142,6 +142,8 @@ test("single-file bundles round-trip through one appended REC trailer carrying M
     wasmBytes: compilation.wasmBytes,
     guestLink: compilation.guestLink,
     singleFileBundle: true,
+    // no publisher mnemonic in this test: a throwaway identity, asked for explicitly (SEC-035)
+    ephemeralIdentity: true,
   });
 
   assert.ok(protectedArtifact.singleFileBundle);
@@ -237,6 +239,7 @@ test("encrypted publication protection keeps MBL, ENC, and PNM in one REC traile
     wasmBytes: compilation.wasmBytes,
     singleFileBundle: true,
     recipientPublicKeyHex,
+    ephemeralIdentity: true,
   });
 
   const parsed = decodePublicationRecordCollection(

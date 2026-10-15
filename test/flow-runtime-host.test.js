@@ -15,6 +15,10 @@ import { compileFlowProgram } from "../src/flow/flowCompiler.js";
 import { normalizeManifestForSdnFlow } from "../src/flow/normalize.js";
 import { ATM } from "spacedatastandards.org/lib/js/ATM/ATM.js";
 
+// These tests exercise the compiler's mechanics on purpose-built, unsigned
+// local dependencies, so linked-direct compiles opt into the development path
+// explicitly (allowUnverifiedLocalDeps). The verified linked-direct path is
+// covered by test/security-flow.test.js (security audit 2026-10-15, SEC-026).
 const ATM_SCHEMA_HASH = Object.freeze([
   0x0f, 0xef, 0xdc, 0xa4, 0xbb, 0xcb, 0x78, 0x57,
   0xe9, 0x34, 0x03, 0xdd, 0x11, 0xf2, 0x9a, 0x67,
@@ -183,7 +187,7 @@ extern "C" int consume(void) {
     requiredPlugins: [manifest.pluginId],
   };
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "neutral-flow-routing-"));
-  const result = await compileFlowProgram({
+  const result = await compileFlowProgram({ allowUnverifiedLocalDeps: true, 
     flow,
     dependencies: new Map([[manifest.pluginId, dependency]]),
     outDir: path.join(tempDir, "dist"),

@@ -117,39 +117,121 @@ export async function signAuthorization({ authorization, signer }) {
   };
 }
 
+/** Longest lifetime verifyAuthorization accepts by default (issuedAt to expiresAt). */
+export const DEFAULT_MAX_AUTHORIZATION_TTL_MS = 60 * 60 * 1000;
+/** Clock skew tolerated on issuedAt. */
+export const AUTHORIZATION_CLOCK_SKEW_MS = 60 * 1000;
+
+function normalizeTrustedAuthorizationKeys(trustedPublicKeys) {
+  const list = Array.isArray(trustedPublicKeys)
+    ? trustedPublicKeys
+    : typeof trustedPublicKeys === "string"
+      ? trustedPublicKeys.split(/[\s,;]+/).filter(Boolean)
+      : null;
+  if (!list || list.length === 0) {
+    throw new Error(
+      "verifyAuthorization requires trustedPublicKeys: the authorization signer keys this verifier accepts.",
+    );
+  }
+  return list.map((key, index) => {
+    const normalized = String(key ?? "").trim().toLowerCase().replace(/^0x/, "");
+    if (!/^[0-9a-f]+$/.test(normalized) || normalized.length < 64) {
+      throw new Error(`trustedPublicKeys[${index}] is not a hex public key.`);
+    }
+    return normalized;
+  });
+}
+
+/**
+ * Verify a signed deployment authorization (security audit 2026-10-15,
+ * SEC-058).
+ *
+ * The envelope names its own signer key in `protected.publicKeyHex`; that is a
+ * claim, not trust. The key must be one of `trustedPublicKeys`, and the
+ * verifier is handed the TRUSTED key, so a self-signed envelope never
+ * verifies. The payload must carry a nonce, an issuedAt not in the future, an
+ * expiresAt not in the past, and a lifetime no longer than `maxTtlMs`. When a
+ * `nonceStore` ({has(nonce), add(nonce, expiresAt)}) is given, a nonce is
+ * accepted once.
+ *
+ * @returns {Promise<boolean>}
+ */
 export async function verifyAuthorization({
   envelope,
   verifier,
+  trustedPublicKeys,
   now = Date.now(),
+  maxTtlMs = DEFAULT_MAX_AUTHORIZATION_TTL_MS,
+  nonceStore = null,
 }) {
   if (!verifier || typeof verifier.verify !== "function") {
     throw new Error("verifyAuthorization requires a verifier.");
   }
+  const trusted = normalizeTrustedAuthorizationKeys(trustedPublicKeys);
   if (!envelope?.payload || !envelope?.signatureHex) {
     return false;
   }
+  const payload = envelope.payload;
+  const header = envelope.protected ?? {};
+  const signerKey = String(header.publicKeyHex ?? "").trim().toLowerCase().replace(/^0x/, "");
+  if (!signerKey || !trusted.includes(signerKey)) {
+    return false;
+  }
   if (
-    typeof envelope.payload.expiresAt === "number" &&
-    envelope.payload.expiresAt < now
+    typeof payload.issuedAt !== "number" ||
+    typeof payload.expiresAt !== "number" ||
+    !Number.isFinite(payload.issuedAt) ||
+    !Number.isFinite(payload.expiresAt)
   ) {
     return false;
   }
-  const payloadBytes = canonicalBytes(envelope.payload);
-  return verifier.verify(
-    payloadBytes,
-    hexToBytes(envelope.signatureHex),
-    envelope.protected ?? {},
-    envelope.payload,
+  if (payload.expiresAt < now || payload.issuedAt > now + AUTHORIZATION_CLOCK_SKEW_MS) {
+    return false;
+  }
+  if (payload.expiresAt <= payload.issuedAt || payload.expiresAt - payload.issuedAt > maxTtlMs) {
+    return false;
+  }
+  if (typeof payload.nonce !== "string" || payload.nonce.trim().length < 16) {
+    return false;
+  }
+  if (nonceStore && (await nonceStore.has(payload.nonce))) {
+    return false;
+  }
+  const payloadBytes = canonicalBytes(payload);
+  const valid = Boolean(
+    await verifier.verify(
+      payloadBytes,
+      hexToBytes(envelope.signatureHex),
+      { ...header, publicKeyHex: signerKey },
+      payload,
+    ),
   );
+  if (valid && nonceStore) {
+    await nonceStore.add(payload.nonce, payload.expiresAt);
+  }
+  return valid;
 }
 
+/**
+ * Check a deployment authorization's claims against what is being deployed.
+ * `verified` must be the result of verifyAuthorization for this envelope
+ * (SEC-058): this function checks claims, never signatures, so it refuses to
+ * run on an envelope nobody verified. A target id or audience the caller
+ * expects must be present in the payload, not merely "not different".
+ */
 export function assertDeploymentAuthorization({
   envelope,
+  verified,
   artifact,
   target,
   requiredCapabilities = [],
   now = Date.now(),
 }) {
+  if (verified !== true) {
+    throw new Error(
+      "Deployment authorization has not been verified (pass verified: true from verifyAuthorization).",
+    );
+  }
   const payload = envelope?.payload;
   if (!payload) {
     throw new Error("Deployment authorization envelope is missing payload.");
@@ -157,8 +239,8 @@ export function assertDeploymentAuthorization({
   if (payload.action !== "deploy-flow") {
     throw new Error(`Unexpected authorization action "${payload.action}".`);
   }
-  if (typeof payload.expiresAt === "number" && payload.expiresAt < now) {
-    throw new Error("Deployment authorization has expired.");
+  if (typeof payload.expiresAt !== "number" || payload.expiresAt < now) {
+    throw new Error("Deployment authorization has expired or has no expiry.");
   }
   if (artifact?.artifactId && payload.artifactId !== artifact.artifactId) {
     throw new Error("Deployment authorization artifactId mismatch.");
@@ -174,17 +256,12 @@ export function assertDeploymentAuthorization({
   }
 
   const normalizedTarget = normalizeTarget(target);
-  if (
-    normalizedTarget.id &&
-    payload.target?.id &&
-    normalizedTarget.id !== payload.target.id
-  ) {
+  if (normalizedTarget.id && payload.target?.id !== normalizedTarget.id) {
     throw new Error("Deployment authorization target id mismatch.");
   }
   if (
     normalizedTarget.audience &&
-    payload.target?.audience &&
-    normalizedTarget.audience !== payload.target.audience
+    payload.target?.audience !== normalizedTarget.audience
   ) {
     throw new Error("Deployment authorization target audience mismatch.");
   }
@@ -200,3 +277,14 @@ export function assertDeploymentAuthorization({
   return true;
 }
 
+/**
+ * verifyAuthorization then assertDeploymentAuthorization, in one call. Throws
+ * unless the envelope is signed by a trusted key, fresh, and matches.
+ */
+export async function verifyDeploymentAuthorization(options = {}) {
+  const verified = await verifyAuthorization(options);
+  if (!verified) {
+    throw new Error("Deployment authorization signature, signer, nonce or lifetime is not valid.");
+  }
+  return assertDeploymentAuthorization({ ...options, verified });
+}

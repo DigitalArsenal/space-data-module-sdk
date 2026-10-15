@@ -15,11 +15,14 @@ import {
   validateArtifactWithStandards,
   validateManifestWithStandards,
 } from "../src/compliance/index.js";
-import { bytesToBase64 } from "../src/utils/encoding.js";
+import { bytesToBase64, bytesToHex, hexToBytes } from "../src/utils/encoding.js";
+import { ed25519PublicKey } from "../src/utils/wasmCrypto.js";
+import { signModuleArtifact } from "../src/bundle/signing.js";
 import {
-  signModuleArtifact,
-  verifyModuleArtifact,
-} from "../src/bundle/signing.js";
+  isDenylistedModuleSigner,
+  parseTrustedModuleSigners,
+  verifyTrustedModuleArtifact,
+} from "../src/bundle/trustPolicy.js";
 import {
   checkFlowProgram,
   compileFlowProgram,
@@ -118,7 +121,25 @@ function parseArgs(argv) {
         options.recipientPublicKeyHex = requireValue(argv, ++index, value);
         break;
       case "--mnemonic":
-        options.mnemonic = requireValue(argv, ++index, value);
+        // A secret on argv is visible to every user of the machine (ps) and
+        // lands in shell history (security audit 2026-10-15, SEC-035).
+        throw new Error(
+          "--mnemonic is not accepted on the command line; use --mnemonic-file <path> or the SDN_MODULE_SIGNING_MNEMONIC environment variable.",
+        );
+      case "--mnemonic-file":
+        options.mnemonicFile = path.resolve(requireValue(argv, ++index, value));
+        break;
+      case "--ephemeral-identity":
+        options.ephemeralIdentity = true;
+        break;
+      case "--scope":
+        options.signatureScope = requireValue(argv, ++index, value);
+        break;
+      case "--allow-dev-fixture":
+        options.allowDevFixture = true;
+        break;
+      case "--allow-unverified-local-deps":
+        options.allowUnverifiedLocalDeps = true;
         break;
       case "--deps":
         options.depsPath = requireValue(argv, ++index, value);
@@ -254,9 +275,10 @@ function printUsage() {
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --recipient-public-key <hex> --out ./dist/module.wasm.enc
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --single-file-bundle --out ./dist/module.bundle.wasm
-  space-data-module sign --wasm ./dist/module.wasm --key ./test/support/dev-module-signing-keypair.json [--out ./dist/module.signed.wasm]
-  space-data-module verify --wasm ./dist/module.wasm --trusted <pubKeyHex[,pubKeyHex...]> [--require-signature]
-  space-data-module verify --wasm ./dist/module.wasm --key ./test/support/dev-module-signing-keypair.json
+  space-data-module protect ... --mnemonic-file ./publisher.mnemonic   (or SDN_MODULE_SIGNING_MNEMONIC; never on argv)
+  space-data-module sign --wasm ./dist/module.wasm --key ./publisher-keypair.json [--scope bundle|module] [--out ./dist/module.signed.wasm]
+  space-data-module verify --wasm ./dist/module.wasm --trusted <pubKeyHex[,pubKeyHex...]>
+  space-data-module flow compile ./flows/my.flow.json --deps ./modules-root --allow-unverified-local-deps   (development only)
 `);
 }
 
@@ -285,7 +307,11 @@ async function runFlow(argv) {
     const value = rest[index];
     if (!value.startsWith("--")) continue;
     flags.push(value);
-    if (value !== "--json" && rest[index + 1] !== undefined) {
+    if (
+      value !== "--json" &&
+      value !== "--allow-unverified-local-deps" &&
+      rest[index + 1] !== undefined
+    ) {
       flags.push(rest[++index]);
     }
   }
@@ -336,6 +362,7 @@ async function runFlow(argv) {
     dependencies,
     outDir,
     flowSourcePath: flowPath,
+    allowUnverifiedLocalDeps: options.allowUnverifiedLocalDeps === true,
   });
   if (options.json) {
     console.log(
@@ -700,11 +727,15 @@ async function runProtect(argv) {
   }
   const manifest = await loadManifestFromFile(options.manifestPath);
   const wasmBytes = new Uint8Array(await readFile(options.wasmPath));
+  const mnemonic = options.mnemonicFile
+    ? (await readFile(options.mnemonicFile, "utf8")).trim()
+    : (process.env.SDN_MODULE_SIGNING_MNEMONIC ?? null);
   const result = await protectModuleArtifact({
     manifest,
     wasmBytes,
     recipientPublicKeyHex: options.recipientPublicKeyHex,
-    mnemonic: options.mnemonic,
+    mnemonic,
+    ephemeralIdentity: options.ephemeralIdentity === true,
     singleFileBundle: options.singleFileBundle,
   });
   if (options.outputPath) {
@@ -714,7 +745,24 @@ async function runProtect(argv) {
     );
   }
   if (options.json) {
-    console.log(JSON.stringify(result, null, 2));
+    // A summary, never the whole result object: nothing secret, no module
+    // bytes (SEC-035).
+    console.log(
+      JSON.stringify(
+        {
+          artifactId: result.payload.artifactId,
+          programId: result.payload.programId,
+          signingPublicKeyHex: result.signingPublicKeyHex,
+          signingPath: result.signingPath,
+          encrypted: result.encrypted,
+          protectedArtifactBytes: result.protectedArtifactBytes.length,
+          bundledWasmBytes: result.bundledWasmBytes?.length ?? null,
+          outputPath: options.outputPath ?? null,
+        },
+        null,
+        2,
+      ),
+    );
   } else {
     console.log(`artifactId=${result.payload.artifactId}`);
     console.log(`signingPublicKeyHex=${result.signingPublicKeyHex}`);
@@ -741,10 +789,25 @@ async function runSign(argv) {
   if (!keypair.privateKeySeedHex) {
     throw new Error("key file must contain privateKeySeedHex.");
   }
+  const signerPublicKeyHex = bytesToHex(
+    new Uint8Array(await ed25519PublicKey(hexToBytes(keypair.privateKeySeedHex))),
+  );
+  if (isDenylistedModuleSigner(signerPublicKeyHex) && options.allowDevFixture !== true) {
+    throw new Error(
+      "refusing to sign with the public development key (its private seed is published); use your own publisher key.",
+    );
+  }
+  // Bundle scope by default: it is the only scope whose signature covers the
+  // MBL trailer (manifest, deployment plan, flow CONFIG). SEC-021.
+  const signatureScope = options.signatureScope ?? "bundle";
+  if (signatureScope !== "bundle" && signatureScope !== "module") {
+    throw new Error('--scope must be "bundle" or "module".');
+  }
   const wasmBytes = new Uint8Array(await readFile(options.wasmPath));
   const result = await signModuleArtifact(wasmBytes, {
     privateKeySeedHex: keypair.privateKeySeedHex,
     keyId: keypair.keyId ?? null,
+    signatureScope,
   });
   const outputPath = options.outputPath ?? options.wasmPath;
   await writeFile(outputPath, result.wasmBytes);
@@ -755,6 +818,7 @@ async function runSign(argv) {
           outputPath,
           keyId: result.signature.keyId,
           publicKeyHex: result.signature.publicKeyHex,
+          signatureScope,
           canonicalModuleHashHex: result.canonicalModuleHashHex,
         },
         null,
@@ -765,6 +829,7 @@ async function runSign(argv) {
     console.log(`signed=${outputPath}`);
     console.log(`keyId=${result.signature.keyId}`);
     console.log(`publicKeyHex=${result.signature.publicKeyHex}`);
+    console.log(`signatureScope=${signatureScope}`);
     console.log(`canonicalModuleHashHex=${result.canonicalModuleHashHex}`);
   }
   return 0;
@@ -780,16 +845,27 @@ async function runVerify(argv) {
     const keypair = JSON.parse(await readFile(options.keyPath, "utf8"));
     trustedPublicKeys = keypair.publicKeyHex;
   }
+  if (!trustedPublicKeys) {
+    throw new Error("verify requires --trusted <pubKeyHex[,...]> or --key <keypair.json>.");
+  }
+  // Strict: malformed keys are errors, a signature is always required, and the
+  // public development key is never trusted (SEC-008, SEC-005).
+  const policy = {
+    trustedPublicKeys: parseTrustedModuleSigners(trustedPublicKeys, {
+      source: "--trusted",
+      allowDevFixture: options.allowDevFixture === true,
+    }),
+    allowDevFixture: options.allowDevFixture === true,
+  };
   const wasmBytes = new Uint8Array(await readFile(options.wasmPath));
-  const result = await verifyModuleArtifact(wasmBytes, {
-    trustedPublicKeys,
-    requireSignature: options.requireSignature ?? true,
-  });
+  const result = await verifyTrustedModuleArtifact(wasmBytes, policy);
   if (options.json) {
     console.log(JSON.stringify(result, null, 2));
   } else {
     console.log(`verified=${result.verified}`);
     console.log(`signed=${result.signed}`);
+    console.log(`signatureScope=${result.signatureScope}`);
+    if (result.statementDomain) console.log(`statementDomain=${result.statementDomain}`);
     if (result.keyId) console.log(`keyId=${result.keyId}`);
     if (result.publicKeyHex) console.log(`publicKeyHex=${result.publicKeyHex}`);
   }

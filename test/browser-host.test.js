@@ -30,6 +30,7 @@ test("browser host exposes awaited filesystem, network, ipfs, and protocol adapt
       "protocol_handle",
       "protocol_dial",
     ],
+    allowedKeySlots: ["browser-provider-signing"],
     wasmWallet,
     capabilityAdapters: {
       filesystem: {
@@ -168,7 +169,8 @@ test("browser host exposes awaited filesystem, network, ipfs, and protocol adapt
     ),
   });
 
-  assert.equal(host.hasCapability("http"), true);
+  // "network" no longer implies "http": http is its own opt-in (SEC-009).
+  assert.equal(host.hasCapability("http"), false);
   assert.equal(host.listOperations().includes("network.request"), true);
   assert.deepEqual(mkdirResponse, {
     path: "/virtual/cache",
@@ -390,6 +392,7 @@ test("browser host keyslot.sign produces host-verifiable ed25519 and secp256k1 s
 
   const host = createBrowserHost({
     capabilities: ["wallet_sign", "crypto_sign", "crypto_verify"],
+    allowedKeySlots: ["browser-ed25519-slot", "browser-secp256k1-slot"],
     wasmWallet,
     capabilityAdapters: {
       wallet_sign: {
@@ -402,7 +405,7 @@ test("browser host keyslot.sign produces host-verifiable ed25519 and secp256k1 s
     },
   });
 
-  const payload = new TextEncoder().encode("keyslot.sign integration payload");
+  const payload = new TextEncoder().encode("keyslot.sign integration payload (non-digest)");
   const payloadBase64 = bytesToBase64(payload);
 
   // ed25519 (default algorithm, matches Go's default).
@@ -441,7 +444,7 @@ test("browser host keyslot.sign produces host-verifiable ed25519 and secp256k1 s
 
   // A tampered payload must not verify against either signature.
   const tamperedPayload = new TextEncoder().encode(
-    "keyslot.sign integration payload!",
+    "keyslot.sign integration payload (non-digest)!",
   );
   assert.equal(
     host.crypto.ed25519.verify(
@@ -484,6 +487,7 @@ test("browser host keyslot.sign rejects unsupported algorithms and requires wall
   const seed = Uint8Array.from({ length: 32 }, (_, index) => index + 5);
   const host = createBrowserHost({
     capabilities: ["wallet_sign"],
+    allowedKeySlots: ["browser-ed25519-slot"],
     wasmWallet,
     capabilityAdapters: {
       wallet_sign: { async get() { return seed; } },
@@ -522,6 +526,7 @@ test("browser host keyslot.unwrap round-trips an ECIES-wrapped payload without e
       "crypto_kdf",
       "crypto_encrypt",
     ],
+    allowedKeySlots: { "browser-x25519-slot": ["unwrap"] },
     wasmWallet,
     capabilityAdapters: {
       wallet_sign: {

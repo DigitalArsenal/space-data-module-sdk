@@ -69,6 +69,8 @@ const protectedArtifact = await protectModuleArtifact({
   manifest,
   wasmBytes: compilation.wasmBytes,
   singleFileBundle: true,
+  // demo only: a real publisher passes its mnemonic
+  ephemeralIdentity: true,
 });
 
 const parsed = await parseBundle(

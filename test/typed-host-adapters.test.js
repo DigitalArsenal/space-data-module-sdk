@@ -875,7 +875,8 @@ for (const [label, createHost] of Object.entries(HOSTS)) {
   test(`typed host adapters: ${label} answers keyslot, protocol, ipfs and pubsub through the worker harness - raw "data", the list ports, every byte form`, { timeout: 300_000 }, async (t) => {
     if (typeof SharedArrayBuffer !== "function" || typeof Atomics !== "object") { t.skip("SharedArrayBuffer/Atomics unavailable"); return; }
     const a = oracleAdapters((v) => new Promise((resolve) => setTimeout(() => resolve(v), 1)));
-    const host = createHost({ capabilities: ORACLE_GRANTED, wasmWallet: await getWasmWallet(), capabilityAdapters: { ipfs: a.ipfs, wallet_sign: a.wallet_sign, protocol_dial: a.protocol_dial, pubsub: a.pubsub } });
+    // each slot bound to the one operation the guest uses it for (SEC-024)
+    const host = createHost({ capabilities: ORACLE_GRANTED, allowedKeySlots: { "sign-ed": ["sign"], "sign-k1": ["sign"], wrap: ["unwrap"] }, wasmWallet: await getWasmWallet(), capabilityAdapters: { ipfs: a.ipfs, wallet_sign: a.wallet_sign, protocol_dial: a.protocol_dial, pubsub: a.pubsub } });
     for (const op of ["ipfs.ls", "ipfs.pin_ls", "ipfs.swarm_peers", "ipfs.dag_get", "keyslot.unwrap", "protocol.request"]) assert.ok(host.listOperations().includes(op), op);
     const harness = await createWorkerModuleHarness({ wasmSource: compilation.wasmBytes, host });
     const run = async (name) => {

@@ -1360,18 +1360,39 @@ export async function cleanupCompilation(result) {
   }
 }
 
-async function deriveSigningIdentity(mnemonic) {
+/**
+ * The publisher identity that signs a protected artifact's authorization and
+ * publication notice (security audit 2026-10-15, SEC-035).
+ *
+ * An invalid mnemonic THROWS (without echoing it): it used to be replaced, in
+ * silence, by a fresh random one, so a typo shipped artifacts signed by a key
+ * nobody holds. A missing mnemonic throws too unless the caller explicitly
+ * asks for a throwaway identity with `ephemeralIdentity: true`. The mnemonic
+ * is never returned.
+ */
+async function deriveSigningIdentity(mnemonic, options = {}) {
   const wallet = await getWasmWallet();
-  const resolvedMnemonic =
-    mnemonic && wallet.mnemonic.validate(mnemonic)
-      ? mnemonic
-      : wallet.mnemonic.generate(12);
+  let resolvedMnemonic;
+  if (mnemonic === undefined || mnemonic === null || mnemonic === "") {
+    if (options.ephemeralIdentity !== true) {
+      throw new Error(
+        "protectModuleArtifact requires the publisher signing mnemonic (or ephemeralIdentity: true for a throwaway identity).",
+      );
+    }
+    resolvedMnemonic = wallet.mnemonic.generate(12);
+  } else {
+    if (typeof mnemonic !== "string" || !wallet.mnemonic.validate(mnemonic.trim())) {
+      throw new Error(
+        "protectModuleArtifact: the signing mnemonic is not a valid BIP-39 mnemonic (word list or checksum); refusing to sign with a substitute identity.",
+      );
+    }
+    resolvedMnemonic = mnemonic.trim();
+  }
   const seed = wallet.mnemonic.toSeed(resolvedMnemonic);
   const root = wallet.hdkey.fromSeed(seed);
   const signingKey = wallet.getSigningKey(root, 0, 0, 0);
   return {
     wallet,
-    mnemonic: resolvedMnemonic,
     signingKey,
   };
 }
@@ -1392,7 +1413,14 @@ export async function protectModuleArtifact(options = {}) {
   const artifactId = options.artifactId ?? `module-${wasmHashHex.slice(0, 16)}`;
   const programId = manifest.pluginId ?? artifactId;
 
-  const identity = await deriveSigningIdentity(options.mnemonic ?? null);
+  if (options.encrypt === true && !options.recipientPublicKeyHex) {
+    throw new Error(
+      "protectModuleArtifact: encrypt: true requires recipientPublicKeyHex; refusing to emit a plaintext artifact.",
+    );
+  }
+  const identity = await deriveSigningIdentity(options.mnemonic ?? null, {
+    ephemeralIdentity: options.ephemeralIdentity === true,
+  });
   const signer = createHdWalletSigner({
     publicKeyHex: bytesToHex(identity.signingKey.publicKey),
     derivationPath: identity.signingKey.path,
@@ -1426,7 +1454,9 @@ export async function protectModuleArtifact(options = {}) {
     programId,
     manifest,
     manifestBase64: bytesToBase64(manifestBytes),
-    wasmBase64: bytesToBase64(wasmBytes),
+    // The plaintext module only when nothing is encrypted: a caller that
+    // serializes the result of an encrypted protect must not leak the module.
+    ...(options.recipientPublicKeyHex ? {} : { wasmBase64: bytesToBase64(wasmBytes) }),
     wasmHashHex,
     manifestHashHex,
     authorization: signedAuthorization,
@@ -1528,7 +1558,6 @@ export async function protectModuleArtifact(options = {}) {
   }
 
   return {
-    mnemonic: identity.mnemonic,
     signingPublicKeyHex: bytesToHex(identity.signingKey.publicKey),
     signingPath: identity.signingKey.path,
     payload,

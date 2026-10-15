@@ -1100,6 +1100,8 @@ test("artifacts can be signed and encrypted for transport", async () => {
     manifest,
     wasmBytes: result.wasmBytes,
     recipientPublicKeyHex: recipient.publicKeyHex,
+    // no publisher mnemonic in this test: a throwaway identity, asked for explicitly (SEC-035)
+    ephemeralIdentity: true,
   });
   assert.equal(protectedArtifact.encrypted, true);
   assert.ok(protectedArtifact.payload.authorization.signatureHex.length > 0);
@@ -1137,18 +1139,22 @@ test("deployment authorizations are ECDSA over sha256(bytes), hashed once: node:
   });
   const artifactAuthorization = payload.authorization;
   assert.equal(artifactAuthorization.protected.algorithm, "secp256k1-sha256");
-  assert.equal(await verifyAuthorization({ envelope: artifactAuthorization, verifier }), true);
+  // the verifier is told which signer keys it trusts; the envelope's own key header is only a claim (SEC-058)
+  assert.equal(
+    await verifyAuthorization({ envelope: artifactAuthorization, verifier, trustedPublicKeys: [artifactAuthorization.protected.publicKeyHex] }),
+    true,
+  );
   assert.equal(nodeVerifies(canonicalBytes(artifactAuthorization.payload), artifactAuthorization), true);
 
   // the SDK signer with the SDK's digest signer, a test key
   const wallet = await getWasmWallet();
   const privateKey = Uint8Array.from({ length: 32 }, (_, i) => 7 + i);
-  const publicKeyHex = Buffer.from(wallet.curves.publicKeyFromPrivate(privateKey)).toString("hex");
+  const publicKeyHex = Buffer.from(wallet.curves.publicKeyFromPrivate(privateKey, 0 /* secp256k1 */)).toString("hex");
   const authorization = await createDeploymentAuthorization({ artifactId: "single-hash", programId: "single-hash", ttlMs: 60_000 });
   const signer = createHdWalletSigner({ publicKeyHex, signDigest: (digest) => secp256k1SignDigest(digest, privateKey) });
   const signed = await signAuthorization({ authorization, signer });
   assert.equal(signed.protected.algorithm, "secp256k1-sha256");
-  assert.equal(await verifyAuthorization({ envelope: signed, verifier }), true);
+  assert.equal(await verifyAuthorization({ envelope: signed, verifier, trustedPublicKeys: [publicKeyHex] }), true);
   assert.equal(nodeVerifies(canonicalBytes(signed.payload), signed), true);
 
   // a double-hashed signature (what SDKs before 0.9.5 made) is ECDSA over sha256(sha256(bytes)): refused. It is
@@ -1163,7 +1169,7 @@ test("deployment authorizations are ECDSA over sha256(bytes), hashed once: node:
   });
   assert.equal(nodeVerifies(sha256(canonicalBytes(doubled.payload)), doubled), true, "the doubled form is ECDSA over sha256(sha256(bytes))");
   assert.equal(nodeVerifies(canonicalBytes(doubled.payload), doubled), false);
-  assert.equal(await verifyAuthorization({ envelope: doubled, verifier }), false);
+  assert.equal(await verifyAuthorization({ envelope: doubled, verifier, trustedPublicKeys: [publicKeyHex] }), false);
 });
 
 test("publication protection honors fixed PNM metadata for reproducible records", async () => {

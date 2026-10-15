@@ -602,6 +602,7 @@ test("node host routes awaited filesystem, network, ipfs, and protocol operation
       "protocol_handle",
       "protocol_dial",
     ],
+    allowedKeySlots: ["node-provider-signing"],
     capabilityAdapters: {
       filesystem: {
         resolvePath(targetPath) {
@@ -830,6 +831,7 @@ test("node host keyslot.sign produces host-verifiable ed25519 and secp256k1 sign
 
   const host = createNodeHost({
     capabilities: ["wallet_sign", "crypto_sign", "crypto_verify"],
+    allowedKeySlots: ["node-ed25519-slot", "node-secp256k1-slot"],
     capabilityAdapters: {
       wallet_sign: {
         async get(params) {
@@ -841,7 +843,7 @@ test("node host keyslot.sign produces host-verifiable ed25519 and secp256k1 sign
     },
   });
 
-  const payload = new TextEncoder().encode("keyslot.sign integration payload");
+  const payload = new TextEncoder().encode("keyslot.sign integration payload (non-digest)");
   const payloadBase64 = bytesToBase64(payload);
 
   // ed25519 (default algorithm, matches Go's default).
@@ -886,7 +888,7 @@ test("node host keyslot.sign produces host-verifiable ed25519 and secp256k1 sign
 
   // A tampered payload must not verify against either signature.
   const tamperedPayload = new TextEncoder().encode(
-    "keyslot.sign integration payload!",
+    "keyslot.sign integration payload (non-digest)!",
   );
   assert.equal(
     await host.crypto.ed25519.verify(
@@ -928,6 +930,7 @@ test("node host keyslot.sign rejects unsupported algorithms and requires wallet_
   const seed = Uint8Array.from({ length: 32 }, (_, index) => index + 5);
   const host = createNodeHost({
     capabilities: ["wallet_sign"],
+    allowedKeySlots: ["node-ed25519-slot"],
     capabilityAdapters: {
       wallet_sign: { async get() { return seed; } },
     },
@@ -964,6 +967,7 @@ test("node host keyslot.unwrap round-trips an ECIES-wrapped payload without expo
       "crypto_kdf",
       "crypto_encrypt",
     ],
+    allowedKeySlots: { "node-x25519-slot": ["unwrap"] },
     capabilityAdapters: {
       wallet_sign: {
         async get(params) {

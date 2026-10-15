@@ -2317,6 +2317,17 @@ export function locateEmbeddedPlgManifest(wasmBytes, options = {}) {
     ? wasmBytes
     : new Uint8Array(wasmBytes);
   const protectedArtifact = extractPublicationRecordCollection(inputBytes);
+  // The MBL trailer's manifest is covered by a signature ONLY in bundle scope
+  // (security audit 2026-10-15, SEC-021). Without a bundle-scope verification
+  // it is not a source: the manifest comes from the payload, which carries the
+  // module's own code. allowUnverifiedTrailerManifest is for reports that make
+  // no trust decision (compliance listings).
+  const trailerVerified =
+    options.verification?.verified === true &&
+    options.verification?.signatureScope === "bundle";
+  const trailerAllowed =
+    trailerVerified || options.allowUnverifiedTrailerManifest === true;
+  let trailerManifestBytes = null;
   for (const entry of protectedArtifact?.mbl?.entries ?? []) {
     if (
       entry?.entryId !== "manifest" &&
@@ -2324,16 +2335,28 @@ export function locateEmbeddedPlgManifest(wasmBytes, options = {}) {
     ) {
       continue;
     }
-    const located = decodeManifestCandidate(
-      new Uint8Array(entry.payload ?? []),
-      options,
-    );
+    trailerManifestBytes = new Uint8Array(entry.payload ?? []);
+    if (!trailerAllowed) break;
+    const located = decodeManifestCandidate(trailerManifestBytes, options);
     if (located) {
-      return { ...located, source: "bundle-manifest" };
+      return {
+        ...located,
+        source: trailerVerified ? "bundle-manifest" : "bundle-manifest-unverified",
+      };
     }
   }
   const bytes = protectedArtifact?.payloadBytes ?? inputBytes;
   for (const sectionBytes of getWasmCustomSections(bytes, SDS_MANIFEST_SECTION_NAME)) {
+    if (
+      trailerManifestBytes &&
+      !trailerAllowed &&
+      (trailerManifestBytes.length !== sectionBytes.length ||
+        trailerManifestBytes.some((byte, index) => byte !== sectionBytes[index]))
+    ) {
+      throw new Error(
+        `Artifact carries two different PLG manifests (MBL trailer and ${SDS_MANIFEST_SECTION_NAME} section); refusing to choose one.`,
+      );
+    }
     const located = decodeManifestCandidate(sectionBytes, options);
     if (located) {
       return { ...located, source: "custom-section" };
@@ -2385,6 +2408,7 @@ function validateEmbeddedManifestBytes({
   const located = locateEmbeddedPlgManifest(wasmBytes, {
     expectedPluginId: sourcePluginId,
     expectedVersion: sourceVersion,
+    allowUnverifiedTrailerManifest: true,
   });
   if (!located) {
     pushIssue(

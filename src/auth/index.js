@@ -6,5 +6,6 @@ export {
   createHdWalletVerifier,
   signAuthorization,
   verifyAuthorization,
+  verifyDeploymentAuthorization,
 } from "./permissions.js";
 

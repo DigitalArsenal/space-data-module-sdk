@@ -765,6 +765,21 @@ export function stripPublicationRecordCollection(bytes) {
   return parsed?.payloadBytes ?? toUint8Array(bytes);
 }
 
+/**
+ * Thrown when bytes END in the `$REC` footer but the trailer it frames cannot
+ * be decoded. Such bytes are not "unsigned": they claim a record trailer and
+ * carry a broken one. Reading them as plain payload would let anyone turn a
+ * signed artifact into an "unsigned" one by flipping a trailer byte, so the
+ * parse fails closed instead (security audit 2026-10-15, SEC-008).
+ */
+export class MalformedPublicationTrailerError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "MalformedPublicationTrailerError";
+    this.code = "malformed_trailer";
+  }
+}
+
 export function extractPublicationRecordCollection(bytes) {
   const buffer = toUint8Array(bytes);
   const recordCollectionLength = readFooterLength(buffer);
@@ -774,7 +789,9 @@ export function extractPublicationRecordCollection(bytes) {
   const footerOffset = buffer.length - TRAILER_FOOTER_LENGTH;
   const recordCollectionOffset = footerOffset - recordCollectionLength;
   if (recordCollectionOffset < 0) {
-    return null;
+    throw new MalformedPublicationTrailerError(
+      `publication record footer declares ${recordCollectionLength} trailer bytes, but only ${footerOffset} precede it`,
+    );
   }
   const recordCollectionBytes = buffer.subarray(
     recordCollectionOffset,
@@ -790,8 +807,10 @@ export function extractPublicationRecordCollection(bytes) {
       footerMagic: TRAILER_MAGIC_TEXT,
       recordCollectionLength,
     };
-  } catch {
-    return null;
+  } catch (error) {
+    throw new MalformedPublicationTrailerError(
+      `publication record trailer is present but does not decode: ${error?.message ?? error}`,
+    );
   }
 }
 

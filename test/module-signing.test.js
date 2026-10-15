@@ -219,11 +219,26 @@ test("signing raw compiled wasm preserves the embedded PLG manifest", async () =
   const signed = await signModuleArtifact(wasm, {
     privateKeySeedHex: keypair.privateKeySeedHex,
     keyId: keypair.keyId,
+    signatureScope: "bundle",
   });
 
+  // The MBL trailer's manifest is read as the artifact's manifest only when a
+  // bundle-scope signature over it has been verified (SEC-021).
+  assert.equal(
+    locateEmbeddedPlgManifest(signed.wasmBytes, {
+      expectedPluginId: manifest.pluginId,
+      expectedVersion: manifest.version,
+    })?.source === "bundle-manifest",
+    false,
+  );
+  const verification = await verifyModuleArtifact(signed.wasmBytes, {
+    trustedPublicKeys: [keypair.publicKeyHex],
+    requireSignature: true,
+  });
   const located = locateEmbeddedPlgManifest(signed.wasmBytes, {
     expectedPluginId: manifest.pluginId,
     expectedVersion: manifest.version,
+    verification,
   });
   assert.equal(located?.source, "bundle-manifest");
   assert.equal(located.decoded.pluginId, manifest.pluginId);

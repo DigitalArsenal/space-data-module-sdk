@@ -96,7 +96,22 @@ test("bogus trailing bytes with a REC identifier are rejected", () => {
     payloadBytes,
     bogusRecordCollectionBytes,
   );
-  assert.equal(extractPublicationRecordCollection(protectedBytes), null);
+  // A $REC footer framing a trailer that does not decode is MALFORMED, not
+  // "no trailer": reading it as plain payload would let a flipped trailer byte
+  // turn a signed artifact into an "unsigned" one (SEC-008).
+  assert.throws(
+    () => extractPublicationRecordCollection(protectedBytes),
+    (error) => error.code === "malformed_trailer",
+  );
+  // a footer that claims more trailer bytes than precede it is malformed too
+  const overlong = new Uint8Array(protectedBytes);
+  new DataView(overlong.buffer).setUint32(overlong.length - 8, 0xffff, true);
+  assert.throws(
+    () => extractPublicationRecordCollection(overlong),
+    (error) => error.code === "malformed_trailer",
+  );
+  // bytes with no footer at all are still simply "no trailer"
+  assert.equal(extractPublicationRecordCollection(payloadBytes), null);
   assert.throws(
     () => decodePublicationRecordCollection(bogusRecordCollectionBytes),
     /invalid|bounds|records|missing/i,

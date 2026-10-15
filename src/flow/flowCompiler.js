@@ -68,10 +68,15 @@ import {
   getPayloadTypeWireFormat,
   payloadSchemaIdentitiesEqual,
 } from "../manifest/index.js";
-import { appendWasmCustomSection } from "../bundle/wasm.js";
+import { appendWasmCustomSection, parseSingleFileBundle } from "../bundle/wasm.js";
 import { runtimeTargetSatisfies } from "../host/runtimeTargetGate.js";
-import { SDS_MANIFEST_SECTION_NAME } from "../bundle/constants.js";
+import {
+  SDS_GUEST_LINK_METADATA_ENTRY_ID,
+  SDS_GUEST_LINK_OBJECT_ENTRY_ID,
+  SDS_MANIFEST_SECTION_NAME,
+} from "../bundle/constants.js";
 import { verifyModuleArtifact } from "../bundle/signing.js";
+import { isDenylistedModuleSigner } from "../bundle/trustPolicy.js";
 import { DOMAIN_MODULE_PUBLICATION_V1 } from "../bundle/sigdomain.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { bytesToHex } from "../utils/encoding.js";
@@ -295,6 +300,11 @@ async function verifyIsomorphicNodeArtifacts({
         `Isomorphic node "${checkedNode.nodeId}" publisher has no valid Ed25519 public key.`,
       );
     }
+    if (isDenylistedModuleSigner(publisher.publicKeyHex)) {
+      throw new Error(
+        `Isomorphic node "${checkedNode.nodeId}" publisher is the public development signer, whose private key is published.`,
+      );
+    }
     const verification = await verifyModuleArtifact(artifactBytes, {
       trustedPublicKeys: [publisher.publicKeyHex],
       requireSignature: true,
@@ -354,6 +364,133 @@ async function verifyIsomorphicNodeArtifacts({
     });
   }
   return verifiedByPluginId;
+}
+
+/**
+ * LINKED-DIRECT dependencies come from a verified, signed bundle (security
+ * audit 2026-10-15, SEC-026).
+ *
+ * A linked-direct node's object code is linked INTO the flow binary, and its
+ * capability slice becomes part of the flow's. Both used to come from
+ * dist/guest-link/ on disk, with no hash or signature, so whoever could write
+ * that directory chose what the published (and then signed) flow ran.
+ *
+ * Now each linked-direct node binds `artifact: {path, publisher, sha256}`
+ * like an isomorphic node. The artifact must be exactly those bytes, signed
+ * with BUNDLE scope (the only scope that covers the MBL, where the guest-link
+ * entries live) by a non-development publisher, and declare the node's
+ * pluginId. The object and metadata that get linked are the bundle's
+ * sds.guest-link entries, never the dist/ files. The engine-linked object
+ * variant has no signed bundle form yet, so verified linking uses the
+ * standard object.
+ *
+ * `allowUnverifiedLocalDeps: true` keeps the old dist/ behaviour for local
+ * development; the compiled artifact is then stamped developmentOnly.
+ */
+async function verifyLinkedDirectDependencies({ flow, dependencies, flowSourcePath }) {
+  const verified = new Map(dependencies);
+  const byPluginId = new Map();
+  for (const node of flow?.nodes ?? []) {
+    const dependency = dependencies.get(node?.pluginId);
+    if (!dependency) continue; // host-dispatched node
+    if (requestedNodeDispatchModel(node) === "isomorphic") continue;
+    const nodeId = node?.nodeId ?? "?";
+    const lock = node?.artifact;
+    const lockValid =
+      lock &&
+      typeof lock === "object" &&
+      typeof lock.path === "string" &&
+      lock.path.trim().length > 0 &&
+      typeof lock.publisher === "string" &&
+      lock.publisher.trim().length > 0 &&
+      typeof lock.sha256 === "string" &&
+      /^[0-9a-f]{64}$/.test(lock.sha256);
+    if (!lockValid) {
+      throw new Error(
+        `Linked-direct node "${nodeId}" must bind artifact.path, artifact.publisher and an exact lowercase SHA-256 ` +
+          "of a bundle-scope signed module whose guest-link entries are linked " +
+          "(compile with allowUnverifiedLocalDeps / --allow-unverified-local-deps for local development only).",
+      );
+    }
+    const prior = byPluginId.get(node.pluginId);
+    if (prior) {
+      if (prior !== lock.sha256) {
+        throw new Error(
+          `Linked-direct plugin "${node.pluginId}" is bound to conflicting artifact hashes.`,
+        );
+      }
+      continue;
+    }
+    const flowBase = flowSourcePath
+      ? path.dirname(path.resolve(flowSourcePath))
+      : dependency.dir ?? process.cwd();
+    const artifactPath = path.isAbsolute(lock.path) ? lock.path : path.resolve(flowBase, lock.path);
+    const artifactBytes = dependency.artifactBytes
+      ? new Uint8Array(dependency.artifactBytes)
+      : new Uint8Array(await readFile(artifactPath));
+    const exactSha256 = bytesToHex(await sha256Bytes(artifactBytes));
+    if (exactSha256 !== lock.sha256) {
+      throw new Error(
+        `Linked-direct node "${nodeId}" artifact hash mismatch: expected ${lock.sha256}, received ${exactSha256}.`,
+      );
+    }
+    const publisherPath = path.isAbsolute(lock.publisher)
+      ? lock.publisher
+      : path.resolve(flowBase, lock.publisher);
+    const publisher = dependency.publisherRecord
+      ? dependency.publisherRecord
+      : JSON.parse(await readFile(publisherPath, "utf8"));
+    if (publisher?.developmentOnly === true) {
+      throw new Error(`Linked-direct node "${nodeId}" is signed only by a development publisher.`);
+    }
+    if (!/^[0-9a-f]{64}$/.test(publisher?.publicKeyHex ?? "")) {
+      throw new Error(`Linked-direct node "${nodeId}" publisher has no valid Ed25519 public key.`);
+    }
+    if (isDenylistedModuleSigner(publisher.publicKeyHex)) {
+      throw new Error(
+        `Linked-direct node "${nodeId}" publisher is the public development signer, whose private key is published.`,
+      );
+    }
+    const verification = await verifyModuleArtifact(artifactBytes, {
+      trustedPublicKeys: [publisher.publicKeyHex],
+      requireSignature: true,
+    });
+    if (verification?.verified !== true || verification.signatureScope !== "bundle") {
+      throw new Error(
+        `Linked-direct node "${nodeId}" artifact is not a verified whole-bundle signature; ` +
+          "only a bundle-scope signature covers the guest-link entries that get linked.",
+      );
+    }
+    const parsed = await parseSingleFileBundle(artifactBytes);
+    if (parsed.manifest?.pluginId && parsed.manifest.pluginId !== node.pluginId) {
+      throw new Error(
+        `Linked-direct node "${nodeId}" artifact declares plugin "${parsed.manifest.pluginId}", not "${node.pluginId}".`,
+      );
+    }
+    const objectEntry = parsed.entries.find((entry) => entry.entryId === SDS_GUEST_LINK_OBJECT_ENTRY_ID);
+    const metadataEntry = parsed.entries.find((entry) => entry.entryId === SDS_GUEST_LINK_METADATA_ENTRY_ID);
+    const metadata = metadataEntry?.decodedPayload;
+    if (!objectEntry || objectEntry.payloadBytes.length === 0 || !metadata || typeof metadata !== "object" || metadata instanceof Uint8Array) {
+      throw new Error(
+        `Linked-direct node "${nodeId}" artifact carries no signed guest-link object and metadata.`,
+      );
+    }
+    const objectBytes = new Uint8Array(objectEntry.payloadBytes);
+    verified.set(node.pluginId, {
+      ...dependency,
+      guestLink: { objectBytes, metadata },
+      guestLinkLinked: null,
+      linkedArtifactLock: {
+        path: lock.path,
+        publisher: lock.publisher,
+        sha256: exactSha256,
+        guestLinkObjectSha256: bytesToHex(await sha256Bytes(objectBytes)),
+        signerPublicKeyHex: verification.publicKeyHex,
+      },
+    });
+    byPluginId.set(node.pluginId, lock.sha256);
+  }
+  return verified;
 }
 
 // ---------------------------------------------------------------------------
@@ -3041,12 +3178,23 @@ async function linkFlowArtifactWithWasiThreads({
  */
 export async function compileFlowProgram({
   flow,
-  dependencies,
+  dependencies: resolvedDependencies,
   outDir,
   flowSourcePath = null,
   catalog,
   standardsRoot,
+  allowUnverifiedLocalDeps = false,
 }) {
+  // Linked-direct object code and capability slices come from verified,
+  // signed bundles unless the caller explicitly asks for an unverified
+  // development build (SEC-026).
+  const dependencies = allowUnverifiedLocalDeps === true
+    ? resolvedDependencies
+    : await verifyLinkedDirectDependencies({
+        flow,
+        dependencies: resolvedDependencies,
+        flowSourcePath,
+      });
   const check = checkFlowProgram({ flow, dependencies });
   if (!check.ok) {
     const error = new Error(
@@ -3164,7 +3312,7 @@ export async function compileFlowProgram({
 
   const dependencyRecords = [];
   for (const dependency of runtimeDependencies) {
-    let sha256 = dependency.artifactLock?.sha256 ?? null;
+    let sha256 = dependency.artifactLock?.sha256 ?? dependency.linkedArtifactLock?.sha256 ?? null;
     if (!sha256) {
       try {
         sha256 = bytesToHex(
@@ -3181,8 +3329,13 @@ export async function compileFlowProgram({
       version: dependency.manifest?.version ?? null,
       sha256,
       dispatchModel: dependency.artifactLock ? "isomorphic" : "linked-direct",
-      artifactPath: dependency.artifactLock?.path ?? null,
-      publisher: dependency.artifactLock?.publisher ?? null,
+      artifactPath: dependency.artifactLock?.path ?? dependency.linkedArtifactLock?.path ?? null,
+      publisher: dependency.artifactLock?.publisher ?? dependency.linkedArtifactLock?.publisher ?? null,
+      // the exact object linked into this flow, for linked-direct nodes
+      guestLinkObjectSha256: dependency.guestLink?.objectBytes
+        ? bytesToHex(await sha256Bytes(dependency.guestLink.objectBytes))
+        : null,
+      verified: Boolean(dependency.artifactLock || dependency.linkedArtifactLock),
       symbolPrefix: dependency.guestLink?.metadata?.symbolPrefix ?? null,
       methodSymbols: dependency.guestLink?.metadata?.methodSymbols ?? {},
     });
@@ -3218,6 +3371,11 @@ export async function compileFlowProgram({
     engineLinkage: check.engineLinkage ? "flatsql-direct" : "bridge",
     dispatch: check.nodes,
     dependencies: dependencyRecords,
+    // An unverified local build links dist/ objects nobody signed: it must
+    // never be published or signed as a release.
+    developmentOnly:
+      allowUnverifiedLocalDeps === true &&
+      check.nodes.some((node) => node.dispatchModel === "linked-direct"),
   };
 
   const outputs = {};
@@ -3273,6 +3431,7 @@ export const __testables = {
   // SHARED statement-domain vectors directly, instead of inferring it from a
   // full compile that fails for a dozen later reasons.
   verifyIsomorphicNodeArtifacts,
+  verifyLinkedDirectDependencies,
   normalizePluginFamilyName,
   resolveNodePluginFamilyBindings,
 };

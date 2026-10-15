@@ -53,6 +53,7 @@ function createRecordingAdapters() {
 test("browser host routes storage.* and pubsub.* to capability adapters", async () => {
   const { calls, storage, pubsub } = createRecordingAdapters();
   const host = createBrowserHost({
+    capabilities: ["storage_write", "storage_query", "pubsub"],
     capabilityAdapters: { storage, pubsub },
   });
   // Guest hostcalls travel through the async dispatcher (host.invoke first).
@@ -92,9 +93,16 @@ test("browser host routes storage.* and pubsub.* to capability adapters", async 
 
 test("storage/pubsub report as supported capabilities and operations", () => {
   const { storage, pubsub } = createRecordingAdapters();
-  const host = createBrowserHost({ capabilityAdapters: { storage, pubsub } });
+  // Default-deny (SEC-009): supported, but granted only when listed.
+  const ungranted = createBrowserHost({ capabilityAdapters: { storage, pubsub } });
+  const host = createBrowserHost({
+    capabilities: ["storage_query", "storage_write", "pubsub"],
+    capabilityAdapters: { storage, pubsub },
+  });
   for (const cap of ["storage_query", "storage_write", "pubsub"]) {
-    assert.ok(host.hasCapability(cap), `capability ${cap} granted by default`);
+    assert.ok(ungranted.listSupportedCapabilities().includes(cap), `capability ${cap} supported`);
+    assert.equal(ungranted.hasCapability(cap), false, `capability ${cap} not granted by default`);
+    assert.ok(host.hasCapability(cap), `capability ${cap} granted when listed`);
   }
   const ops = host.listOperations();
   for (const op of [
@@ -122,7 +130,7 @@ test("storage/pubsub are capability-gated and adapter-gated", async () => {
   );
   await assert.rejects(gated.invoke("pubsub.publish", { topic: "t" }), /pubsub/);
 
-  const unconfigured = createBrowserHost({});
+  const unconfigured = createBrowserHost({ capabilities: ["storage_write", "pubsub"] });
   await assert.rejects(
     unconfigured.invoke("storage.write", { schema: "OMM", data: "AA==" }),
     /storage adapter is not configured/,

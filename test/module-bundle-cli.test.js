@@ -58,6 +58,8 @@ test("CLI protect can emit a single-file bundle wasm", async (t) => {
     "--wasm",
     wasmPath,
     "--single-file-bundle",
+    // no publisher mnemonic in this test: a throwaway identity, asked for explicitly (SEC-035)
+    "--ephemeral-identity",
     "--out",
     bundledPath,
   ]);
@@ -116,6 +118,7 @@ test("CLI protect can emit an encrypted binary with an appended REC trailer", as
     wasmPath,
     "--recipient-public-key",
     recipient.publicKeyHex,
+    "--ephemeral-identity",
     "--out",
     encryptedPath,
   ]);
