@@ -102,6 +102,56 @@ space-data-module verify \
 true. Output reports `verified`, `signed`, `keyId`, `publicKeyHex`, and the
 process exits non-zero unless verification succeeded.
 
+## Load
+
+A signed artifact is `module.wasm` with the publication trailer appended, and
+every wasm engine refuses the trailer ("malformed section id"). That refusal is
+deliberate: the only way from a published artifact to bytes an engine runs is
+`openModuleArtifact` (`space-data-module-sdk/bundle`), which checks the
+signature and strips the trailer in one step. Every SDK loader goes through it
+— `createBrowserModuleHarness`, `createWorkerModuleHarness`, `loadModule`,
+`createModuleHarness`, `runParityHarness` and the parity gate.
+
+```js
+import { openModuleArtifact } from "space-data-module-sdk/bundle";
+
+const { wasmBytes, verification } = await openModuleArtifact(artifactBytes, {
+  verifySignature: { trustedPublicKeys: [ownerKeyHex], requireSignature: true },
+});
+const module = await WebAssembly.compile(wasmBytes);
+```
+
+With a trust policy the signature must chain to a trusted key, and
+`requireSignature` refuses unsigned modules. With no policy configured, a
+signed artifact must still be intact — its signature must verify against the
+key it names — so a tampered or re-trailered artifact is refused rather than
+stripped and run; `verification.trusted` is then `false`. Production hosts
+should always configure a policy: without one an unsigned module still loads.
+
+Engines that only read files — the `wasmedge` CLI, the SDK's WasmEdge
+runners, `wasmedgec`, a Docker container — take a STAGED copy:
+
+```js
+import { stageModuleArtifact } from "space-data-module-sdk/bundle/stage";
+
+const staged = await stageModuleArtifact("dist/isomorphic/module.wasm", {
+  verifySignature: { trustedPublicKeys: [ownerKeyHex], requireSignature: true },
+  directory: ".sdk-build", // optional: a directory a container mounts
+});
+try {
+  // run staged.path: exactly the checked payload, in a private 0700 directory
+} finally {
+  await staged.dispose();
+}
+```
+
+The artifact is read once and the engine never sees the delivered path, so a
+file swapped after the check is not what runs. `createModuleHarness` and
+`loadModule` stage every path they launch; `resolveWasmEdgePluginLaunchPlan`
+refuses a path that still carries a trailer (`unstaged_artifact`). An explicit
+`launchPlan` is the caller's own command line and is launched as given.
+`toLoadableWasmBytes` strips without checking and is for inspection only.
+
 ## Key custody
 
 Signing keys are HD-derived from a node's root identity by default; supplying an

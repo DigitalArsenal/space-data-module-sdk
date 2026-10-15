@@ -15,6 +15,7 @@
  */
 
 import { createBrowserWasiShim } from "../host/wasiShim.js";
+import { openModuleArtifact } from "../bundle/artifactBytes.js";
 import {
   assertArtifactRuntimeTarget,
   detectBrowserLeg,
@@ -203,16 +204,17 @@ export async function createFlowRuntimeHost(options = {}) {
     if (!source) {
       throw new TypeError("createFlowRuntimeHost requires wasmSource bytes or a wasmModule.");
     }
-    const bytes = stripPublicationTrailer(
+    // THE ONE LOAD PATH (openModuleArtifact): the artifact's signature is
+    // checked under this host's policy (a signed artifact must at least be
+    // intact) and the publication trailer stripped, before the compile.
+    // Plaintext hygiene: the payload is a VIEW over the caller's own buffer,
+    // so it is never this function's to zero, and WebAssembly.compile accepts
+    // the view directly — no extra plaintext copy.
+    const { wasmBytes } = await openModuleArtifact(
       source instanceof Uint8Array ? source : new Uint8Array(source),
+      options,
     );
-    // Plaintext hygiene: `bytes` is a VIEW over the caller's own buffer
-    // (stripPublicationTrailer only ever narrows via subarray(), never
-    // copies), so it is never this function's buffer to zero — and
-    // WebAssembly.compile accepts a BufferSource view directly, so a
-    // defensive `.slice().buffer` copy here would only add an extra
-    // plaintext buffer that nothing zeroes. Compile from the view; no copy.
-    wasmModule = await WebAssembly.compile(bytes);
+    wasmModule = await WebAssembly.compile(wasmBytes);
   }
 
   // THE COMPOSED FLOW'S DOOR. A composed artifact now derives its

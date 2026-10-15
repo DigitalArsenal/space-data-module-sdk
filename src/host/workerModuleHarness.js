@@ -27,7 +27,15 @@ import {
 } from "./sabHostcallChannel.js";
 import { WASI_THREAD_HOSTCALL_MESSAGE } from "./wasiThreadWorkerRuntime.js";
 import { importNodeBuiltin } from "./nodeBuiltinSpecifier.js";
-import { assertBrowserRuntimeTarget } from "./browserModuleHarness.js";
+import {
+  assertBrowserRuntimeTarget,
+  zeroWasmBytes,
+} from "./browserModuleHarness.js";
+import { openModuleArtifact } from "../bundle/artifactBytes.js";
+import {
+  ModuleSignatureError,
+  resolveModuleSignaturePolicy,
+} from "../bundle/signing.js";
 
 const WORKER_URL = new URL("./workerModuleHarnessWorker.js", import.meta.url);
 
@@ -91,24 +99,40 @@ async function spawnWorker(workerUrl) {
  * which hands the same compiled module to every pooled worker in both
  * lanes. Shipping the MODULE instead of raw bytes means there is no second
  * plaintext copy alive in the worker, and no re-compile once it arrives —
- * `createBrowserModuleHarness`'s own `compileWasmModule` already accepts a
- * `WebAssembly.Module` directly and returns it unchanged.
+ * `createBrowserModuleHarness` accepts a `WebAssembly.Module` directly.
  *
- * `source` is never retained past this call and never zeroed here: a
- * caller-supplied `Uint8Array`/`ArrayBuffer` is not this harness's buffer to
- * mutate (compile does not retain a reference to it either — the caller is
- * free to reuse or scrub it immediately after this resolves).
+ * Bytes go through the ONE load path (`openModuleArtifact`): the signature is
+ * checked and the publication trailer stripped before the compile, on a copy
+ * this harness owns and scrubs afterwards. A caller-supplied
+ * `Uint8Array`/`ArrayBuffer` is never retained or mutated. A precompiled
+ * `WebAssembly.Module` carries nothing to check, so it is refused when a trust
+ * policy is configured.
  *
  * @param {WebAssembly.Module|Uint8Array|ArrayBuffer} source
  * @param {string} label diagnostic label
+ * @param {object} options loader options carrying `verifySignature`
  * @returns {Promise<WebAssembly.Module>}
  */
-async function toWasmModule(source, label) {
+async function toWasmModule(source, label, options) {
   if (source instanceof WebAssembly.Module) {
+    if (resolveModuleSignaturePolicy(options)) {
+      throw new ModuleSignatureError(
+        "unverifiable_source",
+        "Cannot verify a precompiled WebAssembly.Module; pass bytes when signature verification is enabled.",
+      );
+    }
     return source;
   }
   if (source instanceof Uint8Array || source instanceof ArrayBuffer) {
-    return WebAssembly.compile(source);
+    const artifactBytes = new Uint8Array(
+      source instanceof ArrayBuffer ? source.slice(0) : source,
+    );
+    try {
+      const { wasmBytes } = await openModuleArtifact(artifactBytes, options);
+      return await WebAssembly.compile(wasmBytes);
+    } finally {
+      zeroWasmBytes(artifactBytes);
+    }
   }
   throw new TypeError(
     `${label} must be a WebAssembly.Module, Uint8Array, or ArrayBuffer.`,
@@ -130,7 +154,7 @@ async function toWasmModule(source, label) {
  *   createBrowserModuleHarness (surface, args, env, allowRawInvoke, logOutput, ...)
  */
 export async function createWorkerModuleHarness(options = {}) {
-  const wasmModule = await toWasmModule(options.wasmSource, "wasmSource");
+  const wasmModule = await toWasmModule(options.wasmSource, "wasmSource", options);
   // Fail on THIS thread, before a worker, a SAB channel and a BroadcastChannel
   // are stood up for an artifact the browser leg must not run. The in-worker
   // createBrowserModuleHarness would refuse it too, but a rejection that

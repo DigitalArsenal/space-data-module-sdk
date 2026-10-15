@@ -47,7 +47,6 @@ import { toUint8Array } from "../runtime/bufferLike.js";
 import {
   ModuleSignatureError,
   resolveModuleSignaturePolicy,
-  verifyModuleArtifact,
 } from "../bundle/signing.js";
 import {
   assertArtifactRuntimeTarget,
@@ -56,9 +55,12 @@ import {
 // Artifact byte reduction is an ARTIFACT concern shared by all three runtimes,
 // so it lives on `space-data-module-sdk/bundle`. Re-exported here because a
 // caller loading a module in the browser needs it in the same breath.
-import { toLoadableWasmBytes } from "../bundle/artifactBytes.js";
+import {
+  openModuleArtifact,
+  toLoadableWasmBytes,
+} from "../bundle/artifactBytes.js";
 
-export { toLoadableWasmBytes };
+export { openModuleArtifact, toLoadableWasmBytes };
 
 const STANDALONE_SHARED_MEMORY_ENV_STUBS = Object.freeze({
   _emscripten_init_main_thread_js: () => 0,
@@ -160,25 +162,32 @@ export function detectArtifactProfile(wasmModule) {
   return "unknown";
 }
 
-async function compileWasmModule(source) {
-  if (source instanceof WebAssembly.Module) {
-    return source;
-  }
-  let bytes;
+/**
+ * Read a module source the harness was handed into bytes THIS harness owns: a
+ * fetch, or a copy of the caller's buffer. The copy means the bytes cannot
+ * change between the signature check and the compile, and that scrubbing them
+ * afterwards never touches a buffer the caller still holds.
+ */
+async function readModuleSource(source) {
   if (source instanceof Response) {
-    bytes = new Uint8Array(await source.arrayBuffer());
-  } else if (typeof source === "string") {
+    return new Uint8Array(await source.arrayBuffer());
+  }
+  if (typeof source === "string") {
     const response = await fetch(source);
     if (!response.ok) {
       throw new Error(`Failed to fetch module artifact: ${response.status}`);
     }
-    bytes = new Uint8Array(await response.arrayBuffer());
-  } else {
-    bytes = source instanceof ArrayBuffer ? new Uint8Array(source) : source;
+    return new Uint8Array(await response.arrayBuffer());
   }
-  // Strip any appended publication record collection (signature/PNM/REC
-  // trailers) — wasm engines reject trailing non-section bytes.
-  return WebAssembly.compile(toLoadableWasmBytes(bytes));
+  if (source instanceof ArrayBuffer) {
+    return new Uint8Array(source.slice(0));
+  }
+  if (ArrayBuffer.isView(source)) {
+    return new Uint8Array(
+      source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength),
+    );
+  }
+  return new Uint8Array(source);
 }
 
 const WASM_PAGE_BYTES = 65536;
@@ -481,50 +490,31 @@ async function instantiateBrowserModule(options = {}) {
  */
 export async function createBrowserModuleHarness(options = {}) {
   let wasmSource = options.wasmSource;
-  const signaturePolicy = resolveModuleSignaturePolicy(options);
-  // Bytes THIS function materializes itself (Response/URL fetch, or the
-  // ArrayBuffer/array copy taken for signature verification) — never a
-  // caller-owned buffer, which this function neither created nor may safely
-  // scrub. Zeroed below once the module is compiled.
-  let ownedArtifactBytes = null;
-  if (signaturePolicy) {
-    if (wasmSource instanceof WebAssembly.Module) {
+  let wasmModule;
+  if (wasmSource instanceof WebAssembly.Module) {
+    // A precompiled module carries no artifact bytes to check. Accepted only
+    // when no trust policy is configured; the caller compiled it, the caller
+    // vouches for it.
+    if (resolveModuleSignaturePolicy(options)) {
       throw new ModuleSignatureError(
         "unverifiable_source",
         "Cannot verify a precompiled WebAssembly.Module; pass bytes, a URL, or a Response when signature verification is enabled.",
       );
     }
-    let artifactBytes;
-    if (wasmSource instanceof Response) {
-      artifactBytes = new Uint8Array(await wasmSource.arrayBuffer());
-    } else if (typeof wasmSource === "string") {
-      const response = await fetch(wasmSource);
-      if (!response.ok) {
-        throw new Error(
-          `Failed to fetch module artifact for verification: ${response.status}`,
-        );
-      }
-      artifactBytes = new Uint8Array(await response.arrayBuffer());
-    } else {
-      artifactBytes =
-        wasmSource instanceof ArrayBuffer
-          ? new Uint8Array(wasmSource)
-          : new Uint8Array(wasmSource);
+    wasmModule = wasmSource;
+  } else {
+    // THE ONE LOAD PATH (openModuleArtifact): the signature is checked and
+    // the trailer stripped in one step, on bytes nobody else holds.
+    const artifactBytes = await readModuleSource(wasmSource);
+    try {
+      const { wasmBytes } = await openModuleArtifact(artifactBytes, options);
+      wasmModule = await WebAssembly.compile(wasmBytes);
+    } finally {
+      // Plaintext hygiene (wasm-plaintext-memory-hygiene): nothing needs the
+      // source bytes past this point.
+      zeroWasmBytes(artifactBytes);
     }
-    await verifyModuleArtifact(artifactBytes, signaturePolicy);
-    wasmSource = artifactBytes;
-    ownedArtifactBytes = artifactBytes;
   }
-  const wasmModule = await compileWasmModule(wasmSource);
-  // Plaintext hygiene (wasm-plaintext-memory-hygiene): nothing needs the
-  // source bytes past this point. Scrub whatever THIS function materialized
-  // itself, then drop every local/options reference to the source — a
-  // caller-supplied Uint8Array/ArrayBuffer must not outlive this call by
-  // being pinned via closure over `options` for the harness's entire
-  // lifetime (the returned harness closes over `options` for many other,
-  // unrelated fields).
-  zeroWasmBytes(ownedArtifactBytes);
-  ownedArtifactBytes = null;
   wasmSource = null;
   options.wasmSource = null;
   assertBrowserRuntimeTarget(wasmModule, options.manifest);

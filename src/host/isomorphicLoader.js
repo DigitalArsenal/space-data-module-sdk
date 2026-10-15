@@ -20,13 +20,9 @@
 
 import {
   createBrowserModuleHarness,
-  toLoadableWasmBytes,
   zeroWasmBytes,
 } from "./browserModuleHarness.js";
-import {
-  resolveModuleSignaturePolicy,
-  verifyModuleArtifact,
-} from "../bundle/signing.js";
+import { openModuleArtifact } from "../bundle/artifactBytes.js";
 import { attachHostDispatch, inspectModule } from "./isomorphicLoaderCore.js";
 import { assertArtifactRuntimeTarget } from "./runtimeTargetGate.js";
 import { DEFAULT_HOSTCALL_IMPORT_MODULE } from "./abi.js";
@@ -40,10 +36,17 @@ const isBrowser =
   typeof globalThis.window !== "undefined" &&
   typeof globalThis.document !== "undefined";
 
-async function createWasmEdgeCommandHarness(options = {}) {
+/**
+ * @param {Object} options - loadModule options
+ * @param {Object} staged - the `stageModuleArtifact` result loadModule made:
+ *   the checked payload in a private file. This harness launches that file and
+ *   never re-reads the artifact path, so the bytes WasmEdge runs are the bytes
+ *   whose signature was checked. It owns the stage and disposes it on destroy.
+ * @param {WebAssembly.Module} wasmModule - the staged payload, compiled
+ */
+async function createWasmEdgeCommandHarness(options, staged, wasmModule) {
   const [
     { spawn },
-    { readFile },
     pathModule,
     { encodePluginInvokeRequest, decodePluginInvokeResponse },
     { buildWasmEdgeSpawnEnv },
@@ -51,7 +54,6 @@ async function createWasmEdgeCommandHarness(options = {}) {
     { toUint8Array },
   ] = await Promise.all([
     import("node:child_process"),
-    import("node:fs/promises"),
     import("node:path"),
     import("../invoke/codec.js"),
     import("../testing/processInvoke.js"),
@@ -59,15 +61,7 @@ async function createWasmEdgeCommandHarness(options = {}) {
     import("../runtime/bufferLike.js"),
   ]);
   const path = pathModule.default ?? pathModule;
-  const wasmPath = path.resolve(String(options.wasmSource));
-  const wasmBytes = await readFile(wasmPath);
-  // Signed/published artifacts carry an appended publication record
-  // collection that WasmEdge rejects ("malformed section id"). Strip to the
-  // canonical module payload; if anything was stripped, launch WasmEdge from
-  // a temp copy of the stripped bytes (signature verification, when
-  // requested, already ran against the full artifact in loadModule()).
-  const loadableBytes = toLoadableWasmBytes(wasmBytes);
-  const inspection = await inspectModule(loadableBytes);
+  const inspection = await inspectModule(wasmModule);
 
   const threaded = inspection.imports.some((entry) =>
     entry.module === "wasi" && entry.name === "thread-spawn");
@@ -96,7 +90,7 @@ async function createWasmEdgeCommandHarness(options = {}) {
   const command = useRunner
     ? await (await import("../testing/buildWasmEdgeRunner.js")).resolveWasmEdgeWasiThreadsRunner(options)
     : options.wasmEdgeRunnerBinary ?? options.wasmEdgeBinary ?? "wasmedge";
-  let launchWasmPath = wasmPath;
+  const launchWasmPath = staged.path;
   let tempArtifactDir = null;
   const ensureTempDir = async () => {
     if (!tempArtifactDir) {
@@ -109,11 +103,6 @@ async function createWasmEdgeCommandHarness(options = {}) {
     }
     return tempArtifactDir;
   };
-  if (loadableBytes.byteLength !== wasmBytes.byteLength) {
-    const { writeFile } = await import("node:fs/promises");
-    launchWasmPath = path.join(await ensureTempDir(), "module.wasm");
-    await writeFile(launchWasmPath, loadableBytes);
-  }
   // The runner replays staged $PIV answers for the bridge, as on the parity
   // lanes: plugin.getConfig answers the module's config (options.config, else
   // the host's plugin.getConfig(), else {}), and every other operation answers
@@ -227,6 +216,7 @@ async function createWasmEdgeCommandHarness(options = {}) {
         await rm(tempArtifactDir, { recursive: true, force: true });
         tempArtifactDir = null;
       }
+      await staged.dispose();
     },
   };
 }
@@ -247,7 +237,6 @@ async function createWasmEdgeCommandHarness(options = {}) {
  * @returns {Promise<Object>} Harness with invoke(), readManifest(), destroy().
  */
 export async function loadModule(options = {}) {
-  const signaturePolicy = resolveModuleSignaturePolicy(options);
   if (isBrowser) {
     return createBrowserModuleHarness(options);
   }
@@ -262,50 +251,68 @@ export async function loadModule(options = {}) {
 
   const runtimeKind = options.runtimeKind ?? "wasmedge";
 
-  // ONE READ of the artifact, serving every question this function asks of the
-  // bytes: the signature, the runtime-target declaration, and the profile
-  // inspection below. Each of those used to open the file for itself. The
-  // plaintext buffer this function materialized is scrubbed the moment the
-  // last of them is answered, matching the browser harness's
-  // ownedArtifactBytes contract.
   const runtimeHostRequested =
     String(options.hostProfile ?? "").trim().toLowerCase() === "runtime-host" ||
     Array.isArray(options.modules) ||
     (typeof options.defaultModuleId === "string" &&
       options.defaultModuleId.trim().length > 0);
-  // The profile inspection is the ONLY consumer here that needs a compiled
-  // module. The runtime-host path does not take it, and it must not start
-  // paying a V8 compile of the whole artifact on every load just because the
-  // runtime-target gate arrived — the gate reads a custom section, which is a
-  // byte-level question.
-  const needsCompiledModule =
-    runtimeKind === "wasmedge" &&
-    !runtimeHostRequested;
-  const needsBytes = Boolean(signaturePolicy) || runtimeKind === "wasmedge";
-  let artifactBytes = null;
-  let wasmModule = null;
-  let embeddedManifest = null;
-  if (needsBytes) {
+
+  if (runtimeKind !== "wasmedge") {
+    // A caller-named process runtime receives the artifact path as delivered
+    // (its own host decides how to load it); the signature is still checked
+    // here first, through the one load path.
     const { readFile } = await import("node:fs/promises");
-    artifactBytes = new Uint8Array(await readFile(source));
-    if (signaturePolicy) {
-      await verifyModuleArtifact(artifactBytes, signaturePolicy);
-    }
-    if (runtimeKind === "wasmedge") {
-      const { locateEmbeddedPlgManifest } = await import(
-        "../compliance/index.js"
-      );
-      embeddedManifest =
-        locateEmbeddedPlgManifest(artifactBytes)?.decoded ?? null;
-    }
-    if (needsCompiledModule) {
-      wasmModule = await WebAssembly.compile(toLoadableWasmBytes(artifactBytes));
-    }
+    const artifactBytes = new Uint8Array(await readFile(source));
+    await openModuleArtifact(artifactBytes, options);
     zeroWasmBytes(artifactBytes);
-    artifactBytes = null;
+    return attachHostDispatch(
+      await createModuleHarness({
+        runtime: {
+          kind: runtimeKind,
+          command: options.command ?? runtimeKind,
+          args: options.args ?? [source],
+          env: options.env,
+          cwd: options.cwd,
+          hostProfile: options.hostProfile,
+          modules: options.modules,
+          defaultModuleId: options.defaultModuleId,
+        },
+      }),
+      options.host ?? null,
+    );
   }
 
-  if (runtimeKind === "wasmedge") {
+  // ONE READ of the artifact, through the one load path: stageModuleArtifact
+  // checks the signature, strips the trailer and writes exactly the checked
+  // payload to a private file. Every WasmEdge launch below runs THAT file —
+  // nothing re-reads `source` after the check. The same read answers the
+  // runtime-target declaration and, for the command path, the profile
+  // inspection; the plaintext is scrubbed the moment those are answered.
+  const { stageModuleArtifact } = await import("../bundle/stageModuleArtifact.js");
+  const staged = await stageModuleArtifact(source, options);
+  let wasmModule = null;
+  let embeddedManifest = null;
+  try {
+    // The profile inspection is the ONLY consumer here that needs a compiled
+    // module. The runtime-host path does not take it, and it must not pay a
+    // V8 compile of the whole artifact on every load just because the
+    // runtime-target gate arrived — the gate reads a custom section.
+    if (!runtimeHostRequested) {
+      wasmModule = await WebAssembly.compile(staged.wasmBytes);
+    }
+    const { locateEmbeddedPlgManifest } = await import(
+      "../compliance/index.js"
+    );
+    embeddedManifest =
+      locateEmbeddedPlgManifest(staged.artifactBytes)?.decoded ?? null;
+  } catch (error) {
+    await staged.dispose();
+    throw error;
+  } finally {
+    zeroWasmBytes(staged.artifactBytes);
+  }
+
+  try {
     // MIRROR OF THE BROWSER GATE. Enforcing the declaration on one leg only is
     // itself a divergence between the legs: a `["browser"]`-only artifact
     // handed to WasmEdge would run until it reached something WasmEdge does
@@ -316,7 +323,7 @@ export async function loadModule(options = {}) {
       manifest: options.manifest,
       leg: "wasmedge",
     });
-    if (needsCompiledModule) {
+    if (wasmModule) {
       const inspection = await inspectModule(wasmModule);
       const threaded = inspection.imports.some((entry) => entry.module === "wasi" && entry.name === "thread-spawn");
       const bridged = inspection.imports.some((entry) => entry.module === DEFAULT_HOSTCALL_IMPORT_MODULE);
@@ -327,7 +334,7 @@ export async function loadModule(options = {}) {
         (!options.wasmEdgeRunnerBinary || options.surface === "command" || useRunner)
       ) {
         return attachHostDispatch(
-          await createWasmEdgeCommandHarness(options),
+          await createWasmEdgeCommandHarness(options, staged, wasmModule),
           options.host ?? null,
         );
       }
@@ -337,35 +344,23 @@ export async function loadModule(options = {}) {
       await createModuleHarness({
         runtime: {
           kind: "wasmedge",
-          wasmPath: source,
-        wasmEdgeBinary: options.wasmEdgeBinary,
-        wasmEdgeRunnerBinary: options.wasmEdgeRunnerBinary,
-        enableThreads: options.enableThreads,
-        env: options.env,
-        cwd: options.cwd,
-        hostProfile: options.hostProfile,
-        modules: options.modules,
-        defaultModuleId: options.defaultModuleId,
+          stagedArtifact: staged,
+          wasmEdgeBinary: options.wasmEdgeBinary,
+          wasmEdgeRunnerBinary: options.wasmEdgeRunnerBinary,
+          enableThreads: options.enableThreads,
+          env: options.env,
+          cwd: options.cwd,
+          hostProfile: options.hostProfile,
+          modules: options.modules,
+          defaultModuleId: options.defaultModuleId,
           metadata: options.metadata,
+          verifySignature: options.verifySignature,
         },
       }),
       options.host ?? null,
     );
+  } catch (error) {
+    await staged.dispose();
+    throw error;
   }
-
-  return attachHostDispatch(
-    await createModuleHarness({
-      runtime: {
-        kind: runtimeKind,
-        command: options.command ?? runtimeKind,
-        args: options.args ?? [source],
-        env: options.env,
-        cwd: options.cwd,
-        hostProfile: options.hostProfile,
-        modules: options.modules,
-        defaultModuleId: options.defaultModuleId,
-      },
-    }),
-    options.host ?? null,
-  );
 }

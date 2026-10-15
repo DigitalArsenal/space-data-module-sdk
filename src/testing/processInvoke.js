@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { Buffer } from "node:buffer";
+import { closeSync, openSync, readSync, fstatSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -64,6 +65,36 @@ export function buildWasmEdgeSpawnEnv(baseEnv = process.env) {
   return env;
 }
 
+const PUBLICATION_TRAILER_MAGIC = "$REC";
+
+// True when the file ends in the SDS publication trailer footer
+// (`... || u32le(length) || "$REC"`) that every wasm engine refuses.
+function endsWithPublicationTrailer(filePath) {
+  let fd;
+  try {
+    fd = openSync(filePath, "r");
+    const { size } = fstatSync(fd);
+    if (size < 8) return false;
+    const footer = Buffer.alloc(4);
+    readSync(fd, footer, 0, 4, size - 4);
+    return footer.toString("latin1") === PUBLICATION_TRAILER_MAGIC;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/**
+ * Resolve the command line that runs `options.wasmPath` on WasmEdge.
+ *
+ * The path is handed to the engine AS IS, so it must already be a loadable
+ * module: a published artifact carrying a publication trailer is refused here
+ * (`unstaged_artifact`) rather than at the engine ("malformed section id").
+ * Stage it first with `stageModuleArtifact` (space-data-module-sdk/bundle/stage)
+ * — or let `createModuleHarness` / `loadModule` do it — so its signature is
+ * checked before any engine reads it.
+ */
 export function resolveWasmEdgePluginLaunchPlan(options = {}) {
   const hostProfile = String(options.hostProfile ?? "").trim().toLowerCase();
   if (hostProfile === "runtime-host") {
@@ -90,6 +121,15 @@ export function resolveWasmEdgePluginLaunchPlan(options = {}) {
       : null;
   if (!wasmPath) {
     throw new Error("resolveWasmEdgePluginLaunchPlan requires a wasmPath.");
+  }
+  if (endsWithPublicationTrailer(wasmPath)) {
+    const error = new Error(
+      `${wasmPath} is a published module artifact (it ends in a $REC publication trailer); ` +
+        "stage it through stageModuleArtifact() (space-data-module-sdk/bundle/stage), or load it with " +
+        "createModuleHarness()/loadModule(), so its signature is checked before WasmEdge reads it.",
+    );
+    error.code = "unstaged_artifact";
+    throw error;
   }
 
   const invokeArgs =

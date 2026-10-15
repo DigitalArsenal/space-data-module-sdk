@@ -17,6 +17,7 @@
  */
 
 import fs from "node:fs/promises";
+import { openModuleArtifact } from "../bundle/artifactBytes.js";
 
 import {
   ORBPRO_OMM_RECORD,
@@ -71,11 +72,16 @@ export const REQUIRED_ABI_EXPORTS = Object.freeze([
  * conformance calls them directly. The command surface is exercised by the
  * parity gate, which stays the Tier 0 cross-runtime authority.
  */
-export async function loadPropagatorArtifact(artifactPath) {
+export async function loadPropagatorArtifact(artifactPath, options = {}) {
   const { WASI } = await import("node:wasi");
-  const bytes = await fs.readFile(artifactPath);
+  // Through the one load path: a signed artifact is checked and its
+  // publication trailer stripped (an engine refuses the trailer).
+  const { wasmBytes } = await openModuleArtifact(
+    new Uint8Array(await fs.readFile(artifactPath)),
+    options,
+  );
   const wasi = new WASI({ version: "preview1", args: ["module"], env: {} });
-  const module = await WebAssembly.compile(bytes);
+  const module = await WebAssembly.compile(wasmBytes);
   const instance = await WebAssembly.instantiate(module, wasi.getImportObject());
   return new PropagatorAbiDriver(instance);
 }

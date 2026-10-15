@@ -3,6 +3,10 @@ import {
   createWasmEdgeStreamProcessClient,
   resolveWasmEdgePluginLaunchPlan,
 } from "./processInvoke.js";
+import {
+  isStagedModuleArtifact,
+  stageModuleArtifact,
+} from "../bundle/stageModuleArtifact.js";
 
 function normalizeRuntimeDescriptor(options = {}) {
   if (options.runtime && typeof options.runtime === "object") {
@@ -47,22 +51,113 @@ export function resolveModuleHarnessLaunchPlan(options = {}) {
   throw new Error(`Unsupported module harness runtime kind: ${kind}`);
 }
 
+function hasWasmPath(definition) {
+  return (
+    typeof definition?.wasmPath === "string" &&
+    definition.wasmPath.trim().length > 0
+  );
+}
+
+/**
+ * The module harness hands WasmEdge FILE PATHS, so every path it launches or
+ * installs is first staged through the one load path
+ * (`stageModuleArtifact` -> `openModuleArtifact`): read once, signature
+ * checked, trailer stripped, written to a private file the engine reads
+ * instead of the artifact as delivered. A caller may pass a `stagedArtifact`
+ * it staged itself (it must be a genuine `stageModuleArtifact` result); the
+ * harness owns and disposes every stage it launches from.
+ *
+ * An explicit `launchPlan` is the caller's own command line and is launched as
+ * given — the caller has taken responsibility for what it points at.
+ */
 export async function createModuleHarness(options = {}) {
-  const runtime = normalizeRuntimeDescriptor(options);
+  let runtime = normalizeRuntimeDescriptor(options);
   const kind = String(runtime.kind ?? "process").trim().toLowerCase();
-  const launchPlan = resolveModuleHarnessLaunchPlan(options);
+  const stages = new Set();
+  const stagesByModuleId = new Map();
+  const disposeStages = async (list = [...stages]) => {
+    for (const staged of list) {
+      stages.delete(staged);
+      await staged.dispose();
+    }
+  };
+  const stageFor = async (definition) => {
+    let staged;
+    if (definition.stagedArtifact !== undefined) {
+      if (!isStagedModuleArtifact(definition.stagedArtifact)) {
+        throw new TypeError(
+          "stagedArtifact must be the result of stageModuleArtifact().",
+        );
+      }
+      staged = definition.stagedArtifact;
+    } else {
+      staged = await stageModuleArtifact(definition.wasmPath, {
+        verifySignature: definition.verifySignature ?? runtime.verifySignature,
+      });
+    }
+    stages.add(staged);
+    return staged;
+  };
+  const stagedDefinition = async (definition) => {
+    if (
+      kind !== "wasmedge" ||
+      (definition.stagedArtifact === undefined && !hasWasmPath(definition))
+    ) {
+      return { definition, staged: null };
+    }
+    const staged = await stageFor(definition);
+    const { stagedArtifact: _staged, verifySignature: _policy, ...rest } = definition;
+    return { definition: { ...rest, wasmPath: staged.path }, staged };
+  };
+
+  let defaultStage = null;
+  if (
+    kind === "wasmedge" &&
+    !(runtime.launchPlan && typeof runtime.launchPlan === "object") &&
+    (runtime.stagedArtifact !== undefined || hasWasmPath(runtime))
+  ) {
+    defaultStage = await stageFor(runtime);
+    const { stagedArtifact: _staged, ...rest } = runtime;
+    runtime = { ...rest, wasmPath: defaultStage.path };
+  }
+
+  let processClient;
+  let launchPlan;
   const runtimeHost = isRuntimeHostProfile(runtime);
-  const processClient =
-    kind === "wasmedge"
-      ? await createWasmEdgeStreamProcessClient({ launchPlan })
-      : await createPluginInvokeProcessClient({ launchPlan });
+  try {
+    launchPlan = resolveModuleHarnessLaunchPlan({ runtime });
+    processClient =
+      kind === "wasmedge"
+        ? await createWasmEdgeStreamProcessClient({ launchPlan })
+        : await createPluginInvokeProcessClient({ launchPlan });
+  } catch (error) {
+    await disposeStages();
+    throw error;
+  }
+  const installStaged = async (definition) => {
+    const { definition: launchable, staged } = await stagedDefinition(definition);
+    let installed;
+    try {
+      installed = await processClient.installModule(launchable);
+    } catch (error) {
+      if (staged) await disposeStages([staged]);
+      throw error;
+    }
+    const moduleId = installed?.moduleId ?? launchable.moduleId;
+    if (staged && typeof moduleId === "string") {
+      const previous = stagesByModuleId.get(moduleId);
+      if (previous && previous !== staged) await disposeStages([previous]);
+      stagesByModuleId.set(moduleId, staged);
+    }
+    return installed;
+  };
+
   const configuredModules = Array.isArray(runtime.modules) ? [...runtime.modules] : [];
   if (
     kind === "wasmedge" &&
     runtimeHost &&
     configuredModules.length === 0 &&
-    typeof runtime.wasmPath === "string" &&
-    runtime.wasmPath.trim().length > 0
+    defaultStage
   ) {
     configuredModules.push({
       moduleId:
@@ -70,13 +165,19 @@ export async function createModuleHarness(options = {}) {
         runtime.defaultModuleId.trim().length > 0
           ? runtime.defaultModuleId.trim()
           : "default",
-      wasmPath: runtime.wasmPath,
+      stagedArtifact: defaultStage,
       metadata: runtime.metadata ?? null,
     });
   }
 
-  for (const moduleDefinition of configuredModules) {
-    await processClient.installModule(moduleDefinition);
+  try {
+    for (const moduleDefinition of configuredModules) {
+      await installStaged(moduleDefinition);
+    }
+  } catch (error) {
+    await processClient.destroy();
+    await disposeStages();
+    throw error;
   }
 
   let defaultModuleId =
@@ -106,7 +207,7 @@ export async function createModuleHarness(options = {}) {
       return processClient.invoke(request);
     },
     async installModule(definition) {
-      const installed = await processClient.installModule(definition);
+      const installed = await installStaged(definition);
       if (
         runtimeHost &&
         (!defaultModuleId || defaultModuleId.trim().length === 0) &&
@@ -122,6 +223,10 @@ export async function createModuleHarness(options = {}) {
     },
     async unloadModule(moduleId) {
       const unloaded = await processClient.unloadModule(moduleId);
+      if (unloaded && stagesByModuleId.has(moduleId)) {
+        await disposeStages([stagesByModuleId.get(moduleId)]);
+        stagesByModuleId.delete(moduleId);
+      }
       if (unloaded && moduleId === defaultModuleId) {
         if (runtimeHost) {
           const remainingModules = await processClient.listModules();
@@ -156,8 +261,12 @@ export async function createModuleHarness(options = {}) {
     resolveRecord(query) {
       return processClient.resolveRecord(query);
     },
-    destroy() {
-      return processClient.destroy();
+    async destroy() {
+      try {
+        return await processClient.destroy();
+      } finally {
+        await disposeStages();
+      }
     },
   };
 }

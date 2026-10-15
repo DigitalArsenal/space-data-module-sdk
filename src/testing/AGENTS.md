@@ -37,7 +37,7 @@ The browser runtime surfaces moved OUT of here and into `src/host/`:
 | `testing/browserModuleHarness.js` | `host/browserModuleHarness.js` (`./host/browser-module`) |
 | `testing/workerModuleHarness.js` | `host/workerModuleHarness.js` (`./host/worker-module`) |
 | `testing/moduleFlatbufferStreamPump.js` | `host/moduleFlatbufferStreamPump.js` |
-| `toLoadableWasmBytes` | `bundle/artifactBytes.js` (`./bundle`) |
+| `toLoadableWasmBytes` (inspection only; loaders use `openModuleArtifact`) | `bundle/artifactBytes.js` (`./bundle`) |
 
 `./testing/browser` survives as `browser.js`, a pure re-export shim of those
 runtime surfaces and nothing else. Both guards

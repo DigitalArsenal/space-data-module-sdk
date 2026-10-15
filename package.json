@@ -36,6 +36,7 @@
     "./compiler": "./src/compiler/index.js",
     "./compiler/emception": "./src/compiler/emception.js",
     "./bundle": "./src/bundle/index.js",
+    "./bundle/stage": "./src/bundle/stageModuleArtifact.js",
     "./app": "./src/app/index.js",
     "./deployment": "./src/deployment/index.js",
     "./invoke": "./src/invoke/index.js",

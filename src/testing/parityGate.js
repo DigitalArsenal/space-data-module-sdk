@@ -57,7 +57,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { toLoadableWasmBytes } from "../bundle/artifactBytes.js";
+import { openModuleArtifact } from "../bundle/artifactBytes.js";
 import { locateEmbeddedPlgManifest } from "../compliance/index.js";
 import { runtimeTargetSatisfies } from "../host/runtimeTargetGate.js";
 import {
@@ -900,7 +900,7 @@ export async function runParityGate(options = {}) {
   for (const spec of declared) {
     try {
       const rawBytes = new Uint8Array(await readFile(spec.artifactPath));
-      const loadableBytes = toLoadableWasmBytes(rawBytes);
+      const { wasmBytes: loadableBytes } = await openModuleArtifact(rawBytes, options);
       artifacts.push({
         ...spec,
         rawBytes,

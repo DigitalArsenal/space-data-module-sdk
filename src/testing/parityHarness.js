@@ -30,7 +30,7 @@ import { fileURLToPath } from "node:url";
 
 import { encodePluginInvokeRequest } from "../invoke/codec.js";
 import { toUint8Array } from "../runtime/bufferLike.js";
-import { toLoadableWasmBytes } from "../bundle/artifactBytes.js";
+import { openModuleArtifact } from "../bundle/artifactBytes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -537,9 +537,10 @@ export async function runParityHarness(options = {}) {
   if (!wasmPath) throw new Error("parity harness requires wasmPath.");
   const wasmBytes = new Uint8Array(await readFile(wasmPath));
   // Signed/published artifacts carry appended publication records that wasm
-  // engines reject. Strip ONCE here so every lane executes the identical
-  // canonical module payload.
-  const loadableBytes = toLoadableWasmBytes(wasmBytes);
+  // engines reject. Open ONCE here, through the one load path (signature
+  // checked, trailer stripped), so every lane executes the identical checked
+  // module payload.
+  const { wasmBytes: loadableBytes } = await openModuleArtifact(wasmBytes, options);
 
   const plan =
     options.plan ??

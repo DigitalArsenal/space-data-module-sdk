@@ -715,6 +715,45 @@ export async function verifyModuleArtifact(bytes, options = {}) {
   };
 }
 
+/**
+ * Check that an artifact's embedded signature is INTACT — it verifies against
+ * the public key it names — without deciding whether that key is trusted.
+ *
+ * This is not trust: anyone can sign with a key of their own. It is the floor
+ * every load path applies when no trust policy is configured, so that a signed
+ * artifact whose code or trailer was altered after signing (a stale trailer
+ * stapled onto rebuilt bytes, a byte flipped in transit) is refused rather than
+ * silently stripped and run. A present-but-broken signature is never loaded.
+ *
+ * @param {Uint8Array|ArrayBuffer} bytes - module artifact bytes
+ * @returns {Promise<{verified: false, trusted: false, signed: boolean, intact?: true, publicKeyHex?: string, keyId?: string|null, statementDomain?: string|null, reason: string}>}
+ */
+export async function verifyModuleArtifactIntegrity(bytes) {
+  const protectedArtifact = extractPublicationRecordCollection(bytes);
+  const signatureEntry = protectedArtifact?.mbl
+    ? findSignatureEntry(protectedArtifact.mbl)
+    : null;
+  if (!signatureEntry) {
+    return { verified: false, trusted: false, signed: false, reason: "unsigned" };
+  }
+  const payload = decodeSignaturePayload(signatureEntry);
+  const embeddedKey = String(payload.publicKeyHex ?? "").trim().toLowerCase();
+  const result = await verifyModuleArtifact(bytes, {
+    trustedPublicKeys: [embeddedKey],
+    requireSignature: true,
+  });
+  return {
+    verified: false,
+    trusted: false,
+    signed: true,
+    intact: true,
+    publicKeyHex: result.publicKeyHex,
+    keyId: result.keyId ?? null,
+    statementDomain: result.statementDomain ?? null,
+    reason: "no_trust_policy",
+  };
+}
+
 function readEnv(name) {
   try {
     if (typeof process !== "undefined" && process?.env?.[name] !== undefined) {

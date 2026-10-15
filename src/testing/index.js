@@ -27,6 +27,10 @@ export {
   createModuleHarness,
   resolveModuleHarnessLaunchPlan,
 } from "./moduleHarness.js";
+export {
+  isStagedModuleArtifact,
+  stageModuleArtifact,
+} from "../bundle/stageModuleArtifact.js";
 export { createModuleFlatBufferStreamPump } from "../host/moduleFlatbufferStreamPump.js";
 export {
   PARITY_LANES,

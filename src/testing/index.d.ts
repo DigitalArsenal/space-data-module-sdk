@@ -236,6 +236,32 @@ export interface PluginInvokeProcessClient {
   destroy(): Promise<void>;
 }
 
+export interface ModuleSignaturePolicyOptions {
+  trustedPublicKeys?: string[] | string;
+  requireSignature?: boolean;
+}
+
+/** A `stageModuleArtifact` result: the checked payload in a private file. */
+export interface StagedModuleArtifact {
+  path: string;
+  directory: string;
+  artifactBytes: Uint8Array;
+  wasmBytes: Uint8Array;
+  verification: Record<string, unknown>;
+  dispose(): Promise<void>;
+}
+
+export function stageModuleArtifact(
+  source: string | Uint8Array | ArrayBuffer,
+  options?: {
+    verifySignature?: ModuleSignaturePolicyOptions | false;
+    directory?: string;
+    fileName?: string;
+  },
+): Promise<StagedModuleArtifact>;
+
+export function isStagedModuleArtifact(value: unknown): value is StagedModuleArtifact;
+
 export interface ModuleHarnessRuntimeDescriptor {
   kind?: "process" | "wasmedge";
   launchPlan?: PluginInvokeProcessLaunchPlan;
@@ -243,7 +269,11 @@ export interface ModuleHarnessRuntimeDescriptor {
   args?: string[];
   env?: Record<string, string | undefined>;
   cwd?: string;
+  /** Staged through stageModuleArtifact before WasmEdge reads it. */
   wasmPath?: string;
+  /** A genuine stageModuleArtifact result; the harness owns and disposes it. */
+  stagedArtifact?: StagedModuleArtifact;
+  verifySignature?: ModuleSignaturePolicyOptions | false;
   wasmEdgeBinary?: string;
   wasmEdgeRunnerBinary?: string;
   enableThreads?: boolean;

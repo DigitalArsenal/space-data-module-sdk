@@ -11,6 +11,10 @@ packaging and wasm section handling.
   lives in the REC trailer.
 - Use the public bundle helpers and CLI from this repo rather than inventing a
   custom one-file format.
+- Load through `openModuleArtifact` (bytes) or `stageModuleArtifact`
+  (`./bundle/stage`, a file for WasmEdge/wasmedgec/Docker): the signature is
+  checked and the trailer stripped in one step. Never strip a trailer by hand
+  and hand the result to an engine; `toLoadableWasmBytes` is for inspection.
 
 ## Note
 

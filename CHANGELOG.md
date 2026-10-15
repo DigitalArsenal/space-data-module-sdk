@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### One load path for signed artifacts: checked, then stripped, before any engine sees the bytes
+
+- `openModuleArtifact(bytes, options)` (`./bundle`) is the only path from an artifact to bytes an engine runs: it
+  checks the signature under the loader's policy and strips the publication trailer in one step. With no trust
+  policy configured a SIGNED artifact must still be intact (its signature verifies against the key it names), so a
+  tampered, forged or re-trailered artifact is refused instead of being stripped and run; the result reports
+  `trusted: false`. `verifyModuleArtifactIntegrity` is that check on its own.
+- `stageModuleArtifact(source, options)` (`./bundle/stage`, Node) reads an artifact once, opens it, and writes
+  exactly the checked payload to a fresh 0700 directory for engines that only read files (WasmEdge CLI, the SDK
+  runners, wasmedgec, Docker). Signed artifacts now run on those engines; a refused one is never staged.
+- `createBrowserModuleHarness`, `createWorkerModuleHarness`, `loadModule`, `createModuleHarness`,
+  `runParityHarness` and the parity gate all load through it. `createModuleHarness` stages every `wasmPath` it
+  launches or installs (runtime-host modules too) and disposes the stages; a caller-staged artifact must be a
+  genuine `stageModuleArtifact` result. `loadModule` launches WasmEdge on the staged copy it checked and no longer
+  re-reads the artifact path afterwards. A caller's buffer is copied before the check, so it cannot change between
+  check and compile.
+- `resolveWasmEdgePluginLaunchPlan` refuses a path that still ends in a `$REC` trailer (`unstaged_artifact`)
+  instead of handing WasmEdge bytes it fails on ("malformed section id").
+- `createWorkerModuleHarness` refuses a precompiled `WebAssembly.Module` when a trust policy is configured, as the
+  browser harness does.
+
 ## 0.9.7
 
 ### The WasmEdge leg serves the hostcall bridge to single-thread artifacts
