@@ -4,7 +4,7 @@
   "vocabularies": [
     {
       "id": "orbpro.plugins",
-      "description": "PropagatorState.fbs / \"PRST\" \u2014 the wire the compiled sgp4, hpop, conjunction-assessment and sensor-shader modules already emit. Its values are FROZEN by artifacts in the field; collapsing it into the ABI enum is a wire break, tracked as sdk-reference-frame-enum-unification.",
+      "description": "PropagatorState.fbs / \"PRST\" \u2014 the wire the compiled sgp4, ffm, conjunction-assessment and sensor-shader modules already emit. Its values are FROZEN by artifacts in the field; collapsing it into the ABI enum is a wire break, tracked as sdk-reference-frame-enum-unification.",
       "repo": "space-data-network-modules",
       "source": "propagator/sgp4/schemas/PropagatorState.fbs",
       "members": {
@@ -75,10 +75,10 @@
       }
     },
     {
-      "id": "modules.hpop.coords",
-      "description": "The HPOP propagator's internal chain vocabulary.",
+      "id": "modules.ffm.coords",
+      "description": "The FFM (Full Force Model) propagator's internal chain vocabulary.",
       "repo": "space-data-network-modules",
-      "source": "propagator/hpop/lib/coords_types.h",
+      "source": "propagator/ffm/lib/coords_types.h",
       "members": {
         "TEME": "TEME",
         "GCRF": "ICRF",

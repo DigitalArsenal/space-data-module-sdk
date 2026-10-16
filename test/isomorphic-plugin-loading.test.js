@@ -67,7 +67,7 @@ function skipIfStandaloneArtifactsUnavailable(t) {
 test("sibling plugin fixture catalog includes pending migrated packages", () => {
   const names = siblingPluginSpecs.map((spec) => spec.name).sort();
   assert.ok(names.includes("conjunction-assessment"));
-  assert.ok(names.includes("hpop"));
+  assert.ok(names.includes("ffm"));
 });
 
 test("all sibling plugin packages emit standalone artifacts", (t) => {

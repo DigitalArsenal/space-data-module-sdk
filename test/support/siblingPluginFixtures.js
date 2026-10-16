@@ -101,10 +101,10 @@ export const siblingPluginSpecs = Object.freeze([
     },
   },
   {
-    name: "hpop",
-    packagePath: "propagator/hpop",
+    name: "ffm",
+    packagePath: "propagator/ffm",
     requestFixturePath: packagePath(
-      "propagator/hpop",
+      "propagator/ffm",
       "tests",
       "fixtures",
       "request.propagate.json",

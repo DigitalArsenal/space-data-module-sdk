@@ -31,7 +31,7 @@ with the active architecture.
 
 - [ ] Make the entity model a host-side view over FlatSQL-backed standards rows
 - [ ] Preserve the existing fast shared-buffer WasmEngine path
-- [ ] Route SGP4 and HPOP runtime state through host-managed aligned-binary regions
+- [ ] Route SGP4 and FFM runtime state through host-managed aligned-binary regions
 - [ ] Keep conjunction consuming generic propagator outputs only
 
 ## Hosted Runtime Tooling

@@ -285,7 +285,7 @@ test("orbpro generated bindings expose the canonical runtime FlatBuffer contract
 
 // PLUGGABLE-PROPAGATION LAW (sdk-propagator-source-kind-enum-sync): synced to
 // the ratified SDS VCM.propagatorFamily vocabulary so any provider —
-// including a numerical/Cowell-class integrator like HPOP, which has no
+// including a numerical/Cowell-class integrator like FFM, which has no
 // dedicated code and self-identifies as COWELL — can describe itself in a
 // PropagatorDescribeSourcesBatchResult.
 test("PropagatorSourceKind mirrors the ratified SDS VCM.propagatorFamily vocabulary", () => {
@@ -363,7 +363,7 @@ test("PropagatorSourceDescription round-trips sourceKind, and NONE is the un-set
   assert.equal("UNKNOWN" in PropagatorSourceKind, false);
 });
 
-test("PropagatorDescribeSourcesBatchResult carries a mixed-family source batch (SGP4 alongside a Cowell-class HPOP provider)", () => {
+test("PropagatorDescribeSourcesBatchResult carries a mixed-family source batch (SGP4 alongside a Cowell-class FFM provider)", () => {
   const builder = new flatbuffers.Builder(512);
   const sgp4Name = builder.createString("SGP4-SOURCE");
   const sgp4Id = builder.createString("1");
@@ -371,15 +371,15 @@ test("PropagatorDescribeSourcesBatchResult carries a mixed-family source batch (
     builder, 1, PropagatorSourceKind.SGP4, sgp4Name, sgp4Id,
     1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   );
-  const hpopName = builder.createString("HPOP-SOURCE");
-  const hpopId = builder.createString("2");
-  const hpopOffset = PropagatorSourceDescription.createPropagatorSourceDescription(
-    builder, 2, PropagatorSourceKind.COWELL, hpopName, hpopId,
+  const ffmName = builder.createString("FFM-SOURCE");
+  const ffmId = builder.createString("2");
+  const ffmOffset = PropagatorSourceDescription.createPropagatorSourceDescription(
+    builder, 2, PropagatorSourceKind.COWELL, ffmName, ffmId,
     2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   );
   const sourcesVector = PropagatorDescribeSourcesBatchResult.createSourcesVector(builder, [
     sgp4Offset,
-    hpopOffset,
+    ffmOffset,
   ]);
   const resultOffset = PropagatorDescribeSourcesBatchResult.createPropagatorDescribeSourcesBatchResult(
     builder,

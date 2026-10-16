@@ -50,7 +50,7 @@ attribute "abi_c_helper_prefix";
 //   (A) orbpro.propagator (THIS)  TEME=0 J2000=1 ICRF=2 ECEF=3 MCI=4 MCMF=5,
 //                                 then the appended axis roster at 6+
 //   (B) orbpro.plugins            ECI=0  ECEF=1  TEME=2 ICRF=3
-//       (PropagatorState.fbs / "PRST" — the wire the compiled sgp4, hpop,
+//       (PropagatorState.fbs / "PRST" — the wire the compiled sgp4, ffm,
 //        conjunction-assessment and sensor-shader modules already emit)
 //   (C) OrbPro engine ReferenceFrame.js — NINE members, not two:
 //       FIXED=0 INERTIAL=1 TEME=2 VVLH=3 ENU=4 NED=5 NEU=6 RIC=7 LVLH=8
@@ -69,7 +69,7 @@ attribute "abi_c_helper_prefix";
 // collapsing (A) and (B) is a wire break, not a Wave-0 edit — see
 // graph/tasks/sdk-reference-frame-enum-unification.md, which also owns the
 // (A)-vs-(C) inversion at 0/1. The reference pattern for a correct seam is
-// propagator.hpop/index.js createSourceFromState.
+// propagator.ffm/index.js createSourceFromState.
 //
 // The crosswalk between all of these is DATA, in
 // schemas/orbpro/reference-frame-crosswalk.json, and
@@ -146,8 +146,8 @@ enum StateFlags : uint (abi, abi_c_name: "OrbProStateFlags", abi_c_prefix: "ORBP
 
 // Synced to the ratified SDS VCM.propagatorFamily vocabulary (schema/VCM/main.fbs)
 // so any provider self-identifying in PropagatorDescribeSourcesBatchResult uses
-// the SAME family codes SDS already carries — HPOP/Cowell-class numerical
-// integrators map to COWELL (no HPOP-specific code needed); new codes go
+// the SAME family codes SDS already carries — FFM/Cowell-class numerical
+// integrators map to COWELL (no FFM-specific code needed); new codes go
 // through Themis's SDS auto-ratification law, never invented here first.
 enum PropagatorSourceKind : ubyte {
   NONE = 0,

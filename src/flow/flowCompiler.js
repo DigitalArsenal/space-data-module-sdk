@@ -1395,7 +1395,7 @@ export function validateFlowAPIDeclaration(flow, issues) {
 // Ruling C (provider method vocabulary): providers in one family are NOT
 // required to share a uniform method vocabulary beyond whatever the
 // binding's own declared `methodId` demands — sgp4 exposes
-// ingest_omm/upsert_cat/propagate_state/propagate_path/catalog_query, hpop
+// ingest_omm/upsert_cat/propagate_state/propagate_path/catalog_query, ffm
 // exposes invoke/ingest_state/propagate_state/prepare_trajectory_segments/
 // describe_trajectory_segments; a node that asks for "propagator satisfying
 // propagate_state" resolves against either, a node that asks for

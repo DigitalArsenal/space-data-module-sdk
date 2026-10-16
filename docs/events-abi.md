@@ -344,7 +344,7 @@ not a scoping convenience:
    agree — exactly the drift the generated-ABI lane exists to end.
 2. **It would break every shipped propagator.** The propagator export set is a
    per-epoch state evaluation. Adding stop conditions to it makes root
-   refinement a family-wide obligation on `sgp4`, `hpop` and
+   refinement a family-wide obligation on `sgp4`, `ffm` and
    `keplerian-reference`, all in the field. That is a breaking ABI change and
    an owner decision.
 3. **A propagator is a state SOURCE.** It has no opinion about what is

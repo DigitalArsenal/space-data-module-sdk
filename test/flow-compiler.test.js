@@ -336,8 +336,8 @@ const sgp4Dependency = makeDependency({
   })),
 });
 
-const hpopDependency = makeDependency({
-  pluginId: "com.spacedatanetwork.hpop",
+const ffmDependency = makeDependency({
+  pluginId: "com.spacedatanetwork.ffm",
   pluginFamily: "propagator",
   capabilities: [],
   methods: [
@@ -422,22 +422,22 @@ test("pluginFamily resolution picks the ONE dependency exposing the requested me
   const flow = familyFlow({ methodId: "catalog_query" });
   const check = checkFlowProgram({
     flow,
-    dependencies: dependencyMap(sgp4Dependency, hpopDependency),
+    dependencies: dependencyMap(sgp4Dependency, ffmDependency),
   });
   assert.equal(check.ok, true, JSON.stringify(check.issues));
   assert.equal(flow.nodes[0].pluginId, "com.spacedatanetwork.sgp4");
 });
 
 test("pluginFamily resolution is an error, never a guess, when more than one candidate qualifies", () => {
-  const flow = familyFlow(); // propagate_state: both sgp4 and hpop qualify
+  const flow = familyFlow(); // propagate_state: both sgp4 and ffm qualify
   const check = checkFlowProgram({
     flow,
-    dependencies: dependencyMap(sgp4Dependency, hpopDependency),
+    dependencies: dependencyMap(sgp4Dependency, ffmDependency),
   });
   assert.equal(check.ok, false);
   const issue = check.errors.find((entry) => entry.code === "ambiguous-plugin-family");
   assert.ok(issue, JSON.stringify(check.issues));
-  assert.match(issue.message, /com\.spacedatanetwork\.hpop/);
+  assert.match(issue.message, /com\.spacedatanetwork\.ffm/);
   assert.match(issue.message, /com\.spacedatanetwork\.sgp4/);
   assert.equal(flow.nodes[0].pluginId, undefined, "an ambiguous binding must not silently pick one");
 });
