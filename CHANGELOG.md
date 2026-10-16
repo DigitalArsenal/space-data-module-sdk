@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.8
 
 ### Command surfaces preserve the guest's error response
 
