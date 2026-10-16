@@ -1,4 +1,5 @@
 import type {
+  CommandErrorSummary,
   InvokeSurface,
   PayloadTypeRef,
   PayloadWireFormat,
@@ -535,6 +536,8 @@ export interface ParityRunResult {
   threadCount: number;
   exitClass: string;
   exitDetail?: string | null;
+  exitCode: number | null;
+  commandError: CommandErrorSummary | null;
   stdout: Uint8Array;
   stderr?: Uint8Array;
   stateFiles?: Record<string, string> | null;
@@ -563,6 +566,8 @@ export interface ParityReport {
     threadCount: number;
     exitClass: string;
     exitDetail: string | null;
+    exitCode: number | null;
+    commandError: CommandErrorSummary | null;
     stdoutSha256: string;
     stdoutLength: number;
   }>;

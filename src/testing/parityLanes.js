@@ -30,6 +30,7 @@ import { promisify } from "node:util";
 
 import { ExitClass, assertWasmEdgeVersionMatchesPin } from "./parityHarness.js";
 import { normalizeWasmEdgeOutcome } from "./wasmedgeOutput.js";
+import { invokeErrorFromCommandRun } from "../invoke/commandOutcome.js";
 import { isWasiThreadsModule } from "../host/wasiThreadHost.js";
 import { resolveWasmEdgeWasiThreadsRunner } from "./buildWasmEdgeRunner.js";
 import { PARITY_HOSTCALL_FILES, encodeParityHostcallAnswers, importsHostcallBridge } from "./parityHostcalls.js";
@@ -68,6 +69,29 @@ function classifyProcessOutcome({ code, signal, stderrText }) {
     return { exitClass: ExitClass.Trap, exitDetail: `exit=${code}` };
   }
   return { exitClass: ExitClass.GuestError, exitDetail: `exit=${code}` };
+}
+
+function wasmEdgeRun(outcome, caseId, threadCount, threaded) {
+  // WasmEdge logs diagnostics to stdout; separate them before classification.
+  const normalized = normalizeWasmEdgeOutcome(outcome);
+  const { exitClass, exitDetail } = classifyProcessOutcome({
+    code: outcome.code,
+    signal: outcome.signal,
+    stderrText: normalized.diagnosticText,
+  });
+  const exitCode = !outcome.signal && Number.isInteger(outcome.code) ? outcome.code : null;
+  return {
+    caseId,
+    threadCount,
+    exitClass,
+    exitDetail,
+    exitCode,
+    commandError: invokeErrorFromCommandRun(exitCode, normalized.stdout)?.toJSON() ?? null,
+    stdout: normalized.stdout,
+    stderr: normalized.stderr,
+    spawnCount: threaded ? Number(/sdm-wasi-threads: spawned=(\d+)/.exec(normalized.diagnosticText)?.[1] ?? NaN) : null,
+    stateFiles: null,
+  };
 }
 
 function spawnWithStdin(command, args, { cwd, env, stdinBytes, timeoutMs }) {
@@ -237,24 +261,7 @@ export async function runNativeWasmEdgeLane(context) {
             timeoutMs: context.timeoutMs,
           },
         );
-        // WasmEdge logs its own diagnostics to STDOUT; pull them out before
-        // anything compares guest bytes or classifies an exit.
-        const normalized = normalizeWasmEdgeOutcome(outcome);
-        const { exitClass, exitDetail } = classifyProcessOutcome({
-          code: outcome.code,
-          signal: outcome.signal,
-          stderrText: normalized.diagnosticText,
-        });
-        runs.push({
-          caseId: planCase.id,
-          threadCount,
-          exitClass,
-          exitDetail,
-          stdout: normalized.stdout,
-          stderr: normalized.stderr,
-          spawnCount: threaded ? Number(/sdm-wasi-threads: spawned=(\d+)/.exec(normalized.diagnosticText)?.[1] ?? NaN) : null,
-          stateFiles: null,
-        });
+        runs.push(wasmEdgeRun(outcome, planCase.id, threadCount, threaded));
       }
     }
   } finally {
@@ -363,22 +370,7 @@ export async function runDockerWasmEdgeLane(context) {
           stdinBytes: planCase.stdinBytes,
           timeoutMs: context.timeoutMs,
         });
-        const normalized = normalizeWasmEdgeOutcome(outcome);
-        const { exitClass, exitDetail } = classifyProcessOutcome({
-          code: outcome.code,
-          signal: outcome.signal,
-          stderrText: normalized.diagnosticText,
-        });
-        runs.push({
-          caseId: planCase.id,
-          threadCount,
-          exitClass,
-          exitDetail,
-          stdout: normalized.stdout,
-          stderr: normalized.stderr,
-          spawnCount: threaded ? Number(/sdm-wasi-threads: spawned=(\d+)/.exec(normalized.diagnosticText)?.[1] ?? NaN) : null,
-          stateFiles: null,
-        });
+        runs.push(wasmEdgeRun(outcome, planCase.id, threadCount, threaded));
       }
     }
   } finally {
@@ -588,6 +580,8 @@ export async function runBrowserLane(context) {
       threadCount: Number(run.threadCount),
       exitClass: String(run.exitClass),
       exitDetail: run.exitDetail ?? null,
+      exitCode: run.exitCode,
+      commandError: run.commandError,
       spawnCount: run.spawnCount ?? null,
       stdout: new Uint8Array(Buffer.from(String(run.stdoutBase64 ?? ""), "base64")),
       stderr: new Uint8Array(Buffer.from(String(run.stderrBase64 ?? ""), "base64")),

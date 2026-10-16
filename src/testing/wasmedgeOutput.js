@@ -72,6 +72,7 @@ export function normalizeWasmEdgeOutcome({ stdout, stderr }) {
   return {
     stdout: guestStdout,
     stderr: encoder.encode(combined),
+    diagnostics,
     diagnosticText: combined,
   };
 }

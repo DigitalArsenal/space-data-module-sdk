@@ -11,3 +11,4 @@ export {
   normalizeInvokeSurfaces,
   writePluginInvokeRequestToArena,
 } from "./codec.js";
+export { PluginInvokeError, invokeErrorFromCommandRun } from "./commandOutcome.js";

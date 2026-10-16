@@ -136,6 +136,10 @@
 <li>thread counts are swept via the fixture's <code>threadEnvVar</code> (default <code>SDM_PARITY_THREADS</code>) — runs at 1/2/4/8 (fixture-configurable) must be byte-identical within a lane AND across lanes. Browser sequential <em>throughput</em> divergence is sanctioned until <code>browser-worker-topology</code> lands; results must still match byte-for-byte;</li>
 <li>signed/published artifacts are stripped to the canonical module payload once (<code>toLoadableWasmBytes</code>) so every lane executes identical wasm bytes.</li>
 </ul>
+<h2 id="command-surface-errors"><a class="anchor" href="#command-surface-errors" aria-hidden="true">#</a>Command-surface errors</h2>
+<p>A non-zero command exit with a well-formed <code>$PIV</code> response on stdout throws <code>PluginInvokeError</code> in both the browser and WasmEdge harnesses. It preserves <code>statusCode</code>, <code>errorCode</code>, <code>errorMessage</code>, <code>exitCode</code>, and the decoded <code>response</code>. All three parity lanes record the same error summary in <code>commandError</code>.</p>
+<p>A non-zero guest exit without a response frame throws <code>WasiExitError</code>, with <code>code</code> and guest <code>stderr</code>. Runtime traps remain runtime failures. Exit <code>0</code> is unchanged: the response is returned, including a handler-level non-zero <code>statusCode</code>.</p>
+<p>Every lane run and report summary carries <code>exitCode</code> (a number, or <code>null</code> when no exit code is available) and <code>commandError</code> (<code>PluginInvokeError.toJSON()</code>, or <code>null</code>). Successful runs have <code>exitCode: 0</code> and <code>commandError: null</code>.</p>
 <h2 id="fixtures"><a class="anchor" href="#fixtures" aria-hidden="true">#</a>Fixtures</h2>
 <div class="codeblock"><div class="codeblock-head">json</div><pre><code>{
   &quot;name&quot;: &quot;sgp4-command-parity&quot;,
@@ -177,6 +181,7 @@
 <nav class="rail" aria-label="On this page"><h2>On this page</h2><ul><li><a class="depth-2" href="#running">Running</a></li>
 <li><a class="depth-2" href="#the-wasmedge-pin-one-place">The WasmEdge pin: ONE place</a></li>
 <li><a class="depth-2" href="#determinism-contract">Determinism contract</a></li>
+<li><a class="depth-2" href="#command-surface-errors">Command-surface errors</a></li>
 <li><a class="depth-2" href="#fixtures">Fixtures</a></li>
 <li><a class="depth-2" href="#scope-and-current-limits-v1">Scope and current limits (v1)</a></li></ul></nav>
     </div>

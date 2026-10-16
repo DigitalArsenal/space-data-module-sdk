@@ -13,6 +13,8 @@
  */
 
 import { createBrowserModuleHarness } from "../host/browserModuleHarness.js";
+import { WasiExitError } from "../host/wasiShim.js";
+import { PluginInvokeError } from "../invoke/commandOutcome.js";
 import { parityHostcallDispatch } from "./parityHostcalls.js";
 
 const OK = "ok";
@@ -39,10 +41,18 @@ function bytesToBase64(bytes) {
 }
 
 function classifyBrowserError(error) {
+  if (error instanceof PluginInvokeError) {
+    return {
+      exitClass: GUEST_ERROR,
+      exitDetail: `exit=${error.exitCode}`,
+      exitCode: error.exitCode,
+      commandError: error.toJSON(),
+    };
+  }
   // WasiExitError with code 0 is swallowed inside the harness; reaching here
   // with one means a real nonzero guest exit.
-  if (error?.name === "WasiExitError") {
-    return { exitClass: GUEST_ERROR, exitDetail: `exit=${error.code}` };
+  if (error instanceof WasiExitError) {
+    return { exitClass: GUEST_ERROR, exitDetail: `exit=${error.code}`, exitCode: error.code, commandError: null };
   }
   // The harness refused the artifact because the ARTIFACT declares it does not
   // run here. That is the contract working. Classing it TRAP would score a
@@ -52,11 +62,15 @@ function classifyBrowserError(error) {
     return {
       exitClass: OUT_OF_SCOPE,
       exitDetail: `declared runtimeTargets [${(error.declaredTargets ?? []).join(", ")}]`,
+      exitCode: null,
+      commandError: null,
     };
   }
   return {
     exitClass: TRAP,
     exitDetail: `${error?.name ?? "Error"}: ${error?.message ?? String(error)}`,
+    exitCode: null,
+    commandError: null,
   };
 }
 
@@ -89,6 +103,8 @@ export async function runParityPlanInBrowser({ baseUrl = "" } = {}) {
       setStatus(`case ${planCase.id} @ ${threadCount} thread(s)`);
       let exitClass = OK;
       let exitDetail = null;
+      let exitCode = 0;
+      let commandError = null;
       let stdout = new Uint8Array(0);
       let stderr = new Uint8Array(0);
       let harness = null;
@@ -119,7 +135,7 @@ export async function runParityPlanInBrowser({ baseUrl = "" } = {}) {
         stdout = await harness.invokeRaw(stdinBytes);
         stderr = harness.wasi?.stderr ?? new Uint8Array(0);
       } catch (error) {
-        ({ exitClass, exitDetail } = classifyBrowserError(error));
+        ({ exitClass, exitDetail, exitCode, commandError } = classifyBrowserError(error));
       } finally {
         stderr = harness?.wasi?.stderr ?? stderr;
         if (exitClass !== OK) stdout = harness?.wasi?.stdout ?? stdout;
@@ -135,6 +151,8 @@ export async function runParityPlanInBrowser({ baseUrl = "" } = {}) {
         threadCount,
         exitClass,
         exitDetail,
+        exitCode,
+        commandError,
         spawnCount,
         stdoutBase64: bytesToBase64(stdout),
         stderrBase64: bytesToBase64(stderr),

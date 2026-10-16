@@ -612,6 +612,8 @@ export async function runParityHarness(options = {}) {
           threadCount,
           exitClass: ExitClass.HarnessFailure,
           exitDetail: error?.message ?? String(error),
+          exitCode: null,
+          commandError: null,
           stdout: new Uint8Array(0),
         })),
       );
@@ -644,6 +646,8 @@ export async function runParityHarness(options = {}) {
       threadCount: run.threadCount,
       exitClass: run.exitClass,
       exitDetail: run.exitDetail ?? null,
+      exitCode: run.exitCode,
+      commandError: run.commandError,
       spawnCount: run.spawnCount ?? null,
       stdoutSha256: sha256Hex(toUint8Array(run.stdout) ?? new Uint8Array(0)),
       stdoutLength: (toUint8Array(run.stdout) ?? new Uint8Array(0)).length,

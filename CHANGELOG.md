@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Command surfaces preserve the guest's error response
+
+- Browser and WasmEdge command harnesses throw `PluginInvokeError` when a non-zero exit carries a `$PIV`
+  response, preserving its status, error code, message, decoded response, and exit code. Guest exits without
+  a response frame throw `WasiExitError` with the exit code and guest stderr. Exit-zero responses are unchanged.
+- All three parity lanes and report summaries carry `exitCode` and the serializable `commandError` summary.
+
 ## 0.9.7
 
 ### The WasmEdge leg serves the hostcall bridge to single-thread artifacts

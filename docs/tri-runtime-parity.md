@@ -82,6 +82,22 @@ Every lane receives EXACTLY the same guest-observable inputs:
 - signed/published artifacts are stripped to the canonical module payload once
   (`toLoadableWasmBytes`) so every lane executes identical wasm bytes.
 
+## Command-surface errors
+
+A non-zero command exit with a well-formed `$PIV` response on stdout throws
+`PluginInvokeError` in both the browser and WasmEdge harnesses. It preserves
+`statusCode`, `errorCode`, `errorMessage`, `exitCode`, and the decoded `response`.
+All three parity lanes record the same error summary in `commandError`.
+
+A non-zero guest exit without a response frame throws `WasiExitError`, with
+`code` and guest `stderr`. Runtime traps remain runtime failures. Exit `0` is
+unchanged: the response is returned, including a handler-level non-zero
+`statusCode`.
+
+Every lane run and report summary carries `exitCode` (a number, or `null` when
+no exit code is available) and `commandError` (`PluginInvokeError.toJSON()`, or
+`null`). Successful runs have `exitCode: 0` and `commandError: null`.
+
 ## Fixtures
 
 ```json

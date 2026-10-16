@@ -1951,7 +1951,30 @@ export function createNodeHostSyncHostcallBridge(options: {
 }): HostcallBridge;
 export class WasiExitError extends Error {
   code: number;
+  stderr?: string;
 }
+export interface CommandErrorSummary {
+  name: "PluginInvokeError";
+  message: string;
+  exitCode: number;
+  statusCode: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+}
+export class PluginInvokeError extends Error {
+  constructor(options: { exitCode: number; response: DecodedPluginInvokeResponseEnvelope });
+  name: "PluginInvokeError";
+  exitCode: number;
+  statusCode: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  response: DecodedPluginInvokeResponseEnvelope;
+  toJSON(): CommandErrorSummary;
+}
+export function invokeErrorFromCommandRun(
+  exitCode: number | null,
+  stdout: Uint8Array | ArrayBufferView | ArrayBuffer,
+): PluginInvokeError | null;
 export interface BrowserWasiShim {
   imports: Record<string, Record<string, (...args: number[]) => number>>;
   setMemory(mem: { buffer: ArrayBuffer | SharedArrayBuffer }): void;

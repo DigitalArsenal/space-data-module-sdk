@@ -43,6 +43,7 @@ import {
   decodePluginInvokeResponse,
   writePluginInvokeRequestToArena,
 } from "../invoke/codec.js";
+import { invokeErrorFromCommandRun } from "../invoke/commandOutcome.js";
 import { toUint8Array } from "../runtime/bufferLike.js";
 import {
   ModuleSignatureError,
@@ -857,6 +858,7 @@ export async function createBrowserModuleHarness(options = {}) {
       wasiThreadPoolSize: options.wasiThreadPoolSize,
     });
     lastCommandContext = commandContext;
+    let exitError = null;
     try {
       const commandExport = commandContext.instance.exports[DefaultInvokeExports.commandSymbol];
       if (typeof commandExport !== "function") {
@@ -866,13 +868,17 @@ export async function createBrowserModuleHarness(options = {}) {
       }
       commandExport();
     } catch (error) {
-      if (!(error instanceof WasiExitError) || error.code !== 0) {
-        throw error;
-      }
+      if (!(error instanceof WasiExitError)) throw error;
+      if (error.code !== 0) exitError = error;
     } finally {
       await commandContext.threadHost?.terminateAll();
     }
-    return commandContext.wasi.stdout;
+    const stdout = commandContext.wasi.stdout;
+    if (exitError) {
+      exitError.stderr = new TextDecoder().decode(commandContext.wasi.stderr);
+      throw invokeErrorFromCommandRun(exitError.code, stdout) ?? exitError;
+    }
+    return stdout;
   }
 
   // --- Public API ---

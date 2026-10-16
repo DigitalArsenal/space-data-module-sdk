@@ -30,6 +30,9 @@ import {
 import { attachHostDispatch, inspectModule } from "./isomorphicLoaderCore.js";
 import { assertArtifactRuntimeTarget } from "./runtimeTargetGate.js";
 import { DEFAULT_HOSTCALL_IMPORT_MODULE } from "./abi.js";
+import { WasiExitError } from "./wasiShim.js";
+import { invokeErrorFromCommandRun } from "../invoke/commandOutcome.js";
+import { normalizeWasmEdgeOutcome } from "../testing/wasmedgeOutput.js";
 
 /** The typed failure the WasmEdge command harness's runner answers for any operation but plugin.getConfig. */
 export const WASMEDGE_UNSUPPORTED_MESSAGE = "the WasmEdge command harness serves only plugin.getConfig";
@@ -189,17 +192,33 @@ async function createWasmEdgeCommandHarness(options = {}) {
         );
       });
       child.on("close", (code, signal) => {
-        if (code !== 0 || signal !== null) {
+        if (signal !== null) {
           reject(
             formatFailure(
-              `WasmEdge command harness exited with ${
-                signal ? `signal ${signal}` : `code ${code}`
-              }.`,
+              `WasmEdge command harness exited with signal ${signal}.`,
             ),
           );
           return;
         }
-        resolve(new Uint8Array(Buffer.concat(stdoutChunks)));
+        const stdout = new Uint8Array(Buffer.concat(stdoutChunks));
+        if (code === 0) {
+          resolve(stdout);
+          return;
+        }
+        const stderr = Buffer.concat(stderrChunks);
+        const normalized = normalizeWasmEdgeOutcome({ stdout, stderr });
+        const invokeError = invokeErrorFromCommandRun(code, normalized.stdout);
+        if (invokeError) {
+          reject(invokeError);
+        } else if (normalized.diagnostics) {
+          reject(new Error(
+            `WasmEdge command harness exited with code ${code}.\n${normalized.diagnosticText.trim()}`,
+          ));
+        } else {
+          const error = new WasiExitError(code);
+          error.stderr = stderr.toString("utf8");
+          reject(error);
+        }
       });
       child.stdin.end(Buffer.from(normalizedRequest));
     });

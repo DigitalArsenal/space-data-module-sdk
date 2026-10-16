@@ -107,7 +107,7 @@ test("SDK pthread command delivers real stdin once, joins workers, and matches n
   const first = await harness.invokeRaw(request);
   assert.deepEqual(decodePluginInvokeResponse(first).outputs[0].payload, payload);
   assert.deepEqual(await harness.invokeRaw(request), first, "fresh CRT per invocation");
-  await assert.rejects(harness.invokeRaw(new Uint8Array()), { name: "WasiExitError", code: 1 });
+  await assert.rejects(harness.invokeRaw(new Uint8Array()), { name: "PluginInvokeError", exitCode: 1 });
   assert.match(decodePluginInvokeResponse(harness.wasi.stdout).errorMessage, /request bytes are empty/i);
   assert.deepEqual(await harness.invokeRaw(request), first, "failure does not poison next invocation");
   const secondPayload = new Uint8Array(16385).map((_, i) => (i * 13) % 256);
