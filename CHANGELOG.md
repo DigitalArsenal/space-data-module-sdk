@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.9
+
+### A wasi-sequential guest is sized to its need
+
+- `compileModuleFromSource` honors `initialMemoryBytes` and `maximumMemoryBytes` on the wasi-sequential link
+  (whole 64 KiB pages, initial <= maximum <= 4 GiB; a bad value fails the compile). On wasm32-wasip1-threads a
+  sequential guest defines a SHARED memory, which a browser reserves at its maximum up front; three guests at
+  the fixed 2 GiB ceiling put a phone past what it will reserve. Omitted, the 16 MiB / 2 GiB defaults are unchanged.
+
+### Parity browser lanes launch only the Chromium headless shell
+
+- The browser parity lanes resolve the Playwright Chromium headless shell only, never Chrome.app or Chrome for
+  Testing.
+
 ## 0.9.8
 
 ### Command surfaces preserve the guest's error response

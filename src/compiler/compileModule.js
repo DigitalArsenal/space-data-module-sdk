@@ -170,6 +170,54 @@ const MAX_STACK_SIZE_BYTES = 1024 * 1024 * 1024;
 const SEQUENTIAL_INITIAL_MEMORY_BYTES = 16 * 1024 * 1024;
 const SEQUENTIAL_MAX_MEMORY_BYTES = 2147483648;
 
+// Those are DEFAULTS, not a contract. On wasm32-wasip1-threads the memory a
+// sequential guest defines is SHARED (the triple implies atomics; see
+// assertSequentialArtifact), and a browser reserves a shared memory's whole
+// maximum up front because it can never move: three 2 GiB guests on one page
+// are 6 GiB of address space, which a phone refuses. `initialMemoryBytes` /
+// `maximumMemoryBytes` (declared in index.d.ts) size a guest to its measured
+// need. Whole 64 KiB pages, initial <= maximum <= 4 GiB (wasm32).
+const WASM_PAGE_BYTES = 64 * 1024;
+const WASM32_MAX_MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
+
+function resolveMemoryBytes(name, value, fallback) {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < WASM_PAGE_BYTES ||
+    value > WASM32_MAX_MEMORY_BYTES ||
+    value % WASM_PAGE_BYTES !== 0
+  ) {
+    throw new Error(
+      `${name} must be a whole number of 64 KiB pages between ${WASM_PAGE_BYTES} and ` +
+        `${WASM32_MAX_MEMORY_BYTES} bytes, got ${JSON.stringify(value)}.`,
+    );
+  }
+  return value;
+}
+
+function resolveSequentialMemory(options) {
+  const maximum = resolveMemoryBytes(
+    "maximumMemoryBytes",
+    options.maximumMemoryBytes,
+    SEQUENTIAL_MAX_MEMORY_BYTES,
+  );
+  const initial = resolveMemoryBytes(
+    "initialMemoryBytes",
+    options.initialMemoryBytes,
+    Math.min(SEQUENTIAL_INITIAL_MEMORY_BYTES, maximum),
+  );
+  if (initial > maximum) {
+    throw new Error(
+      `initialMemoryBytes ${initial} exceeds maximumMemoryBytes ${maximum}.`,
+    );
+  }
+  return { initial, maximum };
+}
+
 function resolveStackSize(stackSize) {
   if (stackSize === undefined || stackSize === null) {
     return null;
@@ -212,11 +260,12 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
     // that cannot allocate is not "sequential", it is broken. Same ceiling as
     // PTHREAD_FINAL_LINK_FLAGS' --max-memory, unshared and unimported so the
     // browser needs no cross-origin isolation to load it.
+    const sequentialMemory = resolveSequentialMemory(options);
     const sequentialArgs = [
       "-O3",
       "-mbulk-memory",
-      `-Wl,--initial-memory=${SEQUENTIAL_INITIAL_MEMORY_BYTES}`,
-      `-Wl,--max-memory=${SEQUENTIAL_MAX_MEMORY_BYTES}`,
+      `-Wl,--initial-memory=${sequentialMemory.initial}`,
+      `-Wl,--max-memory=${sequentialMemory.maximum}`,
     ];
     if (options.noEntry === true) {
       sequentialArgs.push("-mexec-model=reactor");
