@@ -55,6 +55,7 @@ import path from "node:path";
 import process from "node:process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { resolveHeadlessShell } from "./headlessShell.js";
 import { promisify } from "node:util";
 
 import { toLoadableWasmBytes } from "../bundle/artifactBytes.js";
@@ -529,26 +530,9 @@ async function ensureDockerLane(context) {
 
 // --- Browser probe lane ---------------------------------------------------------
 
-const CHROME_CANDIDATES = [
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  "/Applications/Chromium.app/Contents/MacOS/Chromium",
-  "/usr/bin/google-chrome-stable",
-  "/usr/bin/google-chrome",
-  "/usr/bin/chromium",
-  "/usr/bin/chromium-browser",
-];
-
+// Only the Playwright chromium headless shell is launched (headlessShell.js).
 export async function resolveChromeBinary(context = {}) {
-  const explicit =
-    context.chromeBinary ?? process.env.SDM_CHROME_BINARY ?? process.env.CHROME_BINARY;
-  if (explicit) return String(explicit);
-  for (const candidate of CHROME_CANDIDATES) {
-    if (await binaryExists(candidate)) return candidate;
-  }
-  throw new Error(
-    "browser lane: no Chrome/Chromium binary found (set SDM_CHROME_BINARY). " +
-      "The browser lane requires a REAL browser context — jsdom masks SAB/threading realities.",
-  );
+  return resolveHeadlessShell(context);
 }
 
 const PROBE_HTML = `<!doctype html>
