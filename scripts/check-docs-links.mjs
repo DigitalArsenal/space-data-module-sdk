@@ -4,8 +4,8 @@
  *
  *   1. Every internal href in docs/**.html resolves to a file that exists.
  *   2. Every in-page #anchor resolves to an id on the target page.
- *   3. No page loads external-origin bytes other than the reviewed,
- *      integrity-pinned SDN consumer-asset block.
+ *   3. No page loads external-origin bytes: the reviewed, integrity-pinned SDN
+ *      consumer assets are vendored under /space-data-module-sdk/assets/vendor/.
  *   4. Every generated page carries the stack-nav element.
  *
  * Usage: node scripts/check-docs-links.mjs
@@ -17,7 +17,8 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DOCS = join(ROOT, "docs");
-const ALLOWED_ORIGIN = "https://static.spacedatanetwork.org/";
+// Pages name the vendored assets root-absolute under the project site's path.
+const SITE_PREFIX = "/space-data-module-sdk/";
 
 function walk(dir) {
   const out = [];
@@ -63,9 +64,7 @@ for (const page of pages) {
     const url = m[1];
     const isAsset = /\.(?:js|css|png|jpg|jpeg|gif|svg|woff2?|wasm)(?:\?|$)/i.test(url);
     if (!isAsset) continue; // plain navigational links to other sites are fine
-    if (!url.startsWith(ALLOWED_ORIGIN)) {
-      problems.push(`${label}: external asset from a non-approved origin: ${url}`);
-    }
+    problems.push(`${label}: external asset: ${url}`);
   }
 
   // --- 1 + 2. internal links ------------------------------------------
@@ -83,7 +82,11 @@ for (const page of pages) {
       continue;
     }
 
-    let target = resolve(dirname(page), path);
+    if (path.startsWith("/") && !path.startsWith(SITE_PREFIX)) {
+      problems.push(`${label}: root-absolute link outside the site: ${href}`);
+      continue;
+    }
+    let target = path.startsWith(SITE_PREFIX) ? join(DOCS, path.slice(SITE_PREFIX.length)) : resolve(dirname(page), path);
     if (path.endsWith("/") || !path.includes(".")) target = join(target, "index.html");
 
     if (!existsSync(target)) {
