@@ -1216,15 +1216,20 @@ export async function runParityGate(options = {}) {
   const behavioral = [];
   for (const artifact of artifacts) {
     if (!artifact.fixture) continue;
-    // Behavioral lanes are scoped by the artifact's OWN declaration too: a
-    // WasmEdge-only artifact has no browser behaviour to compare, and running
-    // it there would score the harness's (correct) refusal as a divergence.
-    // The scoping is RECORDED — a skipped lane is evidence, never silence.
-    const harnessLanes = [
-      "browser",
+    // Behavioral lanes are the gate's active lanes: a lane the caller did not
+    // request is never compared (the Docker lane is optional; owner
+    // 2026-10-22: "we don't need it for any of these tasks"), and a requested
+    // lane that is not up already failed above as lane-unavailable. They are
+    // scoped by the artifact's OWN declaration too: a WasmEdge-only artifact
+    // has no browser behaviour to compare, and running it there would score
+    // the harness's (correct) refusal as a divergence. The scoping is
+    // RECORDED — a skipped lane is evidence, never silence.
+    const requestedHarnessLanes = [
+      ...(activeLanes.includes("browser") ? ["browser"] : []),
       ...(wasmedgeLanes.includes("wasmedge-native") ? ["wasmedge"] : []),
-      "docker-wasmedge",
-    ].filter((laneName) =>
+      ...(wasmedgeLanes.includes("wasmedge-docker") ? ["docker-wasmedge"] : []),
+    ];
+    const harnessLanes = requestedHarnessLanes.filter((laneName) =>
       laneIsInDeclaredScope(
         laneName === "wasmedge"
           ? "wasmedge-native"
@@ -1235,7 +1240,7 @@ export async function runParityGate(options = {}) {
         artifact.declaredCapabilities,
       ),
     );
-    const outOfScopeLanes = ["browser", "wasmedge", "docker-wasmedge"].filter(
+    const outOfScopeLanes = requestedHarnessLanes.filter(
       (laneName) => !harnessLanes.includes(laneName),
     );
     if (harnessLanes.length < 2) {
