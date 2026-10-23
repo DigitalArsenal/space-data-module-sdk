@@ -6,6 +6,7 @@ export type {
   ModuleLibrarySource,
   ModuleThreadModelName,
   ProtectedArtifact,
+  Simd128Report,
 } from "../index.js";
 
 export {

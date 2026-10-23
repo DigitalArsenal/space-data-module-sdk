@@ -6,6 +6,12 @@
 // contain"; what to DO about the answer (thread-model policy, SIMD policy) lives
 // in the guards that import it, so the decoder has one reason to change: the
 // wasm instruction encoding.
+//
+// A function body is decoded to its closing `end`: block depth is tracked, and a
+// body whose last instruction does not close the function block exactly at the
+// body's final byte was mis-decoded, so it is reported as undecodable instead of
+// contributing a count. A caller that needs a proof (the SIMD guard) therefore
+// sees `undecodableFunctions`, never a silent miss.
 
 import { decodeUnsignedLeb128 } from "../bundle/wasm.js";
 
@@ -76,12 +82,23 @@ function skipVec(bytes, cursor, end, bytesPerElement) {
   return position;
 }
 
+// The fixed-width SIMD proposal occupies 0xFD sub-opcodes 0x00..0xFF. Every
+// sub-opcode from 0x100 up belongs to a later proposal: relaxed-SIMD
+// (0x100..0x113, results implementation-defined) and whatever follows it.
+const FIXED_WIDTH_SIMD_LIMIT = 0x100;
+
 /**
- * Walk one function body and count genuine 0xFE-prefixed atomic instructions.
- * This is a real instruction decoder — NOT a byte scan — so `0xFE` bytes that
- * appear inside i32.const / LEB128 / memarg immediates are never miscounted.
+ * Walk one function body to its closing `end` and count, by class, the
+ * instructions it holds. Throws when the body does not decode to exactly its
+ * own bytes.
+ *
+ * @returns {{ atomic: number, simd: number, relaxedSimd: number, exceptionHandling: number }}
+ *   atomic             0xFE-prefixed threads instructions
+ *   simd               0xFD-prefixed fixed-width SIMD instructions (sub-opcode < 0x100)
+ *   relaxedSimd        0xFD-prefixed instructions at sub-opcode 0x100 and above
+ *   exceptionHandling  try / catch / throw / rethrow / delegate / try_table / throw_ref
  */
-function countAtomicsInFunctionBody(bytes, bodyStart, bodyEnd) {
+function scanFunctionBody(bytes, bodyStart, bodyEnd) {
   let cursor = bodyStart;
   // Local declarations: vec of (count, valtype).
   const localVecCount = readLeb(bytes, cursor, bodyEnd);
@@ -99,24 +116,72 @@ function countAtomicsInFunctionBody(bytes, bodyStart, bodyEnd) {
     }
   }
 
-  let atomics = 0;
+  const counts = { atomic: 0, simd: 0, relaxedSimd: 0, exceptionHandling: 0 };
+  // The function body is itself a block; its closing `end` brings depth to 0.
+  let depth = 1;
   while (cursor < bodyEnd) {
+    if (depth === 0) {
+      throw new Error("Instructions follow the function's closing end.");
+    }
     const opcode = bytes[cursor++];
     switch (opcode) {
       // Control / parametric with no immediates.
       case 0x00: // unreachable
       case 0x01: // nop
-      case 0x05: // else
-      case 0x0b: // end
+      case 0x05: // else (stays inside the open if block)
       case 0x0f: // return
       case 0x1a: // drop
       case 0x1b: // select
+        break;
+      case 0x0b: // end
+        depth -= 1;
         break;
       case 0x02: // block
       case 0x03: // loop
       case 0x04: // if
         cursor = skipBlockType(bytes, cursor, bodyEnd);
+        depth += 1;
         break;
+      case 0x06: // try (legacy exception handling)
+        counts.exceptionHandling += 1;
+        cursor = skipBlockType(bytes, cursor, bodyEnd);
+        depth += 1;
+        break;
+      case 0x07: // catch tagidx
+      case 0x08: // throw tagidx
+      case 0x09: // rethrow labelidx
+        counts.exceptionHandling += 1;
+        cursor = skipLeb(bytes, cursor, bodyEnd);
+        break;
+      case 0x0a: // throw_ref
+      case 0x19: // catch_all
+        counts.exceptionHandling += 1;
+        break;
+      case 0x18: // delegate labelidx: closes the try block like an end
+        counts.exceptionHandling += 1;
+        cursor = skipLeb(bytes, cursor, bodyEnd);
+        depth -= 1;
+        break;
+      case 0x1f: { // try_table blocktype vec(catch clause)
+        counts.exceptionHandling += 1;
+        cursor = skipBlockType(bytes, cursor, bodyEnd);
+        const clauses = readLeb(bytes, cursor, bodyEnd);
+        cursor = clauses.nextOffset;
+        for (let i = 0; i < clauses.value; i += 1) {
+          if (cursor >= bodyEnd) {
+            throw new Error("Catch clause ran past end of function body.");
+          }
+          const kind = bytes[cursor++];
+          if (kind === 0x00 || kind === 0x01) {
+            cursor = skipLeb(bytes, cursor, bodyEnd); // tagidx
+          } else if (kind !== 0x02 && kind !== 0x03) {
+            throw new Error(`Unknown catch clause kind 0x${kind.toString(16)}.`);
+          }
+          cursor = skipLeb(bytes, cursor, bodyEnd); // labelidx
+        }
+        depth += 1;
+        break;
+      }
       case 0x0c: // br
       case 0x0d: // br_if
         cursor = skipLeb(bytes, cursor, bodyEnd);
@@ -129,6 +194,8 @@ function countAtomicsInFunctionBody(bytes, bodyStart, bodyEnd) {
       }
       case 0x10: // call
       case 0x12: // return_call
+      case 0x14: // call_ref typeidx
+      case 0x15: // return_call_ref typeidx
         cursor = skipLeb(bytes, cursor, bodyEnd);
         break;
       case 0x11: // call_indirect
@@ -170,8 +237,12 @@ function countAtomicsInFunctionBody(bytes, bodyStart, bodyEnd) {
         }
         break;
       case 0xd1: // ref.is_null
+      case 0xd3: // ref.eq
+      case 0xd4: // ref.as_non_null
         break;
       case 0xd2: // ref.func
+      case 0xd5: // br_on_null labelidx
+      case 0xd6: // br_on_non_null labelidx
         cursor = skipLeb(bytes, cursor, bodyEnd);
         break;
       case 0xfc: {
@@ -213,10 +284,15 @@ function countAtomicsInFunctionBody(bytes, bodyStart, bodyEnd) {
         break;
       }
       case 0xfd: {
-        // SIMD (not emitted by our pthreads builds, but decode defensively).
+        // SIMD.
         const sub = readLeb(bytes, cursor, bodyEnd);
         cursor = sub.nextOffset;
         const op = sub.value;
+        if (op >= FIXED_WIDTH_SIMD_LIMIT) {
+          counts.relaxedSimd += 1;
+        } else {
+          counts.simd += 1;
+        }
         if (op <= 0x0b) {
           cursor = skipMemArg(bytes, cursor, bodyEnd); // v128 load/store
         } else if (op === 0x0c || op === 0x0d) {
@@ -235,7 +311,7 @@ function countAtomicsInFunctionBody(bytes, bodyStart, bodyEnd) {
         // Atomics / threads.
         const sub = readLeb(bytes, cursor, bodyEnd);
         cursor = sub.nextOffset;
-        atomics += 1;
+        counts.atomic += 1;
         if (sub.value === 0x03) {
           cursor += 1; // atomic.fence: one reserved byte, no memarg
         } else {
@@ -251,44 +327,80 @@ function countAtomicsInFunctionBody(bytes, bodyStart, bodyEnd) {
           cursor = skipMemArg(bytes, cursor, bodyEnd);
           break;
         }
-        // All remaining MVP numeric/comparison/conversion opcodes
-        // (0x45..0xc4, sign-extension, etc.) take no immediates.
-        break;
+        if (opcode >= 0x45 && opcode <= 0xc4) {
+          // MVP numeric / comparison / conversion opcodes and the sign-extension
+          // operators take no immediates.
+          break;
+        }
+        // Reserved opcodes and prefixes this decoder does not know (the GC
+        // prefix 0xFB): their immediates cannot be skipped, so the body is
+        // undecodable rather than guessed at.
+        throw new Error(`Unsupported opcode 0x${opcode.toString(16)}.`);
     }
     if (cursor > bodyEnd) {
       throw new Error("Instruction immediate ran past end of function body.");
     }
   }
-  return atomics;
+  if (depth !== 0) {
+    throw new Error("Function body does not close its block at its final byte.");
+  }
+  return counts;
 }
 
-export function countAtomicInstructions(parsed) {
+/**
+ * Scan the code section of a parsed wasm module (parseWasmModuleSections).
+ *
+ * @returns {{
+ *   atomic: number, simd: number, relaxedSimd: number, exceptionHandling: number,
+ *   undecodableFunctions: number,
+ * }}
+ *   Totals over every function that decodes; `undecodableFunctions` counts the
+ *   bodies that did not (their instructions contribute nothing).
+ */
+export function scanWasmCode(parsed) {
+  const totals = {
+    atomic: 0,
+    simd: 0,
+    relaxedSimd: 0,
+    exceptionHandling: 0,
+    undecodableFunctions: 0,
+  };
   const codeSection = parsed.sections.find((section) => section.id === 10);
   if (!codeSection) {
-    return 0;
+    return totals;
   }
   const bytes = parsed.bytes;
-  let total = 0;
   try {
     let cursor = codeSection.payloadStart;
     const funcCount = readLeb(bytes, cursor, codeSection.payloadEnd);
     cursor = funcCount.nextOffset;
-    for (let i = 0; i < funcCount.value && cursor < codeSection.payloadEnd; i += 1) {
+    for (let i = 0; i < funcCount.value; i += 1) {
+      if (cursor >= codeSection.payloadEnd) {
+        totals.undecodableFunctions += funcCount.value - i;
+        break;
+      }
       const sizeInfo = readLeb(bytes, cursor, codeSection.payloadEnd);
       const bodyStart = sizeInfo.nextOffset;
       const bodyEnd = bodyStart + sizeInfo.value;
       if (bodyEnd > codeSection.payloadEnd) {
+        totals.undecodableFunctions += funcCount.value - i;
         break;
       }
       try {
-        total += countAtomicsInFunctionBody(bytes, bodyStart, bodyEnd);
+        const counts = scanFunctionBody(bytes, bodyStart, bodyEnd);
+        totals.atomic += counts.atomic;
+        totals.simd += counts.simd;
+        totals.relaxedSimd += counts.relaxedSimd;
+        totals.exceptionHandling += counts.exceptionHandling;
       } catch {
-        // Best-effort per function: skip an undecodable body rather than crash.
+        // A body that does not decode is counted, not trusted and not fatal.
+        totals.undecodableFunctions += 1;
       }
       cursor = bodyEnd;
     }
   } catch {
-    // Truncated / malformed code section: return best-effort count.
+    // Truncated / malformed code section: report what decoded.
+    totals.undecodableFunctions += 1;
   }
-  return total;
+  return totals;
 }

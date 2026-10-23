@@ -48,6 +48,7 @@ import {
   assertSequentialFlagsAbsent,
   PTHREAD_FINAL_LINK_FLAGS,
 } from "./pthreadArtifactGuard.js";
+import { SIMD128_COMPILE_FLAG, assertSimdArtifact } from "./simdArtifactGuard.js";
 import { resolveWasiThreadsToolchain } from "./wasiThreadsToolchain.js";
 import { encodePluginManifest, toEmbeddedPluginManifest } from "../manifest/index.js";
 import {
@@ -399,6 +400,35 @@ function buildSourceCompilerArgs(options = {}) {
   return args;
 }
 
+// WebAssembly SIMD is an OPT-IN of the module, never a default: a module that does
+// not ask for it compiles with exactly the flags it always has. It is a flag of the
+// sanctioned clang wasm32-wasip1-threads toolchain, so the legacy single-thread
+// (Emscripten) model refuses it rather than ship a lane no guard or runtime proof
+// covers. See simdArtifactGuard.js for what the emitted artifact is held to.
+function resolveSimd128(value, threadModel) {
+  if (value === undefined || value === null || value === false) {
+    return false;
+  }
+  if (value !== true) {
+    throw new Error(`simd128 must be true or false, got "${String(value)}".`);
+  }
+  if (threadModel === ModuleThreadModel.SINGLE_THREAD) {
+    throw new Error(
+      `simd128 requires threadModel "${ModuleThreadModel.WASI_SEQUENTIAL}" or ` +
+        `"${ModuleThreadModel.EMSCRIPTEN_PTHREADS}": SIMD is built by the clang ` +
+        `wasm32-wasip1-threads toolchain, not the legacy Emscripten "${ModuleThreadModel.SINGLE_THREAD}" model.`,
+    );
+  }
+  return true;
+}
+
+// The flags that apply to the module's OWN code - its source and its `libraries` -
+// and not to the SDK's generated manifest exports and invoke bridge, which are the
+// same objects (and the same compile-cache entries) with or without SIMD.
+function moduleCodeCompilerArgs(options = {}) {
+  return options.simd128 === true ? [SIMD128_COMPILE_FLAG] : [];
+}
+
 function normalizeThreadModel(value) {
   if (value === undefined || value === null || value === "") {
     return null;
@@ -635,6 +665,7 @@ function createGuestLinkBundleEntries(guestLink) {
         ...(Array.isArray(guestLink.capabilities)
           ? { capabilities: [...guestLink.capabilities] }
           : {}),
+        ...(guestLink.simd128 === true ? { simd128: true } : {}),
       },
       description: "Guest-link metadata for monolithic flow linking.",
     },
@@ -762,6 +793,7 @@ function normalizeArgv(argv, workDir) {
 // that runs them.
 async function resolveToolchainProfile(kind, { language, sourceCompilerCommand, compileOptions, tempDir }) {
   const sourceCompilerArgs = buildSourceCompilerArgs(compileOptions);
+  const moduleCodeArgs = moduleCodeCompilerArgs(compileOptions);
   if (kind === "wasi") {
     const toolchain = resolveWasiThreadsToolchain();
     const isCpp = String(language ?? "").toLowerCase().startsWith("c++");
@@ -789,6 +821,7 @@ async function resolveToolchainProfile(kind, { language, sourceCompilerCommand, 
               ...(libraryLanguage === "c++" ? ["-std=c++17"] : []),
               ...extra,
               ...sourceCompilerArgs,
+              ...moduleCodeArgs,
               "-o",
               objectPath,
             ]
@@ -802,6 +835,7 @@ async function resolveToolchainProfile(kind, { language, sourceCompilerCommand, 
               ...(isCpp ? ["-std=c++17"] : []),
               ...extra,
               ...sourceCompilerArgs,
+              ...moduleCodeArgs,
               "-o",
               objectPath,
             ]
@@ -1239,6 +1273,9 @@ async function compileWithToolchain(kind, options = {}) {
       methodSymbols: guestLink.methodSymbols,
       threadModel: compileOptions.threadModel ?? ModuleThreadModel.SINGLE_THREAD,
       capabilities: compileOptions.guestLinkCapabilities,
+      // Present only for a module that opted in: a module that did not has a
+      // guest-link record byte-identical to what it always had.
+      ...(compileOptions.simd128 === true ? { simd128: true } : {}),
       objectBytes: guestLink.objectBytes,
       ...(linked.libraries.length > 0
         ? {
@@ -1315,10 +1352,12 @@ export async function compileModuleFromSource(options = {}) {
     manifest,
     threadModel: options.threadModel,
   });
+  const simd128 = resolveSimd128(options.simd128, threadModel);
   const compileOptions = {
     ...options,
     noEntry: includeCommandMain !== true,
     threadModel,
+    simd128,
     guestLinkCapabilities: resolveGuestLinkCapabilities(
       manifest,
       options.guestLinkCapabilities,
@@ -1394,6 +1433,13 @@ export async function compileModuleFromSource(options = {}) {
       });
     }
 
+    // The SIMD guard holds the artifact to the build's declaration: SIMD only when
+    // the module opted in, never relaxed-SIMD. See simdArtifactGuard.js.
+    const simd128Report = assertSimdArtifact(wasmBytes, {
+      optedIn: simd128,
+      source: resolvedOutputPath,
+    });
+
     // Validate the compiled artifact
     const report = await validateArtifactWithStandards({
       manifest,
@@ -1422,6 +1468,7 @@ export async function compileModuleFromSource(options = {}) {
       compileCache: result.cache,
       manifestWarnings: warnings,
       threadFeatures,
+      simd128: simd128Report,
       report,
     };
   } finally {

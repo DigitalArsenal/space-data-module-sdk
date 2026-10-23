@@ -7,10 +7,10 @@
 
 import {
   decodeUnsignedLeb128,
-  listWasmCustomSections,
   parseWasmModuleSections,
 } from "../bundle/wasm.js";
-import { countAtomicInstructions } from "./wasmCodeScan.js";
+import { scanWasmCode } from "./wasmCodeScan.js";
+import { readDeclaredFeatures } from "./wasmTargetFeatures.js";
 
 // Mirrors ModuleThreadModel.EMSCRIPTEN_PTHREADS in compileModule.js. Kept as a
 // local literal to avoid an import cycle (compileModule imports this module).
@@ -314,40 +314,6 @@ function isEmscriptenThreadHook(entry) {
   );
 }
 
-function readDeclaredFeatures(wasmBytes) {
-  let customSections;
-  try {
-    customSections = listWasmCustomSections(wasmBytes);
-  } catch {
-    return null;
-  }
-  const featureSection = customSections.find(
-    (section) => section.name === "target_features",
-  );
-  if (!featureSection) {
-    return null;
-  }
-  const bytes = featureSection.dataBytes;
-  const features = [];
-  try {
-    let cursor = 0;
-    const countInfo = decodeUnsignedLeb128(bytes, cursor);
-    cursor = countInfo.nextOffset;
-    for (let i = 0; i < countInfo.value; i += 1) {
-      cursor += 1; // prefix ('+', '-', '=')
-      const nameLen = decodeUnsignedLeb128(bytes, cursor);
-      cursor = nameLen.nextOffset;
-      features.push(
-        textDecoder.decode(bytes.subarray(cursor, cursor + nameLen.value)),
-      );
-      cursor += nameLen.value;
-    }
-  } catch {
-    return features.length > 0 ? features : null;
-  }
-  return features;
-}
-
 /**
  * Parse a compiled wasm artifact and report its threading features, including
  * the isomorphic wasi-threads host contract.
@@ -374,7 +340,7 @@ export function analyzeWasmThreadFeatures(wasmBytes) {
     ...collectDeclaredMemories(parsed),
   ];
   const sharedMemory = memories.find((memory) => memory.shared) ?? null;
-  const atomicInstructionCount = countAtomicInstructions(parsed);
+  const atomicInstructionCount = scanWasmCode(parsed).atomic;
   const declaredFeatures = readDeclaredFeatures(parsed.bytes);
   const usesAtomics =
     atomicInstructionCount > 0 ||

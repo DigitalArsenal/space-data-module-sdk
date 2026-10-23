@@ -2,7 +2,8 @@
 //
 //   <dir>/module-link.o                    the prefixed guest-link object
 //   <dir>/metadata.json                    format, language, threadModel, symbolPrefix, methodSymbols
-//                                          (+ libraries, below)
+//                                          (+ libraries, below; + simd128: true when the module
+//                                          opted in to WebAssembly SIMD)
 //   <dir>/libraries/<name>-<version>-<sha12>.o
 //                                          each shared library object the module links
 //                                          (compile option `libraries`), listed in
@@ -62,6 +63,7 @@ export async function writeGuestLinkFiles(compilation, dir, metadata = {}) {
     symbolPrefix: guestLink.symbolPrefix,
     methodSymbols: guestLink.methodSymbols,
     ...(libraryEntries.length > 0 ? { libraries: libraryEntries } : {}),
+    ...(guestLink.simd128 === true ? { simd128: true } : {}),
     ...metadata,
   };
   // The SDK's one canonical writer of this metadata (the guest-link bundle entry

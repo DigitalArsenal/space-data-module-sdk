@@ -17,6 +17,12 @@ export {
   PTHREAD_FINAL_LINK_FLAGS,
 } from "./pthreadArtifactGuard.js";
 
+export {
+  analyzeWasmSimdFeatures,
+  assertSimdArtifact,
+  SIMD128_COMPILE_FLAG,
+} from "./simdArtifactGuard.js";
+
 export { resolveWasiThreadsToolchain } from "./wasiThreadsToolchain.js";
 export { writeGuestLinkFiles } from "./guestLinkFiles.js";
 
