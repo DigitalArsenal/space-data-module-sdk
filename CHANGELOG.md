@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.13
+
+### The standards catalog carries $DCL: spacedatastandards.org 1.206.0 -> 1.261.0
+
+- The SDK's `spacedatastandards.org` dependency is 1.261.0 (was 1.206.0). The standards catalog is built from the
+  package's `dist/manifest.json`, so `validateManifestWithStandards` and `compileModuleFromSource` now accept a port
+  typed `$DCL` (`DCL.fbs`, with the PVN provenance of SDS 1.259.0) and the other schemas added since 1.206.0, among
+  them the CVR empirical-history-shrinkage rule of 1.261.0. At 1.206.0 the catalog had no `$DCL` entry and a manifest
+  naming one was refused.
+- `src/generated/spacedatastandards/plg` is the mirror of the 1.261.0 PLG bindings (`npm run check:generated-bindings`
+  passes). Its only change is `hostCapabilityKind`: `STORAGE_INGEST = 36`, which `plgCodec.js` already named and which
+  the 1.206.0 mirror did not define.
+
 ## 0.9.12
 
 - The release of the 0.9.11 changes below. The v0.9.11 tag's publish job failed and 0.9.11 never reached npm:
