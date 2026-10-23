@@ -423,8 +423,9 @@ export function createHostcallBridge(options = {}) {
           `Hostcall request exceeds ${maxRequestBytes} byte limit.`,
         );
       }
+      // Browser TextDecoder rejects shared guest views; decode an owned copy.
       const operation = textDecoder.decode(
-        readMemoryBytes(getMemory, operationPtr, operationLen, "Operation"),
+        readMemoryBytes(getMemory, operationPtr, operationLen, "Operation").slice(),
       );
       const payload = readMemoryBytes(getMemory, payloadPtr, payloadLen, "Payload");
       // An SDS $PIV hostcall (typed contracts 1.0) is answered with a $PIV response; the JSON envelope below goes

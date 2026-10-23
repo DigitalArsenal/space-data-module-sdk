@@ -16,7 +16,7 @@ import { base64ToBytes, bytesToBase64 } from "../utils/encoding.js";
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
-const text = (bytes) => (bytes === undefined ? undefined : textDecoder.decode(bytes));
+const text = (bytes) => (bytes === undefined ? undefined : textDecoder.decode(bytes.slice()));
 const bytesOf = (value) => (value === undefined || value === null ? undefined : value instanceof Uint8Array ? value : typeof value === "string" ? textEncoder.encode(value) : new Uint8Array(value));
 const items = (values) => (values || []).map((v) => ({ VALUE: String(v) }));
 const unix = (value) => BigInt(Math.round(value instanceof Date ? value.getTime() : Number(value)));

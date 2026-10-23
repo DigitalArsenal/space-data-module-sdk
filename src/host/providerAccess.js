@@ -588,7 +588,7 @@ export function createProviderAccessBridge(options = {}) {
   function acquire(reqPtr, reqLen, descPtr) {
     try {
       const request = JSON.parse(
-        textDecoder.decode(guestView(getMemory, reqPtr, reqLen)),
+        textDecoder.decode(guestView(getMemory, reqPtr, reqLen).slice()),
       );
       // RASTER IN. A coverage field is 512x512 = 262,144 positions; encoding
       // those as JSON would be a multi-megabyte request string parsed per

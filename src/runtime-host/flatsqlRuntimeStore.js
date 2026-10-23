@@ -151,7 +151,7 @@ function decodeRuntimeRowMetadata(data) {
     throw new Error("Invalid runtime row metadata layout.");
   }
   return {
-    schemaFileId: decoder.decode(bytes.subarray(schemaStart, schemaEnd)),
+    schemaFileId: decoder.decode(bytes.slice(schemaStart, schemaEnd)),
     rowId: Number(view.getBigUint64(rowIdOffset, true)),
   };
 }

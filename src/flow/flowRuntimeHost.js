@@ -314,7 +314,7 @@ export async function createFlowRuntimeHost(options = {}) {
     let end = ptr;
     const limit = Math.min(heap.length, ptr + maxLength);
     while (end < limit && heap[end] !== 0) end++;
-    return textDecoder.decode(heap.subarray(ptr, end));
+    return textDecoder.decode(heap.slice(ptr, end));
   }
 
   function writeBytes(ptr, bytes) {

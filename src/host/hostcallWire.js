@@ -143,7 +143,7 @@ export function decodeHostcallEnvelope(bytes) {
     throw new RangeError("Hostcall envelope meta exceeds envelope bounds.");
   }
   const meta = JSON.parse(
-    textDecoder.decode(bytes.subarray(offset, offset + metaLength)),
+    textDecoder.decode(bytes.slice(offset, offset + metaLength)),
   );
   offset += metaLength;
   const segmentCount = view.getUint32(offset, true);

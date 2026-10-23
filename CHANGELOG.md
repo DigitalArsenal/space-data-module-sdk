@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.10
+
+- Copy guest-memory text before decoding it in JavaScript hosts: operation names, hostcall JSON metadata,
+  provider requests, typed raw fields, flow C strings, and runtime row schema identifiers. Chromium now
+  accepts shared-memory guests, including wasi-sequential modules, and returns their typed `$PIV` answers.
+- Add a headless Chromium E2E that instantiates a shared-memory WASM guest, round-trips JSON metadata,
+  and verifies a typed `plugin.getConfig` response. The same E2E fails on the unfixed SDK.
+
 ## 0.9.9
 
 ### A wasi-sequential guest is sized to its need
