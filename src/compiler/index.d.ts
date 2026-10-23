@@ -1,5 +1,6 @@
 export type {
   CompilationResult,
+  CompileCacheReport,
   GuestLinkArtifact,
   ModuleThreadModelName,
   ProtectedArtifact,
@@ -11,6 +12,8 @@ export {
   createRecipientKeypairHex,
   deriveGuestLinkObject,
   ModuleThreadModel,
+  pruneCompileCache,
+  resolveCompileCacheRoot,
   protectModuleArtifact,
   getFlatbuffersCppRuntimeHeaders,
   getInvokeCppSchemaHeaders,

@@ -44,10 +44,19 @@ const COMPILER_ENTRY_URL = pathToFileURL(
 
 const realTmpDir = os.tmpdir();
 const isolatedTmpDir = await mkdtemp(path.join(realTmpDir, "sdm-tmpleak-test-"));
+// The compile cache is on by default: a private, empty one (outside the
+// isolated TMPDIR, whose contents these tests count) makes every compile here
+// start the toolchain, as the hygiene checks need.
+const isolatedCacheDir = await mkdtemp(path.join(realTmpDir, "sdm-tmpleak-cache-"));
+const previousCacheDir = process.env.SPACE_DATA_MODULE_SDK_CACHE_DIR;
+process.env.SPACE_DATA_MODULE_SDK_CACHE_DIR = isolatedCacheDir;
 setTmpDir(process.env, isolatedTmpDir);
 after(async () => {
   setTmpDir(process.env, realTmpDir);
+  if (previousCacheDir === undefined) delete process.env.SPACE_DATA_MODULE_SDK_CACHE_DIR;
+  else process.env.SPACE_DATA_MODULE_SDK_CACHE_DIR = previousCacheDir;
   await rm(isolatedTmpDir, { recursive: true, force: true });
+  await rm(isolatedCacheDir, { recursive: true, force: true });
 });
 
 function setTmpDir(env, dir) {

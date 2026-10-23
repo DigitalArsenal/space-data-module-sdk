@@ -27,7 +27,19 @@ import {
   getFlatbuffersCppRuntimeHeaders,
   getInvokeCppSchemaHeaders,
 } from "./flatcSupport.js";
-import { runWithEmceptionLock } from "./emceptionNode.js";
+import { getEmceptionCompileIdentity, runWithEmceptionLock } from "./emceptionNode.js";
+import {
+  COMPILE_CACHE_FORMAT,
+  describeExternalDependencies,
+  digestFiles,
+  digestOf,
+  getNativeClangIdentity,
+  getSdkCompileIdentity,
+  getSystemEmscriptenIdentity,
+  openCompileCache,
+  parseDepfile,
+  sha256Hex,
+} from "./compileCache.js";
 import { listWasmObjectSymbols, renameWasmObjectSymbols } from "./wasmObjectSymbols.js";
 import {
   assertPthreadArtifact,
@@ -728,7 +740,9 @@ async function runWasiCompiler(command, args, options = {}) {
 // One translation unit -> module.o (ONE compile), plus the generated embedded
 // manifest and invoke bridge objects, linked into module.wasm. The guest-link
 // object (module-link.o) is module.o with its guest-link symbols renamed; it
-// is not compiled again.
+// is not compiled again. Each compile and the link is a step with a content
+// key (compileCache.js): a step whose key is in the cache is not run, and a
+// compile whose every step hits never starts a toolchain at all.
 //
 // Three toolchains run the same steps:
 //   emception          single-thread: the vendored Emscripten, in-process wasm
@@ -738,6 +752,12 @@ async function runWasiCompiler(command, args, options = {}) {
 // ---------------------------------------------------------------------------
 
 const EMCEPTION_WORK_DIR = "/working/space-data-module-sdk-compile";
+const WORK_DIR_TOKEN = "<work>";
+
+function normalizeArgv(argv, workDir) {
+  return argv.map((arg) => String(arg).split(workDir).join(WORK_DIR_TOKEN));
+}
+
 // The toolchain profile: the commands and flags of every step, and the driver
 // that runs them.
 async function resolveToolchainProfile(kind, { language, sourceCompilerCommand, compileOptions, tempDir }) {
@@ -751,6 +771,13 @@ async function resolveToolchainProfile(kind, { language, sourceCompilerCommand, 
       kind,
       workDir,
       join: path.join,
+      supportsDepfile: true,
+      identity: () =>
+        getNativeClangIdentity({
+          drivers: Array.from(new Set([isCpp ? toolchain.clangxx : toolchain.clang, toolchain.clangxx])),
+          toolchainArgs: toolchain.toolchainArgs,
+          roots: [toolchain.sysroot, toolchain.resourceDir],
+        }).then((id) => digestOf({ id, env: nativeCompilerEnv() })),
       compileArgv: (role, sourcePath, objectPath, extra = []) =>
         role === "module"
           ? [
@@ -808,6 +835,11 @@ async function resolveToolchainProfile(kind, { language, sourceCompilerCommand, 
       kind,
       workDir,
       join: path.join,
+      supportsDepfile: true,
+      identity: () =>
+        getSystemEmscriptenIdentity(Array.from(new Set([sourceCompilerCommand, "em++"]))).then((id) =>
+          digestOf({ id, env: nativeCompilerEnv() }),
+        ),
       ...emscriptenProfile(workDir),
       withDriver: (task) => task(createNativeDriver(workDir, runSystemCompiler)),
     };
@@ -818,6 +850,8 @@ async function resolveToolchainProfile(kind, { language, sourceCompilerCommand, 
     kind,
     workDir,
     join: path.posix.join,
+    supportsDepfile: false,
+    identity: () => getEmceptionCompileIdentity(),
     ...emscriptenProfile(workDir),
     withDriver: (task) =>
       runWithEmceptionLock(async (emception) => {
@@ -834,6 +868,12 @@ async function resolveToolchainProfile(kind, { language, sourceCompilerCommand, 
   };
 }
 
+// Environment a native compiler reads besides its arguments.
+function nativeCompilerEnv() {
+  const names = ["CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "OBJC_INCLUDE_PATH", "EMCC_CFLAGS", "SDN_WASI_TARGET"];
+  return Object.fromEntries(names.map((name) => [name, process.env[name] ?? null]));
+}
+
 function createNativeDriver(workDir, run) {
   return {
     async writeFile(filePath, content) {
@@ -842,6 +882,9 @@ function createNativeDriver(workDir, run) {
     },
     async readFile(filePath) {
       return new Uint8Array(await readFile(filePath));
+    },
+    async readText(filePath) {
+      return readFile(filePath, "utf8");
     },
     async exec(argv) {
       await run(argv[0], argv.slice(1), { cwd: workDir });
@@ -858,6 +901,9 @@ function createEmceptionDriver(emception, workDir) {
     },
     async readFile(filePath) {
       return new Uint8Array(emception.readFile(filePath));
+    },
+    async readText(filePath) {
+      return emception.readFile(filePath, { encoding: "utf8" });
     },
     async exec(argv) {
       const result = emception.run(argv.join(" "));
@@ -884,6 +930,7 @@ async function compileWithToolchain(kind, options = {}) {
     outputPath,
     tempDir,
     compileOptions,
+    cache,
   } = options;
   const resolvedOutputPath = path.resolve(
     outputPath ?? path.join(tempDir, "module.wasm"),
@@ -920,21 +967,96 @@ async function compileWithToolchain(kind, options = {}) {
   const linkObjects = compileSteps.map((step) => step.object);
   const linkArgv = profile.linkArgv(linkObjects.map(at), at("module.wasm"), linkArgs);
 
+  const cacheReport = { enabled: Boolean(cache), dir: cache?.root ?? null, hits: [], misses: [] };
+  let keyBase = null;
+  if (cache) {
+    const sdk = await getSdkCompileIdentity();
+    keyBase = {
+      format: COMPILE_CACHE_FORMAT,
+      sdk,
+      toolchain: { kind, id: await profile.identity() },
+      support: digestFiles(supportFiles),
+    };
+  }
+  const compileKey = (step) =>
+    digestOf({
+      ...keyBase,
+      step: step.name,
+      argv: normalizeArgv(step.argv, workDir),
+      source: sha256Hex(new TextEncoder().encode(sourceFiles[step.source])),
+    });
+  const linkKey = (objects) =>
+    digestOf({
+      ...keyBase,
+      step: "link",
+      argv: normalizeArgv(linkArgv, workDir),
+      objects: objects.map((bytes) => sha256Hex(bytes)),
+    });
+
   const objects = new Map();
-  const wasmBytes = await profile.withDriver(async (driver) => {
-    for (const [name, content] of Object.entries(supportFiles)) {
-      await driver.writeFile(at(name), content);
-    }
-    for (const [name, content] of Object.entries(sourceFiles)) {
-      await driver.writeFile(at(name), content);
-    }
+  if (cache) {
     for (const step of compileSteps) {
-      await driver.exec(step.argv);
-      objects.set(step.object, await driver.readFile(at(step.object)));
+      step.key = compileKey(step);
+      const entry = await cache.get(step.key);
+      if (entry?.blobs?.object) objects.set(step.object, entry.blobs.object);
     }
-    await driver.exec(linkArgv);
-    return driver.readFile(at("module.wasm"));
-  });
+  }
+  let wasmBytes = null;
+  let linkCacheKey = null;
+  if (cache && objects.size === compileSteps.length) {
+    linkCacheKey = linkKey(linkObjects.map((name) => objects.get(name)));
+    wasmBytes = (await cache.get(linkCacheKey))?.blobs?.wasm ?? null;
+  }
+
+  if (!wasmBytes) {
+    wasmBytes = await profile.withDriver(async (driver) => {
+      for (const [name, content] of Object.entries(supportFiles)) {
+        await driver.writeFile(at(name), content);
+      }
+      for (const [name, content] of Object.entries(sourceFiles)) {
+        await driver.writeFile(at(name), content);
+      }
+      for (const step of compileSteps) {
+        if (objects.has(step.object)) {
+          cacheReport.hits.push(step.name);
+          await driver.writeFile(at(step.object), objects.get(step.object));
+          continue;
+        }
+        cacheReport.misses.push(step.name);
+        const depfile = at(`${step.object}.d`);
+        const useDepfile = Boolean(cache) && profile.supportsDepfile;
+        await driver.exec(useDepfile ? [...step.argv, "-MD", "-MF", depfile] : step.argv);
+        const objectBytes = await driver.readFile(at(step.object));
+        objects.set(step.object, objectBytes);
+        if (cache) {
+          const externalDeps = useDepfile
+            ? await describeExternalDependencies(
+                parseDepfile(await driver.readText(depfile))
+                  .map((dep) => path.resolve(workDir, dep))
+                  .filter((dep) => !dep.startsWith(workDir + path.sep) && dep !== workDir),
+              )
+            : [];
+          await cache.put(step.key, { object: objectBytes }, { step: step.name, externalDeps });
+        }
+      }
+      const objectBytesList = linkObjects.map((name) => objects.get(name));
+      if (cache) {
+        linkCacheKey = linkKey(objectBytesList);
+        const entry = await cache.get(linkCacheKey);
+        if (entry?.blobs?.wasm) {
+          cacheReport.hits.push("link");
+          return entry.blobs.wasm;
+        }
+      }
+      cacheReport.misses.push("link");
+      await driver.exec(linkArgv);
+      const linked = await driver.readFile(at("module.wasm"));
+      if (cache) await cache.put(linkCacheKey, { wasm: linked }, { step: "link" });
+      return linked;
+    });
+  } else {
+    cacheReport.hits.push(...compileSteps.map((step) => step.name), "link");
+  }
 
   const guestLink = deriveGuestLinkObject({
     objectBytes: objects.get("module.o"),
@@ -947,6 +1069,7 @@ async function compileWithToolchain(kind, options = {}) {
   return {
     wasmBytes,
     outputPath: resolvedOutputPath,
+    cache: cacheReport,
     guestLink: {
       format: "wasm-object",
       language,
@@ -1043,6 +1166,7 @@ export async function compileModuleFromSource(options = {}) {
     : useSystemEmscripten
       ? "system-emscripten"
       : "emception";
+  const cache = openCompileCache(options.compileCache);
   // Scratch for the toolchain and, without an explicit outputPath, the home of
   // the emitted artifact. Removed in finally on success, failure and throw.
   // `keepTempDir: true` hands it to the caller on success instead
@@ -1067,6 +1191,7 @@ export async function compileModuleFromSource(options = {}) {
       outputPath: options.outputPath,
       tempDir,
       compileOptions,
+      cache,
     });
     const wasmBytes = appendWasmCustomSection(
       result.wasmBytes,
@@ -1120,6 +1245,7 @@ export async function compileModuleFromSource(options = {}) {
       tempDir: keepTempDir ? tempDir : null,
       wasmBytes,
       guestLink: result.guestLink,
+      compileCache: result.cache,
       manifestWarnings: warnings,
       threadFeatures,
       report,

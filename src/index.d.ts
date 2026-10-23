@@ -993,6 +993,8 @@ export interface CompilationResult {
   tempDir: string | null;
   wasmBytes: Uint8Array;
   guestLink: GuestLinkArtifact | null;
+  /** Which compile steps the content cache answered. */
+  compileCache?: CompileCacheReport;
   manifestWarnings: string[];
   report: ComplianceReport;
 }
@@ -1081,7 +1083,31 @@ export function compileModuleFromSource(options: {
   guestLinkCapabilities?: string[];
   catalog?: StandardsEntry[];
   standardsRoot?: string;
+  /**
+   * The content-addressed compile cache. Default on, at
+   * SPACE_DATA_MODULE_SDK_CACHE_DIR, else $XDG_CACHE_HOME/space-data-module-sdk,
+   * else ~/.cache/space-data-module-sdk. `false` (or the environment
+   * SPACE_DATA_MODULE_SDK_COMPILE_CACHE=0) compiles everything; `{ dir }`
+   * names another cache directory.
+   */
+  compileCache?: boolean | { dir?: string };
 }): Promise<CompilationResult>;
+
+export interface CompileCacheReport {
+  enabled: boolean;
+  dir: string | null;
+  /** Steps answered from the cache: "module", "manifest", "invoke", "link". */
+  hits: string[];
+  /** Steps that ran the toolchain. */
+  misses: string[];
+}
+
+export function pruneCompileCache(options?: {
+  dir?: string;
+  maxBytes?: number;
+}): Promise<{ removedEntries: number; removedBytes: number; keptBytes: number }>;
+
+export function resolveCompileCacheRoot(dir?: string): string;
 
 export function cleanupCompilation(
   result: CompilationResult,

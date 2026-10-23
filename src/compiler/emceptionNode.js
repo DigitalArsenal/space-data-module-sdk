@@ -16,6 +16,8 @@ import { constants as fsConstants, createReadStream, readFileSync } from "node:f
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
+import { getEmceptionPackageIdentity } from "./compileCache.js";
+
 const require = createRequire(import.meta.url);
 // Bump when the patched tree's layout or meaning changes. The patch transform's
 // own source text is part of the cache key as well (see
@@ -481,7 +483,16 @@ class EmceptionController {
         }
         throw error;
       });
-      return await task(emception);
+      // Emception's tools are Emscripten programs, and an Emscripten program
+      // that exits non-zero sets process.exitCode. A failed compile inside a
+      // build that handles the error would otherwise make the whole process
+      // exit 1; the caller sees the failure as the thrown error instead.
+      const exitCode = process.exitCode;
+      try {
+        return await task(emception);
+      } finally {
+        process.exitCode = exitCode;
+      }
     } finally {
       release();
     }
@@ -489,6 +500,15 @@ class EmceptionController {
 }
 
 const sharedEmceptionController = new EmceptionController();
+
+/**
+ * The compile-cache identity of the vendored emception: the sdn-emception
+ * package (version and a stat of every file it ships) and the patch this
+ * module applies to it.
+ */
+export function getEmceptionCompileIdentity() {
+  return getEmceptionPackageIdentity(`${PATCH_VERSION}\0${patchEmceptionModuleSource.toString()}`);
+}
 
 export function getSharedEmceptionController() {
   return sharedEmceptionController;

@@ -21,6 +21,32 @@
   object from any module.o.
 - The three toolchain paths (emception, system Emscripten, wasi) run one shared step pipeline.
 
+### A content-hash compile cache: an unchanged module is not compiled
+
+- Every compile step (module source, embedded manifest, invoke bridge) and the link has a content key: the step's
+  input bytes (its source and every header the SDK stages beside it), every other header the compiler read (native
+  toolchains record them from a depfile; a lookup re-checks each one's size and mtime, and its sha256 when the stat
+  changed), the exact command and flags, the toolchain identity (wasi clang: `--version`, driver and clang binary
+  stats, sysroot and resource-dir library stats, CPATH-style env; system Emscripten: `--version` and `EMCC_CFLAGS`;
+  emception: the sdn-emception package files and the SDK's patch of them) and the SDK identity (package version and
+  the bytes of src/compiler/*.js). A step whose key is stored is not run; when every step hits, no toolchain starts.
+- Location: `SPACE_DATA_MODULE_SDK_CACHE_DIR`, else `$XDG_CACHE_HOME/space-data-module-sdk`, else
+  `~/.cache/space-data-module-sdk`. Off: `SPACE_DATA_MODULE_SDK_COMPILE_CACHE=0` (or `off`/`false`/`no`), or the
+  compile option `compileCache: false`; `compileCache: { dir }` names another directory.
+- Safe under concurrent builds: an entry is one file written under a temp name and renamed into place, and every
+  blob in it is checked against its sha256 before use (a damaged entry is a miss). A cache that cannot be written
+  never fails a build.
+- Size: after its first store each process prunes least-recently-used entries above
+  `SPACE_DATA_MODULE_SDK_CACHE_MAX_BYTES` (default 4 GiB). `pruneCompileCache({ dir, maxBytes })` and
+  `resolveCompileCacheRoot()` are exported from `space-data-module-sdk/compiler`.
+- The result carries `compileCache: { enabled, dir, hits, misses }` (step names).
+- Measured no-change rebuilds (whole `node build.mjs`, Node start included): storage-ingest 10.9 s -> 0.96 s,
+  imager-observation-parser 20.7 s -> 0.98 s, imager-observation-source 14.0 s -> 1.3 s, http-request 11.8 s ->
+  0.63 s, maneuver-detection 60.1 s -> 0.81 s, gp-error-model 74.6 s -> 1.1 s. A source-only edit of storage-ingest
+  rebuilds in 3.9 s (manifest and invoke objects from the cache).
+- Fix: emception's tools set `process.exitCode` when they exit non-zero, so a build that caught a failed emception
+  compile still exited 1. The controller restores the caller's exit code after each emception task.
+
 ## 0.9.10
 
 - A shared-memory guest (wasm32-wasip1-threads, including the wasi-sequential modules) works in Chromium. Its

@@ -20,6 +20,11 @@ export {
 export { resolveWasiThreadsToolchain } from "./wasiThreadsToolchain.js";
 
 export {
+  pruneCompileCache,
+  resolveCompileCacheRoot,
+} from "./compileCache.js";
+
+export {
   getFlatbuffersCppRuntimeHeaders,
   getInvokeCppSchemaHeaders,
 } from "./flatcSupport.js";
