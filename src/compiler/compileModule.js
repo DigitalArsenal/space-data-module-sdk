@@ -774,12 +774,25 @@ async function resolveToolchainProfile(kind, { language, sourceCompilerCommand, 
       supportsDepfile: true,
       identity: () =>
         getNativeClangIdentity({
-          drivers: Array.from(new Set([isCpp ? toolchain.clangxx : toolchain.clang, toolchain.clangxx])),
+          drivers: Array.from(new Set([toolchain.clang, toolchain.clangxx])),
           toolchainArgs: toolchain.toolchainArgs,
           roots: [toolchain.sysroot, toolchain.resourceDir],
         }).then((id) => digestOf({ id, env: nativeCompilerEnv() })),
-      compileArgv: (role, sourcePath, objectPath, extra = []) =>
-        role === "module"
+      compileArgv: (role, sourcePath, objectPath, extra = [], libraryLanguage = "c") =>
+        role === "library"
+          ? [
+              libraryLanguage === "c++" ? toolchain.clangxx : toolchain.clang,
+              ...toolchain.toolchainArgs,
+              "-c",
+              sourcePath,
+              ...includeArgs,
+              ...(libraryLanguage === "c++" ? ["-std=c++17"] : []),
+              ...extra,
+              ...sourceCompilerArgs,
+              "-o",
+              objectPath,
+            ]
+          : role === "module"
           ? [
               isCpp ? toolchain.clangxx : toolchain.clang,
               ...toolchain.toolchainArgs,
@@ -819,8 +832,10 @@ async function resolveToolchainProfile(kind, { language, sourceCompilerCommand, 
   const emscriptenProfile = (workDir) => {
     const includeArgs = [`-I${workDir}`, `-I${path.posix.join(workDir, "flatbuffers-runtime")}`];
     return {
-      compileArgv: (role, sourcePath, objectPath, extra = []) =>
-        role === "module"
+      compileArgv: (role, sourcePath, objectPath, extra = [], libraryLanguage = "c") =>
+        role === "library"
+          ? [libraryLanguage === "c++" ? "em++" : "emcc", "-c", sourcePath, ...includeArgs, ...extra, ...sourceCompilerArgs, "-o", objectPath]
+          : role === "module"
           ? [sourceCompilerCommand, "-c", sourcePath, ...includeArgs, ...extra, ...sourceCompilerArgs, "-o", objectPath]
           : ["em++", "-c", sourcePath, "-std=c++17", ...includeArgs, ...extra, ...sourceCompilerArgs, "-o", objectPath],
       linkArgv: (objectPaths, outputPath, linkArgs) => ["em++", ...objectPaths, ...linkArgs, "-o", outputPath],
@@ -837,7 +852,7 @@ async function resolveToolchainProfile(kind, { language, sourceCompilerCommand, 
       join: path.join,
       supportsDepfile: true,
       identity: () =>
-        getSystemEmscriptenIdentity(Array.from(new Set([sourceCompilerCommand, "em++"]))).then((id) =>
+        getSystemEmscriptenIdentity(Array.from(new Set(["emcc", "em++", sourceCompilerCommand]))).then((id) =>
           digestOf({ id, env: nativeCompilerEnv() }),
         ),
       ...emscriptenProfile(workDir),
@@ -916,6 +931,85 @@ function createEmceptionDriver(emception, workDir) {
   };
 }
 
+// Shared libraries (compile option `libraries`): code several modules carry
+// (ERFA, miniz, SGP4, ...) compiled ONCE per (source, flags, toolchain) into
+// its own object, whose strong global symbols are renamed into a versioned
+// namespace, sdm_lib_<name>_<version>_<digest>_<symbol>. The module object's
+// references to those symbols are renamed to match; the module source only
+// declares them. The standalone module.wasm links the library object; the
+// guest-link metadata lists it, and a flow links each namespace once however
+// many of its modules use it (src/flow/flowCompiler.js), instead of every
+// module carrying an internal-linkage copy.
+const LIBRARY_NAME = /^[A-Za-z][A-Za-z0-9_.-]*$/;
+const LIBRARY_VERSION = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+const PREPROCESSOR_DEFINE = /^[A-Za-z_][A-Za-z0-9_]*(=[^\s]*)?$/;
+
+function normalizeLibraries(libraries) {
+  if (libraries === undefined || libraries === null) return [];
+  if (!Array.isArray(libraries)) {
+    throw new Error("libraries must be an array of { name, version, sourceCode, language?, defines? }.");
+  }
+  const seen = new Set();
+  return libraries.map((library, index) => {
+    const name = String(library?.name ?? "");
+    const version = String(library?.version ?? "");
+    if (!LIBRARY_NAME.test(name) || !LIBRARY_VERSION.test(version)) {
+      throw new Error(
+        `libraries[${index}] needs a name and a version of letters, digits, '.', '_' or '-' ` +
+          `(got name ${JSON.stringify(library?.name)}, version ${JSON.stringify(library?.version)}).`,
+      );
+    }
+    if (seen.has(name)) {
+      throw new Error(`libraries[${index}]: library "${name}" is listed twice.`);
+    }
+    seen.add(name);
+    const sourceCode = String(library?.sourceCode ?? "");
+    if (!sourceCode.trim()) {
+      throw new Error(`libraries[${index}] ("${name}") has no sourceCode.`);
+    }
+    const language = String(library?.language ?? "c").trim().toLowerCase();
+    if (!["c", "c++", "cpp", "cxx"].includes(language)) {
+      throw new Error(`libraries[${index}] ("${name}"): language must be "c" or "c++", got ${JSON.stringify(library?.language)}.`);
+    }
+    const defines = (Array.isArray(library?.defines) ? library.defines : []).map((define) => {
+      const text = String(define ?? "").trim();
+      if (!PREPROCESSOR_DEFINE.test(text)) {
+        throw new Error(`libraries[${index}] ("${name}"): define ${JSON.stringify(define)} is not NAME or NAME=VALUE.`);
+      }
+      return text;
+    });
+    const safe = (text) => text.replace(/[^A-Za-z0-9]/g, "_");
+    const stem = `library-${safe(name)}`;
+    return {
+      name,
+      version,
+      language: language === "c" ? "c" : "c++",
+      defines,
+      sourceCode,
+      safeName: safe(name),
+      safeVersion: safe(version),
+      source: `${stem}.${language === "c" ? "c" : "cpp"}`,
+      object: `${stem}.o`,
+    };
+  });
+}
+
+// The library object with its strong global definitions in its namespace, and
+// the old-name -> new-name map the module's references follow.
+function namespaceLibraryObject(library, objectBytes, digest) {
+  const namespace = `sdm_lib_${library.safeName}_${library.safeVersion}_${digest.slice(0, 12)}_`;
+  const renames = new Map();
+  for (const symbol of listWasmObjectSymbols(objectBytes)) {
+    if (!symbol.defined || symbol.local || symbol.weak || !symbol.name) continue;
+    renames.set(symbol.name, `${namespace}${symbol.name}`);
+  }
+  return {
+    namespace,
+    renames,
+    objectBytes: renameWasmObjectSymbols(objectBytes, renames),
+  };
+}
+
 async function compileWithToolchain(kind, options = {}) {
   const {
     manifest,
@@ -935,6 +1029,7 @@ async function compileWithToolchain(kind, options = {}) {
   const resolvedOutputPath = path.resolve(
     outputPath ?? path.join(tempDir, "module.wasm"),
   );
+  const libraries = normalizeLibraries(compileOptions.libraries);
   const profile = await resolveToolchainProfile(kind, {
     language,
     sourceCompilerCommand,
@@ -956,6 +1051,7 @@ async function compileWithToolchain(kind, options = {}) {
     [`module.${sourceExtension}`]: sourceCode,
     "plugin-manifest-exports.cpp": manifestSource,
     "plugin-invoke-bridge.cpp": invokeSource,
+    ...Object.fromEntries(libraries.map((library) => [library.source, library.sourceCode])),
   };
   const linkArgs = buildCompilerArgs(exportedSymbols, compileOptions);
 
@@ -963,11 +1059,23 @@ async function compileWithToolchain(kind, options = {}) {
     { name: "module", role: "module", source: `module.${sourceExtension}`, object: "module.o" },
     { name: "manifest", role: "support", source: "plugin-manifest-exports.cpp", object: "plugin-manifest-exports.o" },
     { name: "invoke", role: "support", source: "plugin-invoke-bridge.cpp", object: "plugin-invoke-bridge.o" },
-  ].map((step) => ({ ...step, argv: profile.compileArgv(step.role, at(step.source), at(step.object)) }));
+    ...libraries.map((library) => ({
+      name: `library:${library.name}`,
+      role: "library",
+      source: library.source,
+      object: library.object,
+      library,
+      extra: library.defines.map((define) => `-D${define}`),
+    })),
+  ].map((step) => ({
+    ...step,
+    argv: profile.compileArgv(step.role, at(step.source), at(step.object), step.extra ?? [], step.library?.language),
+  }));
+  const linkOutput = "module.wasm";
   const linkObjects = compileSteps.map((step) => step.object);
-  const linkArgv = profile.linkArgv(linkObjects.map(at), at("module.wasm"), linkArgs);
+  const linkArgv = profile.linkArgv(linkObjects.map(at), at(linkOutput), linkArgs);
 
-  const cacheReport = { enabled: Boolean(cache), dir: cache?.root ?? null, hits: [], misses: [] };
+  const cacheReport = { enabled: Boolean(cache), dir: cache?.root ?? null, hits: [], misses: [], stepMs: {} };
   let keyBase = null;
   if (cache) {
     const sdk = await getSdkCompileIdentity();
@@ -993,7 +1101,53 @@ async function compileWithToolchain(kind, options = {}) {
       objects: objects.map((bytes) => sha256Hex(bytes)),
     });
 
+  // The objects as compiled, then as linked: library objects namespaced and the
+  // module object's references to them renamed to match.
   const objects = new Map();
+  let linked = null;
+  const prepareLinkInputs = () => {
+    if (libraries.length === 0) {
+      return { inputs: new Map(objects), libraries: [] };
+    }
+    const inputs = new Map(objects);
+    const references = new Map();
+    const namespaced = libraries.map((library) => {
+      const step = compileSteps.find((entry) => entry.library === library);
+      // The namespace is part of the library's identity: its name, version,
+      // language, defines, source and flags, and the toolchain kind. Two
+      // modules compiling the same library the same way share it in a flow.
+      const digest = digestOf({
+        name: library.name,
+        version: library.version,
+        language: library.language,
+        defines: library.defines,
+        source: sha256Hex(new TextEncoder().encode(library.sourceCode)),
+        argv: normalizeArgv(step.argv, workDir),
+        kind,
+      });
+      const result = namespaceLibraryObject(library, objects.get(library.object), digest);
+      for (const [from, to] of result.renames) {
+        if (references.has(from)) {
+          throw new Error(
+            `Libraries "${references.get(from).library}" and "${library.name}" both define the symbol "${from}".`,
+          );
+        }
+        references.set(from, { to, library: library.name });
+      }
+      inputs.set(library.object, result.objectBytes);
+      return { library, ...result };
+    });
+    inputs.set(
+      "module.o",
+      renameWasmObjectSymbols(
+        objects.get("module.o"),
+        new Map(Array.from(references, ([from, { to }]) => [from, to])),
+        { undefinedOnly: true },
+      ),
+    );
+    return { inputs, libraries: namespaced };
+  };
+
   if (cache) {
     for (const step of compileSteps) {
       step.key = compileKey(step);
@@ -1004,7 +1158,8 @@ async function compileWithToolchain(kind, options = {}) {
   let wasmBytes = null;
   let linkCacheKey = null;
   if (cache && objects.size === compileSteps.length) {
-    linkCacheKey = linkKey(linkObjects.map((name) => objects.get(name)));
+    linked = prepareLinkInputs();
+    linkCacheKey = linkKey(linkObjects.map((name) => linked.inputs.get(name)));
     wasmBytes = (await cache.get(linkCacheKey))?.blobs?.wasm ?? null;
   }
 
@@ -1019,13 +1174,14 @@ async function compileWithToolchain(kind, options = {}) {
       for (const step of compileSteps) {
         if (objects.has(step.object)) {
           cacheReport.hits.push(step.name);
-          await driver.writeFile(at(step.object), objects.get(step.object));
           continue;
         }
         cacheReport.misses.push(step.name);
         const depfile = at(`${step.object}.d`);
         const useDepfile = Boolean(cache) && profile.supportsDepfile;
+        const started = performance.now();
         await driver.exec(useDepfile ? [...step.argv, "-MD", "-MF", depfile] : step.argv);
+        cacheReport.stepMs[step.name] = Math.round(performance.now() - started);
         const objectBytes = await driver.readFile(at(step.object));
         objects.set(step.object, objectBytes);
         if (cache) {
@@ -1039,7 +1195,11 @@ async function compileWithToolchain(kind, options = {}) {
           await cache.put(step.key, { object: objectBytes }, { step: step.name, externalDeps });
         }
       }
-      const objectBytesList = linkObjects.map((name) => objects.get(name));
+      linked = prepareLinkInputs();
+      const objectBytesList = linkObjects.map((name) => linked.inputs.get(name));
+      for (const name of linkObjects) {
+        await driver.writeFile(at(name), linked.inputs.get(name));
+      }
       if (cache) {
         linkCacheKey = linkKey(objectBytesList);
         const entry = await cache.get(linkCacheKey);
@@ -1049,17 +1209,19 @@ async function compileWithToolchain(kind, options = {}) {
         }
       }
       cacheReport.misses.push("link");
+      const linkStarted = performance.now();
       await driver.exec(linkArgv);
-      const linked = await driver.readFile(at("module.wasm"));
-      if (cache) await cache.put(linkCacheKey, { wasm: linked }, { step: "link" });
-      return linked;
+      cacheReport.stepMs.link = Math.round(performance.now() - linkStarted);
+      const linkedBytes = await driver.readFile(at(linkOutput));
+      if (cache) await cache.put(linkCacheKey, { wasm: linkedBytes }, { step: "link" });
+      return linkedBytes;
     });
   } else {
     cacheReport.hits.push(...compileSteps.map((step) => step.name), "link");
   }
 
   const guestLink = deriveGuestLinkObject({
-    objectBytes: objects.get("module.o"),
+    objectBytes: linked.inputs.get("module.o"),
     pluginId: manifest?.pluginId,
     methodIds: Array.isArray(manifest?.methods)
       ? manifest.methods.map((method) => String(method?.methodId ?? ""))
@@ -1078,6 +1240,18 @@ async function compileWithToolchain(kind, options = {}) {
       threadModel: compileOptions.threadModel ?? ModuleThreadModel.SINGLE_THREAD,
       capabilities: compileOptions.guestLinkCapabilities,
       objectBytes: guestLink.objectBytes,
+      ...(linked.libraries.length > 0
+        ? {
+            libraries: linked.libraries.map(({ library, namespace, objectBytes }) => ({
+              name: library.name,
+              version: library.version,
+              language: library.language,
+              namespace,
+              sha256: sha256Hex(objectBytes),
+              objectBytes,
+            })),
+          }
+        : {}),
     },
   };
 }

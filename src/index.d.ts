@@ -1007,6 +1007,8 @@ export interface GuestLinkArtifact {
   threadModel: ModuleThreadModelName;
   capabilities: string[];
   objectBytes: Uint8Array;
+  /** Present when the compile linked `libraries`. */
+  libraries?: GuestLinkLibrary[];
 }
 
 /**
@@ -1091,7 +1093,52 @@ export function compileModuleFromSource(options: {
    * names another cache directory.
    */
   compileCache?: boolean | { dir?: string };
+  /**
+   * Shared libraries compiled once into their own objects and linked by the
+   * module (and once per flow): see GuestLinkLibrary. The module source
+   * declares their functions; the library sources define them.
+   */
+  libraries?: ModuleLibrarySource[];
 }): Promise<CompilationResult>;
+
+export interface ModuleLibrarySource {
+  /** Letters, digits, '.', '_', '-'; starts with a letter. */
+  name: string;
+  /** Letters, digits, '.', '_', '-' (e.g. "3.1.2", "vallado-2020"). */
+  version: string;
+  sourceCode: string;
+  /** Default "c". */
+  language?: "c" | "c++";
+  /** NAME or NAME=VALUE, for this library's compile only. */
+  defines?: string[];
+}
+
+/**
+ * A shared library object. Its strong global symbols are renamed into
+ * `namespace` (sdm_lib_<name>_<version>_<digest>_, the digest covering its
+ * source, defines, flags and toolchain kind); the module object's references
+ * follow. A flow links each namespace once.
+ */
+export interface GuestLinkLibrary {
+  name: string;
+  version: string;
+  language: "c" | "c++";
+  namespace: string;
+  sha256: string;
+  objectBytes: Uint8Array;
+}
+
+/**
+ * Write a compilation's guest-link files into `dir` (dist/guest-link):
+ * module-link.o, libraries/<name>-<version>-<sha12>.o and metadata.json
+ * (version 1 without libraries, 2 with a `libraries` list). `metadata` adds
+ * fields to metadata.json.
+ */
+export function writeGuestLinkFiles(
+  compilation: CompilationResult,
+  dir: string,
+  metadata?: Record<string, unknown>,
+): Promise<Record<string, unknown>>;
 
 export interface CompileCacheReport {
   enabled: boolean;
@@ -1100,6 +1147,8 @@ export interface CompileCacheReport {
   hits: string[];
   /** Steps that ran the toolchain. */
   misses: string[];
+  /** Wall time of each step that ran, in ms. */
+  stepMs: Record<string, number>;
 }
 
 export function pruneCompileCache(options?: {

@@ -292,11 +292,16 @@ function spliceNames(bytes, edits) {
  * Rename symbols of a relocatable wasm object. `renames` maps an old symbol
  * name to its new name; every symbol carrying an old name is renamed (its
  * definition and, through the shared symbol index, every reference to it in
- * the object). Returns new object bytes; the input is not modified. Everything
- * other than the names is preserved byte for byte.
+ * the object), or with `{ undefinedOnly: true }` only the undefined ones.
+ * Returns new object bytes; the input is not modified. Everything other than
+ * the names is preserved byte for byte.
  */
-export function renameWasmObjectSymbols(objectBytes, renames) {
+export function renameWasmObjectSymbols(objectBytes, renames, options = {}) {
   const map = renames instanceof Map ? renames : new Map(Object.entries(renames ?? {}));
+  // `undefinedOnly: true` renames references (undefined symbols) and leaves
+  // definitions alone: how a module object is pointed at a library object's
+  // namespaced definitions.
+  const undefinedOnly = options.undefinedOnly === true;
   if (map.size === 0) {
     return new Uint8Array(objectBytes);
   }
@@ -306,6 +311,7 @@ export function renameWasmObjectSymbols(objectBytes, renames) {
   let imports = null;
   for (const symbol of table.symbols) {
     if (symbol.kind === WasmSymbolKind.SECTION) continue;
+    if (undefinedOnly && (symbol.flags & WASM_SYM_UNDEFINED) === 0) continue;
     if (symbol.nameSpan !== null) {
       const next = map.get(symbol.name);
       if (next !== undefined && next !== symbol.name) {

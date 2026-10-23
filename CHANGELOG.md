@@ -47,6 +47,32 @@
 - Fix: emception's tools set `process.exitCode` when they exit non-zero, so a build that caught a failed emception
   compile still exited 1. The controller restores the caller's exit code after each emception task.
 
+### Shared libraries: compiled once, linked once per flow
+
+- `compileModuleFromSource({ libraries: [{ name, version, sourceCode, language?, defines? }] })` compiles each
+  library source as its own step (cached like the others) into its own object. The object's strong global symbols are
+  renamed into a versioned namespace, `sdm_lib_<name>_<version>_<digest12>_<symbol>`, the digest covering the
+  library's source, defines, compile flags and toolchain kind; the module object's references to them are renamed to
+  match (the module source only declares them). module.wasm links the library object.
+- `guestLink.libraries` carries `{ name, version, language, namespace, sha256, objectBytes }` per library.
+  `writeGuestLinkFiles(compilation, dir)` (`space-data-module-sdk/compiler`) writes `module-link.o`,
+  `libraries/<name>-<version>-<sha12>.o` and `metadata.json`: `version: 1` and the same fields module builds write
+  today when there are no libraries, `version: 2` with a `libraries` list (`file`, `sha256`, `namespace`, ...) when
+  there are.
+- The flow compiler reads `metadata.libraries`, checks each object against its sha256 (a missing or altered library
+  fails the flow), and links each namespace ONCE however many of the flow's modules carry it, after the module
+  objects. artifact.json's node records list their libraries.
+- This replaces the internal-linkage copies (`namespace { SGP4 }`, `static` ERFA) that every module carried so that
+  equal external symbols could not collide in a flow: a namespace is unique to its build, so two modules with the
+  same library share one copy, and two different builds of it coexist.
+- A library must not define symbols other objects look up by name (`malloc`, `operator new`, `main`): its
+  definitions are renamed.
+- Proved on real modules (in a clone, not committed to the modules repo): imager-observation-parser with miniz 3.1.2
+  as a library (its 11 tests pass; the imager-observation-ingest flow links the library object and its E2E passes),
+  maneuver-detection (single-thread) and gp-error-model (wasi-sequential) with the Vallado SGP4 as a library (their
+  test results unchanged).
+- `compileCache.stepMs` reports the wall time of each step that ran.
+
 ### Emception's system libraries persist between processes
 
 - Emscripten builds system libraries on first use (a standalone single-thread link needs

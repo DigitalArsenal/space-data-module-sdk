@@ -2,6 +2,8 @@ export type {
   CompilationResult,
   CompileCacheReport,
   GuestLinkArtifact,
+  GuestLinkLibrary,
+  ModuleLibrarySource,
   ModuleThreadModelName,
   ProtectedArtifact,
 } from "../index.js";
@@ -14,6 +16,7 @@ export {
   ModuleThreadModel,
   pruneCompileCache,
   resolveCompileCacheRoot,
+  writeGuestLinkFiles,
   protectModuleArtifact,
   getFlatbuffersCppRuntimeHeaders,
   getInvokeCppSchemaHeaders,

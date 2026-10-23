@@ -18,6 +18,7 @@ export {
 } from "./pthreadArtifactGuard.js";
 
 export { resolveWasiThreadsToolchain } from "./wasiThreadsToolchain.js";
+export { writeGuestLinkFiles } from "./guestLinkFiles.js";
 
 export {
   pruneCompileCache,
