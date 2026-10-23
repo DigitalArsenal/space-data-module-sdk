@@ -47,6 +47,18 @@
 - Fix: emception's tools set `process.exitCode` when they exit non-zero, so a build that caught a failed emception
   compile still exited 1. The controller restores the caller's exit code after each emception task.
 
+### Emception's system libraries persist between processes
+
+- Emscripten builds system libraries on first use (a standalone single-thread link needs
+  `libstandalonewasm-memgrow.a`) and runs its sanity checks until `cache/sanity.txt` exists. Inside emception that
+  cache is in-memory, so every process paid both again: about 2.4 s on its first link. The files emception adds to
+  `/emscripten/cache` are now kept on disk at `<compile cache root>/emception-cache/<emception identity>/` and written
+  back into a new instance when it loads (temp file + rename, so concurrent processes only read whole files).
+  `SPACE_DATA_MODULE_SDK_EMCEPTION_CACHE=0`, or the compile cache switched off, turns it off.
+- Measured: a first link in a fresh process 2.96 s -> 0.74 s; the imager-observation-ingest flow compile 14.6 s ->
+  11.2 s (its runtime.wasm byte-identical, the flow E2E passing); with an empty compile cache, storage-ingest 9.9 s ->
+  7.1-8.5 s and http-request 9.6 s -> 7.3 s.
+
 ## 0.9.10
 
 - A shared-memory guest (wasm32-wasip1-threads, including the wasi-sequential modules) works in Chromium. Its

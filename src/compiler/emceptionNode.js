@@ -4,6 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import {
   cp,
   lstat,
+  mkdir,
   mkdtemp,
   readFile,
   readdir,
@@ -16,7 +17,7 @@ import { constants as fsConstants, createReadStream, readFileSync } from "node:f
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
-import { getEmceptionPackageIdentity } from "./compileCache.js";
+import { getEmceptionPackageIdentity, resolveCompileCacheRoot } from "./compileCache.js";
 
 const require = createRequire(import.meta.url);
 // Bump when the patched tree's layout or meaning changes. The patch transform's
@@ -444,9 +445,112 @@ function getPatchedEmceptionRoot() {
   return patchedEmceptionRootPromise;
 }
 
+// Emscripten builds system libraries (libstandalonewasm-memgrow.a, the libc
+// variants a flag set needs, ...) on first use and caches them under
+// /emscripten/cache, and it runs its sanity checks until /emscripten/cache/
+// sanity.txt exists. Inside emception that directory is in-memory, so every
+// process paid both again (~2.4-3 s on the first link). The files it adds are
+// persisted on disk per emception identity, at
+// <compile cache root>/emception-cache/<identity>/, and restored into the
+// in-memory cache when an instance loads. Writes are temp-file + rename, so
+// concurrent processes only ever see whole files.
+// SPACE_DATA_MODULE_SDK_EMCEPTION_CACHE=0 (or the compile cache switched off)
+// turns it off.
+const EMSCRIPTEN_CACHE_DIR = "/emscripten/cache";
+const EMSCRIPTEN_CACHE_SKIP = new Set(["cache.lock"]);
+const DISABLED_SETTINGS = new Set(["0", "off", "false", "no", "disabled"]);
+
+function emceptionCacheDisabled() {
+  const own = String(process.env.SPACE_DATA_MODULE_SDK_EMCEPTION_CACHE ?? "").trim().toLowerCase();
+  const compile = String(process.env.SPACE_DATA_MODULE_SDK_COMPILE_CACHE ?? "").trim().toLowerCase();
+  return DISABLED_SETTINGS.has(own) || DISABLED_SETTINGS.has(compile);
+}
+
+function listEmscriptenCache(FS, dir = EMSCRIPTEN_CACHE_DIR, out = new Map()) {
+  let entries;
+  try {
+    entries = FS.readdir(dir);
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    if (entry === "." || entry === "..") continue;
+    const full = `${dir}/${entry}`;
+    const info = FS.stat(full);
+    if (FS.isDir(info.mode)) {
+      listEmscriptenCache(FS, full, out);
+    } else if (!EMSCRIPTEN_CACHE_SKIP.has(entry)) {
+      out.set(full, `${info.size}:${info.mtime?.getTime?.() ?? info.mtime}`);
+    }
+  }
+  return out;
+}
+
+async function listDiskTree(root, relative = "", out = []) {
+  let entries;
+  try {
+    entries = await readdir(path.join(root, relative), { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const rel = relative ? path.posix.join(relative, entry.name) : entry.name;
+    if (entry.isDirectory()) {
+      await listDiskTree(root, rel, out);
+    } else if (entry.isFile() && !entry.name.includes(".tmp-")) {
+      out.push(rel);
+    }
+  }
+  return out;
+}
+
+class PersistedEmscriptenCache {
+  #dir = null;
+  #known = new Map();
+
+  async restore(emception) {
+    if (emceptionCacheDisabled()) return;
+    try {
+      const identity = await getEmceptionCompileIdentity();
+      this.#dir = path.join(resolveCompileCacheRoot(), "emception-cache", identity.slice(0, 32));
+      const FS = emception.FS;
+      for (const relative of await listDiskTree(this.#dir)) {
+        const target = `${EMSCRIPTEN_CACHE_DIR}/${relative}`;
+        FS.mkdirTree(path.posix.dirname(target));
+        emception.writeFile(target, new Uint8Array(await readFile(path.join(this.#dir, relative))));
+      }
+      FS.mkdirTree(EMSCRIPTEN_CACHE_DIR);
+      this.#known = listEmscriptenCache(FS);
+    } catch {
+      // A cache that cannot be read only costs the rebuild it would have saved.
+      this.#dir = null;
+    }
+  }
+
+  async persist(emception) {
+    if (!this.#dir) return;
+    try {
+      const current = listEmscriptenCache(emception.FS);
+      for (const [file, signature] of current) {
+        if (this.#known.get(file) === signature) continue;
+        const relative = file.slice(EMSCRIPTEN_CACHE_DIR.length + 1);
+        const target = path.join(this.#dir, ...relative.split("/"));
+        await mkdir(path.dirname(target), { recursive: true });
+        const temp = `${target}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
+        await writeFile(temp, new Uint8Array(emception.readFile(file)));
+        await rename(temp, target);
+      }
+      this.#known = current;
+    } catch {
+      // Best effort: the next process regenerates what is missing.
+    }
+  }
+}
+
 class EmceptionController {
   #instancePromise = null;
   #executionQueue = Promise.resolve();
+  #persistedCache = new PersistedEmscriptenCache();
 
   async load() {
     if (!this.#instancePromise) {
@@ -459,6 +563,7 @@ class EmceptionController {
           baseUrl: pathToFileURL(`${patchedRoot}${path.sep}`).href,
         });
         await emception.init();
+        await this.#persistedCache.restore(emception);
         return emception;
       })().catch((error) => {
         this.#instancePromise = null;
@@ -492,6 +597,7 @@ class EmceptionController {
         return await task(emception);
       } finally {
         process.exitCode = exitCode;
+        await this.#persistedCache.persist(emception);
       }
     } finally {
       release();
