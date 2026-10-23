@@ -1,6 +1,7 @@
 // Real Chromium regression: one shared-memory WASM guest calls the SDK host
 // with legacy JSON metadata and a typed $PIV request, then reads both answers
-// back through the guest ABI. No compiler or published module is needed.
+// back through the guest ABI; the browser WASI shim then fills the same shared
+// memory with random bytes. No compiler or published module is needed.
 // Usage: node scripts/e2e/shared-memory-hostcall.mjs [--sdk-root <installed SDK>]
 import assert from "node:assert/strict";
 import http from "node:http";
@@ -78,13 +79,19 @@ async function exercise() {
 
   const failures = [];
   const passed = [];
-  for (const kind of ["json-meta", "$PIV"]) {
+  for (const kind of ["json-meta", "$PIV", "wasi-random"]) {
     try {
       if (kind === "json-meta") {
         const meta = { label: "metadata ✓", sequence: 7 };
         const answer = decodeHostcallValueEnvelope(invoke(encodeHostcallValueEnvelope(meta)));
         check(answer.ok && answer.result.label === config.label && answer.result.count === 7, "wrong legacy host answer");
         check(calls.at(-1)?.label === meta.label && calls.at(-1)?.sequence === 7, "JSON metadata did not reach the host");
+      } else if (kind === "wasi-random") {
+        const wasi = createBrowserWasiShim();
+        wasi.setMemory(guest.memory);
+        const status = wasi.imports.wasi_snapshot_preview1.random_get(512, 32);
+        check(status === 0, `random_get status ${status}`);
+        check(heap.slice(512, 544).some((byte) => byte !== 0), "random_get left the shared memory zeroed");
       } else {
         const bytes = invoke(encodeHostCall("plugin.getConfig"));
         check(identifierOf(bytes) === "$PIV", "host answered without a $PIV response");
@@ -103,6 +110,7 @@ const imports = [
   ["createHostcallBridge", "src/host/abi.js"],
   ["encodeHostcallValueEnvelope, decodeHostcallValueEnvelope", "src/host/hostcallWire.js"],
   ["encodeHostCall, decodeHostCallResult, decodeModuleConfig, identifierOf", "src/standards/runtimeContracts.js"],
+  ["createBrowserWasiShim", "src/host/wasiShim.js"],
 ].map(([names, file]) => `import { ${names} } from ${JSON.stringify(path.join(sdkRoot, file))};`).join("\n");
 const bundle = await build({
   stdin: { contents: `${imports}\nwindow.exercise = ${exercise.toString()};`, resolveDir: sdkRoot, sourcefile: "shared-memory-hostcall-browser.js" },
@@ -132,8 +140,8 @@ try {
   console.log(result);
   assert.deepEqual(pageErrors, [], "browser page errors");
   assert.deepEqual(result.failures, [], "shared-memory hostcall regression");
-  assert.deepEqual(result.passed, ["json-meta", "$PIV"]);
-  console.log("SHARED-MEMORY-HOSTCALL PASS: headless Chromium, shared WASM memory, operation + JSON metadata + correct $PIV config response");
+  assert.deepEqual(result.passed, ["json-meta", "$PIV", "wasi-random"]);
+  console.log("SHARED-MEMORY-HOSTCALL PASS: headless Chromium, shared WASM memory, operation + JSON metadata + correct $PIV config response + WASI random_get");
 } finally {
   await browser?.close(); // Playwright removes its temporary browser profile.
   await new Promise((resolve) => server.close(resolve));

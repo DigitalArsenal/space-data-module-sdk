@@ -2,11 +2,17 @@
 
 ## 0.9.10
 
-- Copy guest-memory text before decoding it in JavaScript hosts: operation names, hostcall JSON metadata,
-  provider requests, typed raw fields, flow C strings, and runtime row schema identifiers. Chromium now
-  accepts shared-memory guests, including wasi-sequential modules, and returns their typed `$PIV` answers.
-- Add a headless Chromium E2E that instantiates a shared-memory WASM guest, round-trips JSON metadata,
-  and verifies a typed `plugin.getConfig` response. The same E2E fails on the unfixed SDK.
+- A shared-memory guest (wasm32-wasip1-threads, including the wasi-sequential modules) works in Chromium. Its
+  memory is a SharedArrayBuffer, and Chromium refuses views of it in TextDecoder and crypto.getRandomValues
+  (Node and WasmEdge accept them), so every hostcall of such a module failed in the browser and the guest saw
+  "host answered without a $PIV response".
+- Guest text is decoded in one place, `decodeGuestText` (src/utils/guestText.js), from an owned copy: operation
+  names, hostcall JSON metadata, provider requests, typed raw fields, flow C strings and runtime row schema
+  identifiers.
+- The browser WASI shim's `random_get` fills a private buffer and copies it into the guest.
+- The host worker bundles are rebuilt (the thread-pool worker carries the hostcall bridge and the WASI shim).
+- A headless Chromium E2E (scripts/e2e/shared-memory-hostcall.mjs) instantiates a shared-memory guest, round-trips
+  JSON metadata and a typed `plugin.getConfig` $PIV request, and runs WASI `random_get`; it fails on 0.9.9.
 
 ## 0.9.9
 

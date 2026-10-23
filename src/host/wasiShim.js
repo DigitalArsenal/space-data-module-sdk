@@ -278,7 +278,11 @@ export function createBrowserWasiShim(options = {}) {
     if (!cryptoApi?.getRandomValues) {
       return ERRNO_NOSYS;
     }
-    cryptoApi.getRandomValues(mem8().subarray(bufPtr, bufPtr + bufLen));
+    // A browser refuses crypto.getRandomValues on a view of shared memory (a threads guest): fill a private
+    // buffer, then copy it into the guest.
+    const random = new Uint8Array(bufLen);
+    cryptoApi.getRandomValues(random);
+    mem8().set(random, bufPtr);
     return ERRNO_SUCCESS;
   }
 
