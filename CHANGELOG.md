@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.12
+
+- The release of the 0.9.11 changes below. The v0.9.11 tag's publish job failed and 0.9.11 never reached npm:
+  `npm publish` runs `npm test` again (prepublishOnly), and on that second run, with the compile cache warm from the
+  first, compile-invoke-bridge-optimization saw no compile commands (it records emception's commands). That test now
+  compiles with `compileCache: false`. The whole suite passes twice in a row on one cache (cold 364 s, warm 125 s).
+
 ## 0.9.11
 
 ### The WasmEdge test harness enables threads when the artifact needs them

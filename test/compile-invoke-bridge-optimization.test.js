@@ -100,6 +100,8 @@ before(async () => {
       manifest: ECHO_MANIFEST,
       sourceCode: ECHO_SOURCE,
       language: "c",
+      // The commands are what is under test: every step must run.
+      compileCache: false,
     });
   } finally {
     emception.run = run;
