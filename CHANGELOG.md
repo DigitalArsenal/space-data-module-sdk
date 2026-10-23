@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.11
 
 ### The WasmEdge test harness enables threads when the artifact needs them
 
