@@ -29,8 +29,7 @@ import {
   providerErrorName,
   providerSourceId,
 } from "./providerAccessAbi.js";
-
-const textDecoder = new TextDecoder();
+import { decodeGuestText } from "../utils/guestText.js";
 
 function isThenable(value) {
   return value !== null && typeof value?.then === "function";
@@ -588,7 +587,7 @@ export function createProviderAccessBridge(options = {}) {
   function acquire(reqPtr, reqLen, descPtr) {
     try {
       const request = JSON.parse(
-        textDecoder.decode(guestView(getMemory, reqPtr, reqLen).slice()),
+        decodeGuestText(guestView(getMemory, reqPtr, reqLen)),
       );
       // RASTER IN. A coverage field is 512x512 = 262,144 positions; encoding
       // those as JSON would be a multi-megabyte request string parsed per

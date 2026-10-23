@@ -18,7 +18,8 @@
  * responses (meta = { ok, result } | { ok, error }).
  */
 
-const textDecoder = new TextDecoder();
+import { decodeGuestText } from "../utils/guestText.js";
+
 const textEncoder = new TextEncoder();
 
 export const HOSTCALL_BINARY_REF_KEY = "$bin";
@@ -143,7 +144,7 @@ export function decodeHostcallEnvelope(bytes) {
     throw new RangeError("Hostcall envelope meta exceeds envelope bounds.");
   }
   const meta = JSON.parse(
-    textDecoder.decode(bytes.slice(offset, offset + metaLength)),
+    decodeGuestText(bytes.subarray(offset, offset + metaLength)),
   );
   offset += metaLength;
   const segmentCount = view.getUint32(offset, true);

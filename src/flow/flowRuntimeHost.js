@@ -15,6 +15,7 @@
  */
 
 import { createBrowserWasiShim } from "../host/wasiShim.js";
+import { decodeGuestText } from "../utils/guestText.js";
 import {
   assertArtifactRuntimeTarget,
   detectBrowserLeg,
@@ -151,7 +152,6 @@ function typeRefMatchesDescriptor(typeRef = {}, descriptor, wireFormat) {
   return true;
 }
 
-const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
 
 function assertDescriptorAbiGeneration(generation) {
@@ -314,7 +314,7 @@ export async function createFlowRuntimeHost(options = {}) {
     let end = ptr;
     const limit = Math.min(heap.length, ptr + maxLength);
     while (end < limit && heap[end] !== 0) end++;
-    return textDecoder.decode(heap.slice(ptr, end));
+    return decodeGuestText(heap.subarray(ptr, end));
   }
 
   function writeBytes(ptr, bytes) {

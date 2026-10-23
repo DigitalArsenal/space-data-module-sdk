@@ -7,8 +7,7 @@ import {
 import { isTypedHostCall } from "../standards/runtimeContracts.js";
 import { answerTypedHostCall } from "./typedDispatch.js";
 import { ADAPTER_OPERATIONS } from "./adapterOperations.js";
-
-const textDecoder = new TextDecoder();
+import { decodeGuestText } from "../utils/guestText.js";
 
 export const DEFAULT_HOSTCALL_IMPORT_MODULE = "space_data_module_host";
 export const HOSTCALL_STATUS_OK = 0;
@@ -423,9 +422,8 @@ export function createHostcallBridge(options = {}) {
           `Hostcall request exceeds ${maxRequestBytes} byte limit.`,
         );
       }
-      // Browser TextDecoder rejects shared guest views; decode an owned copy.
-      const operation = textDecoder.decode(
-        readMemoryBytes(getMemory, operationPtr, operationLen, "Operation").slice(),
+      const operation = decodeGuestText(
+        readMemoryBytes(getMemory, operationPtr, operationLen, "Operation"),
       );
       const payload = readMemoryBytes(getMemory, payloadPtr, payloadLen, "Payload");
       // An SDS $PIV hostcall (typed contracts 1.0) is answered with a $PIV response; the JSON envelope below goes

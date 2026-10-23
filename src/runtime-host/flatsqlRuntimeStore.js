@@ -1,4 +1,5 @@
 import { DirectAccessor, FlatSQLDatabase } from "flatsql";
+import { decodeGuestText } from "../utils/guestText.js";
 
 const RUNTIME_ROW_TABLE = "RuntimeHostRow";
 const RUNTIME_ROW_SCHEMA = `
@@ -9,7 +10,6 @@ table RuntimeHostRow {
 `;
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
 
 function clonePayload(payload) {
   if (payload === null || payload === undefined) {
@@ -151,7 +151,7 @@ function decodeRuntimeRowMetadata(data) {
     throw new Error("Invalid runtime row metadata layout.");
   }
   return {
-    schemaFileId: decoder.decode(bytes.slice(schemaStart, schemaEnd)),
+    schemaFileId: decodeGuestText(bytes.subarray(schemaStart, schemaEnd)),
     rowId: Number(view.getBigUint64(rowIdOffset, true)),
   };
 }

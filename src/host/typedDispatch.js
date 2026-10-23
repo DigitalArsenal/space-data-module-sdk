@@ -13,10 +13,10 @@ import {
 import * as hostOps from "../generated/runtime/aligned/HostOps_aligned.js";
 import { cryptoAlgorithm, deliverMode, reconcileKind, sandboxWant } from "../generated/runtime/aligned/HostOps_enums.js";
 import { base64ToBytes, bytesToBase64 } from "../utils/encoding.js";
+import { decodeGuestText } from "../utils/guestText.js";
 
-const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
-const text = (bytes) => (bytes === undefined ? undefined : textDecoder.decode(bytes.slice()));
+const text = (bytes) => (bytes === undefined ? undefined : decodeGuestText(bytes));
 const bytesOf = (value) => (value === undefined || value === null ? undefined : value instanceof Uint8Array ? value : typeof value === "string" ? textEncoder.encode(value) : new Uint8Array(value));
 const items = (values) => (values || []).map((v) => ({ VALUE: String(v) }));
 const unix = (value) => BigInt(Math.round(value instanceof Date ? value.getTime() : Number(value)));
