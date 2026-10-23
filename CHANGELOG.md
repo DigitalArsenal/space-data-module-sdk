@@ -44,6 +44,9 @@
   imager-observation-parser 20.7 s -> 0.98 s, imager-observation-source 14.0 s -> 1.3 s, http-request 11.8 s ->
   0.63 s, maneuver-detection 60.1 s -> 0.81 s, gp-error-model 74.6 s -> 1.1 s. A source-only edit of storage-ingest
   rebuilds in 3.9 s (manifest and invoke objects from the cache).
+- `space-data-module flow compile` links through the same cache: the key covers every generated source, every
+  dependency and library object, the link mode, the toolchain and SDK identities and src/flow/flowCompiler.js. An
+  unchanged flow is not relinked: imager-observation-ingest 12.4 s -> 0.92 s, runtime.wasm byte-identical.
 - Fix: emception's tools set `process.exitCode` when they exit non-zero, so a build that caught a failed emception
   compile still exited 1. The controller restores the caller's exit code after each emception task.
 

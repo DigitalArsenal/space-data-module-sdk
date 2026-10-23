@@ -48,7 +48,16 @@ import {
 
 import { generateEmbeddedManifestSource } from "../embeddedManifest.js";
 import { generateInvokeSupportHeader } from "../compiler/invokeGlue.js";
-import { runWithEmceptionLock } from "../compiler/emceptionNode.js";
+import { getEmceptionCompileIdentity, runWithEmceptionLock } from "../compiler/emceptionNode.js";
+import {
+  COMPILE_CACHE_FORMAT,
+  digestFiles,
+  digestOf,
+  getNativeClangIdentity,
+  getSdkCompileIdentity,
+  openCompileCache,
+  sha256Hex,
+} from "../compiler/compileCache.js";
 import {
   assertPthreadArtifact,
   assertPthreadFlagsPresent,
@@ -3083,6 +3092,56 @@ async function linkFlowArtifactWithWasiThreads({
   }
 }
 
+// The flow link through the compile cache (src/compiler/compileCache.js): keyed
+// on every generated source, every dependency and library object, the link
+// mode, the toolchain identity, the SDK compiler identity and this file's
+// bytes (its compile and link flags). An unchanged flow is not relinked.
+const FLOW_COMPILER_SOURCE = new URL(import.meta.url);
+let flowCompilerDigestPromise = null;
+
+async function linkFlowArtifactCached(link, threadModel, inputs) {
+  const cache = openCompileCache();
+  if (!cache) return link(inputs);
+  flowCompilerDigestPromise ??= readFile(FLOW_COMPILER_SOURCE).then((bytes) => sha256Hex(bytes));
+  let toolchain;
+  if (threadModel === FLOW_THREAD_MODEL.SINGLE_THREAD) {
+    toolchain = { kind: "emception", id: await getEmceptionCompileIdentity() };
+  } else {
+    const wasi = resolveWasiThreadsToolchain();
+    toolchain = {
+      kind: "wasi",
+      id: await getNativeClangIdentity({
+        drivers: [wasi.clangxx],
+        toolchainArgs: wasi.toolchainArgs,
+        roots: [wasi.sysroot, wasi.resourceDir],
+      }),
+    };
+  }
+  const key = digestOf({
+    format: COMPILE_CACHE_FORMAT,
+    step: "flow-link",
+    sdk: await getSdkCompileIdentity(),
+    flowCompiler: await flowCompilerDigestPromise,
+    toolchain,
+    threadModel,
+    engineLinked: Boolean(inputs.engineLinked),
+    sequential: Boolean(inputs.sequential),
+    sources: digestFiles({
+      "flow_runtime.cpp": inputs.runtimeSource,
+      "space_data_module_invoke.h": inputs.invokeHeader,
+      "flow_generated.inc": inputs.generatedInc,
+      "flow-manifest-exports.cpp": inputs.manifestSource,
+      "flow-program-exports.cpp": inputs.programSource,
+    }),
+    objects: inputs.dependencyObjects.map((bytes) => sha256Hex(bytes)),
+  });
+  const entry = await cache.get(key);
+  if (entry?.blobs?.wasm) return entry.blobs.wasm;
+  const wasmBytes = await link(inputs);
+  await cache.put(key, { wasm: wasmBytes }, { step: "flow-link" });
+  return wasmBytes;
+}
+
 /**
  * Compile a validated flow document into the linked-direct flow bundle.
  * Returns { check, manifest, artifact, outputs, report }.
@@ -3177,7 +3236,7 @@ export async function compileFlowProgram({
     check.threadModel !== FLOW_THREAD_MODEL.SINGLE_THREAD
       ? linkFlowArtifactWithWasiThreads
       : linkFlowArtifactWithEmception;
-  let wasmBytes = await linkFlowArtifact({
+  let wasmBytes = await linkFlowArtifactCached(linkFlowArtifact, check.threadModel, {
     runtimeSource,
     invokeHeader: generateInvokeSupportHeader(),
     generatedInc,
