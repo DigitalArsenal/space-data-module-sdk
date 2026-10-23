@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### The WasmEdge test harness enables threads when the artifact needs them
+
+- `createStandaloneHarness("wasmedge", ...)` (`space-data-module-sdk/testing/isomorphic`) used to default
+  `enableThreads` to false, so every wasi-sequential or wasi-threads module (a shared memory on
+  wasm32-wasip1-threads) had to pass `enableThreads: true` or WasmEdge refused it. Unset, it now follows the artifact:
+  on for a shared memory or a `wasi.thread-spawn` import, off otherwise. An explicit `enableThreads` still wins.
+- Measured on analysis/maneuver (wasi-sequential) with its `enableThreads: true` lines removed: 17/17 tests pass on
+  this SDK, 4 fail on 0.9.10.
+
 ### A module source is compiled once
 
 - `compileModuleFromSource` compiles the module source ONCE. The guest-link object (`guestLink.objectBytes`,

@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 
 import { createBrowserModuleHarness } from "../host/browserModuleHarness.js";
 import { loadModule } from "../host/isomorphicLoader.js";
+import { analyzeWasmThreadFeatures } from "../compiler/pthreadArtifactGuard.js";
 
 export const STANDALONE_RUNTIME_KINDS = Object.freeze(["browser", "wasmedge"]);
 
@@ -38,6 +39,15 @@ export function isMissingWasmEdgeError(error) {
 export function isWasmEdgeAvailable() {
   const result = spawnSync("wasmedge", ["--version"], { stdio: "ignore" });
   return result.status === 0;
+}
+
+function artifactNeedsThreads(wasmPath) {
+  try {
+    const features = analyzeWasmThreadFeatures(new Uint8Array(fs.readFileSync(wasmPath)));
+    return features.hasSharedMemory || features.hasWasiThreadSpawnImport;
+  } catch {
+    return false;
+  }
 }
 
 export async function createStandaloneHarness(runtimeKind, wasmPath, options = {}) {
@@ -70,7 +80,11 @@ export async function createStandaloneHarness(runtimeKind, wasmPath, options = {
       wasmSource: resolvedWasmPath,
       runtimeKind: "wasmedge",
       surface: options.surface ?? "command",
-      enableThreads: options.enableThreads ?? false,
+      // Unset, WasmEdge's threads proposal follows the artifact: on for a
+      // shared memory (wasi-threads, and wasi-sequential on
+      // wasm32-wasip1-threads) or a wasi thread-spawn import, which WasmEdge
+      // refuses to instantiate without it; off otherwise.
+      enableThreads: options.enableThreads ?? artifactNeedsThreads(resolvedWasmPath),
       wasmEdgeBinary: options.wasmEdgeBinary,
       wasmEdgeRunnerBinary: options.wasmEdgeRunnerBinary,
       args: options.args,
