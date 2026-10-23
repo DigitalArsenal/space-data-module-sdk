@@ -1087,6 +1087,24 @@ export function cleanupCompilation(
   result: CompilationResult,
 ): Promise<void>;
 
+/**
+ * The guest-link object of a compiled module object (module.o): every strong,
+ * global symbol it defines with a C identifier for a name, and every manifest
+ * method id, renamed to `<symbolPrefix><name>` in the object's symbol table.
+ * compileModuleFromSource derives `guestLink.objectBytes` this way from its one
+ * module compile.
+ */
+export function deriveGuestLinkObject(options: {
+  objectBytes: Uint8Array;
+  pluginId: string;
+  methodIds?: string[];
+}): {
+  symbolPrefix: string;
+  methodSymbols: Record<string, string>;
+  renamedSymbols: string[];
+  objectBytes: Uint8Array;
+};
+
 export function protectModuleArtifact(options: {
   manifest: PluginManifest;
   wasmBytes?: Uint8Array;

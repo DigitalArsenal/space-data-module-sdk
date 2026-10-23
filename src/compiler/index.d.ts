@@ -9,6 +9,7 @@ export {
   cleanupCompilation,
   compileModuleFromSource,
   createRecipientKeypairHex,
+  deriveGuestLinkObject,
   ModuleThreadModel,
   protectModuleArtifact,
   getFlatbuffersCppRuntimeHeaders,

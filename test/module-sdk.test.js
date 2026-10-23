@@ -937,8 +937,15 @@ test("source compilation uses production optimization flags for module objects",
   assert.match(source, /"-O3"/);
   assert.match(source, /"-DNDEBUG"/);
   assert.doesNotMatch(source, /const args = \[\s+"-O2"/);
-  assert.match(source, /sourceCompilerCommand,\s+"\-c",\s+sourcePath,[\s\S]*\.\.\.buildSourceCompilerArgs\(compileOptions\)/);
-  assert.match(source, /sourcePath,[\s\S]*\.\.\.guestLink\.renameArgs,[\s\S]*\.\.\.buildSourceCompilerArgs\(compileOptions\)/);
+  // Every compile step (module source, embedded manifest, invoke bridge) of
+  // every toolchain gets the module source's flags.
+  assert.match(source, /const sourceCompilerArgs = buildSourceCompilerArgs\(compileOptions\)/);
+  assert.match(source, /sourceCompilerCommand, "-c", sourcePath, [^\n]*\.\.\.sourceCompilerArgs/);
+  assert.match(source, /"em\+\+", "-c", sourcePath, "-std=c\+\+17", [^\n]*\.\.\.sourceCompilerArgs/);
+  // Compile once: the guest-link object is module.o renamed, not a second
+  // compile with per-symbol -D renames.
+  assert.doesNotMatch(source, /renameArgs/);
+  assert.match(source, /renameWasmObjectSymbols\(objectBytes, guestLink\.renames\)/);
 });
 
 test("wasmedge-targeted compile resolves to the pthread thread model", async (t) => {

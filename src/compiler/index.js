@@ -2,6 +2,7 @@ export {
   cleanupCompilation,
   compileModuleFromSource,
   createRecipientKeypairHex,
+  deriveGuestLinkObject,
   ModuleThreadModel,
   protectModuleArtifact,
 } from "./compileModule.js";

@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### A module source is compiled once
+
+- `compileModuleFromSource` compiles the module source ONCE. The guest-link object (`guestLink.objectBytes`,
+  `dist/guest-link/module-link.o`) is that module.o with its guest-link symbols renamed in the object's symbol table
+  (src/compiler/wasmObjectSymbols.js), instead of a second compile of the same source with one
+  `-D<name>=<prefix><name>` per symbol. The renamed set is unchanged: every strong, global symbol module.o defines
+  with a C identifier for a name, plus the manifest's method ids.
+- Byte-level effect, measured on real modules: storage-ingest's module-link.o and every module.wasm are byte-identical
+  to 0.9.10's. Where the old macros also reached the names of function-local statics (`_ZZ<fn>E...`) and private
+  labels (`.L...`) that embed a renamed function's name, those LOCAL symbols now keep the unprefixed name; they never
+  link across objects, and the imager-observation-ingest flow artifact linked from the new objects is byte-identical to
+  the one linked from 0.9.10's.
+- One fewer compile per module (the module source was the largest TU of the build): storage-ingest 10.9 s -> 9.2 s,
+  imager-observation-parser 20.7 s -> 15.7 s, maneuver-detection 60.1 s -> 46.6 s, gp-error-model (wasi) 74.6 s ->
+  40.8 s.
+- `deriveGuestLinkObject({ objectBytes, pluginId, methodIds })` (`space-data-module-sdk/compiler`) derives a guest-link
+  object from any module.o.
+- The three toolchain paths (emception, system Emscripten, wasi) run one shared step pipeline.
+
 ## 0.9.10
 
 - A shared-memory guest (wasm32-wasip1-threads, including the wasi-sequential modules) works in Chromium. Its
