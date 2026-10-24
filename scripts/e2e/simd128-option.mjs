@@ -11,7 +11,7 @@
 //      holds no relaxed-SIMD and no exception-handling instruction or tag section;
 //   2. unchanged: the same source WITHOUT the option is byte-identical (module.wasm and
 //      the guest-link object) to what the SDK produced before the option (0.9.14, main 66ebffd), on
-//      both thread models, and carries no SIMD and no simd128 record;
+//      both thread models, and carries no SIMD and no simd128 record or warning;
 //   3. browser and native WasmEdge: the SIMD artifacts run in real headless Chromium
 //      and in native WasmEdge 0.16.4 with byte-identical responses (the sequential one
 //      once, the wasi-threads one at 1, 2 and 4 threads, spawning real threads), and a
@@ -20,8 +20,11 @@
 //      answers the same bytes as the browser; the wasi-threads one AOT-compiles;
 //   5. same bits as scalar: the SIMD build's results equal the scalar build's, byte
 //      for byte, apart from the field that says which path ran;
-//   6. guard: SIMD without the option (a per-function target attribute), relaxed-SIMD,
-//      the legacy single-thread model and a non-boolean value are all refused.
+//   6. guard: SIMD without the option (a per-function target attribute, as a module built by
+//      its own clang driver carries it) is accepted, recorded as if declared (result, guest-link
+//      record, metadata.json, target_features) and warned about (result.warnings and the process
+//      warning SDM_SIMD128_UNDECLARED); relaxed-SIMD, an artifact with a function body the scanner
+//      cannot decode, the legacy single-thread model and a non-boolean value are refused.
 // usage: node scripts/e2e/simd128-option.mjs   (browser lane: run it through headless-run)
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -35,6 +38,7 @@ import { compileModuleFromSource } from "../../src/compiler/compileModule.js";
 import { resolveWasiThreadsToolchain } from "../../src/compiler/wasiThreadsToolchain.js";
 import { writeGuestLinkFiles } from "../../src/compiler/guestLinkFiles.js";
 import { analyzeWasmThreadFeatures } from "../../src/compiler/pthreadArtifactGuard.js";
+import { analyzeWasmSimdFeatures, assertSimdArtifact } from "../../src/compiler/simdArtifactGuard.js";
 import { readTargetFeatureEntries } from "../../src/compiler/wasmTargetFeatures.js";
 import { scanWasmCode } from "../../src/compiler/wasmCodeScan.js";
 import { parseWasmModuleSections } from "../../src/bundle/wasm.js";
@@ -342,10 +346,11 @@ async function main() {
       ["threaded", scalarMt, threaded(false), "baseline-threaded"],
     ]) {
       assert.deepEqual(current.simd128, {
-        requested: false, declared: false, declaredRelaxed: false, used: false,
+        requested: false, undeclared: false, declared: false, declaredRelaxed: false, used: false,
         instructionCount: 0, relaxedInstructionCount: 0, undecodableFunctions: 0,
       }, `${label}: a module without the option records SIMD`);
       assert.equal("simd128" in current.guestLink, false, `${label}: a module without the option has a simd128 guest-link record`);
+      assert.deepEqual(current.warnings, [], `${label}: a module without SIMD carries a build warning`);
       // Both sides compile with no cache so the toolchain really runs.
       const now = await build(compileModuleFromSource, `unchanged-${label}`, { ...options, compileCache: false });
       const before = await build(baseline.compileModuleFromSource, wasmName, { ...options, compileCache: false });
@@ -424,11 +429,19 @@ async function main() {
     await aot("simd-threaded", simdMt.outputPath);
     console.log(`aot: WasmEdge ${pin.wasmedgeVersion} AOT-compiled both SIMD artifacts; the sequential one ran as native code and answered the same ${aotRun.length} bytes as the browser`);
 
-    // --- 6. the guard: SIMD only by opt-in, never relaxed --------------------------------------------------
-    const bypass = [
+    // --- 6. the guard: undeclared SIMD recorded and warned about, never relaxed, never undecodable ---------
+    // What a module built by its own clang driver with -msimd128 looks like to the SDK: SIMD in the artifact,
+    // no option. The attribute keeps real v128 instructions (the helper is not inlined into the caller).
+    const undeclaredSource = [
+      '#include "space_data_module_invoke.h"',
       "typedef float f32x4 __attribute__((vector_size(16)));",
-      '__attribute__((target("simd128"))) static float hsum(const float *p) { f32x4 v; __builtin_memcpy(&v, p, 16); return v[0] + v[1] + v[2] + v[3]; }',
-      "int lanes(void) { float a[4] = {1, 2, 3, 4}; return (int)hsum(a); }",
+      '__attribute__((target("simd128"))) static float hsum(const float *p) { f32x4 v; __builtin_memcpy(&v, p, 16); v = v * v; return v[0] + v[1] + v[2] + v[3]; }',
+      "int lanes(void) {",
+      "  const plugin_input_frame_t *frame = plugin_get_input_frame(0);",
+      '  if (!frame || frame->payload_length < 16) { plugin_set_error("bad-samples", "need 16 bytes"); return 3; }',
+      "  float sum = hsum((const float *)frame->payload);",
+      '  return plugin_push_output("result", "CAT.fbs", "$CAT", (const uint8_t *)&sum, 4) < 0 ? 1 : 0;',
+      "}",
     ].join("\n");
     const relaxed = [
       "typedef float f32x4 __attribute__((vector_size(16)));",
@@ -436,14 +449,72 @@ async function main() {
       "int lanes(void) { f32x4 a = {1, 2, 3, 4}; f32x4 r = fma4(a, a, a); return (int)r[0]; }",
     ].join("\n");
     const attempt = (sourceCode, options) => compileModuleFromSource({ manifest: SEQUENTIAL_MANIFEST, language: "c", sourceCode, threadModel: "wasi-sequential", compileCache: { dir: cacheDir }, ...options });
-    await assert.rejects(attempt(bypass, {}), /did not opt in[\s\S]*simd128: true/, "SIMD without the option was not refused");
-    const attribute = await attempt(bypass, { simd128: true });
-    assert.equal(attribute.simd128.requested && attribute.simd128.declared, true);
+
+    // accepted, recorded as if declared, warned about
+    const processWarnings = [];
+    const onWarning = (warning) => { if (warning.code === "SDM_SIMD128_UNDECLARED") processWarnings.push(warning); };
+    process.on("warning", onWarning);
+    const undeclared = await attempt(undeclaredSource, {});
+    await new Promise((resolve) => setImmediate(resolve)); // process warnings are emitted on the next tick
+    process.off("warning", onWarning);
+    assert.deepEqual(
+      { requested: undeclared.simd128.requested, undeclared: undeclared.simd128.undeclared, declared: undeclared.simd128.declared, used: undeclared.simd128.used },
+      { requested: false, undeclared: true, declared: true, used: true },
+      "SIMD without the option is not recorded as undeclared SIMD",
+    );
+    assert.ok(undeclared.simd128.instructionCount > 0, "the undeclared-SIMD fixture holds no v128 instruction");
+    assert.equal(undeclared.guestLink.simd128, true, "undeclared SIMD is not recorded in the guest-link record");
+    assert.equal(undeclared.warnings.length, 1, "undeclared SIMD carries no build warning");
+    assert.match(undeclared.warnings[0], /simd128: true/);
+    assert.match(undeclared.warnings[0], /error in a later release/);
+    assert.equal(processWarnings.length, 1, "undeclared SIMD emitted no process warning");
+    assert.equal(processWarnings[0].name, "DeprecationWarning");
+    const undeclaredDir = path.join(dir, "guest-link-undeclared");
+    assert.equal((await writeGuestLinkFiles(undeclared, undeclaredDir)).simd128, true, "metadata.json does not record undeclared SIMD");
+    assert.equal(JSON.parse(await readFile(path.join(undeclaredDir, "metadata.json"), "utf8")).simd128, true);
+    assert.ok(wasmSections(undeclared.wasmBytes).features.some((feature) => feature.name === "simd128" && feature.prefix !== "-"), "the undeclared-SIMD artifact does not declare simd128");
+    assert.ok(WebAssembly.validate(undeclared.wasmBytes));
+    // the same source with the option: declared, so no warning and nothing undeclared
+    const declared = await attempt(undeclaredSource, { simd128: true });
+    assert.deepEqual([declared.simd128.requested, declared.simd128.undeclared, declared.warnings.length], [true, false, 0]);
+    console.log(`guard: SIMD without the option (${undeclared.simd128.instructionCount} v128 instructions) is accepted, recorded as if declared (result, guest-link record, metadata.json, target_features) and warned about; with the option it is declared and silent`);
+
+    // refused
     await assert.rejects(attempt(relaxed, { simd128: true }), /relaxed-SIMD[\s\S]*implementation-defined/, "relaxed-SIMD was not refused");
     await assert.rejects(attempt(relaxed, {}), /relaxed-SIMD/, "relaxed-SIMD without the option was not refused");
-    await assert.rejects(attempt(bypass, { simd128: true, threadModel: "single-thread" }), /simd128 requires threadModel "wasi-sequential" or "emscripten-pthreads"/);
-    await assert.rejects(attempt(bypass, { simd128: "yes" }), /simd128 must be true or false/);
-    console.log("guard: SIMD without the option, relaxed-SIMD (with or without it), the legacy single-thread model and a non-boolean value are refused; the option admits the same attribute");
+    await assert.rejects(attempt(undeclaredSource, { simd128: true, threadModel: "single-thread" }), /simd128 requires threadModel "wasi-sequential" or "emscripten-pthreads"/);
+    await assert.rejects(attempt(undeclaredSource, { simd128: "yes" }), /simd128 must be true or false/);
+
+    // A function body the scanner cannot decode: its SIMD would go uncounted, so the artifact is refused.
+    // (Hand-built modules: one function whose body is the locals vector, the instructions and the end.)
+    const crafted = (...body) => new Uint8Array([
+      0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+      1, 4, 0x01, 0x60, 0x00, 0x00, // type section: () -> ()
+      3, 2, 0x01, 0x00, // function section: one function of type 0
+      10, 2 + body.length, 0x01, body.length, ...body, // code section
+    ]);
+    const v128Const = [0xfd, 0x0c, ...new Array(16).fill(0x07), 0x1a]; // v128.const; drop
+    const decodable = crafted(0x00, ...v128Const, 0x0b);
+    const dropsSimd = crafted(0x00, ...v128Const, 0xc5, 0x0b); // reserved opcode 0xC5 after the SIMD
+    const unknownMisc = crafted(0x00, 0xfc, 0x7f, 0x0b); // 0xFC sub-opcode 127 is not an instruction
+    assert.deepEqual(
+      [analyzeWasmSimdFeatures(decodable).instructionCount, analyzeWasmSimdFeatures(decodable).undecodableFunctions],
+      [1, 0],
+    );
+    assert.deepEqual(
+      [analyzeWasmSimdFeatures(dropsSimd).instructionCount, analyzeWasmSimdFeatures(dropsSimd).undecodableFunctions],
+      [0, 1],
+      "the scanner should drop the SIMD of a body it cannot decode (and say so)",
+    );
+    assert.equal(assertSimdArtifact(decodable, { optedIn: false }).undeclared, true);
+    assert.equal(assertSimdArtifact(decodable, { optedIn: true }).undeclared, false);
+    assert.equal(assertSimdArtifact(crafted(0x00, 0x0b), { optedIn: false }).undeclared, false);
+    for (const [label, bytes] of [["SIMD then a reserved opcode", dropsSimd], ["an unknown 0xFC sub-opcode", unknownMisc]]) {
+      for (const optedIn of [false, true]) {
+        assert.throws(() => assertSimdArtifact(bytes, { optedIn }), /could not be decoded/, `${label} (optedIn ${optedIn}) was not refused`);
+      }
+    }
+    console.log("guard: relaxed-SIMD (with or without the option), an artifact with an undecodable function body (SIMD then a reserved opcode; an unknown 0xFC sub-opcode), the legacy single-thread model and a non-boolean value are refused");
 
     console.log(`SIMD128-OPTION PASS in ${((Date.now() - started) / 1000).toFixed(1)} s`);
   } finally {

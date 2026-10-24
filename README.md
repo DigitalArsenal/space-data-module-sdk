@@ -396,13 +396,21 @@ model refuses it. The generated manifest exports and invoke bridge keep their fl
 - A module that does not opt in compiles with exactly the flags it always did: its `module.wasm`
   and guest-link object are byte-identical to SDK 0.9.14's.
 - The artifact guard (`src/compiler/simdArtifactGuard.js`) holds the emitted wasm to the declaration:
-  SIMD only when the module opted in (a per-function `target("simd128")` attribute no longer slips
-  past the guard), `simd128` declared in `target_features` when it did, and never relaxed-SIMD, whose
-  results are implementation-defined and would differ between the browser and WasmEdge.
-- The use is recorded: `result.simd128` (`requested`, `declared`, `used`, `instructionCount`, ...),
-  `result.guestLink.simd128`, the guest-link bundle metadata and `writeGuestLinkFiles`' `metadata.json`
-  (`simd128: true`, only for a module that opted in), and the artifact's own `target_features` section.
-  The plugin manifest FlatBuffer has no field for build features and is unchanged.
+  an opted-in build must declare `simd128` in `target_features`; relaxed-SIMD is always refused (its
+  results are implementation-defined and would differ between the browser and WasmEdge); and an
+  artifact with a function body the scanner cannot decode is refused, because SIMD inside it would go
+  uncounted.
+- SIMD without the option is NOT refused yet. A module built by its own clang driver with `-msimd128`
+  (a driver named by `SDN_WASI_CLANGXX`, as the modules `propagator/ffm` and `analysis/density-calibration`
+  do), or with a per-function `target("simd128")` attribute, still compiles. Its SIMD is recorded as if
+  the module had declared it (`result.simd128` with `undeclared: true`, `result.guestLink.simd128`,
+  `metadata.json`), and a warning (`result.warnings`, and the process warning `SDM_SIMD128_UNDECLARED`)
+  tells the module to pass `simd128: true`. Undeclared SIMD will become an error in a later release.
+- The use is recorded: `result.simd128` (`requested`, `undeclared`, `declared`, `used`,
+  `instructionCount`, ...), `result.guestLink.simd128`, the guest-link bundle metadata and
+  `writeGuestLinkFiles`' `metadata.json` (`simd128: true`, only for a module that uses SIMD), and the
+  artifact's own `target_features` section. The plugin manifest FlatBuffer has no field for build
+  features and is unchanged.
 - Runtimes: every current browser engine and WasmEdge 0.16.4 run fixed-width SIMD, interpreted and
   AOT (`wasmedge compile`); no exception handling is involved.
 - Proof: `node scripts/e2e/simd128-option.mjs` builds one kernel with and without the option on both
