@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.9.15
+
+### An opt-in WebAssembly SIMD build option
+
+- `compileModuleFromSource({ simd128: true })` compiles the module's own code and its `libraries` with
+  `-msimd128` (`__wasm_simd128__` defined; clang vector types and `wasm_simd128.h` lower to `v128`). It needs
+  `threadModel` `"wasi-sequential"` or `"emscripten-pthreads"`; the legacy `"single-thread"` model and a non-boolean
+  value are refused. The SDK's generated manifest exports and invoke bridge keep their flags.
+- Modules that do not opt in are unchanged: with and without the option, `module.wasm` and the guest-link object of
+  a module that does not pass it are byte-identical to 0.9.14's on both thread models (measured by the E2E).
+- The artifact guard (`src/compiler/simdArtifactGuard.js`) holds the emitted wasm to the declaration. SIMD without the
+  option is refused (a per-function `target("simd128")` attribute used to bypass the SDK's flag set); an opted-in build
+  must declare `simd128` in `target_features`; relaxed-SIMD is always refused, because its results are
+  implementation-defined and would differ between the browser and WasmEdge.
+- The use is recorded on the compile result (`result.simd128`: `requested`, `declared`, `used`, `instructionCount`,
+  ...), in `result.guestLink.simd128`, in the guest-link bundle metadata and in `writeGuestLinkFiles`' `metadata.json`
+  (`simd128: true`, present only for a module that opted in). The plugin manifest FlatBuffer has no field for build
+  features and is unchanged.
+- Runtimes: headless Chromium and native WasmEdge 0.16.4 (interpreter and AOT, `wasmedge compile`) answer
+  byte-identical responses from a SIMD artifact, at 1, 2 and 4 threads for the wasi-threads model, and equal to the
+  scalar build's. No exception handling is involved. `node scripts/e2e/simd128-option.mjs`.
+- The wasm instruction scanner moves to `src/compiler/wasmCodeScan.js` and the target_features reader to
+  `src/compiler/wasmTargetFeatures.js`. The scanner now also counts exception-handling and SIMD instructions and tracks
+  block depth, so a body it cannot decode is reported (`undecodableFunctions`) instead of miscounted. It matches
+  wasm-objdump exactly on a module with 23,788 SIMD, 741 atomic and 2,301 exception-handling instructions and decodes
+  400 of 400 wasm files from the stack.
+
 ## 0.9.14
 
 ### The compile cache keeps its keys and entries in binary, with no JSON

@@ -385,6 +385,30 @@ If a runtime cannot interoperate with the guest pthread contract directly,
 document that as a wrapper requirement instead of changing the guest artifact
 semantics.
 
+## WebAssembly SIMD (opt-in)
+
+`compileModuleFromSource({ simd128: true })` compiles the module's own code and its `libraries` with
+`-msimd128`: `__wasm_simd128__` is defined, clang vector types and `wasm_simd128.h` lower to `v128`
+instructions, and the compiler may vectorize. It needs `threadModel` `"wasi-sequential"` or
+`"emscripten-pthreads"` (the clang `wasm32-wasip1-threads` toolchain); the legacy `"single-thread"`
+model refuses it. The generated manifest exports and invoke bridge keep their flags.
+
+- A module that does not opt in compiles with exactly the flags it always did: its `module.wasm`
+  and guest-link object are byte-identical to SDK 0.9.14's.
+- The artifact guard (`src/compiler/simdArtifactGuard.js`) holds the emitted wasm to the declaration:
+  SIMD only when the module opted in (a per-function `target("simd128")` attribute no longer slips
+  past the guard), `simd128` declared in `target_features` when it did, and never relaxed-SIMD, whose
+  results are implementation-defined and would differ between the browser and WasmEdge.
+- The use is recorded: `result.simd128` (`requested`, `declared`, `used`, `instructionCount`, ...),
+  `result.guestLink.simd128`, the guest-link bundle metadata and `writeGuestLinkFiles`' `metadata.json`
+  (`simd128: true`, only for a module that opted in), and the artifact's own `target_features` section.
+  The plugin manifest FlatBuffer has no field for build features and is unchanged.
+- Runtimes: every current browser engine and WasmEdge 0.16.4 run fixed-width SIMD, interpreted and
+  AOT (`wasmedge compile`); no exception handling is involved.
+- Proof: `node scripts/e2e/simd128-option.mjs` builds one kernel with and without the option on both
+  thread models, runs it in headless Chromium and native WasmEdge (and as WasmEdge AOT) with
+  byte-identical responses at 1, 2 and 4 threads, and checks the unchanged build is byte-identical.
+
 ## Browser + WasmEdge Isomorphism
 
 The supported isomorphic profile and browser edge shims are documented in
