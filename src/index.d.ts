@@ -996,9 +996,14 @@ export interface CompilationResult {
   /**
    * How the emitted artifact uses WebAssembly SIMD, as the artifact guard read
    * it. Always present: `requested: false, used: false` for a module that did
-   * not opt in with `simd128: true`.
+   * not opt in with `simd128: true` and carries no SIMD.
    */
   simd128: Simd128Report;
+  /**
+   * Build warnings (not manifest warnings): today, the SIMD an artifact carries without
+   * the build having passed `simd128: true`, with what to do about it. Empty otherwise.
+   */
+  warnings: string[];
   /** Which compile steps the content cache answered. */
   compileCache?: CompileCacheReport;
   manifestWarnings: string[];
@@ -1008,6 +1013,14 @@ export interface CompilationResult {
 export interface Simd128Report {
   /** The module opted in with `simd128: true` (compiled with -msimd128). */
   requested: boolean;
+  /**
+   * The artifact carries SIMD but the build did not pass `simd128: true` (a module built by its
+   * own clang driver with -msimd128, or a per-function target("simd128") attribute). It is
+   * recorded as if declared (`guestLink.simd128`), a warning is added to `CompilationResult.warnings`
+   * and emitted as the process warning SDM_SIMD128_UNDECLARED, and the artifact is not refused
+   * yet: undeclared SIMD will become an error in a later release.
+   */
+  undeclared: boolean;
   /** `simd128` is listed as used in the artifact's target_features section; null when it has none. */
   declared: boolean | null;
   /** `relaxed-simd` is listed in target_features; always false or null in an artifact that shipped. */
@@ -1029,7 +1042,7 @@ export interface GuestLinkArtifact {
   methodSymbols: Record<string, string>;
   threadModel: ModuleThreadModelName;
   capabilities: string[];
-  /** Present (true) only when the module opted in to WebAssembly SIMD (`simd128: true`). */
+  /** Present (true) only for a module that uses WebAssembly SIMD, declared with `simd128: true` or not. */
   simd128?: true;
   objectBytes: Uint8Array;
   /** Present when the compile linked `libraries`. */
@@ -1106,11 +1119,13 @@ export function compileModuleFromSource(options: {
    * compiled with -msimd128 (so `__wasm_simd128__` is defined and the compiler may
    * vectorize), and the artifact guard records the use in `CompilationResult.simd128`
    * and the guest-link metadata. Default `false`: a module that does not opt in is
-   * compiled with exactly the flags it always was, and the guard refuses an
-   * artifact that carries SIMD regardless (a per-function target("simd128")
-   * attribute). Relaxed-SIMD is always refused: its results are
-   * implementation-defined. Needs `threadModel` "wasi-sequential" or
-   * "emscripten-pthreads" (the clang wasm32-wasip1-threads toolchain).
+   * compiled with exactly the flags it always was. An artifact that carries SIMD
+   * anyway (the module's own clang driver passes -msimd128, or a per-function
+   * target("simd128") attribute) is recorded as if declared and warned about, not
+   * refused yet; undeclared SIMD will become an error in a later release.
+   * Relaxed-SIMD is always refused: its results are implementation-defined. Needs
+   * `threadModel` "wasi-sequential" or "emscripten-pthreads" (the clang
+   * wasm32-wasip1-threads toolchain).
    */
   simd128?: boolean;
   importedMemory?: boolean;

@@ -21,6 +21,7 @@ export {
   analyzeWasmSimdFeatures,
   assertSimdArtifact,
   SIMD128_COMPILE_FLAG,
+  SIMD128_UNDECLARED_WARNING_CODE,
 } from "./simdArtifactGuard.js";
 
 export { resolveWasiThreadsToolchain } from "./wasiThreadsToolchain.js";

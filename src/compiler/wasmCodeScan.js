@@ -278,8 +278,15 @@ function scanFunctionBody(bytes, bodyStart, bodyEnd) {
           case 17: // table.fill
             cursor = skipLeb(bytes, cursor, bodyEnd);
             break;
+          case 19: // i64.add128
+          case 20: // i64.sub128
+          case 21: // i64.mul_wide_s
+          case 22: // i64.mul_wide_u
+            break; // wide arithmetic: no immediates
           default:
-            break;
+            // An unknown sub-opcode's immediates cannot be skipped: the body is
+            // undecodable rather than guessed at (as an unknown opcode is, below).
+            throw new Error(`Unsupported 0xFC sub-opcode ${sub.value}.`);
         }
         break;
       }

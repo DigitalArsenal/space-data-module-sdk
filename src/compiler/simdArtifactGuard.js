@@ -2,18 +2,21 @@
 //
 // SIMD is OPT-IN per module: `compileModuleFromSource({ simd128: true })` compiles
 // the module's own code (and its `libraries`) with -msimd128. The guard then holds
-// the emitted artifact to that declaration in both directions:
+// the emitted artifact to that declaration:
 //
-//   * a module that did NOT opt in must carry no SIMD - no v128 instruction and no
-//     `simd128` entry in its target_features section. A per-function
-//     `__attribute__((target("simd128")))` or a stray -msimd128 would otherwise
-//     slip SIMD past the SDK's flag set, and the build would record nothing;
 //   * a module that DID opt in must declare `simd128` in target_features (the flag
 //     reached the objects);
+//   * a module that did NOT opt in but whose artifact carries SIMD anyway (a
+//     per-function `__attribute__((target("simd128")))`, or a module built by its own
+//     clang driver with -msimd128) is NOT refused yet: the SIMD is recorded as if the
+//     module had declared it, and a warning tells the module to pass
+//     `simd128: true`. Undeclared SIMD will become an error in a later release;
 //   * relaxed-SIMD is refused either way. Its instructions are implementation-defined
 //     (whether an FMA fuses, which lane a select takes), so the same module would
 //     return different bytes in the browser and under WasmEdge. Fixed-width simd128
-//     is deterministic and is the only SIMD the SDK admits.
+//     is deterministic and is the only SIMD the SDK admits;
+//   * an artifact with a function body the scanner cannot decode is refused: SIMD
+//     inside that body would go uncounted, so its use cannot be ruled out.
 //
 // Both runtime lanes execute fixed-width SIMD: every current browser engine and
 // WasmEdge 0.16.4 (interpreter and AOT). The analysis is recorded on the compile
@@ -26,6 +29,9 @@ import { readTargetFeatureEntries } from "./wasmTargetFeatures.js";
 
 /** The clang flag the `simd128` compile option turns on for a module's own code. */
 export const SIMD128_COMPILE_FLAG = "-msimd128";
+
+/** The process warning code for an artifact that carries SIMD its build did not declare. */
+export const SIMD128_UNDECLARED_WARNING_CODE = "SDM_SIMD128_UNDECLARED";
 
 /**
  * Parse a compiled wasm artifact and report how it uses SIMD.
@@ -45,7 +51,7 @@ export const SIMD128_COMPILE_FLAG = "-msimd128";
  *   relaxedInstructionCount     SIMD instructions beyond the fixed-width set
  *     (relaxed-simd and later proposals).
  *   undecodableFunctions        function bodies the scanner could not decode (their
- *     instructions are not counted; the target_features declaration still is).
+ *     instructions are not counted).
  */
 export function analyzeWasmSimdFeatures(wasmBytes) {
   const parsed = parseWasmModuleSections(wasmBytes);
@@ -66,9 +72,10 @@ export function analyzeWasmSimdFeatures(wasmBytes) {
 }
 
 /**
- * Reject a compiled wasm artifact whose SIMD use contradicts the build's
- * declaration (see the file header). Returns the analysis plus `requested` on
- * success; throws a clear, actionable error otherwise.
+ * Hold a compiled wasm artifact's SIMD use to the build's declaration (see the file
+ * header). Returns the analysis plus `requested` (the module opted in) and
+ * `undeclared` (SIMD without the opt-in; `warning` then says what to do) on success;
+ * throws a clear, actionable error otherwise.
  *
  * @param {Uint8Array|ArrayBuffer|ArrayBufferView} wasmBytes
  * @param {{ optedIn?: boolean, source?: string }} [options]
@@ -96,14 +103,10 @@ export function assertSimdArtifact(wasmBytes, options = {}) {
         "different bytes in the browser and under WasmEdge; only fixed-width simd128 is admitted",
     );
   }
-  if (!optedIn && (analysis.instructionCount > 0 || analysis.declared === true)) {
+  if (analysis.undecodableFunctions > 0) {
     failures.push(
-      `it uses WebAssembly SIMD (${analysis.instructionCount} v128 instruction(s); ` +
-        `target_features ${analysis.declared ? "declares" : "does not declare"} simd128) ` +
-        "but the build did not opt in - a per-function target(\"simd128\") attribute or a " +
-        "-msimd128 in the source's own flags bypasses the SDK's flag set. Pass " +
-        "compileModuleFromSource({ simd128: true }) so the build, the guard and the build " +
-        "record know the module needs SIMD",
+      `${analysis.undecodableFunctions} function body(ies) could not be decoded, so SIMD ` +
+        "inside them would go uncounted and the artifact's SIMD use cannot be ruled out",
     );
   }
   if (optedIn && analysis.declared === false) {
@@ -118,5 +121,17 @@ export function assertSimdArtifact(wasmBytes, options = {}) {
         "This build must not ship.",
     );
   }
-  return { requested: optedIn, ...analysis };
+
+  const undeclared = !optedIn && (analysis.instructionCount > 0 || analysis.declared === true);
+  const result = { requested: optedIn, undeclared, ...analysis };
+  if (undeclared) {
+    result.warning =
+      `${source} uses WebAssembly SIMD (${analysis.instructionCount} v128 instruction(s); ` +
+      `target_features ${analysis.declared ? "declares" : "does not declare"} simd128) but the build did ` +
+      "not declare it. Pass compileModuleFromSource({ simd128: true }) so the module declares that it " +
+      "needs SIMD (a module built by its own clang driver with -msimd128, or a per-function " +
+      'target("simd128") attribute, is the usual cause). The SDK records the use as if declared ' +
+      "and does not refuse the artifact yet; undeclared SIMD will become an error in a later release.";
+  }
+  return result;
 }

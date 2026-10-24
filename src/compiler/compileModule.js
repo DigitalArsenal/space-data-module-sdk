@@ -48,7 +48,11 @@ import {
   assertSequentialFlagsAbsent,
   PTHREAD_FINAL_LINK_FLAGS,
 } from "./pthreadArtifactGuard.js";
-import { SIMD128_COMPILE_FLAG, assertSimdArtifact } from "./simdArtifactGuard.js";
+import {
+  SIMD128_COMPILE_FLAG,
+  SIMD128_UNDECLARED_WARNING_CODE,
+  assertSimdArtifact,
+} from "./simdArtifactGuard.js";
 import { resolveWasiThreadsToolchain } from "./wasiThreadsToolchain.js";
 import { encodePluginManifest, toEmbeddedPluginManifest } from "../manifest/index.js";
 import {
@@ -1273,9 +1277,6 @@ async function compileWithToolchain(kind, options = {}) {
       methodSymbols: guestLink.methodSymbols,
       threadModel: compileOptions.threadModel ?? ModuleThreadModel.SINGLE_THREAD,
       capabilities: compileOptions.guestLinkCapabilities,
-      // Present only for a module that opted in: a module that did not has a
-      // guest-link record byte-identical to what it always had.
-      ...(compileOptions.simd128 === true ? { simd128: true } : {}),
       objectBytes: guestLink.objectBytes,
       ...(linked.libraries.length > 0
         ? {
@@ -1433,12 +1434,29 @@ export async function compileModuleFromSource(options = {}) {
       });
     }
 
-    // The SIMD guard holds the artifact to the build's declaration: SIMD only when
-    // the module opted in, never relaxed-SIMD. See simdArtifactGuard.js.
-    const simd128Report = assertSimdArtifact(wasmBytes, {
+    // The SIMD guard holds the artifact to the build's declaration: never relaxed-SIMD,
+    // every function body decodable, and simd128 in target_features when the module
+    // opted in. SIMD without the opt-in is recorded as if declared, with a warning
+    // (it becomes an error in a later release). See simdArtifactGuard.js.
+    const { warning: simd128Warning, ...simd128Report } = assertSimdArtifact(wasmBytes, {
       optedIn: simd128,
-      source: resolvedOutputPath,
+      // A path only when the caller asked for one: otherwise the artifact is in a temp dir that is gone.
+      source: options.outputPath != null ? resolvedOutputPath : `the module "${manifest.pluginId ?? "unnamed"}"`,
     });
+    const buildWarnings = [];
+    if (simd128Warning) {
+      buildWarnings.push(simd128Warning);
+      process.emitWarning(simd128Warning, {
+        type: "DeprecationWarning",
+        code: SIMD128_UNDECLARED_WARNING_CODE,
+      });
+    }
+    // Present only for a module that uses SIMD (declared or not): any other module has
+    // a guest-link record byte-identical to what it always had.
+    const guestLink =
+      result.guestLink && (simd128 || simd128Report.undeclared)
+        ? { ...result.guestLink, simd128: true }
+        : result.guestLink;
 
     // Validate the compiled artifact
     const report = await validateArtifactWithStandards({
@@ -1464,9 +1482,10 @@ export async function compileModuleFromSource(options = {}) {
         options.outputPath != null || keepTempDir ? resolvedOutputPath : null,
       tempDir: keepTempDir ? tempDir : null,
       wasmBytes,
-      guestLink: result.guestLink,
+      guestLink,
       compileCache: result.cache,
       manifestWarnings: warnings,
+      warnings: buildWarnings,
       threadFeatures,
       simd128: simd128Report,
       report,
