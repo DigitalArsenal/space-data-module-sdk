@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.9.16
+
+### hd-wallet-wasm 2.1.0 -> 2.2.2: off both published advisories
+
+- The SDK pins hd-wallet-wasm 2.2.2 (was 2.1.0). GHSA-gvwv-r86g-4q35 (fixed in 2.1.1) and GHSA-wp9p-ffrh-ccwm (fixed in
+  2.1.2) cover every release before 2.1.2; 2.2.2 is the newest published release and the SDK's use is compatible with
+  it (2.2.x added wallet sign-in and sealed-field features the SDK does not call). `node scripts/e2e/hd-wallet-advisory.mjs`
+  asserts the pin and runs known vectors through the SDK's wallet paths in Node, headless Chromium (the browser host's
+  crypto operations) and native WasmEdge 0.16.4 (a module signed with an RFC 8032 key loads under a signature policy).
+- One call needed code: from 2.1.2 `curves.publicKeyFromPrivate` takes its curve (it defaulted to secp256k1), so
+  `src/utils/wasmCrypto.js` and the browser host pass `SECP256K1_CURVE` (`src/utils/walletCurves.js`). Naming the curve
+  works on 2.1.0 too.
+- Where the SDK uses the wallet: Ed25519 sign and verify (module signatures in `src/bundle/signing.js`; publication
+  notices and records in `src/transport/records.js`; the node host's `crypto.ed25519`); secp256k1 ECDSA over
+  sha256(message) and over a 32-byte digest, the digest verified by public-key recovery (the node and browser hosts'
+  `crypto.secp256k1`); deployment-authorization signing with an HD-wallet key - BIP-39 mnemonic, BIP-32 derivation,
+  `getSigningKey`, secp256k1 `signRecoverable` - in `protectModuleArtifact` (`src/compiler/compileModule.js`); X25519,
+  HKDF and AES-GCM for encrypted publication envelopes (`src/transport/pki.js`) and the hosts' crypto operations;
+  SHA-256, SHA-512 and random bytes. No SDK path uses P-384, P-256, Ethereum, Bitcoin, Solana, Cosmos, Polkadot, X.509,
+  ECIES or libp2p.
+- Whether any SDK release exposed the advisory paths: no release exposed the P-384 key leak (nothing signs with P-384) or
+  the Ethereum and Bitcoin defects. Every release through 0.9.15 pinned an affected hd-wallet-wasm (2.0.x to 2.1.0), and
+  four effects were reachable through SDK functions, each reproduced on 0.9.15's own code and absent on 0.9.16:
+  `secp256k1VerifyDigest` (verification by public-key recovery, releases 0.9.5 through 0.9.15, behind the node host's
+  `crypto.secp256k1.verifyDigest`) accepted a signature that recovers to no key right after a genuine verification by the
+  same key, because a failed recovery returned the previous key; Ed25519 verification (module signatures, records) accepted
+  a second encoding (S + L) of a valid signature, which is malleability, not forgery; `secp256k1SignMessage` and
+  `secp256k1SignDigest` with a zero private key returned bytes from the wallet's heap instead of an error, reachable by a
+  module holding `crypto_sign`; and `protectModuleArtifact` accepted a mnemonic that continued after a NUL, deriving the
+  wallet from the text before it. GHSA-wp9p's lying-length inputs need a `Uint8Array` subclass or an own `length` property,
+  which parsed wire data and wasm guest memory do not produce; the SDK's DER signatures are converted to raw form in the SDK
+  before the wallet sees them (the wallet's DER reader, which over-read, was not reached).
+- Follow-up, not in this release: `flatc-wasm` 26.1.38 pins hd-wallet-wasm 2.0.28 exactly, so every install of the SDK
+  carries that copy under `node_modules/flatc-wasm/node_modules`. The SDK imports only `FlatcRunner` from flatc-wasm (code
+  generation) and never its HD-key or pipeline APIs, so no SDK path reaches it, but flatc-wasm needs a release on a patched
+  hd-wallet-wasm.
+
 ## 0.9.15
 
 ### An opt-in WebAssembly SIMD build option
