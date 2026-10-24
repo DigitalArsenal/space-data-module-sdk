@@ -16,6 +16,15 @@
 import path from "node:path";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 
+import { canonicalBytes } from "../auth/canonicalize.js";
+
+function concatNewline(bytes) {
+  const out = new Uint8Array(bytes.length + 1);
+  out.set(bytes, 0);
+  out[bytes.length] = 0x0a;
+  return out;
+}
+
 /**
  * Write a compilation's guest-link object, its library objects and
  * metadata.json into `dir` (usually `<package>/dist/guest-link`). `metadata`
@@ -55,6 +64,8 @@ export async function writeGuestLinkFiles(compilation, dir, metadata = {}) {
     ...(libraryEntries.length > 0 ? { libraries: libraryEntries } : {}),
     ...metadata,
   };
-  await writeFile(path.join(dir, "metadata.json"), `${JSON.stringify(written, null, 2)}\n`);
+  // The SDK's one canonical writer of this metadata (the guest-link bundle entry
+  // encodes the same object the same way): sorted keys, no whitespace.
+  await writeFile(path.join(dir, "metadata.json"), concatNewline(canonicalBytes(written)));
   return written;
 }

@@ -956,7 +956,7 @@ function normalizeLibraries(libraries) {
     if (!LIBRARY_NAME.test(name) || !LIBRARY_VERSION.test(version)) {
       throw new Error(
         `libraries[${index}] needs a name and a version of letters, digits, '.', '_' or '-' ` +
-          `(got name ${JSON.stringify(library?.name)}, version ${JSON.stringify(library?.version)}).`,
+          `(got name "${String(library?.name)}", version "${String(library?.version)}").`,
       );
     }
     if (seen.has(name)) {
@@ -969,12 +969,12 @@ function normalizeLibraries(libraries) {
     }
     const language = String(library?.language ?? "c").trim().toLowerCase();
     if (!["c", "c++", "cpp", "cxx"].includes(language)) {
-      throw new Error(`libraries[${index}] ("${name}"): language must be "c" or "c++", got ${JSON.stringify(library?.language)}.`);
+      throw new Error(`libraries[${index}] ("${name}"): language must be "c" or "c++", got "${String(library?.language)}".`);
     }
     const defines = (Array.isArray(library?.defines) ? library.defines : []).map((define) => {
       const text = String(define ?? "").trim();
       if (!PREPROCESSOR_DEFINE.test(text)) {
-        throw new Error(`libraries[${index}] ("${name}"): define ${JSON.stringify(define)} is not NAME or NAME=VALUE.`);
+        throw new Error(`libraries[${index}] ("${name}"): define "${String(define)}" is not NAME or NAME=VALUE.`);
       }
       return text;
     });

@@ -45,8 +45,10 @@ const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 
 // Bump when the entry layout or the meaning of a key changes.
-export const COMPILE_CACHE_FORMAT = "sdm-compile-cache-v1";
-const ENTRY_MAGIC = new TextEncoder().encode("SDMCC1\n");
+export const COMPILE_CACHE_FORMAT = "sdm-compile-cache-v2";
+// v2 (0.9.14): binary keys and a fixed binary entry layout. A v1 entry (0.9.12)
+// has another magic and is a miss.
+const ENTRY_MAGIC = new TextEncoder().encode("SDMCC2\n");
 const ENTRY_SUFFIX = ".entry";
 const DISABLED_VALUES = new Set(["0", "off", "false", "no", "disabled"]);
 const DEFAULT_MAX_BYTES = 4 * 1024 ** 3;
@@ -81,16 +83,60 @@ export function sha256Hex(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-// A stable digest of a JSON-able value (object keys sorted).
-export function digestOf(value) {
-  return sha256Hex(stableStringify(value));
+// A stable digest of a value made of null, booleans, numbers, strings, byte
+// arrays, arrays and plain objects. Each field is fed into the sha256 as a type
+// tag and length-prefixed bytes (object keys sorted, undefined members
+// skipped), so distinct values never share an encoding.
+const DIGEST_TAG = Object.freeze({ NULL: 0, FALSE: 1, TRUE: 2, NUMBER: 3, STRING: 4, BYTES: 5, ARRAY: 6, OBJECT: 7 });
+const textEncoder = new TextEncoder();
+
+function u32(value) {
+  const out = Buffer.alloc(4);
+  out.writeUInt32LE(value >>> 0, 0);
+  return out;
 }
 
-function stableStringify(value) {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-  const keys = Object.keys(value).filter((key) => value[key] !== undefined).sort();
-  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+function feedLengthPrefixed(hash, tag, bytes) {
+  hash.update(Uint8Array.of(tag));
+  hash.update(u32(bytes.length));
+  hash.update(bytes);
+}
+
+function feedDigestValue(hash, value) {
+  if (value === null || value === undefined) {
+    hash.update(Uint8Array.of(DIGEST_TAG.NULL));
+  } else if (typeof value === "boolean") {
+    hash.update(Uint8Array.of(value ? DIGEST_TAG.TRUE : DIGEST_TAG.FALSE));
+  } else if (typeof value === "number") {
+    const bytes = Buffer.alloc(8);
+    bytes.writeDoubleLE(value, 0);
+    hash.update(Uint8Array.of(DIGEST_TAG.NUMBER));
+    hash.update(bytes);
+  } else if (typeof value === "string") {
+    feedLengthPrefixed(hash, DIGEST_TAG.STRING, textEncoder.encode(value));
+  } else if (value instanceof Uint8Array) {
+    feedLengthPrefixed(hash, DIGEST_TAG.BYTES, value);
+  } else if (Array.isArray(value)) {
+    hash.update(Uint8Array.of(DIGEST_TAG.ARRAY));
+    hash.update(u32(value.length));
+    for (const item of value) feedDigestValue(hash, item);
+  } else if (typeof value === "object") {
+    const keys = Object.keys(value).filter((key) => value[key] !== undefined).sort();
+    hash.update(Uint8Array.of(DIGEST_TAG.OBJECT));
+    hash.update(u32(keys.length));
+    for (const key of keys) {
+      feedLengthPrefixed(hash, DIGEST_TAG.STRING, textEncoder.encode(key));
+      feedDigestValue(hash, value[key]);
+    }
+  } else {
+    throw new TypeError(`digestOf cannot encode a ${typeof value}.`);
+  }
+}
+
+export function digestOf(value) {
+  const hash = createHash("sha256");
+  feedDigestValue(hash, value);
+  return hash.digest("hex");
 }
 
 function toBytes(content) {
@@ -110,38 +156,91 @@ export function digestFiles(files) {
   return hash.digest("hex");
 }
 
-function encodeEntry(meta, blobs) {
+// One entry, a fixed little-endian layout:
+//
+//   magic   "SDMCC2\n"
+//   key     32 bytes (the sha256 key the entry is stored under)
+//   u32     dependency count, then per dependency:
+//             u32 path length, path (utf-8), f64 size, f64 mtimeMs, 32-byte sha256
+//   u32     blob count, then per blob (sorted by name):
+//             u16 name length, name (utf-8), u32 size, 32-byte sha256
+//   blob bytes, in the same order
+function encodeEntry(key, blobs, externalDeps = []) {
+  const parts = [ENTRY_MAGIC, Buffer.from(key, "hex"), u32(externalDeps.length)];
+  for (const dep of externalDeps) {
+    const pathBytes = textEncoder.encode(dep.path);
+    const stats = Buffer.alloc(16);
+    stats.writeDoubleLE(dep.size, 0);
+    stats.writeDoubleLE(dep.mtimeMs, 8);
+    parts.push(u32(pathBytes.length), pathBytes, stats, Buffer.from(dep.sha256, "hex"));
+  }
   const names = Object.keys(blobs).sort();
-  const header = {
-    format: COMPILE_CACHE_FORMAT,
-    meta,
-    blobs: names.map((name) => ({ name, size: blobs[name].length, sha256: sha256Hex(blobs[name]) })),
-  };
-  const headerBytes = new TextEncoder().encode(JSON.stringify(header));
-  const lengthBytes = new Uint8Array(4);
-  new DataView(lengthBytes.buffer).setUint32(0, headerBytes.length, true);
-  return Buffer.concat([ENTRY_MAGIC, lengthBytes, headerBytes, ...names.map((name) => blobs[name])]);
+  parts.push(u32(names.length));
+  for (const name of names) {
+    const nameBytes = textEncoder.encode(name);
+    const nameLength = Buffer.alloc(2);
+    nameLength.writeUInt16LE(nameBytes.length, 0);
+    parts.push(nameLength, nameBytes, u32(blobs[name].length), Buffer.from(sha256Hex(blobs[name]), "hex"));
+  }
+  return Buffer.concat([...parts, ...names.map((name) => blobs[name])]);
 }
 
 function decodeEntry(bytes) {
-  if (bytes.length < ENTRY_MAGIC.length + 4) return null;
+  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length);
+  let offset = 0;
+  const need = (count) => {
+    if (offset + count > buffer.length) throw new RangeError("truncated cache entry");
+  };
+  need(ENTRY_MAGIC.length + 32);
   for (let index = 0; index < ENTRY_MAGIC.length; index += 1) {
-    if (bytes[index] !== ENTRY_MAGIC[index]) return null;
+    if (buffer[index] !== ENTRY_MAGIC[index]) return null;
   }
-  const headerLength = new DataView(bytes.buffer, bytes.byteOffset + ENTRY_MAGIC.length, 4).getUint32(0, true);
-  const headerStart = ENTRY_MAGIC.length + 4;
-  const header = JSON.parse(new TextDecoder().decode(bytes.subarray(headerStart, headerStart + headerLength)));
-  if (header?.format !== COMPILE_CACHE_FORMAT || !Array.isArray(header.blobs)) return null;
+  offset = ENTRY_MAGIC.length;
+  const key = buffer.subarray(offset, offset + 32).toString("hex");
+  offset += 32;
+  need(4);
+  const depCount = buffer.readUInt32LE(offset);
+  offset += 4;
+  const externalDeps = [];
+  for (let index = 0; index < depCount; index += 1) {
+    need(4);
+    const pathLength = buffer.readUInt32LE(offset);
+    offset += 4;
+    need(pathLength + 48);
+    const depPath = buffer.subarray(offset, offset + pathLength).toString("utf8");
+    offset += pathLength;
+    const size = buffer.readDoubleLE(offset);
+    const mtimeMs = buffer.readDoubleLE(offset + 8);
+    const sha256 = buffer.subarray(offset + 16, offset + 48).toString("hex");
+    offset += 48;
+    externalDeps.push({ path: depPath, size, mtimeMs, sha256 });
+  }
+  need(4);
+  const blobCount = buffer.readUInt32LE(offset);
+  offset += 4;
+  const index = [];
+  for (let blob = 0; blob < blobCount; blob += 1) {
+    need(2);
+    const nameLength = buffer.readUInt16LE(offset);
+    offset += 2;
+    need(nameLength + 36);
+    const name = buffer.subarray(offset, offset + nameLength).toString("utf8");
+    offset += nameLength;
+    const size = buffer.readUInt32LE(offset);
+    const sha256 = buffer.subarray(offset + 4, offset + 36).toString("hex");
+    offset += 36;
+    index.push({ name, size, sha256 });
+  }
   const blobs = {};
-  let offset = headerStart + headerLength;
-  for (const { name, size, sha256 } of header.blobs) {
-    const blob = new Uint8Array(bytes.subarray(offset, offset + size));
-    if (blob.length !== size || sha256Hex(blob) !== sha256) return null;
+  for (const { name, size, sha256 } of index) {
+    need(size);
+    const blob = new Uint8Array(buffer.subarray(offset, offset + size));
+    if (sha256Hex(blob) !== sha256) return null;
     blobs[name] = blob;
     offset += size;
   }
-  if (offset !== bytes.length) return null;
-  return { meta: header.meta ?? {}, blobs };
+  if (offset !== buffer.length) return null;
+  return { key, externalDeps, blobs };
 }
 
 // Header dependencies outside the staged build dir: each is recorded with its
@@ -216,7 +315,7 @@ export class CompileCache {
     return path.join(this.entriesDir, key.slice(0, 2), `${key}${ENTRY_SUFFIX}`);
   }
 
-  /** The stored entry for `key` ({ meta, blobs }), or null. */
+  /** The stored entry for `key` ({ key, externalDeps, blobs }), or null. */
   async get(key) {
     const file = this.entryPath(key);
     let bytes;
@@ -232,7 +331,7 @@ export class CompileCache {
     } catch {
       entry = null;
     }
-    if (!entry || entry.meta?.key !== key || !(await externalDependenciesUnchanged(entry.meta?.externalDeps))) {
+    if (!entry || entry.key !== key || !(await externalDependenciesUnchanged(entry.externalDeps))) {
       this.stats.misses += 1;
       return null;
     }
@@ -243,14 +342,17 @@ export class CompileCache {
     return entry;
   }
 
-  /** Store `blobs` ({ name: Uint8Array }) under `key`, atomically. */
-  async put(key, blobs, meta = {}) {
+  /**
+   * Store `blobs` ({ name: Uint8Array }) under `key`, atomically, with the
+   * external header dependencies a lookup re-checks (`{ externalDeps }`).
+   */
+  async put(key, blobs, { externalDeps = [] } = {}) {
     const file = this.entryPath(key);
     const dir = path.dirname(file);
     try {
       await mkdir(dir, { recursive: true });
       const temp = path.join(dir, `.${key}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`);
-      await writeFile(temp, encodeEntry({ ...meta, key }, blobs));
+      await writeFile(temp, encodeEntry(key, blobs, externalDeps));
       try {
         await rename(temp, file);
       } catch (error) {
@@ -339,9 +441,7 @@ let sdkIdentityPromise = null;
 export function getSdkCompileIdentity() {
   sdkIdentityPromise ??= (async () => {
     const compilerDir = path.dirname(fileURLToPath(import.meta.url));
-    const packageJson = JSON.parse(
-      await readFile(path.join(compilerDir, "..", "..", "package.json"), "utf8"),
-    );
+    const packageJson = require(path.join(compilerDir, "..", "..", "package.json"));
     const files = {};
     for (const name of (await readdir(compilerDir)).filter((entry) => entry.endsWith(".js")).sort()) {
       files[name] = await readFile(path.join(compilerDir, name));
@@ -385,7 +485,7 @@ const toolchainIdentityCache = new Map();
  * libraries.
  */
 export function getNativeClangIdentity({ drivers, toolchainArgs = [], roots = [] }) {
-  const cacheKey = JSON.stringify({ drivers, toolchainArgs, roots });
+  const cacheKey = ["native-clang", drivers.join("\u0001"), toolchainArgs.join("\u0001"), roots.join("\u0001")].join("\u0000");
   if (!toolchainIdentityCache.has(cacheKey)) {
     toolchainIdentityCache.set(cacheKey, (async () => {
       const driverIds = [];
@@ -436,7 +536,7 @@ async function describeLibraries(root) {
 
 /** Identity of a system Emscripten (em++ / emcc on PATH). */
 export function getSystemEmscriptenIdentity(commands) {
-  const cacheKey = JSON.stringify({ emscripten: commands });
+  const cacheKey = ["system-emscripten", ...commands].join("\u0000");
   if (!toolchainIdentityCache.has(cacheKey)) {
     toolchainIdentityCache.set(cacheKey, (async () => {
       const ids = [];
@@ -463,7 +563,7 @@ export function getEmceptionPackageIdentity(extra = "") {
       let version = "unknown";
       for (;;) {
         try {
-          const pkg = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8"));
+          const pkg = require(path.join(packageRoot, "package.json"));
           if (pkg?.name === "sdn-emception") {
             version = String(pkg.version);
             break;

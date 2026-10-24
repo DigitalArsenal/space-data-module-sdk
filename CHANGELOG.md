@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.9.14
+
+### The compile cache keeps its keys and entries in binary, with no JSON
+
+- 0.9.12's compile cache built its keys from a JSON rendering and stored each entry's metadata as a JSON header. That
+  added 10 JSON call sites under src/compiler, which the stack's JSON-boundary ratchet (module-sdk root, baseline 41)
+  forbids; 0.9.12's library error messages added 3 more.
+- Keys: each field is fed into the sha256 as a type tag and length-prefixed bytes (object keys sorted), no JSON.
+- Entries: a fixed little-endian layout (magic `SDMCC2`, the 32-byte key, the external header dependencies as path +
+  size + mtime + sha256, then each blob's name, size and sha256, then the blobs). The format tag is
+  `sdm-compile-cache-v2`; 0.9.12 entries have another key and magic, so they are misses and are rewritten.
+- `writeGuestLinkFiles` writes `metadata.json` through the SDK's canonical writer (`canonicalBytes`, the encoding the
+  guest-link bundle entry already used): the same fields, sorted keys, no whitespace. Its readers (the flow compiler,
+  the stack's flow-link-models gate) parse it as before.
+- Measured: `node graph/checks/json-boundary.mjs --root module-sdk` on this tree reports 41 hits against the
+  baseline of 41 (it reported 54 on 0.9.13). Outputs are byte-identical to 0.9.12's, a 0.9.12-warm cache misses
+  and then hits under 0.9.14, and a wasi entry with 550 header dependencies round-trips.
+
 ## 0.9.13
 
 ### The standards catalog carries $DCL: spacedatastandards.org 1.206.0 -> 1.261.0
