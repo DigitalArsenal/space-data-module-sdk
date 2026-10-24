@@ -1117,62 +1117,6 @@ test("artifacts can be signed and encrypted for transport", async () => {
   assert.ok(protectedArtifact.encryptedEnvelope.pnmRecordBase64.length > 0);
 });
 
-test("deployment authorizations are ECDSA over sha256(bytes), hashed once: node:crypto verifies them, a double-hashed signature is refused", async () => {
-  const { createHash, createPublicKey, ECDH, verify: cryptoVerify } = await import("node:crypto");
-  const {
-    canonicalBytes, createDeploymentAuthorization, createHdWalletSigner, createHdWalletVerifier, signAuthorization, verifyAuthorization,
-  } = await import("../src/index.js");
-  const { getWasmWallet, secp256k1SignDigest, secp256k1VerifyDigest } = await import("../src/utils/wasmCrypto.js");
-  const verifier = createHdWalletVerifier({
-    verifyDigest: (digest, signature, header) => secp256k1VerifyDigest(digest, signature, Buffer.from(String(header.publicKeyHex), "hex")),
-  });
-  const nodeKey = (publicKeyHex) => createPublicKey({
-    key: Buffer.concat([Buffer.from("3056301006072a8648ce3d020106052b8104000a034200", "hex"),
-      Buffer.from(ECDH.convertKey(publicKeyHex, "secp256k1", "hex", "hex", "uncompressed"), "hex")]),
-    format: "der", type: "spki",
-  });
-  const nodeVerifies = (bytes, envelope) =>
-    cryptoVerify("sha256", bytes, { key: nodeKey(envelope.protected.publicKeyHex), dsaEncoding: "ieee-p1363" }, Buffer.from(envelope.signatureHex, "hex"));
-  const sha256 = (bytes) => createHash("sha256").update(bytes).digest();
-
-  // protectModuleArtifact: one sha256, then ECDSA - node:crypto verifies it with "sha256" over the canonical bytes
-  const manifest = createTestManifest();
-  const result = await compileModuleFromSource({ manifest, sourceCode: "int propagate(void) { return 5; }\n", language: "c" });
-  const { payload } = await protectModuleArtifact({
-    manifest, wasmBytes: result.wasmBytes,
-    mnemonic: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-  });
-  const artifactAuthorization = payload.authorization;
-  assert.equal(artifactAuthorization.protected.algorithm, "secp256k1-sha256");
-  assert.equal(await verifyAuthorization({ envelope: artifactAuthorization, verifier }), true);
-  assert.equal(nodeVerifies(canonicalBytes(artifactAuthorization.payload), artifactAuthorization), true);
-
-  // the SDK signer with the SDK's digest signer, a test key
-  const wallet = await getWasmWallet();
-  const privateKey = Uint8Array.from({ length: 32 }, (_, i) => 7 + i);
-  const publicKeyHex = Buffer.from(wallet.curves.publicKeyFromPrivate(privateKey)).toString("hex");
-  const authorization = await createDeploymentAuthorization({ artifactId: "single-hash", programId: "single-hash", ttlMs: 60_000 });
-  const signer = createHdWalletSigner({ publicKeyHex, signDigest: (digest) => secp256k1SignDigest(digest, privateKey) });
-  const signed = await signAuthorization({ authorization, signer });
-  assert.equal(signed.protected.algorithm, "secp256k1-sha256");
-  assert.equal(await verifyAuthorization({ envelope: signed, verifier }), true);
-  assert.equal(nodeVerifies(canonicalBytes(signed.payload), signed), true);
-
-  // a double-hashed signature (what SDKs before 0.9.5 made) is ECDSA over sha256(sha256(bytes)): refused. It is
-  // built here as exactly that, signRecoverable over the explicit sha256(sha256(bytes)) digest; nothing passes a
-  // digest to the wallet's secp256k1.sign, which hashes its input
-  const doubled = await signAuthorization({
-    authorization,
-    signer: {
-      algorithm: "secp256k1-sha256", curve: "secp256k1", publicKeyHex,
-      sign: async (bytes) => wallet.curves.secp256k1.signRecoverable(sha256(sha256(bytes)), privateKey).signature,
-    },
-  });
-  assert.equal(nodeVerifies(sha256(canonicalBytes(doubled.payload)), doubled), true, "the doubled form is ECDSA over sha256(sha256(bytes))");
-  assert.equal(nodeVerifies(canonicalBytes(doubled.payload), doubled), false);
-  assert.equal(await verifyAuthorization({ envelope: doubled, verifier }), false);
-});
-
 test("publication protection honors fixed PNM metadata for reproducible records", async () => {
   const manifest = createTestManifest();
   const result = await compileModuleFromSource({

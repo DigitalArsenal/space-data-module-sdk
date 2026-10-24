@@ -18,6 +18,9 @@
 // 3. the advisories' effects are gone, on the SDK's own functions: a signature that recovers to no key
 //    does not verify right after a genuine verification, an Ed25519 signature with S + L does not
 //    verify, a zero private key does not sign, a NUL-terminated mnemonic does not validate;
+// 3b. the HD-wallet signing path: protectModuleArtifact derives the BIP-39 "abandon ... about" key (BIP-32,
+//    m/44'/0'/0'/0/0), and its deployment authorization is ECDSA over sha256(bytes), hashed once - OpenSSL
+//    verifies it, the SDK verifies it, and a double-hashed signature is refused;
 // 4. native WasmEdge and the browser: a module signed with an RFC 8032 key (signModuleArtifact) loads
 //    through loadModule under a signature policy and answers on WasmEdge 0.16.4; a tampered copy, an
 //    untrusted signer and an unsigned copy are refused before WasmEdge starts; the same signed bytes
@@ -36,7 +39,10 @@ import { promisify } from "node:util";
 import { build } from "esbuild";
 import { chromium } from "playwright-core";
 
-import { compileModuleFromSource } from "../../src/compiler/compileModule.js";
+import { compileModuleFromSource, protectModuleArtifact } from "../../src/compiler/compileModule.js";
+import {
+  canonicalBytes, createDeploymentAuthorization, createHdWalletSigner, createHdWalletVerifier, signAuthorization, verifyAuthorization,
+} from "../../src/index.js";
 import { ModuleSignatureError, signModuleArtifact, verifyModuleArtifact } from "../../src/bundle/signing.js";
 import { createBrowserHost } from "../../src/host/browserHost.js";
 import { loadModule } from "../../src/host/isomorphicLoader.js";
@@ -382,6 +388,57 @@ async function main() {
     const wasmedge = await resolveWasmEdgeBinary();
     assertWasmEdgeVersionMatchesPin((await execFileAsync(wasmedge, ["--version"])).stdout, loadWasmEdgePin(), `native binary ${wasmedge}`);
     const compiled = await compileModuleFromSource({ manifest, sourceCode: echoSource, language: "c", threadModel: "wasi-sequential", compileCache: { dir: path.join(dir, "cache") } });
+
+    // --- 3b. the HD-wallet signing path: deployment authorizations are ECDSA over sha256(bytes), hashed once ------
+    const opensslKey = (publicKeyHex) => crypto.createPublicKey({
+      key: Buffer.concat([Buffer.from("3056301006072a8648ce3d020106052b8104000a034200", "hex"),
+        Buffer.from(crypto.ECDH.convertKey(publicKeyHex, "secp256k1", "hex", "hex", "uncompressed"), "hex")]),
+      format: "der",
+      type: "spki",
+    });
+    const opensslVerifies = (bytes, envelope) =>
+      crypto.verify("sha256", bytes, { key: opensslKey(envelope.protected.publicKeyHex), dsaEncoding: "ieee-p1363" }, Buffer.from(envelope.signatureHex, "hex"));
+    const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest();
+    const verifier = createHdWalletVerifier({
+      verifyDigest: (digest, signature, header) => walletPaths.secp256k1VerifyDigest(digest, signature, Buffer.from(String(header.publicKeyHex), "hex")),
+    });
+    // protectModuleArtifact: BIP-39 mnemonic, BIP-32 derivation, a secp256k1 key, one sha256, then ECDSA
+    const protectedArtifact = await protectModuleArtifact({
+      manifest,
+      wasmBytes: compiled.wasmBytes,
+      mnemonic: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    });
+    assert.equal(protectedArtifact.signingPublicKeyHex, "03aaeb52dd7494c361049de67cc680e83ebcbbbdbeb13637d92cd845f70308af5e", "the BIP-44 key of the abandon mnemonic changed");
+    assert.equal(protectedArtifact.signingPath, "m/44'/0'/0'/0/0");
+    const artifactAuthorization = protectedArtifact.payload.authorization;
+    assert.equal(artifactAuthorization.protected.algorithm, "secp256k1-sha256");
+    assert.equal(await verifyAuthorization({ envelope: artifactAuthorization, verifier }), true);
+    assert.equal(opensslVerifies(canonicalBytes(artifactAuthorization.payload), artifactAuthorization), true, "OpenSSL does not verify the artifact authorization over sha256(bytes)");
+    // the SDK signer with its digest signer and a test key
+    const wallet = await walletPaths.getWasmWallet();
+    const testKey = Uint8Array.from({ length: 32 }, (_, index) => 7 + index);
+    const testPublicKeyHex = Buffer.from(await walletPaths.secp256k1PublicKey(testKey)).toString("hex");
+    const deployment = await createDeploymentAuthorization({ artifactId: "single-hash", programId: "single-hash", ttlMs: 60_000 });
+    const signedDeployment = await signAuthorization({
+      authorization: deployment,
+      signer: createHdWalletSigner({ publicKeyHex: testPublicKeyHex, signDigest: (digest) => walletPaths.secp256k1SignDigest(digest, testKey) }),
+    });
+    assert.equal(signedDeployment.protected.algorithm, "secp256k1-sha256");
+    assert.equal(await verifyAuthorization({ envelope: signedDeployment, verifier }), true);
+    assert.equal(opensslVerifies(canonicalBytes(signedDeployment.payload), signedDeployment), true);
+    // a double-hashed signature (what SDKs before 0.9.5 made) is ECDSA over sha256(sha256(bytes)): refused
+    const doubled = await signAuthorization({
+      authorization: deployment,
+      signer: {
+        algorithm: "secp256k1-sha256", curve: "secp256k1", publicKeyHex: testPublicKeyHex,
+        sign: async (bytes) => wallet.curves.secp256k1.signRecoverable(sha256(sha256(bytes)), testKey).signature,
+      },
+    });
+    assert.equal(opensslVerifies(sha256(canonicalBytes(doubled.payload)), doubled), true, "the doubled form is ECDSA over sha256(sha256(bytes))");
+    assert.equal(opensslVerifies(canonicalBytes(doubled.payload), doubled), false);
+    assert.equal(await verifyAuthorization({ envelope: doubled, verifier }), false);
+    console.log("authorizations: protectModuleArtifact derives the BIP-44 key of the abandon mnemonic (03aaeb52...); its deployment authorization and the SDK signer's are ECDSA over sha256(bytes), hashed once - OpenSSL and the SDK verify them, a double-hashed signature is refused");
+
     const rfcSeed = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
     const rfcPublic = EXPECTED.ed25519[0].publicKey;
     const signed = await signModuleArtifact(compiled.wasmBytes, { privateKeySeedHex: rfcSeed, keyId: "rfc8032-test-1" });
