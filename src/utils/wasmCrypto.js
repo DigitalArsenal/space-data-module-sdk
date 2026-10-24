@@ -1,4 +1,5 @@
 import { toUint8Array } from "./encoding.js";
+import { SECP256K1_CURVE } from "./walletCurves.js";
 
 let walletPromise = null;
 
@@ -54,7 +55,7 @@ export async function x25519SharedSecret(privateKey, publicKey) {
 
 export async function secp256k1PublicKey(privateKey) {
   const wallet = await getWasmWallet();
-  return wallet.curves.publicKeyFromPrivate(toUint8Array(privateKey));
+  return wallet.curves.publicKeyFromPrivate(toUint8Array(privateKey), SECP256K1_CURVE);
 }
 
 // secp256k1 ECDSA. The wallet's sign / verify hash their input with sha256 (a message API); signRecoverable and

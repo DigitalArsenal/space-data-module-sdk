@@ -13,6 +13,7 @@ import {
   toUint8Array,
 } from "../utils/encoding.js";
 import { derSignatureToRaw, rawSignatureToDer } from "../utils/ecdsaDer.js";
+import { SECP256K1_CURVE } from "../utils/walletCurves.js";
 import {
   parseCronExpression,
   matchesCronExpression,
@@ -913,7 +914,7 @@ export class BrowserHost {
             );
           }
           return new Uint8Array(
-            wasmWallet.curves.publicKeyFromPrivate(toUint8Array(privateKey)),
+            wasmWallet.curves.publicKeyFromPrivate(toUint8Array(privateKey), SECP256K1_CURVE),
           );
         },
         sign: (message, privateKey) => {
