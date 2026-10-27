@@ -266,16 +266,21 @@ await pump.finish();</code></pre></div>
   createRuntimeHost,
 } from &quot;space-data-module-sdk/runtime-host&quot;;
 
-const host = createRuntimeHost();
+// BFBS is compiled separately from the canonical SDS schema (e.g. flatc-wasm).
+const host = createRuntimeHost({ rowStore: {
+  engine: { root: &quot;module-records&quot; },
+  schemas: [{ name: &quot;OMM&quot;, fileIdentifier: &quot;$OMM&quot;, bfbs: ommBinarySchema }],
+} });
 const ingestor = createFlatBufferStreamIngestor({
   rows: host.rows,
 });
 
-ingestor.pushBytes(chunkA);
-ingestor.pushBytes(chunkB);
-ingestor.finish();
+await ingestor.pushBytes(chunkA);
+await ingestor.pushBytes(chunkB);
+await ingestor.finish();
 
-const rows = host.rows.listRows(&quot;OMM&quot;);</code></pre></div>
+const rows = await host.rows.listRows(&quot;$OMM&quot;);
+await host.rows.close();</code></pre></div>
 <h2 id="performance-guidance"><a class="anchor" href="#performance-guidance" aria-hidden="true">#</a>Performance Guidance</h2>
 <p>There are two distinct performance questions:</p>
 <ol>
@@ -307,8 +312,8 @@ npm run benchmark:stream-1gib</code></pre></div>
 <div class="codeblock"><div class="codeblock-head">bash</div><pre><code>npm run test:module-stream
 npm run benchmark:module-stream-1gib</code></pre></div>
 <p>That benchmark exercises the chunked module stream-pump path, not a single huge invoke buffer.</p>
-<h2 id="current-non-canonical-example"><a class="anchor" href="#current-non-canonical-example" aria-hidden="true">#</a>Current Non-Canonical Example</h2>
-<p><code>examples/flatsql-store-local</code> is still useful as an adapter example, but it is not the canonical durable identity model. It exposes a module-owned mutable logical database. The canonical model for cross-host durability is host-owned rows plus host-owned runtime regions.</p>
+<h2 id="binary-example"><a class="anchor" href="#binary-example" aria-hidden="true">#</a>Binary example</h2>
+<p><code>examples/flatsql-store-local</code> registers a canonical GJN binary schema, reads a size-prefixed GJN stream and writes QRP pages. Conversion runs separately through <code>flatc-wasm</code>; the engine receives and returns FlatBuffers only.</p>
 <h2 id="body-reference-delivery-deliverref"><a class="anchor" href="#body-reference-delivery-deliverref" aria-hidden="true">#</a>Body-Reference Delivery (<code>&quot;deliver&quot;:&quot;ref&quot;</code>)</h2>
 <p>Loop C.5c adds an OPTIONAL near-zero-copy egress mode for capability hostcalls whose result is an aligned stream that the module passes through VERBATIM to an HTTP response body (the retrieval flow's flatbuffer branch). The election is always the GUEST's; hosts never invent it.</p>
 <ol>
@@ -348,7 +353,7 @@ npm run benchmark:module-stream-1gib</code></pre></div>
 <li><a class="depth-2" href="#performance-guidance">Performance Guidance</a></li>
 <li><a class="depth-3" href="#outer-transport-benchmark">Outer Transport Benchmark</a></li>
 <li><a class="depth-3" href="#module-invoke-benchmark">Module Invoke Benchmark</a></li>
-<li><a class="depth-2" href="#current-non-canonical-example">Current Non-Canonical Example</a></li>
+<li><a class="depth-2" href="#binary-example">Binary example</a></li>
 <li><a class="depth-2" href="#body-reference-delivery-deliverref">Body-Reference Delivery (<code>&quot;deliver&quot;:&quot;ref&quot;</code>)</a></li></ul></nav>
     </div>
     <section id="stack" data-sdn-stack="module-sdk"></section>

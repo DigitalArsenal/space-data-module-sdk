@@ -18,11 +18,11 @@
       "note": "The SAME module after publication: signature/manifest records appended as a trailing custom section. Proves the record-stripping path yields a loadable payload that instantiates identically in all lanes — a published artifact must never be a fourth runtime."
     },
     {
-      "id": "flatsql-standalone",
-      "packagePath": "flatsql/wasm/flatsql-wasi.wasm",
+      "id": "flatsql-unified",
+      "packagePath": "flatsql/wasm/flatsql.wasm",
       "surface": "flatsql-engine",
       "profile": "library",
-      "note": "The FlatSQL engine as the SDK's own dependency pin resolves it. Contract: WASI preview1 + EXACTLY the seven declared flatsql_io_* VFS imports (offsets f64, never i64). An emscripten-glue build here is an auto-reject: it cannot instantiate on a plain WasmEdge host, which is precisely the ^0.4.2 floor defect (graph: module-sdk-flatsql-floor-not-isomorphic)."
+      "note": "One unified FlatSQL binary, WASI preview1 threads plus the seven declared FlatSQL I/O imports. The binary query/ingest/reopen E2E runs it through the real SDK runtime store."
     }
   ]
 }

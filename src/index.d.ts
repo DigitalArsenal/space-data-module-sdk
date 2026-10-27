@@ -405,7 +405,7 @@ export interface RowHandle {
 
 export interface RuntimeRowView {
   handle: RowHandle;
-  payload: unknown;
+  payload: Uint8Array;
 }
 
 export interface RuntimeRowQueryResult {
@@ -430,18 +430,29 @@ export interface FlatBufferStreamIngestContext {
   stats: FlatBufferStreamIngestStats;
 }
 
-export interface FlatSqlRuntimeStore {
-  appendRow(options: { schemaFileId: string; payload?: unknown }): RowHandle;
-  listRows(schemaFileId?: string | null): RuntimeRowView[];
-  query(sql: string): RuntimeRowQueryResult;
-  resolveRow(handle: RowHandle): RuntimeRowView | null;
+export type FlatSqlQueryParam = null | boolean | number | bigint | string | Uint8Array;
+export interface FlatSqlRuntimeStoreOptions {
+  engine?: import("flatsql").FlatSQLOptions;
+  database?: import("flatsql").FlatSQL;
+  schemas?: import("flatsql").BinarySchema[];
+  resolveSchema?: (fileIdentifier: string) => import("flatsql").BinarySchema | Promise<import("flatsql").BinarySchema>;
 }
+export interface FlatSqlRuntimeStore {
+  registerSchema(schema: import("flatsql").BinarySchema): Promise<void>;
+  appendRow(options: { schemaFileId: string; payload: Uint8Array }): Promise<RowHandle>;
+  listRows(schemaFileId?: string | null): Promise<RuntimeRowView[]>;
+  query(sql: string, params?: FlatSqlQueryParam[], limits?: import("flatsql").QueryOptions): Promise<RuntimeRowQueryResult>;
+  resolveRow(handle: RowHandle): Promise<RuntimeRowView | null>;
+  close(): Promise<void>;
+}
+export function encodeFlatSqlQuery(sql: string, parameters?: FlatSqlQueryParam[]): Uint8Array;
+export function decodeFlatSqlResult(bytes: Uint8Array): RuntimeRowQueryResult;
 
 export interface FlatBufferStreamIngestor {
   rows: FlatSqlRuntimeStore;
   stats: FlatBufferStreamIngestStats;
-  pushBytes(data: Uint8Array | ArrayBuffer | ArrayBufferView): number;
-  finish(): 0;
+  pushBytes(data: Uint8Array | ArrayBuffer | ArrayBufferView): Promise<number>;
+  finish(): Promise<0>;
 }
 
 export interface RuntimeRegionDescriptor {
@@ -561,28 +572,31 @@ export interface RuntimeHost {
 }
 
 export function createFlatBufferStreamIngestor(options?: {
+  store?: FlatSqlRuntimeStoreOptions;
+  maxFrameBytes?: number;
   rows?: FlatSqlRuntimeStore;
   frameRouter?:
     | ((
         payload: Uint8Array,
         context: FlatBufferStreamIngestContext,
-      ) => boolean | void)
+      ) => boolean | void | Promise<boolean | void>)
     | Record<
         string,
         (
           payload: Uint8Array,
           context: FlatBufferStreamIngestContext,
-        ) => boolean | void
+        ) => boolean | void | Promise<boolean | void>
       >;
   appendFrame?: (
     payload: Uint8Array,
     context: FlatBufferStreamIngestContext,
-  ) => void;
+  ) => void | Promise<void>;
 }): FlatBufferStreamIngestor;
-export function createFlatSqlRuntimeStore(): FlatSqlRuntimeStore;
+export function createFlatSqlRuntimeStore(options?: FlatSqlRuntimeStoreOptions): FlatSqlRuntimeStore;
 export function createRuntimeRegionStore(): RuntimeRegionStore;
 export function createModuleRegistry(): RuntimeModuleRegistry;
 export function createRuntimeHost(options?: {
+  rowStore?: FlatSqlRuntimeStoreOptions;
   rows?: FlatSqlRuntimeStore;
   regions?: RuntimeRegionStore;
   moduleRegistry?: RuntimeModuleRegistry;

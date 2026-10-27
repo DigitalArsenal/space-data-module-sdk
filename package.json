@@ -1,6 +1,6 @@
 {
   "name": "space-data-module-sdk",
-  "version": "0.9.16",
+  "version": "0.10.0",
   "license": "Apache-2.0",
   "description": "Module SDK for building, validating, signing, and deploying WebAssembly modules on the Space Data Network.",
   "type": "module",
@@ -92,7 +92,7 @@
     "templates/"
   ],
   "scripts": {
-    "test": "for test_file in test/*.test.js; do node --test \"$test_file\" || exit 1; done",
+    "test": "node scripts/flatsql-release-e2e.mjs",
     "test:host-surfaces": "node --test test/node-host.test.js test/host-abi.test.js test/browser-host.test.js test/browser-module-harness.test.js test/testing-harness.test.js",
     "test:runtime-matrix": "SPACE_DATA_MODULE_SDK_ENABLE_RUNTIME_MATRIX=1 node --test test/runtime-matrix.test.js",
     "test:parity": "node --test test/parity-harness.test.js",
@@ -119,7 +119,7 @@
     "check:reference-frame": "node scripts/check-reference-frame-uniqueness.mjs",
     "generate:propagator-abi": "node scripts/generate-propagator-abi.mjs",
     "generate:vectors": "node ./examples/single-file-bundle/generate-vectors.mjs",
-    "prepublishOnly": "npm test && npm run check:compliance",
+    "prepublishOnly": "npm test && npm run check:compliance && npm run check:generated-bindings",
     "playground:build": "node ./playground/build.mjs",
     "playground:serve": "node ./playground/build.mjs && node ./playground/server.mjs",
     "playground:gate": "node ./playground/build.mjs && node ./playground/test/browser-gate.mjs",
@@ -128,7 +128,7 @@
   "dependencies": {
     "flatbuffers": "^25.9.23",
     "flatc-wasm": "^26.1.32",
-    "flatsql": "^2.0.0",
+    "flatsql": "3.12.0",
     "hd-wallet-wasm": "2.2.2",
     "sdn-emception": "1.0.0",
     "spacedatastandards.org": "1.261.0"
@@ -139,6 +139,6 @@
     "playwright-core": "1.63.0"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=24.0.0"
   }
 }

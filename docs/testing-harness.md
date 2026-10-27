@@ -110,7 +110,13 @@ current process/WasmEdge control protocol, which remains copy-based.
 For outer transport ingest, the runtime-host surface also exposes
 `createFlatBufferStreamIngestor(...)`. That helper is intentionally outside the
 module invoke ABI. It accepts little-endian size-prefixed FlatBuffer stream
-chunks and appends durable rows through `createFlatSqlRuntimeStore()`.
+chunks and appends durable rows through `createFlatSqlRuntimeStore()`. Provide compiled binary schemas through `schemas` or
+`resolveSchema`; payloads are FlatBuffer `Uint8Array`s. Row operations and
+`pushBytes`/`finish` are asynchronous and must be awaited. `query` constructs SDS
+QRP outside FlatSQL; `encodeFlatSqlQuery` and `decodeFlatSqlResult` expose this
+codec to other consumers. Integers outside JavaScript's safe range stay `bigint`.
+Close the row store when its owning host shuts down. No payload map or text-schema
+compiler remains in the runtime store.
 
 Identity rules remain:
 

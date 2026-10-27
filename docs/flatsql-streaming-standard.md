@@ -223,16 +223,21 @@ import {
   createRuntimeHost,
 } from "space-data-module-sdk/runtime-host";
 
-const host = createRuntimeHost();
+// BFBS is compiled separately from the canonical SDS schema (e.g. flatc-wasm).
+const host = createRuntimeHost({ rowStore: {
+  engine: { root: "module-records" },
+  schemas: [{ name: "OMM", fileIdentifier: "$OMM", bfbs: ommBinarySchema }],
+} });
 const ingestor = createFlatBufferStreamIngestor({
   rows: host.rows,
 });
 
-ingestor.pushBytes(chunkA);
-ingestor.pushBytes(chunkB);
-ingestor.finish();
+await ingestor.pushBytes(chunkA);
+await ingestor.pushBytes(chunkB);
+await ingestor.finish();
 
-const rows = host.rows.listRows("OMM");
+const rows = await host.rows.listRows("$OMM");
+await host.rows.close();
 ```
 
 ## Performance Guidance
@@ -287,12 +292,12 @@ npm run benchmark:module-stream-1gib
 That benchmark exercises the chunked module stream-pump path, not a single huge
 invoke buffer.
 
-## Current Non-Canonical Example
+## Binary example
 
-[`examples/flatsql-store-local`](../examples/flatsql-store-local) is still
-useful as an adapter example, but it is not the canonical durable identity
-model. It exposes a module-owned mutable logical database. The canonical model
-for cross-host durability is host-owned rows plus host-owned runtime regions.
+[`examples/flatsql-store-local`](../examples/flatsql-store-local) registers a
+canonical GJN binary schema, reads a size-prefixed GJN stream and writes QRP
+pages. Conversion runs separately through `flatc-wasm`; the engine receives
+and returns FlatBuffers only.
 
 ## Body-Reference Delivery (`"deliver":"ref"`)
 

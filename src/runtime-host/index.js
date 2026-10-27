@@ -46,7 +46,7 @@ function listCapabilityOperations(capabilities) {
 }
 
 export function createRuntimeHost(options = {}) {
-  const rows = options.rows ?? createFlatSqlRuntimeStore();
+  const rows = options.rows ?? createFlatSqlRuntimeStore(options.rowStore);
   const regions = options.regions ?? createRuntimeRegionStore();
   const moduleRegistry = options.moduleRegistry ?? createModuleRegistry();
   const capabilities = createCapabilityRegistry(options.capabilities);
@@ -114,3 +114,5 @@ export {
 // Flow-tier validating method registry (vendored sdn-flow semantics; distinct
 // from createModuleRegistry's module-lifecycle registry).
 export { MethodRegistry } from "./methodRegistry.js";
+
+export { encodeFlatSqlQuery, decodeFlatSqlResult } from "./flatsqlQueryProtocol.js";

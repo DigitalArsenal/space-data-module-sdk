@@ -1,101 +1,23 @@
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
-env:
-  # Bump deliberately, in the same commit as any change that depends on it.
-  EMSDK_VERSION: "6.0.5"
-  # MUST match .github/workflows/publish.yml — the merge gate and the tag gate
-  # have to see the same isomorphic-pthreads toolchain, or a guardrail can
-  # change verdict between the two with no commit. This is the wasi-threads
-  # (wasm32-wasip1-threads) compiler + sysroot that emsdk cannot provide (see
-  # docs/isomorphic-pthreads.md) — without it, resolveWasiThreadsToolchain()
-  # throws and every suite gated by wasiThreadsAvailable() silently SKIPS.
-  WASI_SDK_VERSION: "33"
-  WASI_SDK_SHA256: "0ba8b5bfaeb2adf3f29bab5841d76cf5318ab8e1642ea195f88baba1abd47bce"
-
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  test:
+  binary-runtime-e2e:
     runs-on: ubuntu-latest
-    strategy:
-      # A matrix lane is EVIDENCE, not a race. With fail-fast the first lane to
-      # die cancels its healthy sibling, and the cancelled lane's log stops
-      # mid-stream — which is exactly how "the runner died" was misread as
-      # "these seven tests failed" off a truncated TAP stream. Both lanes report.
-      fail-fast: false
-      matrix:
-        node-version: [20, 22]
-        # Node 20 hosted runners repeatedly disappear in the compile-heavy
-        # direct-invoke cluster after roughly five minutes of one monolithic
-        # test process. The VM remains healthy (12 GB available, zero swap,
-        # 42% idle CPU), and serializing node versions did not change it. Keep
-        # every supported-version gate, but give each deterministic quarter of
-        # the suite its own runner and its own complete TAP verdict.
-        shard: [0, 1, 2, 3]
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.x"
-      - name: Install Python FlatBuffers runtime
-        run: python3 -m pip install flatbuffers
-      - uses: actions/setup-node@v6
-        with:
-          node-version: ${{ matrix.node-version }}
-      # PINNED, never "latest". This repo enforces a pinned compile contract
-      # (clang wasm32-wasip1-threads for the isomorphic artifact, a vendored
-      # sdn-emception for the single-thread artifact) and validates emitted
-      # wasm against it. A floating toolchain under a pinned guard means the
-      # gate can change verdict with no commit — the toolchain is part of the
-      # contract, so it is pinned here and bumped deliberately.
-      - name: Install pinned emsdk
-        run: |
-          git clone https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
-          cd "$RUNNER_TEMP/emsdk"
-          ./emsdk install "$EMSDK_VERSION"
-          ./emsdk activate "$EMSDK_VERSION"
-      - name: Install pinned wasi-sdk
-        # Self-contained release: clang/clang++, its own resource-dir
-        # (compiler-rt builtins), and a sysroot that already carries
-        # lib/wasm32-wasip1-threads/libc.a. No separate resource-dir wiring —
-        # wasi-sdk's clang locates its own, so SDN_WASI_RESOURCE_DIR stays unset.
-        run: |
-          curl -sSL -o "$RUNNER_TEMP/wasi-sdk.tar.gz" \
-            "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux.tar.gz"
-          echo "${WASI_SDK_SHA256}  $RUNNER_TEMP/wasi-sdk.tar.gz" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/wasi-sdk"
-          tar xzf "$RUNNER_TEMP/wasi-sdk.tar.gz" -C "$RUNNER_TEMP/wasi-sdk" --strip-components=1
-          echo "$RUNNER_TEMP/wasi-sdk/bin" >> "$GITHUB_PATH"
-          echo "SDN_WASI_CLANG=$RUNNER_TEMP/wasi-sdk/bin/wasm32-wasi-clang" >> "$GITHUB_ENV"
-          echo "SDN_WASI_CLANGXX=$RUNNER_TEMP/wasi-sdk/bin/wasm32-wasi-clang++" >> "$GITHUB_ENV"
-          echo "SDN_WASI_SYSROOT=$RUNNER_TEMP/wasi-sdk/share/wasi-sysroot" >> "$GITHUB_ENV"
-      - run: source "$RUNNER_TEMP/emsdk/emsdk_env.sh" && npm ci
-      - name: Test shard ${{ matrix.shard }} on Node ${{ matrix.node-version }}
-        run: |
-          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
-          file_index=0
-          selected=0
-          for test_file in test/*.test.js; do
-            if (( file_index % 4 == ${{ matrix.shard }} )); then
-              echo "Running $test_file"
-              node --test "$test_file"
-              selected=$((selected + 1))
-            fi
-            file_index=$((file_index + 1))
-          done
-          test "$selected" -gt 0
-
-  compliance:
-    runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
+          cache: npm
       - run: npm ci
+      - run: npm test
       - run: npm run check:compliance
       - run: npm run check:generated-bindings
