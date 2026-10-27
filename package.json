@@ -1,6 +1,6 @@
 {
   "name": "space-data-module-sdk",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "license": "Apache-2.0",
   "description": "Module SDK for building, validating, signing, and deploying WebAssembly modules on the Space Data Network.",
   "type": "module",
@@ -128,7 +128,7 @@
   "dependencies": {
     "flatbuffers": "^25.9.23",
     "flatc-wasm": "^26.1.32",
-    "flatsql": "3.12.0",
+    "flatsql": "3.12.1",
     "hd-wallet-wasm": "2.2.2",
     "sdn-emception": "1.0.0",
     "spacedatastandards.org": "1.261.0"
