@@ -279,7 +279,7 @@ export function makeExternalArtifact(spec) {
 // --- WasmEdge probe lanes -------------------------------------------------------
 
 const UNKNOWN_IMPORT_RE =
-  /unknown import[\s\S]*?When linking module:\s*"([^"]*)"\s*,\s*function name:\s*"([^"]*)"/;
+  /unknown import[\s\S]*?When linking module:\s*"([^"]*)"\s*,\s*(?:function|memory|table|global) name:\s*"([^"]*)"/;
 
 /**
  * Classify a bare-WasmEdge probe run.
