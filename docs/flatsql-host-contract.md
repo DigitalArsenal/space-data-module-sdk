@@ -1,6 +1,6 @@
 # The unified FlatSQL host contract
 
-The SDK uses **FlatSQL 3.12.0**, one public API and one `flatsql/flatsql.wasm`
+The SDK uses **FlatSQL 3.12**, one public API and one `flatsql/flatsql.wasm`
 artifact across Node, browsers and native WASI hosts. The runtime store uses
 `FlatSQL.open`, binary schema registration, native record ingestion and SDS QRP
 queries. All operations are asynchronous.
