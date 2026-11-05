@@ -6,8 +6,8 @@ const pinned = JSON.parse(readFileSync(new URL("../package.json", import.meta.ur
 const installed = JSON.parse(
   readFileSync(new URL("../node_modules/spacedatastandards.org/package.json", import.meta.url), "utf8"),
 ).version;
-assert.equal(pinned, "1.277.0");
-assert.equal(installed, "1.277.0");
+assert.equal(pinned, "1.278.0");
+assert.equal(installed, "1.278.0");
 console.log(`PASS: spacedatastandards.org pinned ${pinned}, installed ${installed}`);
 
 const met = await import("spacedatastandards.org/lib/js/MET/main.js");
@@ -33,3 +33,10 @@ console.log("PASS: OMM.prototype.BTERM and OMM.prototype.AGOM exist");
 const prw = await import("spacedatastandards.org/lib/js/PRW/main.js");
 assert.equal(prw.prwDynamicParameter.OUTGASSING_ACCELERATION, 16);
 console.log(`PASS: prwDynamicParameter.OUTGASSING_ACCELERATION = ${prw.prwDynamicParameter.OUTGASSING_ACCELERATION}`);
+
+const snr = await import("spacedatastandards.org/lib/js/SNR/main.js");
+assert.equal(typeof snr.SNR.prototype.SENSOR_ID, "function");
+assert.equal(snr.snrEmissionMode.PASSIVE, 2);
+const { ByteBuffer } = await import("flatbuffers");
+assert.equal(snr.SNR.bufferHasIdentifier(new ByteBuffer(new Uint8Array([8, 0, 0, 0, 0x24, 0x53, 0x4e, 0x52]))), true);
+console.log(`PASS: SNR file identifier $SNR, snrEmissionMode.PASSIVE = ${snr.snrEmissionMode.PASSIVE}`);
