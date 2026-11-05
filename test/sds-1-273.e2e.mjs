@@ -6,8 +6,8 @@ const pinned = JSON.parse(readFileSync(new URL("../package.json", import.meta.ur
 const installed = JSON.parse(
   readFileSync(new URL("../node_modules/spacedatastandards.org/package.json", import.meta.url), "utf8"),
 ).version;
-assert.equal(pinned, "1.276.0");
-assert.equal(installed, "1.276.0");
+assert.equal(pinned, "1.277.0");
+assert.equal(installed, "1.277.0");
 console.log(`PASS: spacedatastandards.org pinned ${pinned}, installed ${installed}`);
 
 const met = await import("spacedatastandards.org/lib/js/MET/main.js");
@@ -24,3 +24,12 @@ for (const name of ["OCMMeanElements", "OCMCovariancePropagation", "OCMFitStatis
 console.log("PASS: OCMMeanElements, OCMCovariancePropagation, OCMFitStatistics exported");
 assert.equal(typeof ocm.OCM.prototype.MEAN_ELEMENTS, "function");
 console.log("PASS: OCM.prototype.MEAN_ELEMENTS exists");
+
+const omm = await import("spacedatastandards.org/lib/js/OMM/main.js");
+assert.equal(typeof omm.OMM.prototype.BTERM, "function");
+assert.equal(typeof omm.OMM.prototype.AGOM, "function");
+console.log("PASS: OMM.prototype.BTERM and OMM.prototype.AGOM exist");
+
+const prw = await import("spacedatastandards.org/lib/js/PRW/main.js");
+assert.equal(prw.prwDynamicParameter.OUTGASSING_ACCELERATION, 16);
+console.log(`PASS: prwDynamicParameter.OUTGASSING_ACCELERATION = ${prw.prwDynamicParameter.OUTGASSING_ACCELERATION}`);
