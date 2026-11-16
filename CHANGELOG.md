@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.2
+
+- MODULE compilation accepts hash-verified prebuilt WebAssembly objects and static archives through `prebuiltLibraries`. Input order and producer symbols are preserved; input bytes participate in the link cache.
+- Guest-link output carries prebuilt libraries into FLOW compilation. Identical names and hashes link once; conflicting content for a name or namespace is refused.
+- The compile CLI accepts guest-link metadata with `--prebuilt-libraries`. Artifact guards retain their checks and include library names in failures.
+
 ## 0.9.16
 
 ### hd-wallet-wasm 2.1.0 -> 2.2.2: off both published advisories

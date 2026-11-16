@@ -1,4 +1,4 @@
-import { readGuestLinkLibraries, collectFlowLibraryObjects } from "../compiler/guestLinkLibraries.js";
+import { readGuestLinkLibraries, collectFlowLibraryObjects, withLibraryContext } from "../compiler/guestLinkLibraries.js";
 /**
  * SDN flow compiler (loop C.3c) — `space-data-module flow check|compile`.
  *
@@ -3196,40 +3196,47 @@ export async function compileFlowProgram({
     check.threadModel !== FLOW_THREAD_MODEL.SINGLE_THREAD
       ? linkFlowArtifactWithWasiThreads
       : linkFlowArtifactWithEmception;
-  let wasmBytes = await linkFlowArtifactCached(linkFlowArtifact, check.threadModel, {
-    runtimeSource,
-    invokeHeader: generateInvokeSupportHeader(),
-    generatedInc,
-    manifestSource,
-    programSource,
-    dependencyObjects: [
-      ...linkedDependencies.map((dependency) => dependency.guestLink.objectBytes),
-      ...collectFlowLibraryObjects(linkedDependencies).map((library) => library.objectBytes),
-    ],
-    engineLinked: Boolean(check.engineLinkage),
-    sequential: check.threadModel === FLOW_THREAD_MODEL.WASI_SEQUENTIAL,
-  });
-  wasmBytes = appendWasmCustomSection(
-    wasmBytes,
-    SDS_MANIFEST_SECTION_NAME,
-    flowPlgBytes,
-  );
-  if (check.threadModel === FLOW_THREAD_MODEL.WASI_THREADS) {
-    assertPthreadArtifact(wasmBytes, { source: sourceName });
-  } else if (check.threadModel === FLOW_THREAD_MODEL.WASI_SEQUENTIAL) {
-    assertSequentialArtifact(wasmBytes, { source: sourceName });
-  }
+  const flowLibraries = await collectFlowLibraryObjects(linkedDependencies);
+  let wasmBytes;
+  let report;
+  try {
+    wasmBytes = await linkFlowArtifactCached(linkFlowArtifact, check.threadModel, {
+      runtimeSource,
+      invokeHeader: generateInvokeSupportHeader(),
+      generatedInc,
+      manifestSource,
+      programSource,
+      dependencyObjects: [
+        ...linkedDependencies.map((dependency) => dependency.guestLink.objectBytes),
+        ...flowLibraries.map((library) => library.objectBytes),
+      ],
+      engineLinked: Boolean(check.engineLinkage),
+      sequential: check.threadModel === FLOW_THREAD_MODEL.WASI_SEQUENTIAL,
+    });
+    wasmBytes = appendWasmCustomSection(
+      wasmBytes,
+      SDS_MANIFEST_SECTION_NAME,
+      flowPlgBytes,
+    );
+    if (check.threadModel === FLOW_THREAD_MODEL.WASI_THREADS) {
+      assertPthreadArtifact(wasmBytes, { source: sourceName });
+    } else if (check.threadModel === FLOW_THREAD_MODEL.WASI_SEQUENTIAL) {
+      assertSequentialArtifact(wasmBytes, { source: sourceName });
+    }
 
-  const report = await validateArtifactWithStandards({
-    manifest,
-    wasmBytes,
-    sourceName,
-    ...standardsOptions,
-  });
-  if (!report.ok) {
-    const error = new Error("Flow artifact compliance validation failed.");
-    error.report = report;
-    throw error;
+    report = await validateArtifactWithStandards({
+      manifest,
+      wasmBytes,
+      sourceName,
+      ...standardsOptions,
+    });
+    if (!report.ok) {
+      const error = new Error("Flow artifact compliance validation failed.");
+      error.report = report;
+      throw error;
+    }
+  } catch (error) {
+    throw withLibraryContext(error, flowLibraries);
   }
 
   const dependencyRecords = [];

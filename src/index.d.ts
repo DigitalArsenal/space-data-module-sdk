@@ -1059,7 +1059,7 @@ export interface GuestLinkArtifact {
   /** Present (true) only for a module that uses WebAssembly SIMD, declared with `simd128: true` or not. */
   simd128?: true;
   objectBytes: Uint8Array;
-  /** Present when the compile linked `libraries`. */
+  /** Present when the compile linked source or prebuilt libraries. */
   libraries?: GuestLinkLibrary[];
 }
 
@@ -1165,6 +1165,8 @@ export function compileModuleFromSource(options: {
    * declares their functions; the library sources define them.
    */
   libraries?: ModuleLibrarySource[];
+  /** Hash-verified inputs in link order, with producer-owned symbols. */
+  prebuiltLibraries?: (GuestLinkLibrary & { kind: "wasm-object" | "archive" })[];
 }): Promise<CompilationResult>;
 
 export interface ModuleLibrarySource {
@@ -1180,15 +1182,16 @@ export interface ModuleLibrarySource {
 }
 
 /**
- * A shared library object. Its strong global symbols are renamed into
- * `namespace` (sdm_lib_<name>_<version>_<digest>_, the digest covering its
- * source, defines, flags and toolchain kind); the module object's references
- * follow. A flow links each namespace once.
+ * A guest-link library. Source libraries have SDK-namespaced symbols;
+ * prebuilt libraries preserve the producer's symbols. A flow links identical
+ * names and hashes once and refuses conflicting bytes for a name or namespace.
  */
 export interface GuestLinkLibrary {
   name: string;
   version: string;
-  language: "c" | "c++";
+  language: "c" | "c++" | "fortran";
+  /** Omitted in legacy source-library metadata (wasm-object). */
+  kind?: "wasm-object" | "archive";
   namespace: string;
   sha256: string;
   objectBytes: Uint8Array;

@@ -1,3 +1,4 @@
+import { normalizePrebuiltLibraries, collectGuestLinkLibraries, guestLinkLibraryEntries, withLibraryContext } from "./guestLinkLibraries.js";
 import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -642,7 +643,17 @@ function createGuestLinkBundleEntries(guestLink) {
   if (!guestLink?.objectBytes || guestLink.objectBytes.length === 0) {
     return [];
   }
+  const libraries = guestLinkLibraryEntries(guestLink.libraries);
   return [
+    ...libraries.map(({ metadata, objectBytes }) => ({
+      entryId: metadata.file,
+      role: "auxiliary",
+      sectionName: SDS_GUEST_LINK_SECTION_NAME,
+      payloadEncoding: "raw-bytes",
+      mediaType: metadata.kind === "archive" ? "application/octet-stream" : "application/wasm",
+      payload: objectBytes,
+      description: `Guest-link library ${metadata.name}.`,
+    })),
     {
       entryId: SDS_GUEST_LINK_OBJECT_ENTRY_ID,
       role: "auxiliary",
@@ -659,7 +670,8 @@ function createGuestLinkBundleEntries(guestLink) {
       payloadEncoding: "json-utf8",
       mediaType: SDS_GUEST_LINK_MEDIA_TYPE,
       payload: {
-        version: 1,
+        version: libraries.length ? 2 : 1,
+        ...(libraries.length ? { libraries: libraries.map(({ metadata }) => metadata) } : {}),
         format: "wasm-object",
         symbolPrefix: guestLink.symbolPrefix,
         methodSymbols: guestLink.methodSymbols,
@@ -1068,6 +1080,10 @@ async function compileWithToolchain(kind, options = {}) {
     outputPath ?? path.join(tempDir, "module.wasm"),
   );
   const libraries = normalizeLibraries(compileOptions.libraries);
+  const prebuilt = compileOptions.prebuiltLibraries.map((library, index) => ({
+    library, namespace: library.namespace, kind: library.kind, objectBytes: library.objectBytes,
+    object: `prebuilt-${index}.${library.kind === "archive" ? "a" : "o"}`,
+  }));
   const profile = await resolveToolchainProfile(kind, {
     language,
     sourceCompilerCommand,
@@ -1110,7 +1126,7 @@ async function compileWithToolchain(kind, options = {}) {
     argv: profile.compileArgv(step.role, at(step.source), at(step.object), step.extra ?? [], step.library?.language),
   }));
   const linkOutput = "module.wasm";
-  const linkObjects = compileSteps.map((step) => step.object);
+  const linkObjects = [...compileSteps.map((step) => step.object), ...prebuilt.map((library) => library.object)];
   const linkArgv = profile.linkArgv(linkObjects.map(at), at(linkOutput), linkArgs);
 
   const cacheReport = { enabled: Boolean(cache), dir: cache?.root ?? null, hits: [], misses: [], stepMs: {} };
@@ -1144,10 +1160,8 @@ async function compileWithToolchain(kind, options = {}) {
   const objects = new Map();
   let linked = null;
   const prepareLinkInputs = () => {
-    if (libraries.length === 0) {
-      return { inputs: new Map(objects), libraries: [] };
-    }
-    const inputs = new Map(objects);
+    const inputs = new Map([...objects, ...prebuilt.map((library) => [library.object, library.objectBytes])]);
+    if (libraries.length === 0) return { inputs, libraries: prebuilt };
     const references = new Map();
     const namespaced = libraries.map((library) => {
       const step = compileSteps.find((entry) => entry.library === library);
@@ -1183,7 +1197,11 @@ async function compileWithToolchain(kind, options = {}) {
         { undefinedOnly: true },
       ),
     );
-    return { inputs, libraries: namespaced };
+    const all = [...namespaced, ...prebuilt];
+    collectGuestLinkLibraries(all.map(({ library, namespace, objectBytes }) => ({
+      ...library, namespace, sha256: sha256Hex(objectBytes),
+    })));
+    return { inputs, libraries: all };
   };
 
   if (cache) {
@@ -1280,11 +1298,12 @@ async function compileWithToolchain(kind, options = {}) {
       objectBytes: guestLink.objectBytes,
       ...(linked.libraries.length > 0
         ? {
-            libraries: linked.libraries.map(({ library, namespace, objectBytes }) => ({
+            libraries: linked.libraries.map(({ library, namespace, kind, objectBytes }) => ({
               name: library.name,
               version: library.version,
               language: library.language,
               namespace,
+              ...(kind ? { kind } : {}),
               sha256: sha256Hex(objectBytes),
               objectBytes,
             })),
@@ -1317,6 +1336,7 @@ export async function compileModuleFromSource(options = {}) {
     throw error;
   }
 
+  const prebuiltLibraries = await normalizePrebuiltLibraries(options.prebuiltLibraries);
   const compiler = selectCompiler(options.language);
   const invokeSurfaces = resolveInvokeSurfaces(manifest);
   const includeCommandMain = invokeSurfaces.includes(InvokeSurface.COMMAND);
@@ -1356,6 +1376,7 @@ export async function compileModuleFromSource(options = {}) {
   const simd128 = resolveSimd128(options.simd128, threadModel);
   const compileOptions = {
     ...options,
+    prebuiltLibraries,
     noEntry: includeCommandMain !== true,
     threadModel,
     simd128,
@@ -1465,6 +1486,11 @@ export async function compileModuleFromSource(options = {}) {
       ...standardsOptions,
     });
 
+    if (prebuiltLibraries.length && !report.ok) {
+      const error = new Error(`Linked artifact validation failed: ${JSON.stringify(report.errors)}`);
+      error.report = report;
+      throw error;
+    }
     handedOff = keepTempDir;
     return {
       compiler: useWasiThreads
@@ -1490,6 +1516,8 @@ export async function compileModuleFromSource(options = {}) {
       simd128: simd128Report,
       report,
     };
+  } catch (error) {
+    throw withLibraryContext(error, prebuiltLibraries);
   } finally {
     if (!handedOff) {
       await rm(tempDir, { recursive: true, force: true });

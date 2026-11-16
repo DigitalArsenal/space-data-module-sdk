@@ -556,6 +556,48 @@ const bundle = await createSingleFileBundle({
 const parsed = await parseSingleFileBundle(bundle.wasmBytes);
 ```
 
+`prebuiltLibraries` links relocatable WebAssembly objects and static `ar` archives after
+all module and source-library objects, in the supplied order:
+
+```js
+import { readFile } from "node:fs/promises";
+import { writeGuestLinkFiles } from "space-data-module-sdk/compiler";
+
+const compilation = await compileModuleFromSource({
+  manifest,
+  sourceCode,
+  language: "c++",
+  threadModel: "wasi-sequential",
+  prebuiltLibraries: [{
+    name: "vector_math",
+    version: "1.0.0",
+    language: "c", // also "c++" or "fortran"
+    namespace: "sdm_lib_vector_math_",
+    kind: "archive", // or "wasm-object"
+    sha256: releaseMetadata.sha256, // the producer's pinned SHA-256
+    objectBytes: new Uint8Array(await readFile("./libvector_math.a")),
+  }],
+});
+await writeGuestLinkFiles(compilation, "./dist/guest-link");
+```
+
+The compiler verifies each hash before use. It preserves the producer's symbols;
+`namespace` identifies a library and does not rename prebuilt code. Producers supply
+compatible symbols and a toolchain compatible with the selected thread model.
+Archives retain lazy member extraction. Exact input bytes participate in the link
+cache key. Linked artifacts pass the same thread, import, SIMD, and sequential
+checks; errors include the participating library names.
+
+Guest-link output includes each library's bytes, kind, and SHA-256. Flow compilation
+links identical names and hashes once, in first-use order. Conflicting hashes for a
+name or namespace are refused. Existing metadata without `kind` is accepted based
+on the file's contents. Source libraries remain available through `libraries`.
+
+The CLI accepts `--prebuilt-libraries ./dist/guest-link/metadata.json`. Its
+`libraries` entries name files relative to that metadata file and carry the same
+name, version, language, namespace, kind, and SHA-256 fields.
+`--thread-model wasi-sequential` selects the sequential WASI compile profile.
+
 Each subsystem is also available as a subpath export:
 
 ```js
