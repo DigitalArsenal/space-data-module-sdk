@@ -44,9 +44,9 @@ window.__runWaves = (options) => new Promise((resolve) => {
 });
 `;
 
-export async function startThreadWaveServer({ wasmBytes }) {
+export async function startThreadWaveServer({ wasmBytes, ownerEntry = path.join(here, "threadWaveOwner.mjs") }) {
   const [owner, threadWorker] = await Promise.all([
-    bundle(path.join(here, "threadWaveOwner.mjs")),
+    bundle(ownerEntry),
     bundle(path.join(here, "..", "..", "src", "host", "wasiThreadBrowserWorker.mjs")),
   ]);
   const isolation = {
