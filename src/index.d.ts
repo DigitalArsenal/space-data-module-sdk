@@ -2156,6 +2156,11 @@ export function createBrowserWasiShim(options?: {
   };
 }): BrowserWasiShim;
 export interface BrowserModuleHarness {
+  /** Pool workers requested and armed; excludes the calling thread. Null for non-threaded artifacts.
+   * Command calls report the most recent invocation, including after its pool is terminated.
+   * Node starts workers on demand; requested is null without an explicit pool size.
+   */
+  readonly wasiThreadPoolReport: Readonly<{ requested: number | null; armed: number }> | null;
   runtime: {
     kind: "browser";
     profile: string;
@@ -2234,6 +2239,8 @@ export function createBrowserModuleHarness(options?: {
   wasiThreadSpawnWaitMs?: number;
   // Explicit wasi-threads pool size (createWasiThreadSpawn poolSize).
   wasiThreadPoolSize?: number;
+  /** Positive finite browser pool arming deadline in milliseconds. Default 1500. */
+  wasiThreadProbeTimeoutMs?: number;
   // Request-isolated BroadcastChannel descriptor a nested pthread hostcall
   // dispatches over; supplied by createWorkerModuleHarness for the in-worker
   // harness instance, not something a top-level caller usually sets by hand.
