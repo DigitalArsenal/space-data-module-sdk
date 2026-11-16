@@ -6,6 +6,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+import { resolveWasiThreadsToolchain } from "../src/compiler/wasiThreadsToolchain.js";
 import { fileURLToPath } from "node:url";
 import { compileModuleFromSource, cleanupCompilation } from "../src/compiler/compileModule.js";
 import { createBrowserModuleHarness } from "../src/host/browserModuleHarness.js";
@@ -14,9 +17,23 @@ import { threadWaveToolchainAvailable } from "./support/threadWaveGuest.mjs";
 const available = threadWaveToolchainAvailable();
 const browserEnabled = process.env.SPACE_DATA_MODULE_SDK_ENABLE_BROWSER_THREADS === "1";
 const browsers = (process.env.SPACE_DATA_MODULE_SDK_BROWSERS ?? "chromium,firefox,webkit").split(",");
-let compilation;
+let compilation, compilerDir;
 async function guest() {
-  compilation ??= await compileModuleFromSource({
+  if (compilation) return compilation.wasmBytes;
+  // Match modules linked with --stack-first: an uninitialized TLS base then
+  // aliases the owner stack. The compiler override remains local to this test.
+  const toolchain = resolveWasiThreadsToolchain();
+  compilerDir = await fs.mkdtemp(path.join(os.tmpdir(), "owner-tls-compiler-"));
+  const wrapper = path.join(compilerDir, "clangxx");
+  await fs.writeFile(wrapper, "#!/usr/bin/env node\n" +
+    "const {execFileSync}=require('node:child_process');const a=process.argv.slice(2);" +
+    "if(!a.includes('-c')&&!a.includes('--version'))a.push('-Wl,--stack-first');" +
+    "try{execFileSync(" + JSON.stringify(toolchain.clangxx) + ",a,{stdio:'inherit'});}catch(e){process.exit(e.status||1);}", { mode: 0o755 });
+  const prior = process.env.SDN_WASI_CLANGXX;
+  process.env.SDN_WASI_CLANGXX = wrapper;
+  resolveWasiThreadsToolchain({ force: true });
+  try {
+  compilation = await compileModuleFromSource({
     language: "c++", threadModel: "emscripten-pthreads",
     sourceCode: await fs.readFile(new URL("./support/tlsOwnerGuest.cpp", import.meta.url), "utf8"),
     manifest: {
@@ -25,10 +42,15 @@ async function guest() {
       methods: [{ methodId: "probe", displayName: "Probe", inputPorts: [], outputPorts: [], maxBatch: 1, drainPolicy: "single-shot" }],
     },
   });
+  } finally {
+    if (prior === undefined) delete process.env.SDN_WASI_CLANGXX;
+    else process.env.SDN_WASI_CLANGXX = prior;
+    resolveWasiThreadsToolchain({ force: true });
+  }
   assert.equal(compilation.report.ok, true);
   return compilation.wasmBytes;
 }
-test.after(async () => { if (compilation) await cleanupCompilation(compilation); });
+test.after(async () => { if (compilation) await cleanupCompilation(compilation); if (compilerDir) await fs.rm(compilerDir, {recursive:true, force:true}); });
 const CANARY = 0x12345678;
 function check(result) {
   assert.ok(result.tls >= result.stackTop, JSON.stringify(result));
