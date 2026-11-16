@@ -1,8 +1,11 @@
 # Changelog
 
-## 0.10.3
+## 0.10.4
 
 - The browser module harness accepts `wasiThreadProbeTimeoutMs` (positive finite milliseconds, default 1500) and exposes read-only `wasiThreadPoolReport` counts for requested and armed pool workers. Explicit pools retain workers that arm; workers that miss the deadline are terminated, and the host decides how to handle reduced capacity.
+
+## 0.10.3
+
 - MODULE compilation accepts hash-verified prebuilt WebAssembly objects and static archives through `prebuiltLibraries`. Input order and producer symbols are preserved; input bytes participate in the link cache.
 - Guest-link output carries prebuilt libraries into FLOW compilation. Identical names and hashes link once; conflicting content for a name or namespace is refused.
 - The compile CLI accepts guest-link metadata with `--prebuilt-libraries`. Artifact guards retain their checks and include library names in failures.
