@@ -5,6 +5,7 @@
 - MODULE compilation accepts hash-verified prebuilt WebAssembly objects and static archives through `prebuiltLibraries`. Input order and producer symbols are preserved; input bytes participate in the link cache.
 - Guest-link output carries prebuilt libraries into FLOW compilation. Identical names and hashes link once; conflicting content for a name or namespace is refused.
 - The compile CLI accepts guest-link metadata with `--prebuilt-libraries`. Artifact guards retain their checks and include library names in failures.
+- The host ABI has its own entry, `space-data-module-sdk/host/abi` (`createHostcallBridge` and the host dispatchers). A browser bundle that needs the hostcall bridge alone no longer has to import the package root, whose browser entry brings the runtime host and the FlatSQL runtime store with it.
 
 ## 0.10.2
 

@@ -60,6 +60,7 @@
       "default": "./src/host/isomorphicLoader.js"
     },
     "./host/browser-module": "./src/host/browserModuleHarness.js",
+    "./host/abi": "./src/host/abi.js",
     "./host/runtime-target-gate": "./src/host/runtimeTargetGate.js",
     "./host/node-builtin": "./src/host/nodeBuiltinSpecifier.js",
     "./host/worker-module": "./src/host/workerModuleHarness.js",
