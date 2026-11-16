@@ -378,30 +378,10 @@ async function instantiateBrowserModule(options = {}) {
         "wasi-threads module imports wasi.thread-spawn but no shared imported memory is available.",
       );
     }
-    threadHost = await createWasiThreadSpawn({
-      wasmModule: options.wasmModule,
-      memory: providedMemory,
-      processState,
-      // Browser warm-pool sizing: cap pooled workers at how many guest threads
-      // the module will actually ask for. Ignored by the Node lazy path.
-      requestedThreads: options.maxThreads,
-      poolSize: options.wasiThreadPoolSize,
-      hostcallChannel: options.threadHostcallChannel,
-      requiresHostcalls: needsHostBridge,
-      enableBrowserThreads: options.enableBrowserWasiThreads,
-      // Explicit worker anchor for BUNDLED consumers: when this host source is
-      // bundled into an engine artifact, `import.meta.url` inside the SDK host
-      // points at the bundle and the sibling worker asset 404s. A host shim
-      // passes the directory its build actually serves the SDK host chain from
-      // (e.g. OrbPro: `js/vendor/space-data-module-sdk/src/host/`). Unset =
-      // packaged sibling, i.e. today's unbundled behavior.
-      browserWorkerBaseUrl: options.wasiThreadWorkerBaseUrl,
-      browserWorkerUrl: options.wasiThreadWorkerUrl,
-      spawnWaitMs: options.wasiThreadSpawnWaitMs,
-    });
+
     importObject.wasi = {
       ...(importObject.wasi ?? {}),
-      "thread-spawn": threadHost.threadSpawn,
+      "thread-spawn": (...args) => threadHost.threadSpawn(...args),
     };
   }
 
@@ -436,6 +416,32 @@ async function instantiateBrowserModule(options = {}) {
         );
       }
       wasi.setMemory(memory);
+    }
+    // Instantiate the owner before secondary instances can initialize shared
+    // memory. The WASI startup winner establishes the owner's TLS base.
+    // Constructors run after the pool is ready so they can spawn threads.
+    if (isThreaded) {
+      threadHost = await createWasiThreadSpawn({
+        wasmModule: options.wasmModule,
+        memory: providedMemory,
+        processState,
+        // Browser warm-pool sizing: cap pooled workers at how many guest threads
+        // the module will actually ask for. Ignored by the Node lazy path.
+        requestedThreads: options.maxThreads,
+        poolSize: options.wasiThreadPoolSize,
+        hostcallChannel: options.threadHostcallChannel,
+        requiresHostcalls: needsHostBridge,
+        enableBrowserThreads: options.enableBrowserWasiThreads,
+        // Explicit worker anchor for BUNDLED consumers: when this host source is
+        // bundled into an engine artifact, `import.meta.url` inside the SDK host
+        // points at the bundle and the sibling worker asset 404s. A host shim
+        // passes the directory its build actually serves the SDK host chain from
+        // (e.g. OrbPro: `js/vendor/space-data-module-sdk/src/host/`). Unset =
+        // packaged sibling, i.e. today's unbundled behavior.
+        browserWorkerBaseUrl: options.wasiThreadWorkerBaseUrl,
+        browserWorkerUrl: options.wasiThreadWorkerUrl,
+        spawnWaitMs: options.wasiThreadSpawnWaitMs,
+      });
     }
     initializeInstance(instance, options.directSurface === true);
   } catch (error) {
