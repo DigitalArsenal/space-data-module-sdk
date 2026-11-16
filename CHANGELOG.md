@@ -1,10 +1,43 @@
 # Changelog
 
-## 0.10.2
+## 0.10.3
 
 - MODULE compilation accepts hash-verified prebuilt WebAssembly objects and static archives through `prebuiltLibraries`. Input order and producer symbols are preserved; input bytes participate in the link cache.
 - Guest-link output carries prebuilt libraries into FLOW compilation. Identical names and hashes link once; conflicting content for a name or namespace is refused.
 - The compile CLI accepts guest-link metadata with `--prebuilt-libraries`. Artifact guards retain their checks and include library names in failures.
+
+## 0.10.2
+
+### The browser host instantiates the owning instance before it warms the thread pool
+
+- **Every release through 0.10.1 could return wrong results in a browser with the thread option on**
+  (`enableBrowserWasiThreads`, or the `__SDM_ENABLE_BROWSER_WASI_THREADS__` global). The browser host
+  (`src/host/browserModuleHarness.js`) awaited its warm pool before it instantiated the owner. A wasi-threads module with
+  the stack-first layout sets an instance's thread-local base only in the instance that wins the shared-memory
+  initialization, so with a pool instance first the owner's thread-local base stayed at zero and its thread-local block
+  lay on top of its own main stack. Stack writes then changed thread-local data, with no error. Node was not affected (it
+  creates pool instances after the owner), nor was a browser host with the thread option off (it has no pool).
+- Whether a module shows it depends on two sizes, its main stack and its thread-local block. A module with a 64 KiB stack
+  and a 343,988-byte block returned different results at 2, 4 and 8 threads than on one thread; a module with a 2 MiB
+  stack and a 1,160-byte block returned identical bytes, because its stack never came near the bottom of its allowance.
+- The owner is now instantiated first, then the pool is created, then constructors run. The `wasi.thread-spawn` import
+  closes over the thread host, so constructors can still spawn threads. No option, signature, pool size, Node path or
+  WasmEdge path changes. Compiled modules need no rebuild; a consumer that bundles or vendors the SDK's host JavaScript
+  rebuilds and redeploys that bundle.
+- `test/browser-owner-tls.test.js` (part of `test:host-surfaces`) compiles a small fixture through the SDK and requires,
+  in Node, Chromium, Firefox and WebKit, that the owner's thread-local data lies outside its stack, that a canary survives
+  stack writes and a child thread, and that a constructor can spawn. The pool-first order in Node is the negative control
+  and must corrupt the canary.
+
+### spacedatastandards.org 1.261.0 -> 1.279.0
+
+- The SDK pins spacedatastandards.org 1.279.0 (0.10.1 shipped 1.261.0). `test/sds-1-273.e2e.mjs` asserts the pinned
+  version and what the newer standards carry: the propagator theory values AP = 5 and UNSPECIFIED = 6 and the OCM
+  mean-element tables, OMM BTERM and AGOM, PRW OUTGASSING_ACCELERATION = 16, the $SNR sensor definition, the CQR verified
+  covariance producers and CQREvent.PROBABILITY.
+
+Releases 0.10.0 and 0.10.1 have no entry in this file. They replaced the FlatSQL runtime store with the unified binary
+store; `docs/flatsql-host-contract.md` is its description.
 
 ## 0.9.16
 
