@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.3
+
+- MODULE compilation accepts hash-verified prebuilt WebAssembly objects and static archives through `prebuiltLibraries`. Input order and producer symbols are preserved; input bytes participate in the link cache.
+- Guest-link output carries prebuilt libraries into FLOW compilation. Identical names and hashes link once; conflicting content for a name or namespace is refused.
+- The compile CLI accepts guest-link metadata with `--prebuilt-libraries`. Artifact guards retain their checks and include library names in failures.
+
 ## 0.10.2
 
 ### The browser host instantiates the owning instance before it warms the thread pool

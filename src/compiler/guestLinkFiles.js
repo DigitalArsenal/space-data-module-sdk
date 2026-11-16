@@ -17,6 +17,8 @@
 import path from "node:path";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 
+import { guestLinkLibraryEntries } from "./guestLinkLibraries.js";
+
 import { canonicalBytes } from "../auth/canonicalize.js";
 
 function concatNewline(bytes) {
@@ -42,18 +44,10 @@ export async function writeGuestLinkFiles(compilation, dir, metadata = {}) {
   const librariesDir = path.join(dir, "libraries");
   await rm(librariesDir, { recursive: true, force: true });
   const libraryEntries = [];
-  for (const library of libraries) {
-    const file = `libraries/${library.name}-${library.version}-${library.sha256.slice(0, 12)}.o`;
+  for (const { metadata, objectBytes } of guestLinkLibraryEntries(libraries)) {
     await mkdir(librariesDir, { recursive: true });
-    await writeFile(path.join(dir, file), library.objectBytes);
-    libraryEntries.push({
-      name: library.name,
-      version: library.version,
-      language: library.language,
-      namespace: library.namespace,
-      sha256: library.sha256,
-      file,
-    });
+    await writeFile(path.join(dir, metadata.file), objectBytes);
+    libraryEntries.push(metadata);
   }
   const written = {
     version: libraryEntries.length > 0 ? 2 : 1,

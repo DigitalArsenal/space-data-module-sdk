@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readGuestLinkLibraries } from "../src/compiler/guestLinkLibraries.js";
 
 import path from "node:path";
 import process from "node:process";
@@ -92,6 +93,12 @@ function parseArgs(argv) {
         break;
       case "--wasm":
         options.wasmPath = path.resolve(requireValue(argv, ++index, value));
+        break;
+      case "--thread-model":
+        options.threadModel = requireValue(argv, ++index, value);
+        break;
+      case "--prebuilt-libraries":
+        options.prebuiltLibrariesPath = path.resolve(requireValue(argv, ++index, value));
         break;
       case "--source":
         options.sourcePath = path.resolve(requireValue(argv, ++index, value));
@@ -234,7 +241,7 @@ function printUsage() {
   console.log(`Usage:
   space-data-module check --repo-root .
   space-data-module check --manifest ./manifest.json --wasm ./dist/module.wasm
-  space-data-module compile --manifest ./manifest.json --source ./src/module.c --out ./dist/module.wasm
+  space-data-module compile --manifest ./manifest.json --source ./src/module.c --out ./dist/module.wasm [--prebuilt-libraries ./dist/guest-link/metadata.json] [--thread-model wasi-sequential]
   space-data-module init --family propagator --name my-propagator
   space-data-module init --family propagator --name my-propagator --out ./modules/my-propagator [--plugin-id com.orbpro.my.propagator] [--force] [--json]
   space-data-module parity --wasm ./dist/isomorphic/module.wasm --fixture ./fixtures/parity/basic.json
@@ -628,8 +635,16 @@ async function runCompile(argv) {
   }
   const manifest = await loadManifestFromFile(options.manifestPath);
   const sourceCode = await readFile(options.sourcePath, "utf8");
+  const prebuiltLibraries = options.prebuiltLibrariesPath
+    ? await readGuestLinkLibraries({
+        guestLinkDir: path.dirname(options.prebuiltLibrariesPath),
+        metadata: JSON.parse(await readFile(options.prebuiltLibrariesPath, "utf8")),
+      }, manifest.pluginId)
+    : undefined;
   const result = await compileModuleFromSource({
     manifest,
+    prebuiltLibraries,
+    threadModel: options.threadModel,
     sourceCode,
     language: options.language,
     outputPath: options.outputPath,
