@@ -17,12 +17,13 @@
 //                                 spawns ONE thread, which spawns the other
 //                                 N - 2 and joins them (spawns from a guest
 //                                 thread that is not the main thread)
+//                            "inline": declined stripes run on the calling thread
 //   SDM_WAVES                waves per invoke (default 3)
 //   SDM_WAVE_ROUNDS          mixing rounds per cell (default 2048)
 //
 // The work is a fixed 840-cell grid (840 = lcm(1..8)), so the response bytes
 // never depend on N or the mode: parity compares them across lanes AND thread
-// counts. A declined spawn fails the invoke with status 20 + wave (30 + wave
+// counts. Except in inline mode, a declined spawn fails the invoke with status 20 + wave (30 + wave
 // from the nested spawner) and error "thread-spawn-declined", the way
 // std::thread aborts on EAGAIN.
 
@@ -192,7 +193,11 @@ int waves(void) {
     uint32_t created = 0;
     int declined = 0;
     for (uint32_t t = 0; t < spawned; ++t) {
-      if (pthread_create(&threads[t], 0, thread_main, &plan[first_spawned + t]) != 0) {
+      if (pthread_create(&threads[created], 0, thread_main, &plan[first_spawned + t]) != 0) {
+        if (strcmp(mode, "inline") == 0) {
+          run_stripe(&plan[first_spawned + t]);
+          continue;
+        }
         declined = 1;
         break;
       }

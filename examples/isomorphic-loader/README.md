@@ -41,9 +41,15 @@ Then open:
 
 The browser demo uses:
 
-- `loadModule(...)` from [`src/host/isomorphicLoader.js`](/Users/tj/software/space-data-module-sdk/src/host/isomorphicLoader.js)
-- browser edge shims from [`src/host/browserEdgeShims.js`](/Users/tj/software/space-data-module-sdk/src/host/browserEdgeShims.js)
-- browser host adapter from [`src/host/browserHost.js`](/Users/tj/software/space-data-module-sdk/src/host/browserHost.js)
+- `loadModule(...)` from [`src/host/isomorphicLoader.js`](../../src/host/isomorphicLoader.js)
+- browser edge shims from [`src/host/browserEdgeShims.js`](../../src/host/browserEdgeShims.js)
+- browser host adapter from [`src/host/browserHost.js`](../../src/host/browserHost.js)
+
+For threaded artifacts loaded with `createBrowserModuleHarness`,
+`wasiThreadProbeTimeoutMs` sets the browser pool arming deadline (default 1500
+milliseconds; positive finite values only). The read-only
+`harness.wasiThreadPoolReport` exposes `{ requested, armed }` worker counts.
+See [pool configuration and reporting](../../docs/isomorphic-pthreads.md#explicit-pool-size-partial-spawns-supervision-hooks).
 
 ## Run In WasmEdge
 

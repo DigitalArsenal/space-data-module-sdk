@@ -429,6 +429,7 @@ async function instantiateBrowserModule(options = {}) {
         // the module will actually ask for. Ignored by the Node lazy path.
         requestedThreads: options.maxThreads,
         poolSize: options.wasiThreadPoolSize,
+        probeTimeoutMs: options.wasiThreadProbeTimeoutMs,
         hostcallChannel: options.threadHostcallChannel,
         requiresHostcalls: needsHostBridge,
         enableBrowserThreads: options.enableBrowserWasiThreads,
@@ -485,8 +486,14 @@ async function instantiateBrowserModule(options = {}) {
  * @param {number} [options.wasiThreadSpawnWaitMs] - How long a guest spawn that
  *   finds every pooled thread busy waits for one to finish before
  *   pthread_create fails (createWasiThreadSpawn `spawnWaitMs`, default 250).
+ * @param {number} [options.wasiThreadProbeTimeoutMs] - Positive finite browser
+ *   pool arming deadline in milliseconds (default 1500).
  */
 export async function createBrowserModuleHarness(options = {}) {
+  if (options.wasiThreadProbeTimeoutMs !== undefined &&
+      (!Number.isFinite(options.wasiThreadProbeTimeoutMs) || options.wasiThreadProbeTimeoutMs <= 0)) {
+    throw new Error("wasiThreadProbeTimeoutMs must be a positive finite number.");
+  }
   let wasmSource = options.wasmSource;
   const signaturePolicy = resolveModuleSignaturePolicy(options);
   // Bytes THIS function materializes itself (Response/URL fetch, or the
@@ -596,6 +603,7 @@ export async function createBrowserModuleHarness(options = {}) {
     wasiThreadWorkerUrl: options.wasiThreadWorkerUrl,
     wasiThreadSpawnWaitMs: options.wasiThreadSpawnWaitMs,
     wasiThreadPoolSize: options.wasiThreadPoolSize,
+    wasiThreadProbeTimeoutMs: options.wasiThreadProbeTimeoutMs,
   });
   const { instance, bridge, wasi, memory, threadHost } = activeContext;
   let lastCommandContext = null;
@@ -862,6 +870,7 @@ export async function createBrowserModuleHarness(options = {}) {
       wasiThreadWorkerUrl: options.wasiThreadWorkerUrl,
       wasiThreadSpawnWaitMs: options.wasiThreadSpawnWaitMs,
       wasiThreadPoolSize: options.wasiThreadPoolSize,
+      wasiThreadProbeTimeoutMs: options.wasiThreadProbeTimeoutMs,
     });
     lastCommandContext = commandContext;
     let exitError = null;
@@ -974,6 +983,10 @@ export async function createBrowserModuleHarness(options = {}) {
     // spawn host so callers can observe real thread activity
     // (spawnCount/distinctOsThreadCount).
     get threadHost() { return lastCommandContext?.threadHost ?? threadHost; },
+    get wasiThreadPoolReport() {
+      const report = (lastCommandContext?.threadHost ?? threadHost)?.spawnReport();
+      return report ? Object.freeze({ requested: report.poolSize, armed: report.armed }) : null;
+    },
     callHost,
     invokeDirect,
     invoke,

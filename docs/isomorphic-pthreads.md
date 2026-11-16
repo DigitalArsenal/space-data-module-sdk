@@ -422,6 +422,39 @@ worker bundles and the browser capability probe.
 
 ### Explicit pool size, partial spawns, supervision hooks
 
+`createBrowserModuleHarness` accepts `wasiThreadProbeTimeoutMs`, the browser
+pool arming deadline in milliseconds. It forwards the value as
+`createWasiThreadSpawn`'s `probeTimeoutMs`. The default is 1500. An explicit
+value must be a positive finite number; invalid values throw an `Error` before
+the artifact is loaded. The option applies to the initial context and each
+fresh command invocation. It has no effect on Node's on-demand pool startup.
+
+After harness creation, the read-only `harness.wasiThreadPoolReport` property
+returns a frozen `{ requested, armed }` snapshot. Counts refer to pool workers
+and exclude the calling thread. With `wasiThreadPoolSize`, `requested` is that
+explicit size, including when threading is unavailable. Without an explicit
+size, it is the browser's selected pool size. Non-threaded artifacts return
+`null`. Node reports its explicit cap (or `null` without one) and the number
+of workers started on demand.
+
+For an explicit browser pool, fewer armed workers do not throw. Workers that
+miss the deadline are terminated before the harness returns; successfully
+armed workers remain available. The host uses the report to decide whether
+the capacity meets its needs. A guest must handle declined spawns to execute
+successfully with fewer workers. After a command invocation, the property
+reports that invocation's arming counts, even though its pool is terminated.
+These are startup counts, not a live-worker health report.
+
+```js
+const harness = await createBrowserModuleHarness({
+  wasmSource,
+  enableBrowserWasiThreads: true,
+  wasiThreadPoolSize: 8,
+  wasiThreadProbeTimeoutMs: 10000,
+});
+const { requested, armed } = harness.wasiThreadPoolReport;
+```
+
 `createWasiThreadSpawn` options added in 0.8.22:
 
 | Option | Effect |
