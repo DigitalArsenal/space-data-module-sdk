@@ -35,6 +35,22 @@ export const MODULE_SIGNATURE_ENTRY_ROLE = "signature";
 // (the whole-bundle digest, BUNDLE_SIGNATURE_HASH_ALGORITHM).
 export const PUBLICATION_SIGNED_HASH_ALGORITHM =
   "sha256-canonical-module-hash";
+// The SDK's public TEST signer (keyId sdm-dev-test-2026), whose private half is
+// committed in test/support/dev-module-signing-keypair.json and therefore
+// public. A signature by this key shows only that the file was not damaged by
+// accident: anyone can sign anything with it. verifyModuleArtifact reports it
+// as testSigner by the verified KEY (the keyId in the entry is not signed and
+// says nothing).
+export const SDK_TEST_SIGNER_PUBLIC_KEY_HEX =
+  "cf4625795484d8efe18860141cfdeaaaed7bbee9209488405b6ddeac7543fe78";
+
+export function isSdkTestSigner(publicKeyHex) {
+  return (
+    String(publicKeyHex ?? "").trim().toLowerCase() ===
+    SDK_TEST_SIGNER_PUBLIC_KEY_HEX
+  );
+}
+
 export const BUNDLE_SIGNATURE_HASH_ALGORITHM =
   "sha256-sdn-module-bundle-v1";
 
@@ -537,6 +553,7 @@ export async function verifyModuleArtifact(bytes, options = {}) {
       signed: true,
       keyId: payload.keyId ?? null,
       publicKeyHex,
+      testSigner: isSdkTestSigner(publicKeyHex),
       statementDomain: DOMAIN_MODULE_PUBLICATION_V1,
       contentHashHex,
       // Reported for continuity with the legacy result shape (the CLI prints

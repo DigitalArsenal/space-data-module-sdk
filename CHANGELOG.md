@@ -42,6 +42,14 @@
   always write both; no shared vector carries an empty `signedHashHex`. The label is a fixed string, not a
   description of the hash; the JavaScript constant is now `PUBLICATION_SIGNED_HASH_ALGORITHM` (was
   `LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM`; no alias), and the wire string is unchanged.
+- **The SDK's test key is known by its public half.** `SDK_TEST_SIGNER_PUBLIC_KEY_HEX` (`cf4625...fe78`, keyId
+  `sdm-dev-test-2026`) and `isSdkTestSigner()` are exported; its private half is committed in
+  `test/support/dev-module-signing-keypair.json`, so its signature shows only that a file was not damaged by
+  accident. `verifyModuleArtifact` returns `testSigner: true` when the verified key is that key. The CLI `verify` prints
+  `signer=test` or `signer=other` from the verified key and prints the entry's keyId as `unsignedKeyId=` (it was
+  `keyId=`): the keyId is not signed. The flow compiler treats a child whose publisher key is the test key as a
+  development signer, whatever its publisher record says about itself, and admits it only with
+  `compileFlowProgram({ allowTestSigner: true })` (CLI `flow compile --allow-test-signer`).
 - **Naming a trusted key requires a signature.** `resolveModuleSignaturePolicy` (the Node loader, the browser harness,
   the flow host) sets `requireSignature` whenever the policy, `SDM_TRUSTED_MODULE_SIGNERS` or
   `__SDM_TRUSTED_MODULE_SIGNERS__` names any trusted key, even if it says `requireSignature: false`. The signature does

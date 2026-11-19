@@ -369,6 +369,10 @@ test("the CLI signs either form, refuses scope module, and refuses a bare digest
     const verify = spawnSync(process.execPath, [CLI_PATH, "verify", "--wasm", outPath, "--key", DEV_KEYPAIR_PATH], { encoding: "utf8" });
     assert.equal(verify.status, 0, verify.stderr);
     assert.match(verify.stdout, /verified=true/);
+    // The role comes from the key; the keyId is printed as an unsigned label.
+    assert.match(verify.stdout, /^signer=test$/m);
+    assert.match(verify.stdout, /^unsignedKeyId=/m);
+    assert.doesNotMatch(verify.stdout, /^keyId=/m);
   }
   for (const scope of ["module", "bundle"]) {
     const refusedScope = spawnSync(process.execPath, [CLI_PATH, "sign", "--wasm", rawPath, "--key", DEV_KEYPAIR_PATH, "--scope", scope, "--out", path.join(dir, "m.wasm")], { encoding: "utf8" });

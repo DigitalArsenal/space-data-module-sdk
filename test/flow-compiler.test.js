@@ -36,6 +36,7 @@ import {
   encodePluginManifest,
 } from "../src/manifest/index.js";
 import {
+  SDK_TEST_SIGNER_PUBLIC_KEY_HEX,
   signModuleArtifact,
   verifyModuleArtifact,
 } from "../src/bundle/signing.js";
@@ -2948,7 +2949,7 @@ function vectorHexToBytes(hex) {
   return out;
 }
 
-async function flowLaneAdmits(vector) {
+async function flowLaneAdmits(vector, { allowTestSigner } = {}) {
   const artifactBytes = vectorHexToBytes(vector.sdkArtifactHex);
   const dependency = {
     ...producerDependency,
@@ -2983,6 +2984,7 @@ async function flowLaneAdmits(vector) {
       flow,
       check,
       dependencies,
+      allowTestSigner,
     });
     return { admitted: true, message: "" };
   } catch (error) {
@@ -3063,6 +3065,42 @@ for (const signatureScope of ["publication"]) {
     assert.equal(outcome.admitted, true, outcome.message);
   });
 }
+
+test("a child signed by the SDK's public test key is a development signer: refused unless allowTestSigner", async () => {
+  const keypair = JSON.parse(
+    await readFile(new URL("./support/dev-module-signing-keypair.json", import.meta.url), "utf8"),
+  );
+  assert.equal(keypair.publicKeyHex, SDK_TEST_SIGNER_PUBLIC_KEY_HEX);
+  const signed = await signModuleArtifact(
+    Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]),
+    // The keyId is an unsigned label: claiming the owner's changes nothing.
+    { privateKeySeedHex: keypair.privateKeySeedHex, keyId: "module-owner-2026-10-15" },
+  );
+  const vector = {
+    name: "sdk-test-key",
+    why: "the SDK test key signs",
+    sdkArtifactHex: Buffer.from(signed.wasmBytes).toString("hex"),
+    // The publisher record says developmentOnly: false about itself.
+    trustedPublicKeysHex: [keypair.publicKeyHex],
+  };
+  const refused = await flowLaneAdmits(vector);
+  assert.equal(refused.admitted, false);
+  assert.match(refused.message, /SDK's public test key/);
+  assert.match(refused.message, /allowTestSigner/);
+  const admitted = await flowLaneAdmits(vector, { allowTestSigner: true });
+  assert.equal(admitted.admitted, true, admitted.message);
+  const result = await verifyModuleArtifact(signed.wasmBytes, {
+    trustedPublicKeys: [keypair.publicKeyHex],
+  });
+  assert.equal(result.testSigner, true);
+  const other = await signModuleArtifact(Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]), {
+    privateKeySeedHex: "45".repeat(32),
+  });
+  assert.equal(
+    (await verifyModuleArtifact(other.wasmBytes, { trustedPublicKeys: [other.signature.publicKeyHex] })).testSigner,
+    false,
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Composed runtimeTargets are DERIVED, not asserted

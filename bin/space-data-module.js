@@ -170,6 +170,9 @@ function parseArgs(argv) {
       case "--allow-single-lane":
         options.allowSingleLane = true;
         break;
+      case "--allow-test-signer":
+        options.allowTestSigner = true;
+        break;
       case "--gate-manifest":
         options.gateManifestPath = path.resolve(
           requireValue(argv, ++index, value),
@@ -260,7 +263,7 @@ function printUsage() {
   space-data-module conformance estimation --evidence ./conformance/estimation-evidence.json --json
   space-data-module conformance estimation --self-test                                          (proves EKF/UKF alias, runtime divergence, and placeholder OCM are caught)
   space-data-module flow check ./flows/my.flow.json --deps ./modules-root
-  space-data-module flow compile ./flows/my.flow.json --deps ./modules-root [--out ./flows/my/dist]
+  space-data-module flow compile ./flows/my.flow.json --deps ./modules-root [--out ./flows/my/dist] [--allow-test-signer]
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --recipient-public-key <hex> --out ./dist/module.wasm.enc
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --single-file-bundle --out ./dist/module.bundle.wasm
@@ -346,6 +349,7 @@ async function runFlow(argv) {
     dependencies,
     outDir,
     flowSourcePath: flowPath,
+    allowTestSigner: options.allowTestSigner === true,
   });
   if (options.json) {
     console.log(
@@ -815,8 +819,11 @@ async function runVerify(argv) {
   } else {
     console.log(`verified=${result.verified}`);
     console.log(`signed=${result.signed}`);
-    if (result.keyId) console.log(`keyId=${result.keyId}`);
+    // The signer's role comes from the verified KEY. The entry's keyId is an
+    // unsigned label the file carries about itself, printed as such.
+    if (result.verified) console.log(`signer=${result.testSigner ? "test" : "other"}`);
     if (result.publicKeyHex) console.log(`publicKeyHex=${result.publicKeyHex}`);
+    if (result.keyId) console.log(`unsignedKeyId=${result.keyId}`);
     if (result.signatureScope) console.log(`signatureScope=${result.signatureScope}`);
     if (result.statementDomain) console.log(`statementDomain=${result.statementDomain}`);
   }

@@ -81,7 +81,11 @@ import {
 import { appendWasmCustomSection } from "../bundle/wasm.js";
 import { runtimeTargetSatisfies } from "../host/runtimeTargetGate.js";
 import { SDS_MANIFEST_SECTION_NAME } from "../bundle/constants.js";
-import { verifyModuleArtifact } from "../bundle/signing.js";
+import {
+  SDK_TEST_SIGNER_PUBLIC_KEY_HEX,
+  isSdkTestSigner,
+  verifyModuleArtifact,
+} from "../bundle/signing.js";
 import { DOMAIN_MODULE_PUBLICATION_V1 } from "../bundle/sigdomain.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { bytesToHex } from "../utils/encoding.js";
@@ -249,6 +253,7 @@ async function verifyIsomorphicNodeArtifacts({
   check,
   dependencies,
   flowSourcePath,
+  allowTestSigner = false,
 }) {
   const nodesById = new Map(
     (flow?.nodes ?? []).map((node) => [node.nodeId, node]),
@@ -295,9 +300,17 @@ async function verifyIsomorphicNodeArtifacts({
     const publisher = dependency.publisherRecord
       ? dependency.publisherRecord
       : JSON.parse(await readFile(publisherPath, "utf8"));
-    if (publisher?.developmentOnly === true) {
+    // A publisher file says what it likes about itself; the SDK's public test
+    // key is a development signer whatever its record claims, and is admitted
+    // only when the caller says so (allowTestSigner).
+    const developmentPublisher =
+      publisher?.developmentOnly === true ||
+      isSdkTestSigner(publisher?.publicKeyHex);
+    if (developmentPublisher && allowTestSigner !== true) {
       throw new Error(
-        `Isomorphic node "${checkedNode.nodeId}" is signed only by a development publisher.`,
+        isSdkTestSigner(publisher?.publicKeyHex)
+          ? `Isomorphic node "${checkedNode.nodeId}" is signed by the SDK's public test key (${SDK_TEST_SIGNER_PUBLIC_KEY_HEX}), a development signer; pass allowTestSigner: true to compile it.`
+          : `Isomorphic node "${checkedNode.nodeId}" is signed only by a development publisher.`,
       );
     }
     if (!/^[0-9a-f]{64}$/.test(publisher?.publicKeyHex ?? "")) {
@@ -3093,6 +3106,7 @@ export async function compileFlowProgram({
   flowSourcePath = null,
   catalog,
   standardsRoot,
+  allowTestSigner = false,
 }) {
   const check = checkFlowProgram({ flow, dependencies });
   if (!check.ok) {
@@ -3108,6 +3122,7 @@ export async function compileFlowProgram({
     check,
     dependencies,
     flowSourcePath,
+    allowTestSigner,
   });
 
   const standardsOptions = { catalog, standardsRoot };
