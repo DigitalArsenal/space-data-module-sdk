@@ -2949,7 +2949,7 @@ function vectorHexToBytes(hex) {
   return out;
 }
 
-async function flowLaneAdmits(vector, { allowTestSigner } = {}) {
+async function flowLaneAdmits(vector, { allowTestSigner, developmentOnly = false } = {}) {
   const artifactBytes = vectorHexToBytes(vector.sdkArtifactHex);
   const dependency = {
     ...producerDependency,
@@ -2966,7 +2966,7 @@ async function flowLaneAdmits(vector, { allowTestSigner } = {}) {
       publicKeyHex:
         vector.trustedPublicKeysHex[0] ??
         "00000000000000000000000000000000000000000000000000000000000000ff",
-      developmentOnly: false,
+      developmentOnly,
     },
   };
   const flow = singleNodeFlow(dependency, {
@@ -3100,6 +3100,27 @@ test("a child signed by the SDK's public test key is a development signer: refus
     (await verifyModuleArtifact(other.wasmBytes, { trustedPublicKeys: [other.signature.publicKeyHex] })).testSigner,
     false,
   );
+});
+
+test("a publisher whose own record says developmentOnly is refused, with and without allowTestSigner", async () => {
+  // Another key than the test key: only the test KEY is gated by allowTestSigner.
+  const signed = await signModuleArtifact(Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]), {
+    privateKeySeedHex: "45".repeat(32),
+  });
+  assert.notEqual(signed.signature.publicKeyHex, SDK_TEST_SIGNER_PUBLIC_KEY_HEX);
+  const vector = {
+    name: "development-only-publisher",
+    why: "a publisher record that says developmentOnly about itself",
+    sdkArtifactHex: Buffer.from(signed.wasmBytes).toString("hex"),
+    trustedPublicKeysHex: [signed.signature.publicKeyHex],
+  };
+  for (const allowTestSigner of [undefined, false, true]) {
+    const outcome = await flowLaneAdmits(vector, { allowTestSigner, developmentOnly: true });
+    assert.equal(outcome.admitted, false, `allowTestSigner ${allowTestSigner}`);
+    assert.match(outcome.message, /signed only by a development publisher/);
+  }
+  // The control: the same child with a publisher record that does not say so.
+  assert.equal((await flowLaneAdmits(vector, { developmentOnly: false })).admitted, true);
 });
 
 // ---------------------------------------------------------------------------

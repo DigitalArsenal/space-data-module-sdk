@@ -300,17 +300,20 @@ async function verifyIsomorphicNodeArtifacts({
     const publisher = dependency.publisherRecord
       ? dependency.publisherRecord
       : JSON.parse(await readFile(publisherPath, "utf8"));
+    // A publisher whose own record says developmentOnly is refused, always,
+    // as through 0.10.4: allowTestSigner does not admit it.
+    if (publisher?.developmentOnly === true) {
+      throw new Error(
+        `Isomorphic node "${checkedNode.nodeId}" is signed only by a development publisher.`,
+      );
+    }
     // A publisher file says what it likes about itself; the SDK's public test
     // key is a development signer whatever its record claims, and is admitted
-    // only when the caller says so (allowTestSigner).
-    const developmentPublisher =
-      publisher?.developmentOnly === true ||
-      isSdkTestSigner(publisher?.publicKeyHex);
-    if (developmentPublisher && allowTestSigner !== true) {
+    // only when the caller says so (allowTestSigner). Only the test KEY is
+    // gated by that option.
+    if (isSdkTestSigner(publisher?.publicKeyHex) && allowTestSigner !== true) {
       throw new Error(
-        isSdkTestSigner(publisher?.publicKeyHex)
-          ? `Isomorphic node "${checkedNode.nodeId}" is signed by the SDK's public test key (${SDK_TEST_SIGNER_PUBLIC_KEY_HEX}), a development signer; pass allowTestSigner: true to compile it.`
-          : `Isomorphic node "${checkedNode.nodeId}" is signed only by a development publisher.`,
+        `Isomorphic node "${checkedNode.nodeId}" is signed by the SDK's public test key (${SDK_TEST_SIGNER_PUBLIC_KEY_HEX}), a development signer; pass allowTestSigner: true to compile it.`,
       );
     }
     if (!/^[0-9a-f]{64}$/.test(publisher?.publicKeyHex ?? "")) {

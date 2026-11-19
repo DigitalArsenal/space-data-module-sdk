@@ -80,7 +80,9 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
   `signer=test` or `signer=other` from the verified key and prints the entry's keyId as `unsignedKeyId=` (it was
   `keyId=`): the keyId is not signed. The flow compiler treats a child whose publisher key is the test key as a
   development signer, whatever its publisher record says about itself, and admits it only with
-  `compileFlowProgram({ allowTestSigner: true })` (CLI `flow compile --allow-test-signer`).
+  `compileFlowProgram({ allowTestSigner: true })` (CLI `flow compile --allow-test-signer`). Only the test KEY is
+  gated by that option: a publisher whose own record says `developmentOnly: true` stays refused, with or without
+  `allowTestSigner`, as in 0.10.4.
 - **Naming a trusted key requires a signature.** `resolveModuleSignaturePolicy` (the Node loader, the browser harness,
   the flow host) sets `requireSignature` whenever the policy, `SDM_TRUSTED_MODULE_SIGNERS` or
   `__SDM_TRUSTED_MODULE_SIGNERS__` names any trusted key, even if it says `requireSignature: false`. The signature does
