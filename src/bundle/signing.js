@@ -596,17 +596,26 @@ function readEnv(name) {
  *
  * Returns null when no policy is configured (loading proceeds unverified,
  * preserving existing behavior).
+ *
+ * NAMING A TRUSTED KEY REQUIRES A SIGNATURE. The publication form does not
+ * cover its own trailer, so stripping the trailer (or only its signature
+ * entry) leaves a file that would otherwise load as "unsigned" under a policy
+ * that trusts key X. A policy, environment or global that names any trusted
+ * key therefore always sets requireSignature, whatever it says about it.
  */
 export function resolveModuleSignaturePolicy(options = {}) {
   if (options.verifySignature === false) {
     return null;
   }
   if (options.verifySignature && typeof options.verifySignature === "object") {
+    const trustedPublicKeys = normalizeTrustedPublicKeys(
+      options.verifySignature.trustedPublicKeys,
+    );
     return {
-      trustedPublicKeys: normalizeTrustedPublicKeys(
-        options.verifySignature.trustedPublicKeys,
-      ),
-      requireSignature: options.verifySignature.requireSignature === true,
+      trustedPublicKeys,
+      requireSignature:
+        options.verifySignature.requireSignature === true ||
+        trustedPublicKeys.length > 0,
     };
   }
   const envTrusted = readEnv("SDM_TRUSTED_MODULE_SIGNERS");
@@ -617,6 +626,7 @@ export function resolveModuleSignaturePolicy(options = {}) {
     envTrusted ?? globalTrusted,
   );
   const requireSignature =
+    trustedPublicKeys.length > 0 ||
     envRequire === "1" ||
     envRequire === "true" ||
     globalRequire === true ||

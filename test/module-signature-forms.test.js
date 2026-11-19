@@ -13,6 +13,7 @@ import {
   MODULE_SIGNATURE_SCOPES,
   DEFAULT_MODULE_SIGNATURE_SCOPE,
   ModuleSignatureError,
+  resolveModuleSignaturePolicy,
   signModuleArtifact,
   verifyModuleArtifact,
 } from "../src/bundle/signing.js";
@@ -234,6 +235,57 @@ test("publication: signedHashHex and the hash label are required; an entry witho
   // The entry as written verifies, and its label is the node's wire string.
   assert.equal(signed.signature.signedHashAlgorithm, "sha256-canonical-module-hash");
   assert.equal((await verifyModuleArtifact(await withEntry(signed.signature), policy)).verified, true);
+});
+
+test("a policy that names a trusted key requires a signature: a stripped trailer is refused", async () => {
+  const keypair = await loadDevKeypair();
+  const signed = await signModuleArtifact(buildTestWasm(), {
+    privateKeySeedHex: keypair.privateKeySeedHex,
+    keyId: keypair.keyId,
+  });
+  const keyOnly = { verifySignature: { trustedPublicKeys: [keypair.publicKeyHex] } };
+  assert.deepEqual(resolveModuleSignaturePolicy(keyOnly), {
+    trustedPublicKeys: [keypair.publicKeyHex],
+    requireSignature: true,
+  });
+  assert.equal(
+    resolveModuleSignaturePolicy({
+      verifySignature: { trustedPublicKeys: [keypair.publicKeyHex], requireSignature: false },
+    }).requireSignature,
+    true,
+  );
+  const previous = process.env.SDM_TRUSTED_MODULE_SIGNERS;
+  process.env.SDM_TRUSTED_MODULE_SIGNERS = keypair.publicKeyHex;
+  try {
+    assert.equal(resolveModuleSignaturePolicy({}).requireSignature, true);
+  } finally {
+    if (previous === undefined) delete process.env.SDM_TRUSTED_MODULE_SIGNERS;
+    else process.env.SDM_TRUSTED_MODULE_SIGNERS = previous;
+  }
+  // No key named and no requirement: no policy, as before.
+  assert.equal(resolveModuleSignaturePolicy({ verifySignature: {} }).requireSignature, false);
+
+  // The attack: the trailer removed (the signature does not cover it), or
+  // only its signature entry removed.
+  const stripped = new Uint8Array(extractPublicationRecordCollection(signed.wasmBytes).payloadBytes);
+  const signatureless = new Uint8Array(
+    (await createSingleFileBundle({ wasmBytes: stripped, entries: [] })).wasmBytes,
+  );
+  const dir = await mkdtemp(path.join(tmpdir(), "sdm-forms-strip-"));
+  for (const [label, bytes] of [["stripped", stripped], ["signatureless", signatureless]]) {
+    await assert.rejects(
+      verifyModuleArtifact(bytes, resolveModuleSignaturePolicy(keyOnly)),
+      (error) => error.code === "missing_signature",
+      label,
+    );
+    const wasmPath = path.join(dir, `${label}.wasm`);
+    await writeFile(wasmPath, bytes);
+    await assert.rejects(
+      loadModule({ wasmSource: wasmPath, ...keyOnly }),
+      (error) => error instanceof ModuleSignatureError && error.code === "missing_signature",
+      label,
+    );
+  }
 });
 
 test("no shared vector verifies with an empty signedHashHex", async () => {

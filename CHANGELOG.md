@@ -42,6 +42,12 @@
   always write both; no shared vector carries an empty `signedHashHex`. The label is a fixed string, not a
   description of the hash; the JavaScript constant is now `PUBLICATION_SIGNED_HASH_ALGORITHM` (was
   `LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM`; no alias), and the wire string is unchanged.
+- **Naming a trusted key requires a signature.** `resolveModuleSignaturePolicy` (the Node loader, the browser harness,
+  the flow host) sets `requireSignature` whenever the policy, `SDM_TRUSTED_MODULE_SIGNERS` or
+  `__SDM_TRUSTED_MODULE_SIGNERS__` names any trusted key, even if it says `requireSignature: false`. The signature does
+  not cover its own trailer, so through 0.10.4 a file with its trailer (or only its signature entry) removed loaded as
+  "unsigned" under a policy that trusted key X; it is now refused with `missing_signature`. With no key named and no
+  requirement there is still no policy, and such a load is not judged at all.
 - **The trailer's manifest copy is never trusted.** The publication form covers the bytes before the trailer; the
   bundle writer moves the `sds.manifest` section into the trailer's `manifest` entry, which the signature does not
   cover. Every reader takes the manifest from the SIGNED code instead (an `sds.manifest` section left in the signed
