@@ -288,6 +288,21 @@ test("a policy that names a trusted key requires a signature: a stripped trailer
   }
 });
 
+test("keyId stays optional: an entry with a null or absent keyId verifies", async () => {
+  // OrbPro's envelope signer writes keyId: null (scripts/signProtectedEnvelope.mjs).
+  const keypair = await loadDevKeypair();
+  const signed = await signModuleArtifact(buildTestWasm(), { privateKeySeedHex: keypair.privateKeySeedHex });
+  assert.equal(signed.signature.keyId, null);
+  const portable = new Uint8Array(extractPublicationRecordCollection(signed.wasmBytes).payloadBytes);
+  const policy = { trustedPublicKeys: [keypair.publicKeyHex], requireSignature: true };
+  for (const entry of [signed.signature, (({ keyId, ...rest }) => rest)(signed.signature)]) {
+    const bytes = (await createSingleFileBundle({ wasmBytes: portable, signature: entry })).wasmBytes;
+    const result = await verifyModuleArtifact(bytes, policy);
+    assert.equal(result.verified, true);
+    assert.equal(result.keyId, null);
+  }
+});
+
 test("no shared vector verifies with an empty signedHashHex", async () => {
   const vectors = JSON.parse(await readFile(VECTORS_PATH, "utf8"));
   const empty = vectors.artifacts.filter(
