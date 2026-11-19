@@ -57,8 +57,8 @@ export const BUNDLE_SIGNATURE_HASH_ALGORITHM =
 
 /**
  * The one signature form, `signatureScope: "publication"`: Ed25519 over
- * `"SDN-MODULE-PUBLICATION-V1" || 0x00 || sha256(portable)`, the entry the
- * node's signing endpoint writes, field for field. "module" (the bare canonical
+ * `"SDN-MODULE-PUBLICATION-V1" || 0x00 || sha256(portable)`, an entry with the
+ * same fields and values as the node's signing endpoint writes. "module" (the bare canonical
  * module digest) and "bundle" (the whole-bundle digest) were removed in 0.11.0
  * and are refused by name.
  */
@@ -251,9 +251,11 @@ function resolveSignatureScope(signatureScope) {
 
 /**
  * The publication signature entry over `portable` (the bytes before the
- * trailer), in the node's SignatureEntry JSON key order
- * (sdn-server/internal/modulesign/modulesign.go, Sign): the same key over the
- * same portable bytes gives the same entry bytes as the node's.
+ * trailer), with the same fields and values as the node's SignatureEntry
+ * (sdn-server/internal/modulesign/modulesign.go, Sign). Not the same bytes:
+ * the bundle writer sorts the keys and this writes keyId null when there is
+ * none, where the node writes its struct's field order and keyId ""; both
+ * verify on both sides.
  */
 async function publicationSignatureEntry(seed, portable, keyId) {
   const publicKey = await ed25519PublicKey(seed);
@@ -329,9 +331,9 @@ async function signEncryptedArtifact(protectedArtifact, seed, options, signature
  * in the artifact's MBL bundle (sds.signature entry).
  *
  * One form, `signatureScope: "publication"` (the default and the only value):
- * the entry the node's signing endpoint writes
- * (`sdn-server/internal/modulesign`), field for field and in its key order, so
- * the same key over the same portable bytes yields the same entry bytes. The
+ * an entry with the same fields and values as the one the node's signing
+ * endpoint writes (`sdn-server/internal/modulesign`); the key order and an
+ * absent keyId (null here, "" there) differ, and both verify. The
  * signature covers the bytes before the trailer; the trailer's entries (the
  * manifest copy included) are not covered.
  *

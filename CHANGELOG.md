@@ -22,8 +22,13 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
 - Options removed: `signModuleArtifact`'s `signatureScope: "module"` and `"bundle"` (refused,
   `legacy_signature_scope`). A policy that names trusted keys with `requireSignature: false` now requires a signature.
   The flow compiler refuses a test-key child unless `allowTestSigner: true`.
-- Result fields removed: `verifyModuleArtifact` no longer returns `signatureScope`; it returns `testSigner`. The CLI
-  `verify` prints `unsignedKeyId=` where it printed `keyId=`.
+- Result fields: `verifyModuleArtifact` still returns `signatureScope`, with the value `"module"`: the node's status
+  label for the publication form, pinned by the shared vectors. It is NOT a `signModuleArtifact` scope (that one
+  returns `"publication"`, and `"module"` as a signing option is the removed bare-digest form). A caller checks
+  `statementDomain === DOMAIN_MODULE_PUBLICATION_V1`, and never compares the verify result's `signatureScope` with
+  the sign result's or feeds it back into `signModuleArtifact`. The result adds `testSigner`. The CLI `verify` prints
+  `unsignedKeyId=` where it printed `keyId=`, prints `statementDomain=`, and no longer prints `signatureScope=`
+  (in text or `--json`).
 - Exports removed: `computeModuleBundleSignatureHash`, and `LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM` (now
   `PUBLICATION_SIGNED_HASH_ALGORITHM`, the same string; no alias). `BUNDLE_SIGNATURE_HASH_ALGORITHM` stays, to name
   the refusal. Exports added: `PUBLICATION_SIGNED_HASH_ALGORITHM`, `MODULE_SIGNATURE_SCOPES`,
@@ -37,8 +42,9 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
 
 - **One form remains:** Ed25519 over `"SDN-MODULE-PUBLICATION-V1" || 0x00 || sha256(portable)`, where `portable` is
   every byte before the publication trailer. `signModuleArtifact` writes it (`signatureScope: "publication"`, the
-  default and the only value), with the same signature entry, field for field and in the same key order, as the
-  node's signing endpoint. Through 0.10.4 the SDK could verify this form but not write it.
+  default and the only value), with a signature entry that has the same fields and values as the node's signing
+  endpoint writes. The bytes of the entry differ: the SDK sorts the keys and writes `keyId: null` when there is
+  none, the node writes its own field order and `keyId: ""`; both verify on both sides. Through 0.10.4 the SDK could verify this form but not write it.
 - **The two forms without a statement domain are refused by name.** `verifyModuleArtifact` refuses the bare module
   digest (`signedHashAlgorithm` `sha256-canonical-module-hash` or absent; `signModuleArtifact`'s default and the CLI
   `sign`'s only form through 0.10.4) with `legacy_module_signature`, and the whole-bundle digest
@@ -56,8 +62,8 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
   `sds.manifest` section there, and it stays bound); the file's sha256 changes, so every list that pins a signed file by hash must
   be regenerated. A module signed in the publication form by 0.11.0 still verifies under earlier SDKs, which accept
   that form.
-- The CLI `sign` takes `--scope` (only `publication`), and `sign` and `verify` report the form (`signatureScope`,
-  `statementDomain`, `signedHashHex`). `signModuleArtifact` returns `signatureScope` and asserts that writing the
+- The CLI `sign` takes `--scope` (only `publication`) and reports the form (`signatureScope`, `statementDomain`,
+  `signedHashHex`); `verify` reports the `statementDomain` it verified. `signModuleArtifact` returns `signatureScope` and asserts that writing the
   signature leaves the bytes before the trailer unchanged.
 - The shared statement-domain vector file is unchanged and stays byte-identical to the node's copy. The node's
   verifier still admits the four vectors without a statement domain (`legacy-bare-digest-no-domain`,
@@ -67,7 +73,7 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
   `test/module-bundle-signing.test.js` and the bundle-vector generator `test/support/statement-domain-vectors-bundle.mjs`
   are removed with the form; regenerating the bundle vectors needs the 0.10.4 tree.
 - `test/module-signature-forms.test.js` covers the one form, the refusal by name in the verifier, the Node loader, the
-  flow compiler and the CLI, and the publication entry against the node's vector.
+  flow compiler and the CLI, and the publication entry against the shared vector (the same fields and values).
 - **The entry must say what it covers.** On the publication form `signedHashHex` is REQUIRED and equal to sha256 of
   the bytes before the trailer (empty or absent: `missing_signed_hash`; another value: `hash_mismatch`), and
   `signedHashAlgorithm` is REQUIRED and is the node's fixed label `sha256-canonical-module-hash`

@@ -814,18 +814,21 @@ async function runVerify(argv) {
     trustedPublicKeys,
     requireSignature: options.requireSignature ?? true,
   });
+  // The form verified is named by its statement domain. The result's
+  // signatureScope ("module", the node's status label, kept for the shared
+  // vectors) is not printed: it reads like the removed bare-digest form.
+  const { signatureScope: _nodeStatusLabel, ...printed } = result;
   if (options.json) {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(printed, null, 2));
   } else {
-    console.log(`verified=${result.verified}`);
-    console.log(`signed=${result.signed}`);
+    console.log(`verified=${printed.verified}`);
+    console.log(`signed=${printed.signed}`);
     // The signer's role comes from the verified KEY. The entry's keyId is an
     // unsigned label the file carries about itself, printed as such.
-    if (result.verified) console.log(`signer=${result.testSigner ? "test" : "other"}`);
-    if (result.publicKeyHex) console.log(`publicKeyHex=${result.publicKeyHex}`);
-    if (result.keyId) console.log(`unsignedKeyId=${result.keyId}`);
-    if (result.signatureScope) console.log(`signatureScope=${result.signatureScope}`);
-    if (result.statementDomain) console.log(`statementDomain=${result.statementDomain}`);
+    if (printed.verified) console.log(`signer=${printed.testSigner ? "test" : "other"}`);
+    if (printed.publicKeyHex) console.log(`publicKeyHex=${printed.publicKeyHex}`);
+    if (printed.keyId) console.log(`unsignedKeyId=${printed.keyId}`);
+    if (printed.statementDomain) console.log(`statementDomain=${printed.statementDomain}`);
   }
   return result.verified ? 0 : 1;
 }

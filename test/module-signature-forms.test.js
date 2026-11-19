@@ -161,7 +161,7 @@ for (const signatureScope of MODULE_SIGNATURE_SCOPES) {
   });
 }
 
-test("publication: the SDK's entry is the node's, byte for byte (shared vector domain-signed-ok)", async () => {
+test("publication: the SDK's entry has the same fields and values as the shared vector domain-signed-ok", async () => {
   const vectors = JSON.parse(await readFile(VECTORS_PATH, "utf8"));
   const vector = vectors.artifacts.find((entry) => entry.name === "domain-signed-ok");
   const signed = await signModuleArtifact(hexToBytes(vector.portableHex), {
@@ -169,8 +169,9 @@ test("publication: the SDK's entry is the node's, byte for byte (shared vector d
     keyId: vector.signatureEntry.keyId,
     signatureScope: "publication",
   });
-  // Every field the node wrote, with the node's values, in the node's order.
-  assert.deepEqual(Object.keys(signed.signature), Object.keys(vector.signatureEntry));
+  // The same fields and values as the vector's entry. Not the node's bytes:
+  // the SDK sorts the keys and writes keyId null when there is none, the
+  // node's signer writes its struct's field order and keyId ""; both verify.
   assert.deepEqual(signed.signature, vector.signatureEntry);
   // The signature entry's payload bytes and the portable bytes equal the
   // vector's. (The REC envelope around them does not: the vector file was
@@ -388,6 +389,15 @@ test("the CLI signs either form, refuses scope module, and refuses a bare digest
     assert.match(verify.stdout, /^signer=test$/m);
     assert.match(verify.stdout, /^unsignedKeyId=/m);
     assert.doesNotMatch(verify.stdout, /^keyId=/m);
+    // The form is named by its statement domain; the result's signatureScope
+    // ("module", the node's label) is not printed, in text or JSON.
+    assert.match(verify.stdout, new RegExp(`^statementDomain=${DOMAIN_MODULE_PUBLICATION_V1}$`, "m"));
+    assert.doesNotMatch(verify.stdout, /signatureScope/);
+    const verifyJson = spawnSync(process.execPath, [CLI_PATH, "verify", "--wasm", outPath, "--key", DEV_KEYPAIR_PATH, "--json"], { encoding: "utf8" });
+    assert.equal(verifyJson.status, 0, verifyJson.stderr);
+    const printed = JSON.parse(verifyJson.stdout);
+    assert.equal(printed.statementDomain, DOMAIN_MODULE_PUBLICATION_V1);
+    assert.equal(Object.hasOwn(printed, "signatureScope"), false);
   }
   for (const scope of ["module", "bundle"]) {
     const refusedScope = spawnSync(process.execPath, [CLI_PATH, "sign", "--wasm", rawPath, "--key", DEV_KEYPAIR_PATH, "--scope", scope, "--out", path.join(dir, "m.wasm")], { encoding: "utf8" });

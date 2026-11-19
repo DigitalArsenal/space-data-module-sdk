@@ -277,14 +277,13 @@ test("the WasmEdge leg of loadModule refuses a file whose trailer manifest was a
     loadModule({ wasmSource: alteredPath, runtimeKind: "wasmedge" }),
     (error) => error.code === "trailer_manifest_mismatch",
   );
-  // The untouched file passes the manifest step. (Whether it then runs needs a
-  // WasmEdge binary, which this test does not require: any later failure is
-  // not a manifest refusal.)
+  // The untouched file passes every signature and manifest step. (Whether it
+  // then runs needs a WasmEdge binary, which this test does not require: a
+  // later failure may happen, but never a ModuleSignatureError of any code.)
   await loadModule({ wasmSource: signedPath, runtimeKind: "wasmedge", verifySignature: policy }).then(
     (harness) => harness?.destroy?.(),
     (error) => {
-      assert.notEqual(error?.code, "trailer_manifest_mismatch");
-      assert.notEqual(error?.code, "trailer_manifest_unbound");
+      assert.ok(!(error instanceof ModuleSignatureError), String(error));
     },
   );
 });

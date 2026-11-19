@@ -101,8 +101,10 @@ space-data-module verify \
 
 `--trusted` takes a comma-separated list of trusted public keys; `--key` reads
 `publicKeyHex` out of a keypair JSON instead. Signature requirement defaults to
-true. Output reports `verified`, `signed`, `keyId`, `publicKeyHex`,
-`signatureScope` and `statementDomain`, and the process exits non-zero unless
+true. Output reports `verified`, `signed`, `signer` (`test` or `other`, from the
+verified key), `publicKeyHex`, `unsignedKeyId` (a label the file carries about
+itself) and `statementDomain`, the form verified; check `statementDomain`, not a
+scope. The process exits non-zero unless
 verification succeeded. An artifact signed in the bare module digest form is
 refused with `legacy_module_signature`, one in the whole-bundle form with
 `legacy_bundle_signature`; sign it again.
