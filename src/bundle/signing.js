@@ -23,13 +23,17 @@ import { ModuleBundleEntryRole } from "spacedatastandards.org/lib/js/MBL/main.js
 
 export const MODULE_SIGNATURE_ALGORITHM = "ed25519";
 export const MODULE_SIGNATURE_ENTRY_ROLE = "signature";
-// The `signedHashAlgorithm` labels of the two signature forms removed in 0.11.0.
-// A signature entry with NO statementDomain is one of them and is refused by
-// name: `legacy_module_signature` (the bare module digest, this label or none)
-// or `legacy_bundle_signature` (the whole-bundle digest). The node's
-// publication signer still writes the first label NEXT TO a statementDomain;
-// there the domain decides the basis and the label is not consulted.
-export const LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM =
+// The `signedHashAlgorithm` of the publication form: REQUIRED and fixed, the
+// exact string the node's publication signer writes next to its
+// statementDomain (sdn-server/internal/modulesign). The wire string is the
+// node's and does not change; the statementDomain, not this label, says what
+// the signature covers.
+//
+// A signature entry with NO statementDomain is one of the two forms removed in
+// 0.11.0 and is refused by name: `legacy_module_signature` (the bare module
+// digest, labelled with this string or with none) or `legacy_bundle_signature`
+// (the whole-bundle digest, BUNDLE_SIGNATURE_HASH_ALGORITHM).
+export const PUBLICATION_SIGNED_HASH_ALGORITHM =
   "sha256-canonical-module-hash";
 export const BUNDLE_SIGNATURE_HASH_ALGORITHM =
   "sha256-sdn-module-bundle-v1";
@@ -289,7 +293,7 @@ export async function signModuleArtifact(bytes, options = {}) {
     keyId: options.keyId ?? null,
     publicKeyHex,
     signatureHex: bytesToHex(new Uint8Array(signatureBytes)),
-    signedHashAlgorithm: LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM,
+    signedHashAlgorithm: PUBLICATION_SIGNED_HASH_ALGORITHM,
     signedHashHex,
     statementDomain: DOMAIN_MODULE_PUBLICATION_V1,
   };
@@ -535,7 +539,7 @@ export async function verifyModuleArtifact(bytes, options = {}) {
   const declaredAlgorithm = trimGoWhitespace(payload.signedHashAlgorithm);
   if (
     declaredAlgorithm !== "" &&
-    declaredAlgorithm !== LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM
+    declaredAlgorithm !== PUBLICATION_SIGNED_HASH_ALGORITHM
   ) {
     throw new ModuleSignatureError(
       "unsupported_hash_algorithm",

@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM,
+  PUBLICATION_SIGNED_HASH_ALGORITHM,
   MODULE_SIGNATURE_SCOPES,
   DEFAULT_MODULE_SIGNATURE_SCOPE,
   ModuleSignatureError,
@@ -61,7 +61,7 @@ async function buildBareDigestArtifact(seedHex, keyId = null) {
       publicKeyHex: bytesToHex(await ed25519PublicKey(seed)),
       signatureHex: bytesToHex(signatureBytes),
       signedHashHex: canonical.hashHex,
-      signedHashAlgorithm: LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM,
+      signedHashAlgorithm: PUBLICATION_SIGNED_HASH_ALGORITHM,
     },
   });
   return new Uint8Array(built.wasmBytes);
