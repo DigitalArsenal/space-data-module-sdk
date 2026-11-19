@@ -193,6 +193,57 @@ test("publication: the SDK's entry is the node's, byte for byte (shared vector d
   assert.equal(result.signatureScope, vector.expect.signatureScope);
 });
 
+test("publication: signedHashHex and the hash label are required; an entry without them is refused by name", async () => {
+  const keypair = await loadDevKeypair();
+  const signed = await signModuleArtifact(buildTestWasm(), {
+    privateKeySeedHex: keypair.privateKeySeedHex,
+    keyId: keypair.keyId,
+  });
+  const portable = new Uint8Array(extractPublicationRecordCollection(signed.wasmBytes).payloadBytes);
+  const policy = { trustedPublicKeys: [keypair.publicKeyHex], requireSignature: true };
+  const withEntry = async (signature) =>
+    new Uint8Array((await createSingleFileBundle({ wasmBytes: portable, signature })).wasmBytes);
+  // The Ed25519 signature is valid in every case below: only the entry's
+  // declarations change, and they are refused before the signature is checked.
+  for (const signedHashHex of ["", "   ", undefined]) {
+    const entry = { ...signed.signature, signedHashHex };
+    if (signedHashHex === undefined) delete entry.signedHashHex;
+    await assert.rejects(
+      verifyModuleArtifact(await withEntry(entry), policy),
+      (error) =>
+        error instanceof ModuleSignatureError &&
+        error.code === "missing_signed_hash" &&
+        error.statementDomain === DOMAIN_MODULE_PUBLICATION_V1,
+      JSON.stringify(signedHashHex),
+    );
+  }
+  for (const signedHashAlgorithm of ["", "sha256", undefined]) {
+    const entry = { ...signed.signature, signedHashAlgorithm };
+    if (signedHashAlgorithm === undefined) delete entry.signedHashAlgorithm;
+    await assert.rejects(
+      verifyModuleArtifact(await withEntry(entry), policy),
+      (error) => error instanceof ModuleSignatureError && error.code === "unsupported_hash_algorithm",
+      JSON.stringify(signedHashAlgorithm),
+    );
+  }
+  // A recorded hash other than sha256(portable) stays hash_mismatch.
+  await assert.rejects(
+    verifyModuleArtifact(await withEntry({ ...signed.signature, signedHashHex: "00".repeat(32) }), policy),
+    (error) => error.code === "hash_mismatch",
+  );
+  // The entry as written verifies, and its label is the node's wire string.
+  assert.equal(signed.signature.signedHashAlgorithm, "sha256-canonical-module-hash");
+  assert.equal((await verifyModuleArtifact(await withEntry(signed.signature), policy)).verified, true);
+});
+
+test("no shared vector verifies with an empty signedHashHex", async () => {
+  const vectors = JSON.parse(await readFile(VECTORS_PATH, "utf8"));
+  const empty = vectors.artifacts.filter(
+    (vector) => String(vector.signatureEntry.signedHashHex ?? "").trim() === "",
+  );
+  assert.deepEqual(empty.map((vector) => vector.name), []);
+});
+
 test("the bare module digest form is refused by name, before the signer is asked about", async () => {
   const keypair = await loadDevKeypair();
   const old = await buildBareDigestArtifact(keypair.privateKeySeedHex, keypair.keyId);

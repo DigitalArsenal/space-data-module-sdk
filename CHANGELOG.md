@@ -35,6 +35,13 @@
   are removed with the form; regenerating the bundle vectors needs the 0.10.4 tree.
 - `test/module-signature-forms.test.js` covers the one form, the refusal by name in the verifier, the Node loader, the
   flow compiler and the CLI, and the publication entry against the node's vector.
+- **The entry must say what it covers.** On the publication form `signedHashHex` is REQUIRED and equal to sha256 of
+  the bytes before the trailer (empty or absent: `missing_signed_hash`; another value: `hash_mismatch`), and
+  `signedHashAlgorithm` is REQUIRED and is the node's fixed label `sha256-canonical-module-hash`
+  (`unsupported_hash_algorithm` otherwise). Through 0.10.4 both could be empty. The node's signer and this SDK's
+  always write both; no shared vector carries an empty `signedHashHex`. The label is a fixed string, not a
+  description of the hash; the JavaScript constant is now `PUBLICATION_SIGNED_HASH_ALGORITHM` (was
+  `LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM`; no alias), and the wire string is unchanged.
 - **The trailer's manifest copy is never trusted.** The publication form covers the bytes before the trailer; the
   bundle writer moves the `sds.manifest` section into the trailer's `manifest` entry, which the signature does not
   cover. Every reader takes the manifest from the SIGNED code instead (an `sds.manifest` section left in the signed

@@ -131,7 +131,11 @@ whose trailer copy differs from the code's copy.
 
 `signModuleArtifact` writes it (`signatureScope: "publication"`, the default and
 the only value), the same entry, field for field, as the node's signing
-endpoint; so does the CLI's `sign`.
+endpoint; so does the CLI's `sign`. The entry's `signedHashHex` is REQUIRED and
+equal to sha256(portable) (`missing_signed_hash`, `hash_mismatch`), and its
+`signedHashAlgorithm` is REQUIRED and is the fixed label
+`sha256-canonical-module-hash`, the string the node writes; it is a label, not
+a description of the hash (`unsupported_hash_algorithm`).
 
 A signature with no `statementDomain` is one of the two forms removed in
 0.11.0, and every verifier in this SDK refuses it by name, before the signer is

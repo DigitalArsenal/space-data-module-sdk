@@ -487,6 +487,30 @@ export async function verifyModuleArtifact(bytes, options = {}) {
       throw error;
     }
 
+    // The entry names what it covers. signedHashHex is REQUIRED and equal to
+    // sha256(portable) (a different one is hash_mismatch, above); the node's
+    // signer always writes it, and sdn-js already requires it. The hash
+    // algorithm label is REQUIRED and is the node's fixed string.
+    if (declaredHashHex === "") {
+      const error = new ModuleSignatureError(
+        "missing_signed_hash",
+        `module signature declares no signedHashHex; the publication form records sha256 of the bytes before the trailer (${contentHashHex}), sign the module again`,
+      );
+      error.statementDomain = DOMAIN_MODULE_PUBLICATION_V1;
+      throw error;
+    }
+    if (
+      trimGoWhitespace(payload.signedHashAlgorithm) !==
+      PUBLICATION_SIGNED_HASH_ALGORITHM
+    ) {
+      const error = new ModuleSignatureError(
+        "unsupported_hash_algorithm",
+        `module signature declares signedHashAlgorithm ${JSON.stringify(payload.signedHashAlgorithm ?? "")}; the publication form records ${JSON.stringify(PUBLICATION_SIGNED_HASH_ALGORITHM)}`,
+      );
+      error.statementDomain = DOMAIN_MODULE_PUBLICATION_V1;
+      throw error;
+    }
+
     const statementBytes = buildSignatureStatement(
       DOMAIN_MODULE_PUBLICATION_V1,
       contentHashBytes,
