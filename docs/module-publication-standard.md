@@ -115,16 +115,36 @@ published and which signer attested to it.
 ### MBL `signature` entry — domain separation (`statementDomain`)
 
 The detached Ed25519 signature carried as the MBL bundle's `signature`-role
-entry has two forms, and the ARTIFACT chooses which one applies — never the
-verifier, never a policy:
+entry has ONE form:
 
 | `statementDomain`            | signature covers                                    |
 | ---------------------------- | --------------------------------------------------- |
 | `SDN-MODULE-PUBLICATION-V1`  | `"SDN-MODULE-PUBLICATION-V1" \|\| 0x00 \|\| sha256(portable)` |
-| absent                       | the bare canonical module (or bundle) digest — legacy |
 
 `portable` is the trailer-stripped payload: the exact bytes the runtime
-instantiates and the node's capability policy identifies by content hash.
+instantiates and the node's capability policy identifies by content hash. The
+signature covers every byte of it (the code, every data segment, every custom
+section left in it) and none of the trailer: the MBL entries beside the
+signature, the manifest copy among them, are not signed. A host takes the
+manifest from the signed code, never from the trailer, and refuses an artifact
+whose trailer copy differs from the code's copy.
+
+`signModuleArtifact` writes it (`signatureScope: "publication"`, the default and
+the only value), the same entry, field for field, as the node's signing
+endpoint; so does the CLI's `sign`. The entry's `signedHashHex` is REQUIRED and
+equal to sha256(portable) (`missing_signed_hash`, `hash_mismatch`), and its
+`signedHashAlgorithm` is REQUIRED and is the fixed label
+`sha256-canonical-module-hash`, the string the node writes; it is a label, not
+a description of the hash (`unsupported_hash_algorithm`).
+
+A signature with no `statementDomain` is one of the two forms removed in
+0.11.0, and every verifier in this SDK refuses it by name, before the signer is
+asked about: `legacy_module_signature` for the bare canonical module digest
+(`signedHashAlgorithm` `sha256-canonical-module-hash` or absent) and
+`legacy_bundle_signature` for the whole-bundle digest (`signedHashAlgorithm`
+`sha256-sdn-module-bundle-v1`). No writer produces either, and
+`signatureScope: "module"` or `"bundle"` is refused. A module signed in either
+must be signed again.
 
 The domain prefix exists because the node's publisher key is the NODE key, and
 that one bonded key signs several unrelated kinds of statement (dataset
@@ -153,10 +173,12 @@ JavaScript's: Go trims U+0085 NEL and JS does not, JS trims U+FEFF BOM and Go
 does not. Either mismatch is a "loads on the node, dies in the browser" split,
 so both are pinned by vectors rather than left to each language's default.
 
-Legacy artifacts that predate the field keep verifying unchanged. The forms,
-the preimage bytes and every refusal reason are pinned as shared cross-language
-vectors in `test/support/statement-domain-vectors.json`, byte-identical to the
-node's copies, and asserted by the JS suite and both Go suites.
+The forms, the preimage bytes and every refusal reason are pinned as shared
+cross-language vectors in `test/support/statement-domain-vectors.json`,
+byte-identical to the node's copies, and asserted by the JS suite and both Go
+suites. Four vectors, `legacy-bare-digest-no-domain` and the three
+`bundle-scope-*`, are refused by this SDK where the file records the node's
+verdict; the JS suite states those differences by name.
 
 ### `ENC` encrypted-delivery extension
 

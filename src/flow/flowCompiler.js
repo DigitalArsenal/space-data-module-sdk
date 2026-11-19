@@ -81,7 +81,11 @@ import {
 import { appendWasmCustomSection } from "../bundle/wasm.js";
 import { runtimeTargetSatisfies } from "../host/runtimeTargetGate.js";
 import { SDS_MANIFEST_SECTION_NAME } from "../bundle/constants.js";
-import { verifyModuleArtifact } from "../bundle/signing.js";
+import {
+  SDK_TEST_SIGNER_PUBLIC_KEY_HEX,
+  isSdkTestSigner,
+  verifyModuleArtifact,
+} from "../bundle/signing.js";
 import { DOMAIN_MODULE_PUBLICATION_V1 } from "../bundle/sigdomain.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { bytesToHex } from "../utils/encoding.js";
@@ -249,6 +253,7 @@ async function verifyIsomorphicNodeArtifacts({
   check,
   dependencies,
   flowSourcePath,
+  allowTestSigner = false,
 }) {
   const nodesById = new Map(
     (flow?.nodes ?? []).map((node) => [node.nodeId, node]),
@@ -295,9 +300,20 @@ async function verifyIsomorphicNodeArtifacts({
     const publisher = dependency.publisherRecord
       ? dependency.publisherRecord
       : JSON.parse(await readFile(publisherPath, "utf8"));
+    // A publisher whose own record says developmentOnly is refused, always,
+    // as through 0.10.4: allowTestSigner does not admit it.
     if (publisher?.developmentOnly === true) {
       throw new Error(
         `Isomorphic node "${checkedNode.nodeId}" is signed only by a development publisher.`,
+      );
+    }
+    // A publisher file says what it likes about itself; the SDK's public test
+    // key is a development signer whatever its record claims, and is admitted
+    // only when the caller says so (allowTestSigner). Only the test KEY is
+    // gated by that option.
+    if (isSdkTestSigner(publisher?.publicKeyHex) && allowTestSigner !== true) {
+      throw new Error(
+        `Isomorphic node "${checkedNode.nodeId}" is signed by the SDK's public test key (${SDK_TEST_SIGNER_PUBLIC_KEY_HEX}), a development signer; pass allowTestSigner: true to compile it.`,
       );
     }
     if (!/^[0-9a-f]{64}$/.test(publisher?.publicKeyHex ?? "")) {
@@ -305,53 +321,33 @@ async function verifyIsomorphicNodeArtifacts({
         `Isomorphic node "${checkedNode.nodeId}" publisher has no valid Ed25519 public key.`,
       );
     }
-    const verification = await verifyModuleArtifact(artifactBytes, {
-      trustedPublicKeys: [publisher.publicKeyHex],
-      requireSignature: true,
-    });
-    // WHAT THE FLOW LANE REQUIRES OF A SIGNATURE, and why it is two forms.
-    //
-    // Composition inlines somebody else's object code into a binary this
-    // process then ships. The signature has to bind, at minimum, everything
-    // that ends up compiled in. Two signatures do that, and they are NOT the
-    // same statement:
-    //
-    //   - BUNDLE scope — binds the whole MBL: the canonical module hash, the
-    //     manifest hash, and every non-signature member around it. The widest
-    //     commitment available, and the only one that covers the surrounding
-    //     bundle metadata.
-    //
-    //   - MODULE scope UNDER THE MODULE-PUBLICATION DOMAIN — the node's own
-    //     signing endpoint (sdn-server/internal/modulesign) issues
-    //     `SDN-MODULE-PUBLICATION-V1 || 0x00 || sha256(portable)`. That covers
-    //     the ENTIRE trailer-stripped payload — the code, the embedded
-    //     manifest section, every sds.* section — which is strictly more of the
-    //     compiled artifact than the canonical hash inside a bundle signature
-    //     binds (the canonical hash strips sds.* before hashing). It does not
-    //     bind the trailer metadata around it; the flow document's own
-    //     artifact.sha256 check above already pinned the exact file bytes, so
-    //     nothing the compiler consumes is left unbound.
-    //
-    // A BARE-DIGEST module signature (statementDomain absent, the pre-domain
-    // SDK form) is still refused here: no domain separation means a signature
-    // minted over some other protocol's digest can be replayed into this lane,
-    // and this lane compiles what it admits.
-    //
-    // Refusing module scope outright — which this did until 2026-07-30 — meant
-    // the flow compiler rejected EVERY artifact the node is able to sign, one
-    // line after verifying it, with a message that blamed the signature rather
-    // than the policy. See graph/tasks/sdk-flow-compiler-refuses-node-signed.md.
-    const domainSeparatedModuleScope =
-      verification.signatureScope === "module" &&
-      verification.statementDomain === DOMAIN_MODULE_PUBLICATION_V1;
+    let verification;
+    try {
+      verification = await verifyModuleArtifact(artifactBytes, {
+        trustedPublicKeys: [publisher.publicKeyHex],
+        requireSignature: true,
+      });
+    } catch (error) {
+      if (error?.code === "legacy_module_signature" || error?.code === "legacy_bundle_signature") {
+        error.message = `Isomorphic node "${checkedNode.nodeId}": ${error.message}`;
+      }
+      throw error;
+    }
+    // WHAT THE FLOW LANE REQUIRES OF A SIGNATURE: the one form, the
+    // `SDN-MODULE-PUBLICATION-V1 || 0x00 || sha256(portable)` statement, which
+    // covers the ENTIRE trailer-stripped payload (the code, every data segment,
+    // every section left in it). It does not bind the trailer around it; the
+    // flow document's own artifact.sha256 check above pins the exact file
+    // bytes, so nothing the compiler consumes is left unbound. The two forms
+    // without a statement domain were removed in 0.11.0 and verifyModuleArtifact
+    // refuses them by name before this line.
     if (
       !verification.verified ||
-      (verification.signatureScope !== "bundle" && !domainSeparatedModuleScope)
+      verification.statementDomain !== DOMAIN_MODULE_PUBLICATION_V1
     ) {
       throw new Error(
         `Isomorphic node "${checkedNode.nodeId}" artifact signature is not a verified ` +
-          `whole-bundle signature, nor a module signature under the ` +
-          `${DOMAIN_MODULE_PUBLICATION_V1} statement domain.`,
+          `signature under the ${DOMAIN_MODULE_PUBLICATION_V1} statement domain.`,
       );
     }
     verifiedByPluginId.set(checkedNode.pluginId, {
@@ -3113,6 +3109,7 @@ export async function compileFlowProgram({
   flowSourcePath = null,
   catalog,
   standardsRoot,
+  allowTestSigner = false,
 }) {
   const check = checkFlowProgram({ flow, dependencies });
   if (!check.ok) {
@@ -3128,6 +3125,7 @@ export async function compileFlowProgram({
     check,
     dependencies,
     flowSourcePath,
+    allowTestSigner,
   });
 
   const standardsOptions = { catalog, standardsRoot };

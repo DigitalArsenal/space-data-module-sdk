@@ -75,12 +75,14 @@ space-data-module sign \
 | --- | --- | --- |
 | `--wasm <path>` | yes | Artifact to sign |
 | `--key <path>` | yes | Keypair JSON; must contain `privateKeySeedHex` |
+| `--scope <form>` | no | `publication`, the one form (the `SDN-MODULE-PUBLICATION-V1` statement over the bytes before the trailer) and the default. `module` and `bundle` are refused: those forms were removed in 0.11.0 |
 | `--out <path>` | no | Output path; otherwise the input is signed in place |
 
 The key file must carry `privateKeySeedHex` or the command refuses. Output
-reports `signed`, `keyId`, `publicKeyHex`, and `canonicalModuleHashHex` — the
-canonical hash is what a verifier recomputes, so it is stable across the
-appended trailer.
+reports `signed`, `keyId`, `publicKeyHex`, `signatureScope`, `statementDomain`,
+`signedHashHex` and `canonicalModuleHashHex`. Any previous
+signature entry is replaced, whatever its form. The form is defined in
+[the publication standard](./module-publication-standard.md).
 
 ## Verify
 
@@ -99,8 +101,13 @@ space-data-module verify \
 
 `--trusted` takes a comma-separated list of trusted public keys; `--key` reads
 `publicKeyHex` out of a keypair JSON instead. Signature requirement defaults to
-true. Output reports `verified`, `signed`, `keyId`, `publicKeyHex`, and the
-process exits non-zero unless verification succeeded.
+true. Output reports `verified`, `signed`, `signer` (`test` or `other`, from the
+verified key), `publicKeyHex`, `unsignedKeyId` (a label the file carries about
+itself) and `statementDomain`, the form verified; check `statementDomain`, not a
+scope. The process exits non-zero unless
+verification succeeded. An artifact signed in the bare module digest form is
+refused with `legacy_module_signature`, one in the whole-bundle form with
+`legacy_bundle_signature`; sign it again.
 
 ## Key custody
 

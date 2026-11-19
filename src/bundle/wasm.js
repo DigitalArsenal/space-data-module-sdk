@@ -463,6 +463,66 @@ export async function createSingleFileBundle(options = {}) {
   };
 }
 
+/**
+ * The trailer of an ENCRYPTED artifact (`ciphertext || REC` with an ENC
+ * record) written again with the given bundle entries and signature. The
+ * payload is never read as wasm: it is ciphertext, and it is copied as it is.
+ * The ENC and PNM records and the record collection's version are kept. With
+ * no bundle in the old trailer, the new one records `contentHash` as its
+ * canonical module hash and no manifest hash, as the engine's envelope signer
+ * does.
+ *
+ * @param {Object} options
+ * @param {Object} options.publicationRecords - extractPublicationRecordCollection() of the artifact
+ * @param {Array} options.entries - bundle entries to keep (no signature entry)
+ * @param {Object} options.signature - the signature entry's JSON payload
+ * @param {Uint8Array} options.contentHash - sha256 of the payload
+ * @returns {Promise<Uint8Array>}
+ */
+export async function rewriteProtectedEnvelopeTrailer(options = {}) {
+  const records = options.publicationRecords;
+  if (!records?.enc) {
+    throw new Error(
+      "rewriteProtectedEnvelopeTrailer takes only an artifact whose trailer carries an ENC record.",
+    );
+  }
+  const kept = normalizeAdditionalEntries(options.entries ?? []);
+  const manifestEntries = kept.filter((entry) => entry.entryId === "manifest");
+  const otherEntries = kept.filter((entry) => entry.entryId !== "manifest");
+  const rawEntries = [
+    ...manifestEntries,
+    ...normalizeStandardEntries({ signature: options.signature }),
+    ...otherEntries,
+  ];
+  const entries = [];
+  for (const entry of rawEntries) {
+    entries.push(await withSha256(entry));
+  }
+  const base = records.mbl ?? {
+    bundleVersion: 1,
+    moduleFormat: "space-data-module",
+    canonicalization: {
+      version: 1,
+      strippedCustomSectionPrefix: SDS_CUSTOM_SECTION_PREFIX,
+      bundleSectionName: SDS_MBL_CONTAINER_NAME,
+      hashAlgorithm: "sha256",
+    },
+    canonicalModuleHash: normalizeBytes(options.contentHash, "contentHash"),
+    manifestHash: [],
+    manifestExportSymbol: DEFAULT_MANIFEST_EXPORT_SYMBOL,
+    manifestSizeSymbol: DEFAULT_MANIFEST_SIZE_SYMBOL,
+  };
+  return appendPublicationRecordCollection(
+    records.payloadBytes,
+    encodePublicationRecordCollection({
+      version: records.version,
+      mbl: { ...base, entries },
+      enc: records.enc,
+      pnm: records.pnm,
+    }),
+  );
+}
+
 export async function parseSingleFileBundle(bytes, options = {}) {
   const protectedArtifact = extractPublicationRecordCollection(bytes);
   if (!protectedArtifact?.mbl) {

@@ -27,6 +27,8 @@ import {
   resolveModuleSignaturePolicy,
   verifyModuleArtifact,
 } from "../bundle/signing.js";
+import { readBoundManifestBytes } from "../bundle/codeManifest.js";
+import { decodePlgManifest } from "../manifest/plgCodec.js";
 import { attachHostDispatch, inspectModule } from "./isomorphicLoaderCore.js";
 import { assertArtifactRuntimeTarget } from "./runtimeTargetGate.js";
 import { DEFAULT_HOSTCALL_IMPORT_MODULE } from "./abi.js";
@@ -67,8 +69,9 @@ async function createWasmEdgeCommandHarness(options = {}) {
   // Signed/published artifacts carry an appended publication record
   // collection that WasmEdge rejects ("malformed section id"). Strip to the
   // canonical module payload; if anything was stripped, launch WasmEdge from
-  // a temp copy of the stripped bytes (signature verification, when
-  // requested, already ran against the full artifact in loadModule()).
+  // a temp copy of the stripped bytes. Under a signature policy loadModule()
+  // passes, as wasmSource, its own private copy of the bytes it verified, so
+  // these are those bytes, not a second read of the caller's file.
   const loadableBytes = toLoadableWasmBytes(wasmBytes);
   const inspection = await inspectModule(loadableBytes);
 
@@ -270,7 +273,58 @@ export async function loadModule(options = {}) {
   if (isBrowser) {
     return createBrowserModuleHarness(options);
   }
+  const owned = { verifiedCopy: null };
+  let harness;
+  try {
+    harness = await loadServerModule(options, signaturePolicy, owned);
+  } catch (error) {
+    await owned.verifiedCopy?.remove();
+    throw error;
+  }
+  const verifiedCopy = owned.verifiedCopy;
+  if (!verifiedCopy) {
+    return harness;
+  }
+  // The verified copy lives as long as the harness that runs it.
+  const destroy = typeof harness.destroy === "function" ? harness.destroy.bind(harness) : null;
+  harness.verifiedArtifactPath = verifiedCopy.path;
+  harness.destroy = async (...args) => {
+    try {
+      return destroy ? await destroy(...args) : undefined;
+    } finally {
+      await verifiedCopy.remove();
+    }
+  };
+  return harness;
+}
 
+// The verified bytes, written to a new private temporary directory
+// (owner-only), for the harness to read instead of the caller's path.
+async function writeVerifiedArtifactCopy(bytes) {
+  const [{ mkdtemp, writeFile, rm }, osModule, pathModule] = await Promise.all([
+    import("node:fs/promises"),
+    import("node:os"),
+    import("node:path"),
+  ]);
+  const os = osModule.default ?? osModule;
+  const path = pathModule.default ?? pathModule;
+  const dir = await mkdtemp(path.join(os.tmpdir(), "sdm-verified-"));
+  const filePath = path.join(dir, "module.wasm");
+  try {
+    await writeFile(filePath, bytes, { mode: 0o600, flag: "wx" });
+  } catch (error) {
+    await rm(dir, { recursive: true, force: true });
+    throw error;
+  }
+  return {
+    path: filePath,
+    async remove() {
+      await rm(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+async function loadServerModule(options, signaturePolicy, owned) {
   const { createModuleHarness } = await import("../testing/moduleHarness.js");
   const source = options.wasmSource;
   if (typeof source !== "string") {
@@ -304,18 +358,40 @@ export async function loadModule(options = {}) {
   let artifactBytes = null;
   let wasmModule = null;
   let embeddedManifest = null;
+  // Under a signature policy every runtime runs the bytes that were VERIFIED:
+  // they are written to a private temporary file and that file, never the
+  // caller's path, is what the harness reads and launches. Reading the path
+  // again after the check would let a file swapped in between run unverified.
+  let launchSource = source;
   if (needsBytes) {
     const { readFile } = await import("node:fs/promises");
     artifactBytes = new Uint8Array(await readFile(source));
+    let verifiedSignature = false;
     if (signaturePolicy) {
-      await verifyModuleArtifact(artifactBytes, signaturePolicy);
+      const verification = await verifyModuleArtifact(artifactBytes, signaturePolicy);
+      verifiedSignature =
+        signaturePolicy.requireSignature === true && verification?.verified === true;
+      owned.verifiedCopy = await writeVerifiedArtifactCopy(artifactBytes);
+      launchSource = owned.verifiedCopy.path;
     }
     if (runtimeKind === "wasmedge") {
-      const { locateEmbeddedPlgManifest } = await import(
-        "../compliance/index.js"
-      );
-      embeddedManifest =
-        locateEmbeddedPlgManifest(artifactBytes)?.decoded ?? null;
+      // The declaration comes from the SIGNED code (readBoundManifestBytes),
+      // never from the trailer's manifest entry, which the signature does not
+      // cover; a trailer copy that differs from the code's is refused by name.
+      // The code is run in this process to ask it ONLY when its signature
+      // was verified under a policy that requires one; otherwise the manifest
+      // exports are answered from the bytes alone or not at all.
+      const manifestBytes = await readBoundManifestBytes(artifactBytes, {
+        verifiedSignature,
+      });
+      embeddedManifest = null;
+      if (manifestBytes) {
+        try {
+          embeddedManifest = decodePlgManifest(manifestBytes);
+        } catch {
+          // An undecodable manifest is not a declaration.
+        }
+      }
     }
     if (needsCompiledModule) {
       wasmModule = await WebAssembly.compile(toLoadableWasmBytes(artifactBytes));
@@ -346,7 +422,7 @@ export async function loadModule(options = {}) {
         (!options.wasmEdgeRunnerBinary || options.surface === "command" || useRunner)
       ) {
         return attachHostDispatch(
-          await createWasmEdgeCommandHarness(options),
+          await createWasmEdgeCommandHarness({ ...options, wasmSource: launchSource }),
           options.host ?? null,
         );
       }
@@ -356,7 +432,7 @@ export async function loadModule(options = {}) {
       await createModuleHarness({
         runtime: {
           kind: "wasmedge",
-          wasmPath: source,
+          wasmPath: launchSource,
         wasmEdgeBinary: options.wasmEdgeBinary,
         wasmEdgeRunnerBinary: options.wasmEdgeRunnerBinary,
         enableThreads: options.enableThreads,
@@ -377,7 +453,9 @@ export async function loadModule(options = {}) {
       runtime: {
         kind: runtimeKind,
         command: options.command ?? runtimeKind,
-        args: options.args ?? [source],
+        // Caller-given args are the caller's: the loader cannot know what
+        // they read. The default runs the verified copy.
+        args: options.args ?? [launchSource],
         env: options.env,
         cwd: options.cwd,
         hostProfile: options.hostProfile,

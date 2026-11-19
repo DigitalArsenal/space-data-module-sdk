@@ -1,5 +1,182 @@
 # Changelog
 
+## 0.11.0
+
+### Breaking: one signature form, the publication statement domain; every module signed by 0.10.x must be signed again
+
+**What a signature binds, and what it does not.** A module signature now covers exactly one thing: the bytes of the
+file before its publication trailer (the code, its data, and any custom section still in it), under the statement
+`"SDN-MODULE-PUBLICATION-V1" || 0x00 || sha256(those bytes)`. It does not bind a name, a version or an expiry: a
+file signed once by a trusted key verifies for as long as that key is trusted, and swapping one signed file for
+another signed file, or an older one for a newer one, is caught only by a hash pin (a flow document's
+`artifact.sha256`, a ledger, a page's `data-sha256`), never by the signature. It binds nothing in the trailer: not
+the trailer's manifest copy, not the guest-link objects, not the deployment plan, not any other bundle entry, not the
+bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longer trust the trailer's manifest copy
+(below). For an encrypted file it binds the ciphertext, not the cipher suite, the key context or the plaintext.
+
+**What breaks for a caller.**
+- Every module signed by 0.10.x or earlier in the two forms without a statement domain (the default of
+  `signModuleArtifact` and the CLI `sign` through 0.10.4, and `signatureScope: "bundle"`) is refused by every verifier
+  in this SDK, with or without `requireSignature`. **Every module must be signed again** with 0.11.0 before a host
+  on 0.11.0 loads it under a signature policy. The loadable wasm does not change; the file's sha256 does.
+- Options removed: `signModuleArtifact`'s `signatureScope: "module"` and `"bundle"` (refused,
+  `legacy_signature_scope`). A policy that names trusted keys with `requireSignature: false` now requires a signature.
+  The flow compiler refuses a test-key child unless `allowTestSigner: true`.
+- Result fields: `verifyModuleArtifact` still returns `signatureScope`, with the value `"module"`: the node's status
+  label for the publication form, pinned by the shared vectors. It is NOT a `signModuleArtifact` scope (that one
+  returns `"publication"`, and `"module"` as a signing option is the removed bare-digest form). A caller checks
+  `statementDomain === DOMAIN_MODULE_PUBLICATION_V1`, and never compares the verify result's `signatureScope` with
+  the sign result's or feeds it back into `signModuleArtifact`. The result adds `testSigner`. The CLI `verify` prints
+  `unsignedKeyId=` where it printed `keyId=`, prints `statementDomain=`, and no longer prints `signatureScope=`
+  (in text or `--json`).
+- Exports removed: `computeModuleBundleSignatureHash`, and `LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM` (now
+  `PUBLICATION_SIGNED_HASH_ALGORITHM`, the same string; no alias). `BUNDLE_SIGNATURE_HASH_ALGORITHM` stays, to name
+  the refusal. Exports added: `PUBLICATION_SIGNED_HASH_ALGORITHM`, `MODULE_SIGNATURE_SCOPES`,
+  `DEFAULT_MODULE_SIGNATURE_SCOPE`, `SDK_TEST_SIGNER_PUBLIC_KEY_HEX`, `isSdkTestSigner`, `readBoundManifestBytes`,
+  `readSignedCodeManifest`, `readTrailerManifestBytes`, `readInstanceManifestBytes`, `readStaticManifestBytes`,
+  `rewriteProtectedEnvelopeTrailer` and `locateBoundPlgManifest`.
+- New refusals a caller can meet: `legacy_module_signature`, `legacy_bundle_signature`, `missing_signed_hash`,
+  `unsupported_hash_algorithm`, `trailer_manifest_mismatch`, `trailer_manifest_unbound`, `missing_signature` for
+  a file whose trailer was removed under a key-naming policy, and `invalid_trusted_key` for a malformed trusted key
+  (it was dropped without a word).
+
+- **One form remains:** Ed25519 over `"SDN-MODULE-PUBLICATION-V1" || 0x00 || sha256(portable)`, where `portable` is
+  every byte before the publication trailer. `signModuleArtifact` writes it (`signatureScope: "publication"`, the
+  default and the only value), with a signature entry that has the same fields and values as the node's signing
+  endpoint writes. The bytes of the entry differ: the SDK sorts the keys and writes `keyId: null` when there is
+  none, the node writes its own field order and `keyId: ""`; both verify on both sides. Through 0.10.4 the SDK could verify this form but not write it.
+- **The two forms without a statement domain are refused by name.** `verifyModuleArtifact` refuses the bare module
+  digest (`signedHashAlgorithm` `sha256-canonical-module-hash` or absent; `signModuleArtifact`'s default and the CLI
+  `sign`'s only form through 0.10.4) with `legacy_module_signature`, and the whole-bundle digest
+  (`sha256-sdn-module-bundle-v1`; `signatureScope: "bundle"` through 0.10.4) with `legacy_bundle_signature`. Both are
+  refused before the signer is asked about, with or without `requireSignature`: a present signature in a removed form
+  is never treated as unsigned. Everything that calls the verifier refuses them: the Node loader and the browser
+  harness under a signature policy, the isomorphic flow host's parent check, the flow compiler's hash-bound children
+  (its message names the node), and the CLI `verify`.
+- **`signatureScope: "module"` and `"bundle"` are refused** with `legacy_signature_scope`.
+  `computeModuleBundleSignatureHash` is removed.
+- **The flow compiler admits a hash-bound child only in the publication form.**
+- **Every module signed by 0.10.x must be signed again** with 0.11.0. Signing again replaces the signature entry and
+  keeps the loadable wasm byte for byte: a file that already has a trailer is signed over the bytes before it as they
+  stand, and they are kept unchanged, also when they still carry `sds.*` sections (a node-signed file keeps its
+  `sds.manifest` section there, and it stays bound); the file's sha256 changes, so every list that pins a signed file by hash must
+  be regenerated. A module signed in the publication form by 0.11.0 still verifies under earlier SDKs, which accept
+  that form.
+- The CLI `sign` takes `--scope` (only `publication`) and reports the form (`signatureScope`, `statementDomain`,
+  `signedHashHex`); `verify` reports the `statementDomain` it verified. `signModuleArtifact` returns `signatureScope` and asserts that writing the
+  signature leaves the bytes before the trailer unchanged.
+- The shared statement-domain vector file is unchanged and stays byte-identical to the node's copy. The node's
+  verifier still admits the four vectors without a statement domain (`legacy-bare-digest-no-domain`,
+  `bundle-scope-signed-ok`, and, with other reasons, `bundle-scope-untrusted-signer` and
+  `bundle-scope-recorded-digest-tampered`); this SDK refuses them by the form's name, and
+  `test/statement-domain-parity.test.js` and `test/flow-compiler.test.js` state those differences by name.
+  `test/module-bundle-signing.test.js` and the bundle-vector generator `test/support/statement-domain-vectors-bundle.mjs`
+  are removed with the form; regenerating the bundle vectors needs the 0.10.4 tree.
+- `test/module-signature-forms.test.js` covers the one form, the refusal by name in the verifier, the Node loader, the
+  flow compiler and the CLI, and the publication entry against the shared vector (the same fields and values).
+- **The entry must say what it covers.** On the publication form `signedHashHex` is REQUIRED and equal to sha256 of
+  the bytes before the trailer (empty or absent: `missing_signed_hash`; another value: `hash_mismatch`), and
+  `signedHashAlgorithm` is REQUIRED and is the node's fixed label `sha256-canonical-module-hash`
+  (`unsupported_hash_algorithm` otherwise). Through 0.10.4 both could be empty. The node's signer and this SDK's
+  always write both; no shared vector carries an empty `signedHashHex`. The label is a fixed string, not a
+  description of the hash; the JavaScript constant is now `PUBLICATION_SIGNED_HASH_ALGORITHM` (was
+  `LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM`; no alias), and the wire string is unchanged.
+- **The SDK's test key is known by its public half.** `SDK_TEST_SIGNER_PUBLIC_KEY_HEX` (`cf4625...fe78`, keyId
+  `sdm-dev-test-2026`) and `isSdkTestSigner()` are exported; its private half is committed in
+  `test/support/dev-module-signing-keypair.json`, so its signature shows only that a file was not damaged by
+  accident. `verifyModuleArtifact` returns `testSigner: true` when the verified key is that key. The CLI `verify` prints
+  `signer=test` or `signer=other` from the verified key and prints the entry's keyId as `unsignedKeyId=` (it was
+  `keyId=`): the keyId is not signed. The flow compiler treats a child whose publisher key is the test key as a
+  development signer, whatever its publisher record says about itself, and admits it only with
+  `compileFlowProgram({ allowTestSigner: true })` (CLI `flow compile --allow-test-signer`). Only the test KEY is
+  gated by that option: a publisher whose own record says `developmentOnly: true` stays refused, with or without
+  `allowTestSigner`, as in 0.10.4.
+- **Naming a trusted key requires a signature.** `resolveModuleSignaturePolicy` (the Node loader, the browser harness,
+  the flow host) sets `requireSignature` whenever the policy, `SDM_TRUSTED_MODULE_SIGNERS` or
+  `__SDM_TRUSTED_MODULE_SIGNERS__` names any trusted key, even if it says `requireSignature: false`. The signature does
+  not cover its own trailer, so through 0.10.4 a file with its trailer (or only its signature entry) removed loaded as
+  "unsigned" under a policy that trusted key X; it is now refused with `missing_signature`. With no key named and no
+  requirement there is still no policy, and such a load is not judged at all.
+- **The signature entry is found and read as the node reads it** (`publication_signature.go`). Every known key of
+  the entry is a string (`keyId` may also be null); an array, a number, an object, a boolean, or null for another
+  key is refused with `invalid_signature_payload` (through 0.10.4 a one-element array was read as its string and
+  admitted, which the node refuses). For null the node reads an empty string, and the verdicts differ: a null
+  `keyId` is admitted on both sides; for a null or empty `signedHashHex` or `signedHashAlgorithm` the node admits
+  what this SDK refuses (this SDK requires both, above); for a null `statementDomain` the node takes the legacy path
+  without a domain, which this SDK refuses. `signatureHex` and `publicKeyHex` are trimmed as
+  Go's `strings.TrimSpace` trims (U+0085 trimmed, U+FEFF not), not as JavaScript's `trim`. The entry is matched by
+  `entryId` or `sectionName` after a Go trim and lowercase (`"Signature"`, `"SDS.Signature"`), as the node matches
+  it. `test/signature-entry-parsing.test.js`; the shared vector file is unchanged.
+- **A malformed trusted key is refused, never dropped.** Any non-empty entry of a policy's `trustedPublicKeys`,
+  `SDM_TRUSTED_MODULE_SIGNERS`, `__SDM_TRUSTED_MODULE_SIGNERS__` or `verifyModuleArtifact`'s `trustedPublicKeys` that
+  is not exactly 64 hex characters after trim and lowercase (a `0x` prefix, a 63-character typo, a non-hex character)
+  throws `ModuleSignatureError("invalid_trusted_key")` before any artifact is read. Through 0.10.4 such an entry was
+  dropped without a word, so a policy that named only a mistyped key verified nothing at all and any file loaded. A
+  trusted-key list that is not undefined, null, an array or a string (a Set, an object, a number) throws
+  `invalid_trusted_key` too; through 0.10.4 it was read as no keys. A policy's `trustedPublicKeys` that was given (a
+  non-empty array, a non-blank string) but yields no key, for example `[process.env.KEY]` with `KEY` unset, throws
+  `invalid_trusted_key`; an explicit empty array still names no key and adds no requirement. An
+  `SDM_TRUSTED_MODULE_SIGNERS` that yields no key (unset, empty, blanks or commas only) no longer hides
+  `__SDM_TRUSTED_MODULE_SIGNERS__`.
+  `verifySignature: true` still takes its trust from the environment or the global, and now always requires a
+  signature: with no trust configured there, every load is refused by name (`missing_signature` or
+  `untrusted_signer`) instead of being let through unverified. `test/signature-policy-keys.test.js`.
+- **The trailer's manifest copy is never trusted.** The publication form covers the bytes before the trailer; the
+  bundle writer moves the `sds.manifest` section into the trailer's `manifest` entry, which the signature does not
+  cover. Every reader takes the manifest from the SIGNED code instead (an `sds.manifest` section left in the signed
+  bytes, else what the code's `plugin_get_manifest_flatbuffer` export returns), through the new
+  `readBoundManifestBytes` (`src/bundle/codeManifest.js`): the isomorphic flow host's node list and signed node
+  CONFIG (read from the parent's running instance), and the WasmEdge leg of `loadModule` (its runtime-target gate).
+  Without a running instance the two manifest exports are answered from the bytes alone when their bodies are
+  constants (`readStaticManifestBytes`: an `i32.const` body read over the data the module places, active segments and
+  the passive ones its start function copies); the code is instantiated, with stand-in imports, only when its
+  signature was already verified under a policy that requires one (`verifiedSignature: true`). Code nobody verified
+  is never run in the caller's process: on `check` and on a load with no policy, a start function that loops or a
+  declared memory of 65,536 pages would otherwise hang it or allocate 4 GiB. Such code is reported as not asked
+  (`trailer_manifest_unbound` with `error.codeNotRun` true). On the 239 signed files of the modules repository all
+  239 are answered from the bytes alone, each equal to what the running code returns. Refused by name: `trailer_manifest_mismatch` (the
+  trailer copy is not byte for byte the code's copy, that is, it was changed after signing) and
+  `trailer_manifest_unbound` (the trailer carries a manifest and the code carries none). A module with a manifest in
+  neither place declares nothing, as before. Through 0.10.4 both readers took the trailer's copy first: a file whose
+  trailer manifest was changed after signing still verified, and the flow host ran its nodes with the changed CONFIG.
+  `test/signed-code-manifest.test.js` and `test/isomorphic-flow-host.test.js` cover both readers;
+  `test/code-manifest-not-run.test.js` covers the code that is not run.
+- **What `signModuleArtifact` hashes is what its output holds before the trailer.** For a raw module (no trailer
+  yet) that is the module with its `sds.*` custom sections removed, so a raw build that still carries `sds.manifest`
+  is signed in one pass; a file that already has a trailer is signed over the bytes before it as they stand. **An encrypted artifact is signed without being parsed.** When the trailer carries an ENC record, the
+  payload is ciphertext: it is hashed as stored, never read as wasm, and the trailer is written again with the new
+  signature entry, every other bundle entry, and the ENC and PNM records unchanged. Through 0.10.4 signing an encrypted
+  artifact threw (`WASM magic header mismatch`). For an envelope with only an ENC record the output is byte for byte
+  what the engine's envelope signer writes. That signature binds the ciphertext only: not the ENC record, not the
+  plaintext; a host that decrypts checks the plaintext's own signature. New export from `src/bundle/wasm.js`:
+  `rewriteProtectedEnvelopeTrailer`. `test/module-signature-writer.test.js` covers both.
+- **The Node loader runs the bytes it verified.** Under a signature policy, `loadModule` on the server writes the
+  bytes it verified to a private temporary file (owner-only, removed by the harness's `destroy()`, or at once when
+  the load is refused) and the WasmEdge leg, the runtime host and a process runtime's default arguments read that
+  file, never the caller's path. Through 0.10.4 it verified one read of the file and then handed the path to the
+  harness, which read it again, so a file replaced in between ran unverified. The harness reports the copy as
+  `verifiedArtifactPath`. Not covered: a process runtime's caller-given `args` (the loader cannot know what they read)
+  and the runtime host's `modules` definitions, which name their own paths and are not verified by `loadModule`.
+  Without a policy nothing is verified and the caller's path is used, as before. `test/loader-verified-bytes.test.js`.
+- **`locateEmbeddedPlgManifest` looks in the code first.** Through 0.10.4 it returned the trailer's manifest copy
+  first. Now, when the trailer carries one, it is returned with `fromCode: true` only if its exact bytes appear in the
+  code (an `sds.manifest` section, the data segments or their memory image); it is refused with an Error whose `code`
+  is `trailer_manifest_mismatch` when the code keeps an `sds.manifest` section that differs; otherwise it is returned
+  with `fromCode: false`, because a byte scan cannot find the code's copy of most compiled modules (it sits where only
+  running the `plugin_get_manifest_flatbuffer` export finds it, and a scan of data can land on bytes that only look
+  like a manifest, so a scan never refuses). Every result now says `fromCode`. The new async
+  `locateBoundPlgManifest` asks the code (`readBoundManifestBytes`) and refuses a different or unbound trailer copy by
+  name; the compliance validator (`validatePluginArtifact`, `check`) uses it and reports `trailer-manifest-mismatch`
+  or `trailer-manifest-unbound` as errors. The parity gate reads only the loadable bytes, which carry no trailer.
+  On the modules repository's 239 signed files at 83289e693: no refusal; for 11 the trailer copy is found in the
+  code, for 218 it is returned with `fromCode: false`, and `readBoundManifestBytes` binds all 239.
+- **The publish gate runs the signing tests.** `npm test` (which `prepublishOnly`, CI and the publish workflow run)
+  now also runs `npm run test:signatures`: the signature forms, the writer, module signing, the signed-code manifest,
+  the statement-domain parity, the loader's verified bytes, the flow compiler and the isomorphic flow host. Through
+  0.10.4 no signing test ran before a publish.
+- The signing and verifying functions have no type declarations in `src/index.d.ts`, as in 0.10.4, so a TypeScript
+  caller declares them itself.
+
 ## 0.10.4
 
 - The browser module harness accepts `wasiThreadProbeTimeoutMs` (positive finite milliseconds, default 1500) and exposes read-only `wasiThreadPoolReport` counts for requested and armed pool workers. Explicit pools retain workers that arm; workers that miss the deadline are terminated, and the host decides how to handle reduced capacity.

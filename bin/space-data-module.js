@@ -139,6 +139,9 @@ function parseArgs(argv) {
       case "--require-signature":
         options.requireSignature = true;
         break;
+      case "--scope":
+        options.signatureScope = requireValue(argv, ++index, value);
+        break;
       case "--fixture":
         options.fixturePath = path.resolve(requireValue(argv, ++index, value));
         break;
@@ -166,6 +169,9 @@ function parseArgs(argv) {
         break;
       case "--allow-single-lane":
         options.allowSingleLane = true;
+        break;
+      case "--allow-test-signer":
+        options.allowTestSigner = true;
         break;
       case "--gate-manifest":
         options.gateManifestPath = path.resolve(
@@ -257,7 +263,7 @@ function printUsage() {
   space-data-module conformance estimation --evidence ./conformance/estimation-evidence.json --json
   space-data-module conformance estimation --self-test                                          (proves EKF/UKF alias, runtime divergence, and placeholder OCM are caught)
   space-data-module flow check ./flows/my.flow.json --deps ./modules-root
-  space-data-module flow compile ./flows/my.flow.json --deps ./modules-root [--out ./flows/my/dist]
+  space-data-module flow compile ./flows/my.flow.json --deps ./modules-root [--out ./flows/my/dist] [--allow-test-signer]
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --recipient-public-key <hex> --out ./dist/module.wasm.enc
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --single-file-bundle --out ./dist/module.bundle.wasm
@@ -343,6 +349,7 @@ async function runFlow(argv) {
     dependencies,
     outDir,
     flowSourcePath: flowPath,
+    allowTestSigner: options.allowTestSigner === true,
   });
   if (options.json) {
     console.log(
@@ -760,6 +767,7 @@ async function runSign(argv) {
   const result = await signModuleArtifact(wasmBytes, {
     privateKeySeedHex: keypair.privateKeySeedHex,
     keyId: keypair.keyId ?? null,
+    ...(options.signatureScope ? { signatureScope: options.signatureScope } : {}),
   });
   const outputPath = options.outputPath ?? options.wasmPath;
   await writeFile(outputPath, result.wasmBytes);
@@ -770,6 +778,9 @@ async function runSign(argv) {
           outputPath,
           keyId: result.signature.keyId,
           publicKeyHex: result.signature.publicKeyHex,
+          signatureScope: result.signatureScope,
+          statementDomain: result.signature.statementDomain ?? null,
+          signedHashHex: result.signedHashHex,
           canonicalModuleHashHex: result.canonicalModuleHashHex,
         },
         null,
@@ -780,6 +791,9 @@ async function runSign(argv) {
     console.log(`signed=${outputPath}`);
     console.log(`keyId=${result.signature.keyId}`);
     console.log(`publicKeyHex=${result.signature.publicKeyHex}`);
+    console.log(`signatureScope=${result.signatureScope}`);
+    if (result.signature.statementDomain) console.log(`statementDomain=${result.signature.statementDomain}`);
+    console.log(`signedHashHex=${result.signedHashHex}`);
     console.log(`canonicalModuleHashHex=${result.canonicalModuleHashHex}`);
   }
   return 0;
@@ -800,13 +814,21 @@ async function runVerify(argv) {
     trustedPublicKeys,
     requireSignature: options.requireSignature ?? true,
   });
+  // The form verified is named by its statement domain. The result's
+  // signatureScope ("module", the node's status label, kept for the shared
+  // vectors) is not printed: it reads like the removed bare-digest form.
+  const { signatureScope: _nodeStatusLabel, ...printed } = result;
   if (options.json) {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(printed, null, 2));
   } else {
-    console.log(`verified=${result.verified}`);
-    console.log(`signed=${result.signed}`);
-    if (result.keyId) console.log(`keyId=${result.keyId}`);
-    if (result.publicKeyHex) console.log(`publicKeyHex=${result.publicKeyHex}`);
+    console.log(`verified=${printed.verified}`);
+    console.log(`signed=${printed.signed}`);
+    // The signer's role comes from the verified KEY. The entry's keyId is an
+    // unsigned label the file carries about itself, printed as such.
+    if (printed.verified) console.log(`signer=${printed.testSigner ? "test" : "other"}`);
+    if (printed.publicKeyHex) console.log(`publicKeyHex=${printed.publicKeyHex}`);
+    if (printed.keyId) console.log(`unsignedKeyId=${printed.keyId}`);
+    if (printed.statementDomain) console.log(`statementDomain=${printed.statementDomain}`);
   }
   return result.verified ? 0 : 1;
 }

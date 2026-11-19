@@ -6,7 +6,14 @@ import {
   cleanupCompilation,
   compileModuleFromSource,
 } from "../src/compiler/compileModule.js";
-import { signModuleArtifact } from "../src/bundle/signing.js";
+import {
+  ModuleSignatureError,
+  signModuleArtifact,
+  verifyModuleArtifact,
+} from "../src/bundle/signing.js";
+import { createSingleFileBundle } from "../src/bundle/wasm.js";
+import { decodePlgManifest, encodePlgManifest } from "../src/manifest/plgCodec.js";
+import { extractPublicationRecordCollection } from "../src/transport/records.js";
 import { compileFlowProgram } from "../src/flow/flowCompiler.js";
 import { createIsomorphicFlowRuntimeHost } from "../src/flow/isomorphicFlowHost.js";
 import { normalizeManifestForSdnFlow } from "../src/flow/normalize.js";
@@ -135,7 +142,7 @@ extern "C" int echo(void) {
   const signed = await signModuleArtifact(compilation.wasmBytes, {
     privateKeySeedHex: "31".repeat(32),
     keyId: "isomorphic-flow-host-test",
-    signatureScope: "bundle",
+    signatureScope: "publication",
   });
   const childSha256 = createHash("sha256")
     .update(signed.wasmBytes)
@@ -236,7 +243,7 @@ extern "C" int echo(void) {
   const signedFlow = await signModuleArtifact(compiledFlow.wasmBytes, {
     privateKeySeedHex: "32".repeat(32),
     keyId: "isomorphic-parent-flow-test",
-    signatureScope: "bundle",
+    signatureScope: "publication",
   });
 
   let extraImportReads = 0;
@@ -281,6 +288,45 @@ extern "C" int echo(void) {
       children: [child],
     }).then((unexpectedHost) => unexpectedHost.destroy()),
     /trusted signer set/i,
+  );
+
+  // The trailer's manifest copy is outside the publication signature. A flow
+  // whose trailer manifest was changed after signing (here: node echo-a's
+  // signed CONFIG byte) still verifies, and is refused by name: the node list
+  // and its configs come from the flow's signed code.
+  const signedTrailer = extractPublicationRecordCollection(signedFlow.wasmBytes);
+  const trailerManifest = decodePlgManifest(
+    new Uint8Array(
+      signedTrailer.mbl.entries.find((entry) => entry.entryId === "manifest").payload,
+    ),
+  );
+  const echoA = trailerManifest.flowNodes.find((node) => node.nodeId === "echo-a");
+  assert.deepEqual(Array.from(echoA.config), [0xa1]);
+  echoA.config = Uint8Array.of(0xee);
+  const alteredFlow = (
+    await createSingleFileBundle({
+      wasmBytes: new Uint8Array(signedTrailer.payloadBytes),
+      manifestBytes: encodePlgManifest(trailerManifest),
+      signature: signedFlow.signature,
+    })
+  ).wasmBytes;
+  const alteredPolicy = {
+    trustedPublicKeys: [signedFlow.signature.publicKeyHex],
+    requireSignature: true,
+  };
+  assert.equal(
+    (await verifyModuleArtifact(alteredFlow, alteredPolicy)).verified,
+    true,
+  );
+  await assert.rejects(
+    createIsomorphicFlowRuntimeHost({
+      wasmSource: alteredFlow,
+      verifySignature: alteredPolicy,
+      children: [child],
+    }).then((unexpectedHost) => unexpectedHost.destroy()),
+    (error) =>
+      error instanceof ModuleSignatureError &&
+      error.code === "trailer_manifest_mismatch",
   );
 
   const host = await createIsomorphicFlowRuntimeHost({

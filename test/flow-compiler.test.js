@@ -36,6 +36,7 @@ import {
   encodePluginManifest,
 } from "../src/manifest/index.js";
 import {
+  SDK_TEST_SIGNER_PUBLIC_KEY_HEX,
   signModuleArtifact,
   verifyModuleArtifact,
 } from "../src/bundle/signing.js";
@@ -44,6 +45,11 @@ import {
   validatePluginManifest,
 } from "../src/compliance/index.js";
 import { createBrowserModuleHarness } from "../src/host/browserModuleHarness.js";
+import {
+  computeCanonicalModuleHash,
+  createSingleFileBundle,
+} from "../src/bundle/wasm.js";
+import { ed25519PublicKey, ed25519Sign } from "../src/utils/wasmCrypto.js";
 
 const execFileAsync = promisify(execFile);
 const CLI_PATH = fileURLToPath(new URL("../bin/space-data-module.js", import.meta.url));
@@ -248,7 +254,7 @@ async function signedEmptyArtifact(seedByte, keyId) {
     {
       privateKeySeedHex: seedByte.repeat(32),
       keyId,
-      signatureScope: "bundle",
+      signatureScope: "publication",
     },
   );
   return {
@@ -2943,7 +2949,7 @@ function vectorHexToBytes(hex) {
   return out;
 }
 
-async function flowLaneAdmits(vector) {
+async function flowLaneAdmits(vector, { allowTestSigner, developmentOnly = false } = {}) {
   const artifactBytes = vectorHexToBytes(vector.sdkArtifactHex);
   const dependency = {
     ...producerDependency,
@@ -2960,7 +2966,7 @@ async function flowLaneAdmits(vector) {
       publicKeyHex:
         vector.trustedPublicKeysHex[0] ??
         "00000000000000000000000000000000000000000000000000000000000000ff",
-      developmentOnly: false,
+      developmentOnly,
     },
   };
   const flow = singleNodeFlow(dependency, {
@@ -2978,6 +2984,7 @@ async function flowLaneAdmits(vector) {
       flow,
       check,
       dependencies,
+      allowTestSigner,
     });
     return { admitted: true, message: "" };
   } catch (error) {
@@ -2985,9 +2992,15 @@ async function flowLaneAdmits(vector) {
   }
 }
 
+// Where this SDK differs from the shared file (the node's verdicts) on
+// purpose: 0.11.0 removed the whole-bundle form, which the node still admits.
+const SDK_NOT_ADMISSIBLE = new Set(["bundle-scope-signed-ok"]);
+
 for (const vector of STATEMENT_DOMAIN_VECTORS.artifacts) {
   test(`flow lane admissibility: ${vector.name}`, async () => {
-    const expected = vector.expect.flowNodeAdmissible === true;
+    const expected =
+      vector.expect.flowNodeAdmissible === true &&
+      !SDK_NOT_ADMISSIBLE.has(vector.name);
     const outcome = await flowLaneAdmits(vector);
     assert.equal(
       outcome.admitted,
@@ -2999,34 +3012,115 @@ for (const vector of STATEMENT_DOMAIN_VECTORS.artifacts) {
   });
 }
 
-test("a bare-digest module signature verifies but is refused for composition", async () => {
-  // Minted here rather than looked up: the shared vector set carries no
-  // verified bare-digest artifact today, and the contract must be tested, not
-  // asserted about a fixture that might stop existing.
+test("a bare-digest module signature is refused by name, for composition too", async () => {
+  // Minted by hand: since 0.11.0 no SDK writer produces this form.
   const portable = Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
-  const legacySigned = await signModuleArtifact(portable, {
-    privateKeySeedHex: "44".repeat(32),
-    keyId: "legacy-bare-digest",
-    signatureScope: "module",
+  const seed = Uint8Array.from(Buffer.from("44".repeat(32), "hex"));
+  const canonical = await computeCanonicalModuleHash(portable);
+  const publicKeyHex = Buffer.from(await ed25519PublicKey(seed)).toString("hex");
+  const legacy = await createSingleFileBundle({
+    wasmBytes: portable,
+    signature: {
+      algorithm: "ed25519",
+      keyId: "legacy-bare-digest",
+      publicKeyHex,
+      signatureHex: Buffer.from(await ed25519Sign(canonical.hashBytes, seed)).toString("hex"),
+      signedHashHex: canonical.hashHex,
+      signedHashAlgorithm: "sha256-canonical-module-hash",
+    },
   });
-  assert.equal(legacySigned.signature.statementDomain, undefined);
 
-  const verified = await verifyModuleArtifact(legacySigned.wasmBytes, {
-    trustedPublicKeys: [legacySigned.signature.publicKeyHex],
-    requireSignature: true,
-  });
-  assert.equal(verified.verified, true, "the legacy form must still VERIFY");
-  assert.equal(verified.signatureScope, "module");
-  assert.equal(verified.statementDomain, null);
+  await assert.rejects(
+    verifyModuleArtifact(legacy.wasmBytes, {
+      trustedPublicKeys: [publicKeyHex],
+      requireSignature: true,
+    }),
+    (error) => error.code === "legacy_module_signature",
+  );
 
   const outcome = await flowLaneAdmits({
     name: "legacy-bare-digest",
-    why: "no domain separation: a signature minted over another protocol's digest could be replayed into a lane that compiles what it admits",
-    sdkArtifactHex: Buffer.from(legacySigned.wasmBytes).toString("hex"),
-    trustedPublicKeysHex: [legacySigned.signature.publicKeyHex],
+    why: "the bare module digest form was removed in 0.11.0",
+    sdkArtifactHex: Buffer.from(legacy.wasmBytes).toString("hex"),
+    trustedPublicKeysHex: [publicKeyHex],
   });
-  assert.equal(outcome.admitted, false, "verified is not the same as admissible");
-  assert.match(outcome.message, /SDN-MODULE-PUBLICATION-V1/);
+  assert.equal(outcome.admitted, false);
+  assert.match(outcome.message, /Isomorphic node "[^"]+": module signature has no statementDomain/);
+});
+
+for (const signatureScope of ["publication"]) {
+  test(`a child signed by the SDK in the ${signatureScope} form is admitted for composition as it is`, async () => {
+    const portable = Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+    const signed = await signModuleArtifact(portable, {
+      privateKeySeedHex: "45".repeat(32),
+      keyId: "sdk-signed-child",
+      signatureScope,
+    });
+    const outcome = await flowLaneAdmits({
+      name: `sdk-${signatureScope}`,
+      why: `the SDK's ${signatureScope} form must be a hash-bound child as written`,
+      sdkArtifactHex: Buffer.from(signed.wasmBytes).toString("hex"),
+      trustedPublicKeysHex: [signed.signature.publicKeyHex],
+    });
+    assert.equal(outcome.admitted, true, outcome.message);
+  });
+}
+
+test("a child signed by the SDK's public test key is a development signer: refused unless allowTestSigner", async () => {
+  const keypair = JSON.parse(
+    await readFile(new URL("./support/dev-module-signing-keypair.json", import.meta.url), "utf8"),
+  );
+  assert.equal(keypair.publicKeyHex, SDK_TEST_SIGNER_PUBLIC_KEY_HEX);
+  const signed = await signModuleArtifact(
+    Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]),
+    // The keyId is an unsigned label: claiming the owner's changes nothing.
+    { privateKeySeedHex: keypair.privateKeySeedHex, keyId: "module-owner-2026-10-15" },
+  );
+  const vector = {
+    name: "sdk-test-key",
+    why: "the SDK test key signs",
+    sdkArtifactHex: Buffer.from(signed.wasmBytes).toString("hex"),
+    // The publisher record says developmentOnly: false about itself.
+    trustedPublicKeysHex: [keypair.publicKeyHex],
+  };
+  const refused = await flowLaneAdmits(vector);
+  assert.equal(refused.admitted, false);
+  assert.match(refused.message, /SDK's public test key/);
+  assert.match(refused.message, /allowTestSigner/);
+  const admitted = await flowLaneAdmits(vector, { allowTestSigner: true });
+  assert.equal(admitted.admitted, true, admitted.message);
+  const result = await verifyModuleArtifact(signed.wasmBytes, {
+    trustedPublicKeys: [keypair.publicKeyHex],
+  });
+  assert.equal(result.testSigner, true);
+  const other = await signModuleArtifact(Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]), {
+    privateKeySeedHex: "45".repeat(32),
+  });
+  assert.equal(
+    (await verifyModuleArtifact(other.wasmBytes, { trustedPublicKeys: [other.signature.publicKeyHex] })).testSigner,
+    false,
+  );
+});
+
+test("a publisher whose own record says developmentOnly is refused, with and without allowTestSigner", async () => {
+  // Another key than the test key: only the test KEY is gated by allowTestSigner.
+  const signed = await signModuleArtifact(Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]), {
+    privateKeySeedHex: "45".repeat(32),
+  });
+  assert.notEqual(signed.signature.publicKeyHex, SDK_TEST_SIGNER_PUBLIC_KEY_HEX);
+  const vector = {
+    name: "development-only-publisher",
+    why: "a publisher record that says developmentOnly about itself",
+    sdkArtifactHex: Buffer.from(signed.wasmBytes).toString("hex"),
+    trustedPublicKeysHex: [signed.signature.publicKeyHex],
+  };
+  for (const allowTestSigner of [undefined, false, true]) {
+    const outcome = await flowLaneAdmits(vector, { allowTestSigner, developmentOnly: true });
+    assert.equal(outcome.admitted, false, `allowTestSigner ${allowTestSigner}`);
+    assert.match(outcome.message, /signed only by a development publisher/);
+  }
+  // The control: the same child with a publisher record that does not say so.
+  assert.equal((await flowLaneAdmits(vector, { developmentOnly: false })).admitted, true);
 });
 
 // ---------------------------------------------------------------------------

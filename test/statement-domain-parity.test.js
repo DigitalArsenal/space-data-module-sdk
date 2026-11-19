@@ -74,6 +74,51 @@ function bytesToHex(bytes) {
 const vectorsRaw = await readFile(VECTORS_PATH);
 const vectors = JSON.parse(vectorsRaw.toString("utf8"));
 
+// Where this SDK's verdict differs from the shared file's (the node's) on
+// purpose. 0.11.0 removed the two forms without a statement domain (the bare
+// module digest and the whole-bundle digest); the node's verifier still admits
+// them until the node changes in step. The shared file stays the node's bytes,
+// so the SDK's expectation for those vectors is stated here, by name, and the
+// file's own expectation is checked to be the node's (so a regenerated file
+// that already refuses them shows up here). Both removed forms are refused
+// before the signer is asked about, so even the untrusted-signer and tampered
+// bundle vectors get the form's name as their reason.
+const refusedAs = (reason) => ({ verified: false, reason, statementDomain: "" });
+const SDK_EXPECTATIONS = Object.freeze({
+  "legacy-bare-digest-no-domain": {
+    nodeExpect: { verified: true, reason: "ok" },
+    expect: refusedAs("legacy_module_signature"),
+  },
+  "bundle-scope-signed-ok": {
+    nodeExpect: { verified: true, reason: "ok" },
+    expect: refusedAs("legacy_bundle_signature"),
+  },
+  "bundle-scope-untrusted-signer": {
+    nodeExpect: { verified: false, reason: "untrusted_signer" },
+    expect: refusedAs("legacy_bundle_signature"),
+  },
+  "bundle-scope-recorded-digest-tampered": {
+    nodeExpect: { verified: false, reason: "hash_mismatch" },
+    expect: refusedAs("legacy_bundle_signature"),
+  },
+});
+
+for (const vector of vectors.artifacts) {
+  const override = SDK_EXPECTATIONS[vector.name];
+  if (!override) continue;
+  vector.nodeExpect = vector.expect;
+  vector.expect = { ...vector.expect, ...override.expect };
+}
+
+test("the SDK's stated differences from the shared vectors are the ones named", () => {
+  for (const [name, override] of Object.entries(SDK_EXPECTATIONS)) {
+    const vector = vectors.artifacts.find((entry) => entry.name === name);
+    assert.ok(vector, `shared vectors no longer carry ${name}`);
+    assert.equal(vector.nodeExpect.verified, override.nodeExpect.verified);
+    assert.equal(vector.nodeExpect.reason, override.nodeExpect.reason);
+  }
+});
+
 test("the shared vector file is the same bytes the node's Go suite reads", () => {
   const sum = createHash("sha256").update(vectorsRaw).digest("hex");
   assert.equal(
