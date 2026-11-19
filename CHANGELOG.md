@@ -109,8 +109,13 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
   `SDM_TRUSTED_MODULE_SIGNERS`, `__SDM_TRUSTED_MODULE_SIGNERS__` or `verifyModuleArtifact`'s `trustedPublicKeys` that
   is not exactly 64 hex characters after trim and lowercase (a `0x` prefix, a 63-character typo, a non-hex character)
   throws `ModuleSignatureError("invalid_trusted_key")` before any artifact is read. Through 0.10.4 such an entry was
-  dropped without a word, so a policy that named only a mistyped key verified nothing at all and any file loaded. An
-  `SDM_TRUSTED_MODULE_SIGNERS` that is set but empty no longer hides `__SDM_TRUSTED_MODULE_SIGNERS__`.
+  dropped without a word, so a policy that named only a mistyped key verified nothing at all and any file loaded. A
+  trusted-key list that is not undefined, null, an array or a string (a Set, an object, a number) throws
+  `invalid_trusted_key` too; through 0.10.4 it was read as no keys. A policy's `trustedPublicKeys` that was given (a
+  non-empty array, a non-blank string) but yields no key, for example `[process.env.KEY]` with `KEY` unset, throws
+  `invalid_trusted_key`; an explicit empty array still names no key and adds no requirement. An
+  `SDM_TRUSTED_MODULE_SIGNERS` that yields no key (unset, empty, blanks or commas only) no longer hides
+  `__SDM_TRUSTED_MODULE_SIGNERS__`.
   `verifySignature: true` still takes its trust from the environment or the global, and now always requires a
   signature: with no trust configured there, every load is refused by name (`missing_signature` or
   `untrusted_signer`) instead of being let through unverified. `test/signature-policy-keys.test.js`.

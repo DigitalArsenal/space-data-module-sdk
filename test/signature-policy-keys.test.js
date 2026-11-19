@@ -1,7 +1,9 @@
 // A trusted key the caller named is never dropped without a word: a malformed
 // key is refused by name (invalid_trusted_key), so a typo can never turn the
-// signature check off. An empty environment variable does not hide the global
-// list, and `verifySignature: true` always requires a signature.
+// signature check off. A list of the wrong type, or one that was given and
+// yields no key, is refused the same way. An environment variable that yields
+// no key does not hide the global list, and `verifySignature: true` always
+// requires a signature.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -111,6 +113,124 @@ test("an environment variable set but empty does not hide the global list", asyn
         requireSignature: true,
       });
     });
+  }
+});
+
+test("an environment variable that yields no key (commas or blanks only) does not hide the global list", async () => {
+  for (const env of [",", " , ", ",,,", " ,\t, "]) {
+    await withSignerEnv({ env, global: [GOOD] }, async () => {
+      assert.deepEqual(
+        resolveModuleSignaturePolicy({}),
+        { trustedPublicKeys: [GOOD], requireSignature: true },
+        `env ${JSON.stringify(env)}`,
+      );
+    });
+    // With no global either, it names nothing: no policy, as with an unset variable.
+    await withSignerEnv({ env }, async () => {
+      assert.equal(resolveModuleSignaturePolicy({}), null, `env ${JSON.stringify(env)} alone`);
+    });
+  }
+  // An environment that yields a key still wins over the global.
+  const other = "cd".repeat(32);
+  await withSignerEnv({ env: `,${other},`, global: [GOOD] }, async () => {
+    assert.deepEqual(resolveModuleSignaturePolicy({}), {
+      trustedPublicKeys: [other],
+      requireSignature: true,
+    });
+  });
+});
+
+test("a trusted-key list that is not undefined, null, an array or a string is refused by name", async () => {
+  const wrongTypes = {
+    "a Set": new Set([GOOD]),
+    "an object": { key: GOOD },
+    "a number": 42,
+    "a boolean": true,
+  };
+  for (const [label, value] of Object.entries(wrongTypes)) {
+    assert.throws(
+      () => resolveModuleSignaturePolicy({ verifySignature: { trustedPublicKeys: value } }),
+      isInvalidKey,
+      `policy: ${label}`,
+    );
+    await withSignerEnv({ global: value }, async () => {
+      assert.throws(() => resolveModuleSignaturePolicy({}), isInvalidKey, `global: ${label}`);
+    });
+    await assert.rejects(
+      verifyModuleArtifact(buildTestWasm(), { trustedPublicKeys: value }),
+      isInvalidKey,
+      `verifyModuleArtifact: ${label}`,
+    );
+  }
+  // undefined and null name no key and are not refused.
+  for (const value of [undefined, null]) {
+    assert.deepEqual(
+      resolveModuleSignaturePolicy({ verifySignature: { trustedPublicKeys: value } }),
+      { trustedPublicKeys: [], requireSignature: false },
+    );
+  }
+});
+
+test("a trustedPublicKeys that was given but yields no key is refused (an unset environment variable in an array)", () => {
+  const unset = process.env.SDM_TEST_KEY_THAT_IS_NEVER_SET;
+  assert.equal(unset, undefined);
+  for (const given of [[unset], [null], [""], ["  "], [undefined, ""], ",", " , ", ",,"]) {
+    assert.throws(
+      () => resolveModuleSignaturePolicy({ verifySignature: { trustedPublicKeys: given } }),
+      isInvalidKey,
+      `trustedPublicKeys ${JSON.stringify(given)}`,
+    );
+    assert.throws(
+      () =>
+        resolveModuleSignaturePolicy({
+          verifySignature: { trustedPublicKeys: given, requireSignature: true },
+        }),
+      isInvalidKey,
+      `trustedPublicKeys ${JSON.stringify(given)} with requireSignature`,
+    );
+  }
+  // One real key next to empty entries is a key: accepted.
+  assert.deepEqual(
+    resolveModuleSignaturePolicy({ verifySignature: { trustedPublicKeys: [unset, GOOD] } }),
+    { trustedPublicKeys: [GOOD], requireSignature: true },
+  );
+});
+
+test("an explicit empty trustedPublicKeys array or blank string stays as it was: no key named and no requirement", () => {
+  for (const given of [[], "", "   "]) {
+    assert.deepEqual(
+      resolveModuleSignaturePolicy({ verifySignature: { trustedPublicKeys: given } }),
+      { trustedPublicKeys: [], requireSignature: false },
+      `trustedPublicKeys ${JSON.stringify(given)}`,
+    );
+    assert.deepEqual(
+      resolveModuleSignaturePolicy({
+        verifySignature: { trustedPublicKeys: given, requireSignature: true },
+      }),
+      { trustedPublicKeys: [], requireSignature: true },
+      `trustedPublicKeys ${JSON.stringify(given)} with requireSignature`,
+    );
+  }
+});
+
+test("a stripped file under an environment of commas and a global key is refused, never loaded", async () => {
+  const keypair = JSON.parse(await readFile(DEV_KEYPAIR_PATH, "utf8"));
+  const signed = await signModuleArtifact(buildTestWasm(), {
+    privateKeySeedHex: keypair.privateKeySeedHex,
+  });
+  const stripped = new Uint8Array(extractPublicationRecordCollection(signed.wasmBytes).payloadBytes);
+  const dir = await mkdtemp(path.join(tmpdir(), "sdm-policy-commas-"));
+  try {
+    const wasmPath = path.join(dir, "stripped.wasm");
+    await writeFile(wasmPath, stripped);
+    await withSignerEnv({ env: ",", global: [keypair.publicKeyHex] }, async () => {
+      await assert.rejects(
+        loadModule({ wasmSource: wasmPath }),
+        (error) => error instanceof ModuleSignatureError && error.code === "missing_signature",
+      );
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });
 

@@ -101,12 +101,28 @@ function hexToBytes(hex) {
 // after trim and lowercase. Anything else that is not empty is REFUSED by
 // name: a key the operator named and the SDK silently dropped would leave a
 // policy that trusts nothing it was told to, or none at all (fail open).
+// The list itself is undefined, null (no keys), an array or a comma-separated
+// string; any other value (a Set, an object, a number) is refused by name too,
+// never read as an empty list.
 function normalizeTrustedPublicKeys(trustedPublicKeys) {
-  const list = Array.isArray(trustedPublicKeys)
-    ? trustedPublicKeys
-    : typeof trustedPublicKeys === "string"
-      ? trustedPublicKeys.split(",")
-      : [];
+  if (trustedPublicKeys === undefined || trustedPublicKeys === null) {
+    return [];
+  }
+  let list;
+  if (Array.isArray(trustedPublicKeys)) {
+    list = trustedPublicKeys;
+  } else if (typeof trustedPublicKeys === "string") {
+    list = trustedPublicKeys.split(",");
+  } else {
+    const kind =
+      typeof trustedPublicKeys === "object"
+        ? Object.prototype.toString.call(trustedPublicKeys).slice(8, -1)
+        : typeof trustedPublicKeys;
+    throw new ModuleSignatureError(
+      "invalid_trusted_key",
+      `trusted signer keys must be an array of hex strings or a comma-separated string; got ${kind}`,
+    );
+  }
   const keys = [];
   for (const entry of list) {
     const key = String(entry ?? "").trim().toLowerCase();
@@ -763,8 +779,13 @@ function readEnv(name) {
  * exactly 64 hex characters after trim and lowercase (a `0x` prefix, a
  * 63-character typo, a non-hex character) throws
  * `ModuleSignatureError("invalid_trusted_key")`, so a typo can never turn the
- * check off. An environment variable that is set but empty does not hide the
- * global list.
+ * check off. A list that is not undefined, null, an array or a string (a Set,
+ * an object, a number) throws `invalid_trusted_key` as well. In the object
+ * form, a `trustedPublicKeys` that was given (a non-empty array, a non-blank
+ * string) but yields no key (for example `[process.env.KEY]` with KEY unset)
+ * throws `invalid_trusted_key`; an explicit empty array names no key and adds
+ * no requirement. An environment variable that yields no key (unset, empty,
+ * blanks or commas only) does not hide the global list.
  *
  * `verifySignature: true` uses the environment's or the global's trust. The
  * caller asked for verification, so it always requires a signature: with no
@@ -776,9 +797,19 @@ export function resolveModuleSignaturePolicy(options = {}) {
     return null;
   }
   if (options.verifySignature && typeof options.verifySignature === "object") {
-    const trustedPublicKeys = normalizeTrustedPublicKeys(
-      options.verifySignature.trustedPublicKeys,
-    );
+    const given = options.verifySignature.trustedPublicKeys;
+    const trustedPublicKeys = normalizeTrustedPublicKeys(given);
+    const named =
+      (Array.isArray(given) && given.length > 0) ||
+      (typeof given === "string" && given.trim() !== "");
+    if (named && trustedPublicKeys.length === 0) {
+      // For example [process.env.KEY] with KEY unset: the caller named keys,
+      // and not one of them is a key. Refused, never read as "no keys".
+      throw new ModuleSignatureError(
+        "invalid_trusted_key",
+        "trustedPublicKeys was given but holds no key (every entry is empty)",
+      );
+    }
     return {
       trustedPublicKeys,
       requireSignature:
@@ -790,11 +821,12 @@ export function resolveModuleSignaturePolicy(options = {}) {
   const envRequire = readEnv("SDM_REQUIRE_MODULE_SIGNATURE");
   const globalTrusted = globalThis.__SDM_TRUSTED_MODULE_SIGNERS__;
   const globalRequire = globalThis.__SDM_REQUIRE_MODULE_SIGNATURE__;
-  const envTrustedText =
-    typeof envTrusted === "string" ? envTrusted.trim() : envTrusted;
-  const trustedPublicKeys = normalizeTrustedPublicKeys(
-    envTrustedText || globalTrusted,
-  );
+  // The environment's list is read first; the global is used when the
+  // environment yields no key (unset, empty, blanks or commas only), so a
+  // variable that names nothing never hides the global list.
+  const envKeys = normalizeTrustedPublicKeys(envTrusted);
+  const trustedPublicKeys =
+    envKeys.length > 0 ? envKeys : normalizeTrustedPublicKeys(globalTrusted);
   const requireSignature =
     options.verifySignature === true ||
     trustedPublicKeys.length > 0 ||
