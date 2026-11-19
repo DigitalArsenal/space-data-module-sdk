@@ -35,6 +35,18 @@
   are removed with the form; regenerating the bundle vectors needs the 0.10.4 tree.
 - `test/module-signature-forms.test.js` covers the one form, the refusal by name in the verifier, the Node loader, the
   flow compiler and the CLI, and the publication entry against the node's vector.
+- **The trailer's manifest copy is never trusted.** The publication form covers the bytes before the trailer; the
+  bundle writer moves the `sds.manifest` section into the trailer's `manifest` entry, which the signature does not
+  cover. Every reader takes the manifest from the SIGNED code instead (an `sds.manifest` section left in the signed
+  bytes, else what the code's `plugin_get_manifest_flatbuffer` export returns), through the new
+  `readBoundManifestBytes` (`src/bundle/codeManifest.js`): the isomorphic flow host's node list and signed node
+  CONFIG (read from the parent's running instance), and the WasmEdge leg of `loadModule` (its runtime-target gate,
+  read by instantiating the signed code with stand-in imports). Refused by name: `trailer_manifest_mismatch` (the
+  trailer copy is not byte for byte the code's copy, that is, it was changed after signing) and
+  `trailer_manifest_unbound` (the trailer carries a manifest and the code carries none). A module with a manifest in
+  neither place declares nothing, as before. Through 0.10.4 both readers took the trailer's copy first: a file whose
+  trailer manifest was changed after signing still verified, and the flow host ran its nodes with the changed CONFIG.
+  `test/signed-code-manifest.test.js` and `test/isomorphic-flow-host.test.js` cover both readers.
 
 ## 0.10.4
 

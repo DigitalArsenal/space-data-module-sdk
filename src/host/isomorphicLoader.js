@@ -27,6 +27,8 @@ import {
   resolveModuleSignaturePolicy,
   verifyModuleArtifact,
 } from "../bundle/signing.js";
+import { readBoundManifestBytes } from "../bundle/codeManifest.js";
+import { decodePlgManifest } from "../manifest/plgCodec.js";
 import { attachHostDispatch, inspectModule } from "./isomorphicLoaderCore.js";
 import { assertArtifactRuntimeTarget } from "./runtimeTargetGate.js";
 import { DEFAULT_HOSTCALL_IMPORT_MODULE } from "./abi.js";
@@ -311,11 +313,18 @@ export async function loadModule(options = {}) {
       await verifyModuleArtifact(artifactBytes, signaturePolicy);
     }
     if (runtimeKind === "wasmedge") {
-      const { locateEmbeddedPlgManifest } = await import(
-        "../compliance/index.js"
-      );
-      embeddedManifest =
-        locateEmbeddedPlgManifest(artifactBytes)?.decoded ?? null;
+      // The declaration comes from the SIGNED code (readBoundManifestBytes),
+      // never from the trailer's manifest entry, which the signature does not
+      // cover; a trailer copy that differs from the code's is refused by name.
+      const manifestBytes = await readBoundManifestBytes(artifactBytes);
+      embeddedManifest = null;
+      if (manifestBytes) {
+        try {
+          embeddedManifest = decodePlgManifest(manifestBytes);
+        } catch {
+          // An undecodable manifest is not a declaration.
+        }
+      }
     }
     if (needsCompiledModule) {
       wasmModule = await WebAssembly.compile(toLoadableWasmBytes(artifactBytes));

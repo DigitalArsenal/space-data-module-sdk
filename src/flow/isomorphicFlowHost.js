@@ -3,10 +3,9 @@ import {
   resolveModuleSignaturePolicy,
   verifyModuleArtifact,
 } from "../bundle/signing.js";
-import { getWasmCustomSections } from "../bundle/wasm.js";
+import { readBoundManifestBytes } from "../bundle/codeManifest.js";
 import { decodePlgManifest } from "../manifest/plgCodec.js";
 import { createBrowserModuleHarness } from "../host/browserModuleHarness.js";
-import { extractPublicationRecordCollection } from "../transport/records.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { bytesToHex } from "../utils/encoding.js";
 import { createFlowRuntimeHost } from "./flowRuntimeHost.js";
@@ -45,31 +44,22 @@ function decodeCanonicalPlg(bytes, description) {
   }
 }
 
-function embeddedFlowManifest(artifactBytes) {
-  const publication = extractPublicationRecordCollection(artifactBytes);
-  for (const entry of publication?.mbl?.entries ?? []) {
-    if (
-      entry?.entryId === "manifest" ||
-      entry?.sectionName === SDS_MANIFEST_SECTION_NAME
-    ) {
-      return decodeCanonicalPlg(
-        exactArtifactBytes(entry.payload),
-        "Signed flow bundle manifest",
-      );
-    }
-  }
-
-  const portableBytes = publication?.payloadBytes ?? artifactBytes;
-  const sections = getWasmCustomSections(
-    portableBytes,
-    SDS_MANIFEST_SECTION_NAME,
-  );
-  if (sections.length === 0) {
+// The flow's node list comes from its SIGNED code: the manifest the parent's
+// running instance returns (or an sds.manifest section left in the bytes
+// before the trailer). The trailer's manifest entry is not covered by the
+// signature; it is only compared with the code's copy, and a difference is
+// refused by name (readBoundManifestBytes).
+async function signedFlowManifest(artifactBytes, parent) {
+  const manifestBytes = await readBoundManifestBytes(artifactBytes, {
+    instance: parent.instance,
+    memory: parent.memory,
+  });
+  if (!manifestBytes) {
     throw new Error(
-      `Isomorphic flow artifact embeds no ${SDS_MANIFEST_SECTION_NAME} PLG manifest.`,
+      `Isomorphic flow artifact carries no PLG manifest in its signed code (no ${SDS_MANIFEST_SECTION_NAME} section, no manifest export).`,
     );
   }
-  return decodeCanonicalPlg(sections[0], "Embedded flow manifest");
+  return decodeCanonicalPlg(manifestBytes, "Signed flow manifest");
 }
 
 function flowManifestNodes(manifest) {
@@ -215,9 +205,6 @@ export async function createIsomorphicFlowRuntimeHost(options = {}) {
   if (parentSignaturePolicy) {
     await verifyModuleArtifact(parentArtifactBytes, parentSignaturePolicy);
   }
-  const manifestNodes = flowManifestNodes(
-    embeddedFlowManifest(parentArtifactBytes),
-  );
   const parent = await createFlowRuntimeHost({
     wasmSource: parentArtifactBytes,
     // UNCONDITIONAL, with no opt-out. This host mounts every isomorphic child
@@ -235,6 +222,9 @@ export async function createIsomorphicFlowRuntimeHost(options = {}) {
     legacyHostImportCompat: options.legacyHostImportCompat,
     engineLink: options.engineLink,
   });
+  const manifestNodes = flowManifestNodes(
+    await signedFlowManifest(parentArtifactBytes, parent),
+  );
   const declared = new Map();
   for (let index = 0; index < parent.dependencyCount; index += 1) {
     const descriptor = parent.getDependencyDescriptor(index);
