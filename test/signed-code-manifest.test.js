@@ -157,7 +157,8 @@ test("a signed file's trailer manifest is outside the signature: an altered one 
   // The signer moved the manifest into the trailer; the code keeps its copy.
   assert.deepEqual(Buffer.from(readTrailerManifestBytes(signed)), Buffer.from(manifestBytes));
   const code = await readSignedCodeManifest(signed);
-  assert.equal(code.source, "manifest-export");
+  // The fixture's export bodies are constants: answered from the bytes alone.
+  assert.equal(code.source, "static-exports");
   assert.deepEqual(Buffer.from(code.bytes), Buffer.from(manifestBytes));
   // The alteration: the publication signature does not see it.
   const result = await verifyModuleArtifact(altered, policy);

@@ -366,8 +366,11 @@ async function loadServerModule(options, signaturePolicy, owned) {
   if (needsBytes) {
     const { readFile } = await import("node:fs/promises");
     artifactBytes = new Uint8Array(await readFile(source));
+    let verifiedSignature = false;
     if (signaturePolicy) {
-      await verifyModuleArtifact(artifactBytes, signaturePolicy);
+      const verification = await verifyModuleArtifact(artifactBytes, signaturePolicy);
+      verifiedSignature =
+        signaturePolicy.requireSignature === true && verification?.verified === true;
       owned.verifiedCopy = await writeVerifiedArtifactCopy(artifactBytes);
       launchSource = owned.verifiedCopy.path;
     }
@@ -375,7 +378,12 @@ async function loadServerModule(options, signaturePolicy, owned) {
       // The declaration comes from the SIGNED code (readBoundManifestBytes),
       // never from the trailer's manifest entry, which the signature does not
       // cover; a trailer copy that differs from the code's is refused by name.
-      const manifestBytes = await readBoundManifestBytes(artifactBytes);
+      // The code is run in this process to ask it ONLY when its signature
+      // was verified under a policy that requires one; otherwise the manifest
+      // exports are answered from the bytes alone or not at all.
+      const manifestBytes = await readBoundManifestBytes(artifactBytes, {
+        verifiedSignature,
+      });
       embeddedManifest = null;
       if (manifestBytes) {
         try {

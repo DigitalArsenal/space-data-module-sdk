@@ -28,8 +28,8 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
   `PUBLICATION_SIGNED_HASH_ALGORITHM`, the same string; no alias). `BUNDLE_SIGNATURE_HASH_ALGORITHM` stays, to name
   the refusal. Exports added: `PUBLICATION_SIGNED_HASH_ALGORITHM`, `MODULE_SIGNATURE_SCOPES`,
   `DEFAULT_MODULE_SIGNATURE_SCOPE`, `SDK_TEST_SIGNER_PUBLIC_KEY_HEX`, `isSdkTestSigner`, `readBoundManifestBytes`,
-  `readSignedCodeManifest`, `readTrailerManifestBytes`, `readInstanceManifestBytes`, `rewriteProtectedEnvelopeTrailer`
-  and `locateBoundPlgManifest`.
+  `readSignedCodeManifest`, `readTrailerManifestBytes`, `readInstanceManifestBytes`, `readStaticManifestBytes`,
+  `rewriteProtectedEnvelopeTrailer` and `locateBoundPlgManifest`.
 - New refusals a caller can meet: `legacy_module_signature`, `legacy_bundle_signature`, `missing_signed_hash`,
   `unsupported_hash_algorithm`, `trailer_manifest_mismatch`, `trailer_manifest_unbound`, `missing_signature` for
   a file whose trailer was removed under a key-naming policy, and `invalid_trusted_key` for a malformed trusted key
@@ -101,13 +101,21 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
   cover. Every reader takes the manifest from the SIGNED code instead (an `sds.manifest` section left in the signed
   bytes, else what the code's `plugin_get_manifest_flatbuffer` export returns), through the new
   `readBoundManifestBytes` (`src/bundle/codeManifest.js`): the isomorphic flow host's node list and signed node
-  CONFIG (read from the parent's running instance), and the WasmEdge leg of `loadModule` (its runtime-target gate,
-  read by instantiating the signed code with stand-in imports). Refused by name: `trailer_manifest_mismatch` (the
+  CONFIG (read from the parent's running instance), and the WasmEdge leg of `loadModule` (its runtime-target gate).
+  Without a running instance the two manifest exports are answered from the bytes alone when their bodies are
+  constants (`readStaticManifestBytes`: an `i32.const` body read over the data the module places, active segments and
+  the passive ones its start function copies); the code is instantiated, with stand-in imports, only when its
+  signature was already verified under a policy that requires one (`verifiedSignature: true`). Code nobody verified
+  is never run in the caller's process: on `check` and on a load with no policy, a start function that loops or a
+  declared memory of 65,536 pages would otherwise hang it or allocate 4 GiB. Such code is reported as not asked
+  (`trailer_manifest_unbound` with `error.codeNotRun` true). On the 239 signed files of the modules repository all
+  239 are answered from the bytes alone, each equal to what the running code returns. Refused by name: `trailer_manifest_mismatch` (the
   trailer copy is not byte for byte the code's copy, that is, it was changed after signing) and
   `trailer_manifest_unbound` (the trailer carries a manifest and the code carries none). A module with a manifest in
   neither place declares nothing, as before. Through 0.10.4 both readers took the trailer's copy first: a file whose
   trailer manifest was changed after signing still verified, and the flow host ran its nodes with the changed CONFIG.
-  `test/signed-code-manifest.test.js` and `test/isomorphic-flow-host.test.js` cover both readers.
+  `test/signed-code-manifest.test.js` and `test/isomorphic-flow-host.test.js` cover both readers;
+  `test/code-manifest-not-run.test.js` covers the code that is not run.
 - **What `signModuleArtifact` hashes is what its output holds before the trailer.** For a plaintext module that is
   the payload with its `sds.*` custom sections removed, so a raw build that still carries `sds.manifest` is signed in
   one pass. **An encrypted artifact is signed without being parsed.** When the trailer carries an ENC record, the
