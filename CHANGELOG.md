@@ -68,6 +68,15 @@
   neither place declares nothing, as before. Through 0.10.4 both readers took the trailer's copy first: a file whose
   trailer manifest was changed after signing still verified, and the flow host ran its nodes with the changed CONFIG.
   `test/signed-code-manifest.test.js` and `test/isomorphic-flow-host.test.js` cover both readers.
+- **What `signModuleArtifact` hashes is what its output holds before the trailer.** For a plaintext module that is
+  the payload with its `sds.*` custom sections removed, so a raw build that still carries `sds.manifest` is signed in
+  one pass. **An encrypted artifact is signed without being parsed.** When the trailer carries an ENC record, the
+  payload is ciphertext: it is hashed as stored, never read as wasm, and the trailer is written again with the new
+  signature entry, every other bundle entry, and the ENC and PNM records unchanged. Through 0.10.4 signing an encrypted
+  artifact threw (`WASM magic header mismatch`). For an envelope with only an ENC record the output is byte for byte
+  what the engine's envelope signer writes. That signature binds the ciphertext only: not the ENC record, not the
+  plaintext; a host that decrypts checks the plaintext's own signature. New export from `src/bundle/wasm.js`:
+  `rewriteProtectedEnvelopeTrailer`. `test/module-signature-writer.test.js` covers both.
 
 ## 0.10.4
 

@@ -3,6 +3,7 @@ import {
   createSingleFileBundle,
   getWasmCustomSections,
   parseSingleFileBundle,
+  rewriteProtectedEnvelopeTrailer,
 } from "./wasm.js";
 import { SDS_MANIFEST_SECTION_NAME } from "./constants.js";
 import {
@@ -213,6 +214,81 @@ function resolveSignatureScope(signatureScope) {
 }
 
 /**
+ * The publication signature entry over `portable` (the bytes before the
+ * trailer), in the node's SignatureEntry JSON key order
+ * (sdn-server/internal/modulesign/modulesign.go, Sign): the same key over the
+ * same portable bytes gives the same entry bytes as the node's.
+ */
+async function publicationSignatureEntry(seed, portable, keyId) {
+  const publicKey = await ed25519PublicKey(seed);
+  const contentHashBytes = await sha256Bytes(new Uint8Array(portable));
+  const signedHashHex = bytesToHex(contentHashBytes);
+  const signatureBytes = await ed25519Sign(
+    buildSignatureStatement(DOMAIN_MODULE_PUBLICATION_V1, contentHashBytes),
+    seed,
+  );
+  return {
+    contentHashBytes,
+    signedHashHex,
+    signature: {
+      algorithm: MODULE_SIGNATURE_ALGORITHM,
+      keyId: keyId ?? null,
+      publicKeyHex: bytesToHex(new Uint8Array(publicKey)),
+      signatureHex: bytesToHex(new Uint8Array(signatureBytes)),
+      signedHashAlgorithm: PUBLICATION_SIGNED_HASH_ALGORITHM,
+      signedHashHex,
+      statementDomain: DOMAIN_MODULE_PUBLICATION_V1,
+    },
+  };
+}
+
+/**
+ * An artifact whose trailer carries an ENC record: the payload is ciphertext
+ * and is NEVER parsed. The signature is taken over the bytes as stored (the
+ * ciphertext), the same statement as for a plaintext module; the trailer is
+ * written again with the new signature entry, every other bundle entry, and
+ * the ENC and PNM records as they were. The engine's envelope signer
+ * (OrbPro `scripts/signProtectedEnvelope.mjs`) writes the same entry.
+ *
+ * What this signature binds is the ciphertext only: not the ENC record (its
+ * cipher suite, key context or recipient), not the plaintext. A host that
+ * decrypts checks the plaintext's own signature after decrypting.
+ */
+async function signEncryptedArtifact(protectedArtifact, seed, options, signatureScope) {
+  const portable = new Uint8Array(protectedArtifact.payloadBytes);
+  const keptEntries = (protectedArtifact.mbl?.entries ?? [])
+    .filter((entry) => !findSignatureEntry({ entries: [entry] }))
+    .map((entry) => ({ ...entry, payload: new Uint8Array(entry.payload ?? []) }));
+  const { signature, signedHashHex, contentHashBytes } =
+    await publicationSignatureEntry(seed, portable, options.keyId);
+  const wasmBytes = await rewriteProtectedEnvelopeTrailer({
+    publicationRecords: protectedArtifact,
+    entries: keptEntries,
+    signature,
+    contentHash: contentHashBytes,
+  });
+  const written = extractPublicationRecordCollection(wasmBytes);
+  if (!written?.enc || !equalBytes(written.payloadBytes, portable)) {
+    throw new ModuleSignatureError(
+      "hash_mismatch",
+      "writing the signature changed the encrypted payload; nothing signed",
+    );
+  }
+  return {
+    wasmBytes,
+    signature,
+    // The bundle's recorded value, as it stands in the trailer: the
+    // plaintext's canonical hash when the old trailer carried one, else the
+    // ciphertext's content hash. The ciphertext itself is never parsed.
+    canonicalModuleHashHex: bytesToHex(
+      new Uint8Array(written.mbl?.canonicalModuleHash ?? []),
+    ),
+    signedHashHex,
+    signatureScope,
+  };
+}
+
+/**
  * Sign a module artifact with an Ed25519 key and embed the detached signature
  * in the artifact's MBL bundle (sds.signature entry).
  *
@@ -222,6 +298,12 @@ function resolveSignatureScope(signatureScope) {
  * the same key over the same portable bytes yields the same entry bytes. The
  * signature covers the bytes before the trailer; the trailer's entries (the
  * manifest copy included) are not covered.
+ *
+ * What is hashed is what the OUTPUT holds before its trailer. For a plaintext
+ * module that is the payload with its `sds.*` custom sections removed (they
+ * move into the trailer), so a raw build that still carries `sds.manifest` is
+ * signed correctly in one pass. For an artifact whose trailer carries an ENC
+ * record, the payload is ciphertext: it is hashed as stored and never parsed.
  *
  * Existing bundle entries, the manifest, and any ENC/PNM publication records
  * in the REC trailer are preserved. Any previous signature entry is replaced,
@@ -244,6 +326,9 @@ export async function signModuleArtifact(bytes, options = {}) {
     );
   }
   const protectedArtifact = extractPublicationRecordCollection(bytes);
+  if (protectedArtifact?.enc) {
+    return signEncryptedArtifact(protectedArtifact, seed, options, signatureScope);
+  }
   const payloadBytes = protectedArtifact?.payloadBytes ?? bytes;
 
   let manifestBytes;
@@ -293,26 +378,11 @@ export async function signModuleArtifact(bytes, options = {}) {
     );
   }
 
-  const publicKey = await ed25519PublicKey(seed);
-  const publicKeyHex = bytesToHex(new Uint8Array(publicKey));
-  const contentHashBytes = await sha256Bytes(new Uint8Array(unsignedPortable));
-  const signedHashHex = bytesToHex(contentHashBytes);
-  const signatureBytes = await ed25519Sign(
-    buildSignatureStatement(DOMAIN_MODULE_PUBLICATION_V1, contentHashBytes),
+  const { signature, signedHashHex } = await publicationSignatureEntry(
     seed,
+    unsignedPortable,
+    options.keyId,
   );
-  // The node's SignatureEntry, in its JSON key order
-  // (sdn-server/internal/modulesign/modulesign.go, Sign): the same key over
-  // the same portable bytes gives the same entry bytes as the node's.
-  const signature = {
-    algorithm: MODULE_SIGNATURE_ALGORITHM,
-    keyId: options.keyId ?? null,
-    publicKeyHex,
-    signatureHex: bytesToHex(new Uint8Array(signatureBytes)),
-    signedHashAlgorithm: PUBLICATION_SIGNED_HASH_ALGORITHM,
-    signedHashHex,
-    statementDomain: DOMAIN_MODULE_PUBLICATION_V1,
-  };
 
   const rebuilt = await createSingleFileBundle({
     wasmBytes: bytes,
