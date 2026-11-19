@@ -77,6 +77,14 @@
   what the engine's envelope signer writes. That signature binds the ciphertext only: not the ENC record, not the
   plaintext; a host that decrypts checks the plaintext's own signature. New export from `src/bundle/wasm.js`:
   `rewriteProtectedEnvelopeTrailer`. `test/module-signature-writer.test.js` covers both.
+- **The Node loader runs the bytes it verified.** Under a signature policy, `loadModule` on the server writes the
+  bytes it verified to a private temporary file (owner-only, removed by the harness's `destroy()`, or at once when
+  the load is refused) and the WasmEdge leg, the runtime host and a process runtime's default arguments read that
+  file, never the caller's path. Through 0.10.4 it verified one read of the file and then handed the path to the
+  harness, which read it again, so a file replaced in between ran unverified. The harness reports the copy as
+  `verifiedArtifactPath`. Not covered: a process runtime's caller-given `args` (the loader cannot know what they read)
+  and the runtime host's `modules` definitions, which name their own paths and are not verified by `loadModule`.
+  Without a policy nothing is verified and the caller's path is used, as before. `test/loader-verified-bytes.test.js`.
 
 ## 0.10.4
 
