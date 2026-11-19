@@ -51,7 +51,9 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
   `computeModuleBundleSignatureHash` is removed.
 - **The flow compiler admits a hash-bound child only in the publication form.**
 - **Every module signed by 0.10.x must be signed again** with 0.11.0. Signing again replaces the signature entry and
-  keeps the loadable wasm byte for byte; the file's sha256 changes, so every list that pins a signed file by hash must
+  keeps the loadable wasm byte for byte: a file that already has a trailer is signed over the bytes before it as they
+  stand, and they are kept unchanged, also when they still carry `sds.*` sections (a node-signed file keeps its
+  `sds.manifest` section there, and it stays bound); the file's sha256 changes, so every list that pins a signed file by hash must
   be regenerated. A module signed in the publication form by 0.11.0 still verifies under earlier SDKs, which accept
   that form.
 - The CLI `sign` takes `--scope` (only `publication`), and `sign` and `verify` report the form (`signatureScope`,

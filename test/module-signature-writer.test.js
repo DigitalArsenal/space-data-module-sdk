@@ -41,7 +41,10 @@ import {
   encryptBytesForRecipient,
   generateX25519Keypair,
 } from "../src/transport/pki.js";
-import { sha256Bytes } from "../src/utils/wasmCrypto.js";
+import { ed25519PublicKey, ed25519Sign, sha256Bytes } from "../src/utils/wasmCrypto.js";
+import { statement as buildSignatureStatement } from "../src/bundle/sigdomain.js";
+import { toLoadableWasmBytes } from "../src/bundle/artifactBytes.js";
+import { readBoundManifestBytes, readSignedCodeManifest } from "../src/bundle/codeManifest.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEV_KEYPAIR_PATH = path.join(__dirname, "support", "dev-module-signing-keypair.json");
@@ -133,6 +136,63 @@ test("(a) a raw build carrying sds.manifest is signed in one pass over the bytes
     keyId: keypair.keyId,
   });
   assert.deepEqual(new Uint8Array(again.wasmBytes), out);
+});
+
+// A node-style file: the node's signer (modulesign.Artifact) appends a trailer
+// that holds only a signature entry, in its own field order with keyId "", to
+// a module that keeps its sds.manifest section in the signed bytes.
+async function nodeStyleSignedFile(raw, seedHex) {
+  const seed = Uint8Array.from(Buffer.from(seedHex, "hex"));
+  const contentHash = await sha256Bytes(raw);
+  const signatureHex = bytesToHex(
+    await ed25519Sign(buildSignatureStatement(DOMAIN_MODULE_PUBLICATION_V1, contentHash), seed),
+  );
+  const entryText = JSON.stringify({
+    algorithm: "ed25519",
+    keyId: "",
+    publicKeyHex: bytesToHex(await ed25519PublicKey(seed)),
+    signatureHex,
+    signedHashHex: bytesToHex(contentHash),
+    signedHashAlgorithm: "sha256-canonical-module-hash",
+    statementDomain: DOMAIN_MODULE_PUBLICATION_V1,
+  });
+  // The trailer's shape, taken from the bundle writer over an empty module,
+  // then put after the raw module as it stands.
+  const header = Uint8Array.of(0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00);
+  const shaped = extractPublicationRecordCollection(
+    (await createSingleFileBundle({ wasmBytes: header, signature: entryText })).wasmBytes,
+  );
+  return appendPublicationRecordCollection(
+    raw,
+    encodePublicationRecordCollection({ version: shaped.version, mbl: shaped.mbl }),
+  );
+}
+
+test("signing a node-style file again keeps the bytes before its trailer, and its manifest stays bound", async () => {
+  const keypair = await loadDevKeypair();
+  const manifest = manifestBytes();
+  const raw = rawBuildCarryingSdsSections(manifest);
+  const nodeFile = await nodeStyleSignedFile(raw, keypair.privateKeySeedHex);
+  const policy = { trustedPublicKeys: [keypair.publicKeyHex], requireSignature: true };
+  // The fixture is what it claims: the signed bytes are the raw module, its
+  // trailer holds only the signature entry, and it verifies.
+  assert.deepEqual(new Uint8Array(extractPublicationRecordCollection(nodeFile).payloadBytes), raw);
+  assert.deepEqual(
+    extractPublicationRecordCollection(nodeFile).mbl.entries.map((entry) => entry.entryId),
+    ["signature"],
+  );
+  assert.equal((await verifyModuleArtifact(nodeFile, policy)).verified, true);
+
+  const again = new Uint8Array(
+    (await signModuleArtifact(nodeFile, { privateKeySeedHex: keypair.privateKeySeedHex })).wasmBytes,
+  );
+  // The bytes before the trailer, and so the loadable wasm, are identical.
+  assert.deepEqual(new Uint8Array(extractPublicationRecordCollection(again).payloadBytes), raw);
+  assert.deepEqual(toLoadableWasmBytes(again), toLoadableWasmBytes(nodeFile));
+  assert.equal((await verifyModuleArtifact(again, policy)).verified, true);
+  // The manifest stays in the signed bytes and bound.
+  assert.equal((await readSignedCodeManifest(again)).source, "custom-section");
+  assert.deepEqual(new Uint8Array(await readBoundManifestBytes(again)), manifest);
 });
 
 async function encryptedEnvelope(plaintext, { withBundle = false } = {}) {

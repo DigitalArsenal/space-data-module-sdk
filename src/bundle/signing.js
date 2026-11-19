@@ -313,11 +313,15 @@ async function signEncryptedArtifact(protectedArtifact, seed, options, signature
  * signature covers the bytes before the trailer; the trailer's entries (the
  * manifest copy included) are not covered.
  *
- * What is hashed is what the OUTPUT holds before its trailer. For a plaintext
- * module that is the payload with its `sds.*` custom sections removed (they
- * move into the trailer), so a raw build that still carries `sds.manifest` is
- * signed correctly in one pass. For an artifact whose trailer carries an ENC
- * record, the payload is ciphertext: it is hashed as stored and never parsed.
+ * What is hashed is what the OUTPUT holds before its trailer. For a raw
+ * module (no trailer yet) that is the module with its `sds.*` custom sections
+ * removed (they move into the trailer), so a raw build that still carries
+ * `sds.manifest` is signed correctly in one pass. For a file that already has
+ * a trailer, the bytes before it are signed as they stand and kept unchanged
+ * (a node-signed file keeps its `sds.manifest` section there): signing again
+ * never changes the loadable wasm. For an artifact whose trailer carries an
+ * ENC record, the payload is ciphertext: it is hashed as stored and never
+ * parsed.
  *
  * Existing bundle entries, the manifest, and any ENC/PNM publication records
  * in the REC trailer are preserved. Any previous signature entry is replaced,
@@ -392,9 +396,18 @@ export async function signModuleArtifact(bytes, options = {}) {
     );
   }
 
+  // A file that already has a trailer (signed before, by this SDK or by the
+  // node) is signed over the bytes before that trailer AS THEY STAND, and they
+  // are kept unchanged: signing again never changes the loadable wasm. A
+  // node-signed file keeps its sds.manifest section in those bytes; the bundle
+  // writer would strip it (only the trailer it writes is used, below).
+  const keptPortable = protectedArtifact
+    ? new Uint8Array(protectedArtifact.payloadBytes)
+    : null;
+
   const { signature, signedHashHex } = await publicationSignatureEntry(
     seed,
-    unsignedPortable,
+    keptPortable ?? unsignedPortable,
     options.keyId,
   );
 
@@ -413,8 +426,24 @@ export async function signModuleArtifact(bytes, options = {}) {
       "writing the signature changed the bytes before the trailer; nothing signed",
     );
   }
+  let wasmBytes = new Uint8Array(rebuilt.wasmBytes);
+  if (keptPortable) {
+    // The trailer is self-contained (its footer records only its own length):
+    // the one just written goes after the bytes as they stood.
+    const trailer = wasmBytes.subarray(signedPortable.length);
+    wasmBytes = new Uint8Array(keptPortable.length + trailer.length);
+    wasmBytes.set(keptPortable, 0);
+    wasmBytes.set(trailer, keptPortable.length);
+    const written = extractPublicationRecordCollection(wasmBytes);
+    if (!written?.mbl || written.enc || !equalBytes(written.payloadBytes, keptPortable)) {
+      throw new ModuleSignatureError(
+        "hash_mismatch",
+        "writing the signature changed the bytes before the trailer; nothing signed",
+      );
+    }
+  }
   return {
-    wasmBytes: rebuilt.wasmBytes,
+    wasmBytes,
     signature,
     canonicalModuleHashHex: rebuilt.canonicalModuleHashHex,
     signedHashHex,
