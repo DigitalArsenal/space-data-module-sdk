@@ -2430,11 +2430,15 @@ function trailerManifestMismatch(trailer, codeDecoded, where) {
 /**
  * The manifest the SIGNED code carries, asked of the code itself
  * (`readBoundManifestBytes`: an `sds.manifest` section left in the bytes
- * before the trailer, else the code's `plugin_get_manifest_flatbuffer`
- * export, run with stand-in imports). A trailer copy that is not byte for byte
- * the code's is refused by name (`trailer_manifest_mismatch`), and a trailer
- * copy with no manifest in the code to bind it to is refused
- * (`trailer_manifest_unbound`), each as a ModuleSignatureError. Returns
+ * before the trailer, else what the code's `plugin_get_manifest_flatbuffer`
+ * export returns, answered from the bytes alone by `readStaticManifestBytes`).
+ * The code is never run here: no signature was verified, so a manifest export
+ * whose body is not a constant, with a trailer copy, is reported
+ * `trailer_manifest_unbound` with `codeNotRun` true. A trailer copy that is
+ * not byte for byte the code's is refused by name
+ * (`trailer_manifest_mismatch`), and a trailer copy with no manifest in the
+ * code to bind it to is refused (`trailer_manifest_unbound`), each as a
+ * ModuleSignatureError. Returns
  * `{ bytes, decoded, source: "signed-code", fromCode: true }`, or null when
  * neither the code nor the trailer carries a manifest that decodes, or when
  * the decoded manifest is not the expected plugin id or version.

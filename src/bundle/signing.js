@@ -510,26 +510,33 @@ export async function signModuleArtifact(bytes, options = {}) {
  * 0.11.0 and is REFUSED by name before the signer is asked about (it is a
  * property of the artifact): `legacy_bundle_signature` when it declares the
  * whole-bundle hash algorithm, `legacy_module_signature` for the bare module
- * digest. Such an artifact must be signed again. Here, and only here, this
- * verifier is deliberately STRICTER than the node's, which still admits both;
+ * digest. Such an artifact must be signed again. The node still admits both;
  * the parity test names the vectors where the verdicts differ.
  *
- * Elsewhere this mirrors the node exactly, to the reason code, because
- * the same artifact is verified by the Go loaders
- * (`sdn-server/internal/modulert/publication_signature.go` and its kubo twin)
- * and by this function in the browser and under Node/WasmEdge. An artifact that
- * verifies on the node and is refused here is a cross-runtime defect, not a
- * platform difference — so the checks below run in the node's ORDER (what the
- * signature covers is resolved before who signed it) and the shared vector file
+ * This verifier is also deliberately STRICTER than the node's on the
+ * publication form's own fields. It REQUIRES `signedHashHex` (equal to sha256
+ * of the bytes before the trailer) and `signedHashAlgorithm` (the fixed label);
+ * a null, empty or absent value is refused here (`invalid_signature_payload`
+ * for null, `missing_signed_hash`, `unsupported_hash_algorithm`), while the
+ * node admits an empty or null `signedHashHex` and consults
+ * `signedHashAlgorithm` only to recognize the whole-bundle label, so it admits
+ * an empty, null or other value there. A null `statementDomain` sends the node
+ * down its path without a domain (the removed form), which this verifier
+ * refuses. A null `keyId` is admitted on both sides.
+ *
+ * Apart from those differences, the checks follow the node
+ * (`sdn-server/internal/modulert/publication_signature.go` and its kubo twin),
+ * which verifies the same artifact as this function does in the browser and
+ * under Node/WasmEdge: they run in the node's ORDER (what the signature covers
+ * is resolved before who signed it), and the shared vector file
  * `test/support/statement-domain-vectors.json` pins both sides against the same
  * bytes and the same refusal reasons.
  *
- * Note the deliberate omissions on the node-signed path: `signedHashAlgorithm`
- * is not consulted and the bundle's recorded `canonicalModuleHash` is not
- * gated on, because the node consults neither. The domain itself defines the
- * hash basis (portable-payload SHA-256), and that basis binds the entire
- * instantiated payload — a strictly stronger commitment than the canonical
- * hash, which strips `sds.*` custom sections before hashing.
+ * The bundle's recorded `canonicalModuleHash` is not gated on, because the
+ * node does not gate on it. The domain itself defines the hash basis
+ * (portable-payload SHA-256), and that basis binds the entire instantiated
+ * payload — a strictly stronger commitment than the canonical hash, which
+ * strips `sds.*` custom sections before hashing.
  *
  * A present-but-invalid signature always throws. A missing signature throws
  * only when `requireSignature` is true.

@@ -100,8 +100,10 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
 - **The signature entry is found and read as the node reads it** (`publication_signature.go`). Every known key of
   the entry is a string (`keyId` may also be null); an array, a number, an object, a boolean, or null for another
   key is refused with `invalid_signature_payload` (through 0.10.4 a one-element array was read as its string and
-  admitted, which the node refuses; for null the node reads an empty string, so the reason can differ there, and the
-  verdict is a refusal on both sides wherever the SDK refuses). `signatureHex` and `publicKeyHex` are trimmed as
+  admitted, which the node refuses). For null the node reads an empty string, and the verdicts differ: a null
+  `keyId` is admitted on both sides; for a null or empty `signedHashHex` or `signedHashAlgorithm` the node admits
+  what this SDK refuses (this SDK requires both, above); for a null `statementDomain` the node takes the legacy path
+  without a domain, which this SDK refuses. `signatureHex` and `publicKeyHex` are trimmed as
   Go's `strings.TrimSpace` trims (U+0085 trimmed, U+FEFF not), not as JavaScript's `trim`. The entry is matched by
   `entryId` or `sectionName` after a Go trim and lowercase (`"Signature"`, `"SDS.Signature"`), as the node matches
   it. `test/signature-entry-parsing.test.js`; the shared vector file is unchanged.
@@ -139,9 +141,9 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
   trailer manifest was changed after signing still verified, and the flow host ran its nodes with the changed CONFIG.
   `test/signed-code-manifest.test.js` and `test/isomorphic-flow-host.test.js` cover both readers;
   `test/code-manifest-not-run.test.js` covers the code that is not run.
-- **What `signModuleArtifact` hashes is what its output holds before the trailer.** For a plaintext module that is
-  the payload with its `sds.*` custom sections removed, so a raw build that still carries `sds.manifest` is signed in
-  one pass. **An encrypted artifact is signed without being parsed.** When the trailer carries an ENC record, the
+- **What `signModuleArtifact` hashes is what its output holds before the trailer.** For a raw module (no trailer
+  yet) that is the module with its `sds.*` custom sections removed, so a raw build that still carries `sds.manifest`
+  is signed in one pass; a file that already has a trailer is signed over the bytes before it as they stand. **An encrypted artifact is signed without being parsed.** When the trailer carries an ENC record, the
   payload is ciphertext: it is hashed as stored, never read as wasm, and the trailer is written again with the new
   signature entry, every other bundle entry, and the ENC and PNM records unchanged. Through 0.10.4 signing an encrypted
   artifact threw (`WASM magic header mismatch`). For an envelope with only an ENC record the output is byte for byte
@@ -172,6 +174,8 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
   now also runs `npm run test:signatures`: the signature forms, the writer, module signing, the signed-code manifest,
   the statement-domain parity, the loader's verified bytes, the flow compiler and the isomorphic flow host. Through
   0.10.4 no signing test ran before a publish.
+- The signing and verifying functions have no type declarations in `src/index.d.ts`, as in 0.10.4, so a TypeScript
+  caller declares them itself.
 
 ## 0.10.4
 
