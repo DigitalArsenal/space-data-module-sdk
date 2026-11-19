@@ -32,6 +32,7 @@ import {
 } from "../manifest/normalize.js";
 import { isLegacyWildcardPort } from "./legacyWildcardPorts.js";
 import { SDS_MANIFEST_SECTION_NAME } from "../bundle/constants.js";
+import { readBoundManifestBytes } from "../bundle/codeManifest.js";
 import {
   decodeUnsignedLeb128,
   getWasmCustomSections,
@@ -2304,35 +2305,19 @@ function decodeManifestCandidate(candidate, options = {}) {
   return { start: 0, identifierOffset: 4, bytes, decoded };
 }
 
-/**
- * Scan wasm bytes for the canonical `$PLG` FlatBuffer identifier and, when
- * found, return both the raw offset and the smallest aligned candidate buffer
- * that a downstream decoder can try to parse. The wasm `data` sections embed
- * the manifest bytes verbatim; FlatBuffer headers are `<root_offset:u32><$PLG>`
- * so we walk backwards one 4-byte word and hand the caller a slice starting
- * there.
- */
-export function locateEmbeddedPlgManifest(wasmBytes, options = {}) {
-  const inputBytes = wasmBytes instanceof Uint8Array
-    ? wasmBytes
-    : new Uint8Array(wasmBytes);
-  const protectedArtifact = extractPublicationRecordCollection(inputBytes);
-  for (const entry of protectedArtifact?.mbl?.entries ?? []) {
-    if (
-      entry?.entryId !== "manifest" &&
-      entry?.sectionName !== SDS_MANIFEST_SECTION_NAME
-    ) {
-      continue;
-    }
-    const located = decodeManifestCandidate(
-      new Uint8Array(entry.payload ?? []),
-      options,
-    );
-    if (located) {
-      return { ...located, source: "bundle-manifest" };
-    }
+function containsBytes(haystack, needle) {
+  if (!haystack || needle.length === 0 || haystack.length < needle.length) {
+    return false;
   }
-  const bytes = protectedArtifact?.payloadBytes ?? inputBytes;
+  return Buffer.from(haystack.buffer, haystack.byteOffset, haystack.byteLength)
+    .indexOf(Buffer.from(needle.buffer, needle.byteOffset, needle.byteLength)) !== -1;
+}
+
+// The manifest found in the code itself (the bytes before any trailer): an
+// `sds.manifest` custom section, the data segments, the memory image they
+// build, or a raw scan. These bytes are the ones a publication signature
+// covers.
+function locateCodePlgManifest(bytes, options) {
   for (const sectionBytes of getWasmCustomSections(bytes, SDS_MANIFEST_SECTION_NAME)) {
     const located = decodeManifestCandidate(sectionBytes, options);
     if (located) {
@@ -2357,6 +2342,114 @@ export function locateEmbeddedPlgManifest(wasmBytes, options = {}) {
   return located ? { ...located, source: "raw-wasm" } : null;
 }
 
+/**
+ * The artifact's embedded `$PLG` manifest, the copy inside the CODE first.
+ *
+ * The code (every byte before the publication trailer) is what a publication
+ * signature covers; the trailer's MBL `manifest` entry is not covered. So:
+ *
+ *  - The code's copy is looked for first: an `sds.manifest` custom section,
+ *    then the data segments (FlatBuffer headers are `<root_offset:u32><$PLG>`,
+ *    so a scan walks back one word from the identifier and hands back a
+ *    slice starting there), then their memory image, then a raw scan.
+ *  - When the trailer also carries a manifest and its exact bytes appear in
+ *    the code (an `sds.manifest` section, the data segments or their memory
+ *    image), it is returned with `fromCode: true`.
+ *  - When they do not and the code keeps an `sds.manifest` section of its
+ *    own, the trailer copy was changed after signing: refused with an Error
+ *    whose `code` is `trailer_manifest_mismatch`. A byte scan of the data is
+ *    a heuristic (it can land on bytes that only look like a manifest), so a
+ *    scan never refuses.
+ *  - Otherwise the trailer's copy is returned with `fromCode: false`: this
+ *    function could not find it in the code by reading bytes. Most compiled
+ *    modules keep their manifest where only running their
+ *    `plugin_get_manifest_flatbuffer` export finds it. A caller that must
+ *    trust the manifest calls `locateBoundPlgManifest`, which asks the code
+ *    and refuses a trailer copy that differs.
+ *
+ * Every result says `fromCode`: true when the bytes were found in the code.
+ */
+export function locateEmbeddedPlgManifest(wasmBytes, options = {}) {
+  const inputBytes = wasmBytes instanceof Uint8Array
+    ? wasmBytes
+    : new Uint8Array(wasmBytes);
+  const protectedArtifact = extractPublicationRecordCollection(inputBytes);
+  const bytes = protectedArtifact?.payloadBytes ?? inputBytes;
+  let trailer = null;
+  for (const entry of protectedArtifact?.mbl?.entries ?? []) {
+    if (
+      entry?.entryId !== "manifest" &&
+      entry?.sectionName !== SDS_MANIFEST_SECTION_NAME
+    ) {
+      continue;
+    }
+    const located = decodeManifestCandidate(
+      new Uint8Array(entry.payload ?? []),
+      options,
+    );
+    if (located) {
+      trailer = { ...located, source: "bundle-manifest" };
+      break;
+    }
+  }
+
+  if (trailer) {
+    const sections = getWasmCustomSections(bytes, SDS_MANIFEST_SECTION_NAME);
+    const inCode =
+      sections.some((section) =>
+        section.length === trailer.bytes.length && containsBytes(section, trailer.bytes)) ||
+      containsBytes(concatenateWasmDataSegmentPayloads(bytes), trailer.bytes) ||
+      containsBytes(reconstructWasmDataMemoryImage(bytes), trailer.bytes);
+    if (inCode) {
+      return { ...trailer, fromCode: true };
+    }
+    // Refused only against a copy the code certainly carries: its own
+    // `sds.manifest` section. A byte scan of the data is a heuristic (it can
+    // land on bytes that only look like a manifest), so it never refuses.
+    const section = sections
+      .map((sectionBytes) => decodeManifestCandidate(sectionBytes, {}))
+      .find(Boolean);
+    if (section) {
+      throw trailerManifestMismatch(trailer, section.decoded, "its sds.manifest section");
+    }
+    return { ...trailer, fromCode: false };
+  }
+
+  const code = locateCodePlgManifest(bytes, options);
+  return code ? { ...code, fromCode: true } : null;
+}
+
+function trailerManifestMismatch(trailer, codeDecoded, where) {
+  const error = new Error(
+    `the artifact's trailer manifest (${trailer.bytes.length} bytes, pluginId "${trailer.decoded?.pluginId}") is not the manifest its signed code carries in ${where} (pluginId "${codeDecoded?.pluginId}"); the trailer is not covered by the signature and was changed after signing`,
+  );
+  error.code = "trailer_manifest_mismatch";
+  return error;
+}
+
+/**
+ * The manifest the SIGNED code carries, asked of the code itself
+ * (`readBoundManifestBytes`: an `sds.manifest` section left in the bytes
+ * before the trailer, else the code's `plugin_get_manifest_flatbuffer`
+ * export, run with stand-in imports). A trailer copy that is not byte for byte
+ * the code's is refused by name (`trailer_manifest_mismatch`), and a trailer
+ * copy with no manifest in the code to bind it to is refused
+ * (`trailer_manifest_unbound`), each as a ModuleSignatureError. Returns
+ * `{ bytes, decoded, source: "signed-code", fromCode: true }`, or null when
+ * neither the code nor the trailer carries a manifest that decodes, or when
+ * the decoded manifest is not the expected plugin id or version.
+ */
+export async function locateBoundPlgManifest(wasmBytes, options = {}) {
+  const bound = await readBoundManifestBytes(
+    wasmBytes instanceof Uint8Array ? wasmBytes : new Uint8Array(wasmBytes),
+  );
+  if (!bound) {
+    return null;
+  }
+  const located = decodeManifestCandidate(bound, options);
+  return located ? { ...located, source: "signed-code", fromCode: true } : null;
+}
+
 export function hasLegacyPmanManifest(wasmBytes) {
   const bytes = wasmBytes instanceof Uint8Array
     ? wasmBytes
@@ -2364,7 +2457,7 @@ export function hasLegacyPmanManifest(wasmBytes) {
   return indexOfBytes(bytes, LEGACY_PMAN_IDENTIFIER_BYTES) !== -1;
 }
 
-function validateEmbeddedManifestBytes({
+async function validateEmbeddedManifestBytes({
   wasmBytes,
   manifest,
   issues,
@@ -2382,10 +2475,25 @@ function validateEmbeddedManifestBytes({
 
   const sourcePluginId = manifest?.pluginId ?? manifest?.plugin_id ?? null;
   const sourceVersion = manifest?.version ?? null;
-  const located = locateEmbeddedPlgManifest(wasmBytes, {
-    expectedPluginId: sourcePluginId,
-    expectedVersion: sourceVersion,
-  });
+  // The manifest the signed code carries, asked of the code; the trailer's
+  // copy, which no signature covers, is checked against it.
+  let located = null;
+  try {
+    located = await locateBoundPlgManifest(wasmBytes);
+    located ??= locateEmbeddedPlgManifest(wasmBytes, {
+      expectedPluginId: sourcePluginId,
+      expectedVersion: sourceVersion,
+    });
+  } catch (error) {
+    if (
+      error?.code !== "trailer_manifest_mismatch" &&
+      error?.code !== "trailer_manifest_unbound"
+    ) {
+      throw error;
+    }
+    pushIssue(issues, "error", error.code.replaceAll("_", "-"), error.message, sourceLabel);
+    return;
+  }
   if (!located) {
     pushIssue(
       issues,
@@ -2521,7 +2629,7 @@ export async function validatePluginArtifact(options) {
       );
     }
     if (loadedWasmBytes) {
-      validateEmbeddedManifestBytes({
+      await validateEmbeddedManifestBytes({
         wasmBytes: loadedWasmBytes,
         manifest,
         issues,

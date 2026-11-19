@@ -4,6 +4,36 @@
 
 ### Breaking: one signature form, the publication statement domain; every module signed by 0.10.x must be signed again
 
+**What a signature binds, and what it does not.** A module signature now covers exactly one thing: the bytes of the
+file before its publication trailer (the code, its data, and any custom section still in it), under the statement
+`"SDN-MODULE-PUBLICATION-V1" || 0x00 || sha256(those bytes)`. It does not bind a name, a version or an expiry: a
+file signed once by a trusted key verifies for as long as that key is trusted, and swapping one signed file for
+another signed file, or an older one for a newer one, is caught only by a hash pin (a flow document's
+`artifact.sha256`, a ledger, a page's `data-sha256`), never by the signature. It binds nothing in the trailer: not
+the trailer's manifest copy, not the guest-link objects, not the deployment plan, not any other bundle entry, not the
+bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longer trust the trailer's manifest copy
+(below). For an encrypted file it binds the ciphertext, not the cipher suite, the key context or the plaintext.
+
+**What breaks for a caller.**
+- Every module signed by 0.10.x or earlier in the two forms without a statement domain (the default of
+  `signModuleArtifact` and the CLI `sign` through 0.10.4, and `signatureScope: "bundle"`) is refused by every verifier
+  in this SDK, with or without `requireSignature`. **Every module must be signed again** with 0.11.0 before a host
+  on 0.11.0 loads it under a signature policy. The loadable wasm does not change; the file's sha256 does.
+- Options removed: `signModuleArtifact`'s `signatureScope: "module"` and `"bundle"` (refused,
+  `legacy_signature_scope`). A policy that names trusted keys with `requireSignature: false` now requires a signature.
+  The flow compiler refuses a test-key child unless `allowTestSigner: true`.
+- Result fields removed: `verifyModuleArtifact` no longer returns `signatureScope`; it returns `testSigner`. The CLI
+  `verify` prints `unsignedKeyId=` where it printed `keyId=`.
+- Exports removed: `computeModuleBundleSignatureHash`, and `LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM` (now
+  `PUBLICATION_SIGNED_HASH_ALGORITHM`, the same string; no alias). `BUNDLE_SIGNATURE_HASH_ALGORITHM` stays, to name
+  the refusal. Exports added: `PUBLICATION_SIGNED_HASH_ALGORITHM`, `MODULE_SIGNATURE_SCOPES`,
+  `DEFAULT_MODULE_SIGNATURE_SCOPE`, `SDK_TEST_SIGNER_PUBLIC_KEY_HEX`, `isSdkTestSigner`, `readBoundManifestBytes`,
+  `readSignedCodeManifest`, `readTrailerManifestBytes`, `readInstanceManifestBytes`, `rewriteProtectedEnvelopeTrailer`
+  and `locateBoundPlgManifest`.
+- New refusals a caller can meet: `legacy_module_signature`, `legacy_bundle_signature`, `missing_signed_hash`,
+  `unsupported_hash_algorithm`, `trailer_manifest_mismatch`, `trailer_manifest_unbound`, and `missing_signature` for
+  a file whose trailer was removed under a key-naming policy.
+
 - **One form remains:** Ed25519 over `"SDN-MODULE-PUBLICATION-V1" || 0x00 || sha256(portable)`, where `portable` is
   every byte before the publication trailer. `signModuleArtifact` writes it (`signatureScope: "publication"`, the
   default and the only value), with the same signature entry, field for field and in the same key order, as the
@@ -85,6 +115,18 @@
   `verifiedArtifactPath`. Not covered: a process runtime's caller-given `args` (the loader cannot know what they read)
   and the runtime host's `modules` definitions, which name their own paths and are not verified by `loadModule`.
   Without a policy nothing is verified and the caller's path is used, as before. `test/loader-verified-bytes.test.js`.
+- **`locateEmbeddedPlgManifest` looks in the code first.** Through 0.10.4 it returned the trailer's manifest copy
+  first. Now, when the trailer carries one, it is returned with `fromCode: true` only if its exact bytes appear in the
+  code (an `sds.manifest` section, the data segments or their memory image); it is refused with an Error whose `code`
+  is `trailer_manifest_mismatch` when the code keeps an `sds.manifest` section that differs; otherwise it is returned
+  with `fromCode: false`, because a byte scan cannot find the code's copy of most compiled modules (it sits where only
+  running the `plugin_get_manifest_flatbuffer` export finds it, and a scan of data can land on bytes that only look
+  like a manifest, so a scan never refuses). Every result now says `fromCode`. The new async
+  `locateBoundPlgManifest` asks the code (`readBoundManifestBytes`) and refuses a different or unbound trailer copy by
+  name; the compliance validator (`validatePluginArtifact`, `check`) uses it and reports `trailer-manifest-mismatch`
+  or `trailer-manifest-unbound` as errors. The parity gate reads only the loadable bytes, which carry no trailer.
+  On the modules repository's 239 signed files at 83289e693: no refusal; for 11 the trailer copy is found in the
+  code, for 218 it is returned with `fromCode: false`, and `readBoundManifestBytes` binds all 239.
 
 ## 0.10.4
 

@@ -25,8 +25,16 @@ import {
 import { SDS_MANIFEST_SECTION_NAME } from "../src/bundle/constants.js";
 import { encodePluginManifest } from "../src/manifest/index.js";
 import { decodePlgManifest } from "../src/manifest/plgCodec.js";
-import { locateEmbeddedPlgManifest } from "../src/compliance/index.js";
-import { extractPublicationRecordCollection } from "../src/transport/records.js";
+import {
+  locateBoundPlgManifest,
+  locateEmbeddedPlgManifest,
+  validatePluginArtifact,
+} from "../src/compliance/index.js";
+import {
+  appendPublicationRecordCollection,
+  encodePublicationRecordCollection,
+  extractPublicationRecordCollection,
+} from "../src/transport/records.js";
 import { loadModule } from "../src/host/isomorphicLoader.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -154,10 +162,55 @@ test("a signed file's trailer manifest is outside the signature: an altered one 
   // The alteration: the publication signature does not see it.
   const result = await verifyModuleArtifact(altered, policy);
   assert.equal(result.verified, true);
-  // And the byte locator, which reads the trailer first, returns the altered
-  // declaration: what the two readers below used before 0.11.0.
+  // The byte locator returned the altered declaration as if it were the
+  // module's (what the two readers below used before 0.11.0). It still
+  // returns it, since a byte scan does not find this code's copy, but it says
+  // so: fromCode false. The unaltered file's trailer copy is found in the code.
   assert.deepEqual(locateEmbeddedPlgManifest(altered)?.decoded.runtimeTargets, ["browser"]);
   assert.equal(locateEmbeddedPlgManifest(altered)?.source, "bundle-manifest");
+  assert.equal(locateEmbeddedPlgManifest(altered)?.fromCode, false);
+  assert.equal(locateEmbeddedPlgManifest(signed)?.fromCode, true);
+});
+
+test("locateBoundPlgManifest asks the code and refuses an altered trailer manifest by name", async () => {
+  const { signed, altered, manifestBytes } = await signedFixture();
+  const bound = await locateBoundPlgManifest(signed);
+  assert.equal(bound.source, "signed-code");
+  assert.equal(bound.fromCode, true);
+  assert.deepEqual(Buffer.from(bound.bytes), Buffer.from(manifestBytes));
+  await assert.rejects(
+    locateBoundPlgManifest(altered),
+    (error) => error instanceof ModuleSignatureError && error.code === "trailer_manifest_mismatch",
+  );
+});
+
+test("locateEmbeddedPlgManifest refuses a trailer manifest that differs from an sds.manifest section left in the code", async () => {
+  const codeManifest = encodePluginManifest(testManifest());
+  const otherManifest = encodePluginManifest(testManifest({ runtimeTargets: ["browser"] }));
+  // The code keeps its sds.manifest section (a writer that does not move it,
+  // as the node's signer leaves a payload); the trailer carries another.
+  const code = moduleCarryingManifest(codeManifest, { customSection: true, exportManifest: false });
+  const trailer = (await createSingleFileBundle({ wasmBytes: code, manifestBytes: otherManifest })).bundle;
+  const artifact = appendPublicationRecordCollection(code, encodePublicationRecordCollection({ mbl: trailer }));
+  assert.throws(() => locateEmbeddedPlgManifest(artifact), (error) => error.code === "trailer_manifest_mismatch");
+  // The same section and the same trailer copy: found, from the code.
+  const same = (await createSingleFileBundle({ wasmBytes: code, manifestBytes: codeManifest })).bundle;
+  const matching = appendPublicationRecordCollection(code, encodePublicationRecordCollection({ mbl: same }));
+  const located = locateEmbeddedPlgManifest(matching);
+  assert.equal(located.fromCode, true);
+  assert.deepEqual(Buffer.from(located.bytes), Buffer.from(codeManifest));
+});
+
+test("the compliance validator reports an altered trailer manifest by name", async () => {
+  const { signed, altered } = await signedFixture();
+  const manifest = testManifest();
+  const good = await validatePluginArtifact({ manifest, wasmBytes: signed });
+  assert.ok(!good.issues.some((issue) => issue.code === "trailer-manifest-mismatch"));
+  const bad = await validatePluginArtifact({ manifest, wasmBytes: altered });
+  assert.ok(
+    bad.issues.some((issue) => issue.code === "trailer-manifest-mismatch" && issue.severity === "error"),
+    JSON.stringify(bad.issues.map((issue) => issue.code)),
+  );
 });
 
 test("readBoundManifestBytes returns the code's copy and refuses a different trailer copy by name", async () => {
