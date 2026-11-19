@@ -44,6 +44,11 @@ import {
   validatePluginManifest,
 } from "../src/compliance/index.js";
 import { createBrowserModuleHarness } from "../src/host/browserModuleHarness.js";
+import {
+  computeCanonicalModuleHash,
+  createSingleFileBundle,
+} from "../src/bundle/wasm.js";
+import { ed25519PublicKey, ed25519Sign } from "../src/utils/wasmCrypto.js";
 
 const execFileAsync = promisify(execFile);
 const CLI_PATH = fileURLToPath(new URL("../bin/space-data-module.js", import.meta.url));
@@ -2999,35 +3004,59 @@ for (const vector of STATEMENT_DOMAIN_VECTORS.artifacts) {
   });
 }
 
-test("a bare-digest module signature verifies but is refused for composition", async () => {
-  // Minted here rather than looked up: the shared vector set carries no
-  // verified bare-digest artifact today, and the contract must be tested, not
-  // asserted about a fixture that might stop existing.
+test("a bare-digest module signature is refused by name, for composition too", async () => {
+  // Minted by hand: since 0.11.0 no SDK writer produces this form.
   const portable = Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
-  const legacySigned = await signModuleArtifact(portable, {
-    privateKeySeedHex: "44".repeat(32),
-    keyId: "legacy-bare-digest",
-    signatureScope: "module",
+  const seed = Uint8Array.from(Buffer.from("44".repeat(32), "hex"));
+  const canonical = await computeCanonicalModuleHash(portable);
+  const publicKeyHex = Buffer.from(await ed25519PublicKey(seed)).toString("hex");
+  const legacy = await createSingleFileBundle({
+    wasmBytes: portable,
+    signature: {
+      algorithm: "ed25519",
+      keyId: "legacy-bare-digest",
+      publicKeyHex,
+      signatureHex: Buffer.from(await ed25519Sign(canonical.hashBytes, seed)).toString("hex"),
+      signedHashHex: canonical.hashHex,
+      signedHashAlgorithm: "sha256-canonical-module-hash",
+    },
   });
-  assert.equal(legacySigned.signature.statementDomain, undefined);
 
-  const verified = await verifyModuleArtifact(legacySigned.wasmBytes, {
-    trustedPublicKeys: [legacySigned.signature.publicKeyHex],
-    requireSignature: true,
-  });
-  assert.equal(verified.verified, true, "the legacy form must still VERIFY");
-  assert.equal(verified.signatureScope, "module");
-  assert.equal(verified.statementDomain, null);
+  await assert.rejects(
+    verifyModuleArtifact(legacy.wasmBytes, {
+      trustedPublicKeys: [publicKeyHex],
+      requireSignature: true,
+    }),
+    (error) => error.code === "legacy_module_signature",
+  );
 
   const outcome = await flowLaneAdmits({
     name: "legacy-bare-digest",
-    why: "no domain separation: a signature minted over another protocol's digest could be replayed into a lane that compiles what it admits",
-    sdkArtifactHex: Buffer.from(legacySigned.wasmBytes).toString("hex"),
-    trustedPublicKeysHex: [legacySigned.signature.publicKeyHex],
+    why: "the bare module digest form was removed in 0.11.0",
+    sdkArtifactHex: Buffer.from(legacy.wasmBytes).toString("hex"),
+    trustedPublicKeysHex: [publicKeyHex],
   });
-  assert.equal(outcome.admitted, false, "verified is not the same as admissible");
-  assert.match(outcome.message, /SDN-MODULE-PUBLICATION-V1/);
+  assert.equal(outcome.admitted, false);
+  assert.match(outcome.message, /Isomorphic node "[^"]+": module signature has no statementDomain/);
 });
+
+for (const signatureScope of ["publication", "bundle"]) {
+  test(`a child signed by the SDK in the ${signatureScope} form is admitted for composition as it is`, async () => {
+    const portable = Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+    const signed = await signModuleArtifact(portable, {
+      privateKeySeedHex: "45".repeat(32),
+      keyId: "sdk-signed-child",
+      signatureScope,
+    });
+    const outcome = await flowLaneAdmits({
+      name: `sdk-${signatureScope}`,
+      why: `the SDK's ${signatureScope} form must be a hash-bound child as written`,
+      sdkArtifactHex: Buffer.from(signed.wasmBytes).toString("hex"),
+      trustedPublicKeysHex: [signed.signature.publicKeyHex],
+    });
+    assert.equal(outcome.admitted, true, outcome.message);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Composed runtimeTargets are DERIVED, not asserted

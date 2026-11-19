@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.11.0
+
+### Breaking: the bare module digest signature is removed; every module signed in it must be signed again
+
+- **A module signed in the bare module digest form is refused.** That form is an Ed25519 signature over the raw
+  canonical module hash with no `statementDomain` (`signedHashAlgorithm` `sha256-canonical-module-hash` or absent). It
+  was `signModuleArtifact`'s default and the CLI `sign`'s only form through 0.10.4. `verifyModuleArtifact` now refuses
+  it with the reason `legacy_module_signature` before the signer is asked about, and so does everything that calls it:
+  the Node loader and the browser harness under a signature policy, the isomorphic flow host's parent check, the flow
+  compiler's hash-bound children, and the CLI `verify`. It is refused with or without `requireSignature`: a present
+  signature in a removed form is never treated as unsigned.
+- **Every module signed by 0.10.x with its default options must be signed again** with 0.11.0. Signing again replaces
+  the signature entry and keeps the loadable wasm byte for byte; the file's sha256 changes, so every list that pins a
+  signed file by hash must be regenerated.
+- **`signatureScope: "module"` is refused** with `legacy_signature_scope`. `signModuleArtifact` writes two forms:
+  `"publication"`, the `SDN-MODULE-PUBLICATION-V1` statement over the bytes before the trailer, the same entry field
+  for field as the node's signing endpoint; and `"bundle"`, the whole-bundle statement. The default is `"bundle"`.
+  Until 0.10.4 the SDK could verify the publication form but not write it.
+- The CLI `sign` takes `--scope publication|bundle`, and `sign` and `verify` report the form they wrote or verified
+  (`signatureScope`, `statementDomain`, `signedHashHex`).
+- `signModuleArtifact` returns `signatureScope` and asserts that writing the signature leaves the bytes before the
+  trailer unchanged.
+- The shared statement-domain vector file is unchanged and stays byte-identical to the node's copy. The node's
+  verifier still admits the bare digest vector `legacy-bare-digest-no-domain`; this SDK refuses it, and
+  `test/statement-domain-parity.test.js` states that one difference by name.
+- `test/module-signature-forms.test.js` covers both forms, the refusal by name in the verifier, the Node loader, the
+  flow compiler and the CLI, and the publication entry against the node's vector.
+
 ## 0.10.4
 
 - The browser module harness accepts `wasiThreadProbeTimeoutMs` (positive finite milliseconds, default 1500) and exposes read-only `wasiThreadPoolReport` counts for requested and armed pool workers. Explicit pools retain workers that arm; workers that miss the deadline are terminated, and the host decides how to handle reduced capacity.

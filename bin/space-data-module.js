@@ -139,6 +139,9 @@ function parseArgs(argv) {
       case "--require-signature":
         options.requireSignature = true;
         break;
+      case "--scope":
+        options.signatureScope = requireValue(argv, ++index, value);
+        break;
       case "--fixture":
         options.fixturePath = path.resolve(requireValue(argv, ++index, value));
         break;
@@ -261,7 +264,7 @@ function printUsage() {
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --recipient-public-key <hex> --out ./dist/module.wasm.enc
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --single-file-bundle --out ./dist/module.bundle.wasm
-  space-data-module sign --wasm ./dist/module.wasm --key ./test/support/dev-module-signing-keypair.json [--out ./dist/module.signed.wasm]
+  space-data-module sign --wasm ./dist/module.wasm --key ./test/support/dev-module-signing-keypair.json [--scope publication|bundle] [--out ./dist/module.signed.wasm]
   space-data-module verify --wasm ./dist/module.wasm --trusted <pubKeyHex[,pubKeyHex...]> [--require-signature]
   space-data-module verify --wasm ./dist/module.wasm --key ./test/support/dev-module-signing-keypair.json
 `);
@@ -760,6 +763,7 @@ async function runSign(argv) {
   const result = await signModuleArtifact(wasmBytes, {
     privateKeySeedHex: keypair.privateKeySeedHex,
     keyId: keypair.keyId ?? null,
+    ...(options.signatureScope ? { signatureScope: options.signatureScope } : {}),
   });
   const outputPath = options.outputPath ?? options.wasmPath;
   await writeFile(outputPath, result.wasmBytes);
@@ -770,6 +774,9 @@ async function runSign(argv) {
           outputPath,
           keyId: result.signature.keyId,
           publicKeyHex: result.signature.publicKeyHex,
+          signatureScope: result.signatureScope,
+          statementDomain: result.signature.statementDomain ?? null,
+          signedHashHex: result.signedHashHex,
           canonicalModuleHashHex: result.canonicalModuleHashHex,
         },
         null,
@@ -780,6 +787,9 @@ async function runSign(argv) {
     console.log(`signed=${outputPath}`);
     console.log(`keyId=${result.signature.keyId}`);
     console.log(`publicKeyHex=${result.signature.publicKeyHex}`);
+    console.log(`signatureScope=${result.signatureScope}`);
+    if (result.signature.statementDomain) console.log(`statementDomain=${result.signature.statementDomain}`);
+    console.log(`signedHashHex=${result.signedHashHex}`);
     console.log(`canonicalModuleHashHex=${result.canonicalModuleHashHex}`);
   }
   return 0;
@@ -807,6 +817,8 @@ async function runVerify(argv) {
     console.log(`signed=${result.signed}`);
     if (result.keyId) console.log(`keyId=${result.keyId}`);
     if (result.publicKeyHex) console.log(`publicKeyHex=${result.publicKeyHex}`);
+    if (result.signatureScope) console.log(`signatureScope=${result.signatureScope}`);
+    if (result.statementDomain) console.log(`statementDomain=${result.statementDomain}`);
   }
   return result.verified ? 0 : 1;
 }

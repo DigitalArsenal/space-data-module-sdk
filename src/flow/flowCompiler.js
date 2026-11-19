@@ -305,10 +305,18 @@ async function verifyIsomorphicNodeArtifacts({
         `Isomorphic node "${checkedNode.nodeId}" publisher has no valid Ed25519 public key.`,
       );
     }
-    const verification = await verifyModuleArtifact(artifactBytes, {
-      trustedPublicKeys: [publisher.publicKeyHex],
-      requireSignature: true,
-    });
+    let verification;
+    try {
+      verification = await verifyModuleArtifact(artifactBytes, {
+        trustedPublicKeys: [publisher.publicKeyHex],
+        requireSignature: true,
+      });
+    } catch (error) {
+      if (error?.code === "legacy_module_signature") {
+        error.message = `Isomorphic node "${checkedNode.nodeId}": ${error.message}`;
+      }
+      throw error;
+    }
     // WHAT THE FLOW LANE REQUIRES OF A SIGNATURE, and why it is two forms.
     //
     // Composition inlines somebody else's object code into a binary this
@@ -332,15 +340,9 @@ async function verifyIsomorphicNodeArtifacts({
     //     artifact.sha256 check above already pinned the exact file bytes, so
     //     nothing the compiler consumes is left unbound.
     //
-    // A BARE-DIGEST module signature (statementDomain absent, the pre-domain
-    // SDK form) is still refused here: no domain separation means a signature
-    // minted over some other protocol's digest can be replayed into this lane,
-    // and this lane compiles what it admits.
-    //
-    // Refusing module scope outright — which this did until 2026-07-30 — meant
-    // the flow compiler rejected EVERY artifact the node is able to sign, one
-    // line after verifying it, with a message that blamed the signature rather
-    // than the policy. See graph/tasks/sdk-flow-compiler-refuses-node-signed.md.
+    // The bare module digest form was removed in 0.11.0: verifyModuleArtifact
+    // refuses it by name (legacy_module_signature) before this line, so the
+    // check below admits exactly the two forms the SDK writes.
     const domainSeparatedModuleScope =
       verification.signatureScope === "module" &&
       verification.statementDomain === DOMAIN_MODULE_PUBLICATION_V1;

@@ -23,10 +23,27 @@ import { ModuleBundleEntryRole } from "spacedatastandards.org/lib/js/MBL/main.js
 
 export const MODULE_SIGNATURE_ALGORITHM = "ed25519";
 export const MODULE_SIGNATURE_ENTRY_ROLE = "signature";
+// The `signedHashAlgorithm` label of the bare module digest, the signature form
+// removed in 0.11.0. A signature entry with this label and NO statementDomain is
+// that form and is refused by name (`legacy_module_signature`). The node's
+// publication signer still writes this label NEXT TO a statementDomain; there
+// the domain decides the basis and this label is not consulted.
 export const LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM =
   "sha256-canonical-module-hash";
 export const BUNDLE_SIGNATURE_HASH_ALGORITHM =
   "sha256-sdn-module-bundle-v1";
+
+/**
+ * The signature forms `signModuleArtifact` writes, by `signatureScope`:
+ *  - "publication": Ed25519 over `"SDN-MODULE-PUBLICATION-V1" || 0x00 ||
+ *    sha256(portable)`, the entry the node's signing endpoint writes, field for
+ *    field.
+ *  - "bundle": Ed25519 over the canonical whole-bundle statement.
+ * "module" (the bare canonical module digest) was removed in 0.11.0 and is
+ * refused by name.
+ */
+export const MODULE_SIGNATURE_SCOPES = Object.freeze(["publication", "bundle"]);
+export const DEFAULT_MODULE_SIGNATURE_SCOPE = "bundle";
 
 export class ModuleSignatureError extends Error {
   constructor(code, message) {
@@ -332,20 +349,48 @@ export async function computeModuleBundleSignatureHash(bundle, options = {}) {
   };
 }
 
+function resolveSignatureScope(signatureScope) {
+  if (signatureScope === undefined) {
+    return DEFAULT_MODULE_SIGNATURE_SCOPE;
+  }
+  if (signatureScope === "module") {
+    throw new ModuleSignatureError(
+      "legacy_signature_scope",
+      'signatureScope "module" (a signature over the bare canonical module digest, no statement domain) was removed in space-data-module-sdk 0.11.0; sign with signatureScope "publication" or "bundle"',
+    );
+  }
+  if (!MODULE_SIGNATURE_SCOPES.includes(signatureScope)) {
+    throw new ModuleSignatureError(
+      "invalid_signature_scope",
+      `signatureScope must be one of ${MODULE_SIGNATURE_SCOPES.map((scope) => JSON.stringify(scope)).join(", ")}`,
+    );
+  }
+  return signatureScope;
+}
+
 /**
- * Sign a module artifact's canonical wasm hash with an Ed25519 key and embed
- * the detached signature in the artifact's MBL bundle (sds.signature entry).
+ * Sign a module artifact with an Ed25519 key and embed the detached signature
+ * in the artifact's MBL bundle (sds.signature entry).
+ *
+ * Two forms, chosen by `signatureScope` (see MODULE_SIGNATURE_SCOPES):
+ * "publication" writes the entry the node's signing endpoint writes
+ * (`sdn-server/internal/modulesign`), field for field and in its key order, so
+ * the same key over the same portable bytes yields the same entry bytes;
+ * "bundle" signs the canonical whole-bundle statement.
  *
  * Existing bundle entries, the manifest, and any ENC/PNM publication records
- * in the REC trailer are preserved. Any previous signature entry is replaced.
+ * in the REC trailer are preserved. Any previous signature entry is replaced,
+ * whatever its form: a previous signature is never verified or kept here.
  *
  * @param {Uint8Array|ArrayBuffer} bytes - module artifact (raw wasm or single-file bundle)
  * @param {Object} options
  * @param {string} options.privateKeySeedHex - 32-byte Ed25519 seed, hex
  * @param {string} [options.keyId] - identifier recorded alongside the signature
- * @returns {Promise<{wasmBytes: Uint8Array, signature: Object, canonicalModuleHashHex: string}>}
+ * @param {"publication"|"bundle"} [options.signatureScope]
+ * @returns {Promise<{wasmBytes: Uint8Array, signature: Object, canonicalModuleHashHex: string, signedHashHex: string, signatureScope: string}>}
  */
 export async function signModuleArtifact(bytes, options = {}) {
+  const signatureScope = resolveSignatureScope(options.signatureScope);
   const seed = hexToBytes(options.privateKeySeedHex);
   if (seed.length !== 32) {
     throw new ModuleSignatureError(
@@ -355,7 +400,6 @@ export async function signModuleArtifact(bytes, options = {}) {
   }
   const protectedArtifact = extractPublicationRecordCollection(bytes);
   const payloadBytes = protectedArtifact?.payloadBytes ?? bytes;
-  const canonical = await computeCanonicalModuleHash(payloadBytes);
 
   let manifestBytes;
   let preservedEntries = [];
@@ -387,43 +431,64 @@ export async function signModuleArtifact(bytes, options = {}) {
     )[0];
   }
 
-  let signedHashBytes = canonical.hashBytes;
-  let signedHashHex = canonical.hashHex;
-  let signedHashAlgorithm = LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM;
-  if (options.signatureScope === "bundle") {
-    const unsigned = await createSingleFileBundle({
-      wasmBytes: bytes,
-      ...(manifestBytes ? { manifestBytes } : {}),
-      entries: preservedEntries,
-    });
+  // The bundle as it will be written, without its signature. Neither form's
+  // preimage depends on the signature entry: "publication" hashes the bytes
+  // before the trailer, "bundle" hashes every entry except the signature.
+  const unsigned = await createSingleFileBundle({
+    wasmBytes: bytes,
+    ...(manifestBytes ? { manifestBytes } : {}),
+    entries: preservedEntries,
+  });
+  const unsignedPortable = extractPublicationRecordCollection(
+    unsigned.wasmBytes,
+  )?.payloadBytes;
+  if (!unsignedPortable) {
+    throw new ModuleSignatureError(
+      "invalid_bundle",
+      "the unsigned bundle has no publication trailer",
+    );
+  }
+
+  const publicKey = await ed25519PublicKey(seed);
+  const publicKeyHex = bytesToHex(new Uint8Array(publicKey));
+  let signature;
+  let signedHashHex;
+  if (signatureScope === "publication") {
+    const contentHashBytes = await sha256Bytes(new Uint8Array(unsignedPortable));
+    signedHashHex = bytesToHex(contentHashBytes);
+    const signatureBytes = await ed25519Sign(
+      buildSignatureStatement(DOMAIN_MODULE_PUBLICATION_V1, contentHashBytes),
+      seed,
+    );
+    // The node's SignatureEntry, in its JSON key order
+    // (sdn-server/internal/modulesign/modulesign.go, Sign): the same key over
+    // the same portable bytes gives the same entry bytes as the node's.
+    signature = {
+      algorithm: MODULE_SIGNATURE_ALGORITHM,
+      keyId: options.keyId ?? null,
+      publicKeyHex,
+      signatureHex: bytesToHex(new Uint8Array(signatureBytes)),
+      signedHashAlgorithm: LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM,
+      signedHashHex,
+      statementDomain: DOMAIN_MODULE_PUBLICATION_V1,
+    };
+  } else {
     const parsedUnsigned = await parseSingleFileBundle(unsigned.wasmBytes);
     const bundleHash = await computeModuleBundleSignatureHash(
       parsedUnsigned.bundle,
       { wasmBytes: parsedUnsigned.wasmBytes },
     );
-    signedHashBytes = bundleHash.hashBytes;
     signedHashHex = bundleHash.hashHex;
-    signedHashAlgorithm = BUNDLE_SIGNATURE_HASH_ALGORITHM;
-  } else if (
-    options.signatureScope !== undefined &&
-    options.signatureScope !== "module"
-  ) {
-    throw new ModuleSignatureError(
-      "invalid_signature_scope",
-      'signatureScope must be either "module" or "bundle"',
-    );
+    const signatureBytes = await ed25519Sign(bundleHash.hashBytes, seed);
+    signature = {
+      algorithm: MODULE_SIGNATURE_ALGORITHM,
+      keyId: options.keyId ?? null,
+      publicKeyHex,
+      signatureHex: bytesToHex(new Uint8Array(signatureBytes)),
+      signedHashHex,
+      signedHashAlgorithm: BUNDLE_SIGNATURE_HASH_ALGORITHM,
+    };
   }
-
-  const publicKey = await ed25519PublicKey(seed);
-  const signatureBytes = await ed25519Sign(signedHashBytes, seed);
-  const signature = {
-    algorithm: MODULE_SIGNATURE_ALGORITHM,
-    keyId: options.keyId ?? null,
-    publicKeyHex: bytesToHex(new Uint8Array(publicKey)),
-    signatureHex: bytesToHex(new Uint8Array(signatureBytes)),
-    signedHashHex,
-    signedHashAlgorithm,
-  };
 
   const rebuilt = await createSingleFileBundle({
     wasmBytes: bytes,
@@ -431,11 +496,21 @@ export async function signModuleArtifact(bytes, options = {}) {
     signature,
     entries: preservedEntries,
   });
+  const signedPortable = extractPublicationRecordCollection(
+    rebuilt.wasmBytes,
+  )?.payloadBytes;
+  if (!equalBytes(signedPortable, unsignedPortable)) {
+    throw new ModuleSignatureError(
+      "hash_mismatch",
+      "writing the signature changed the bytes before the trailer; nothing signed",
+    );
+  }
   return {
     wasmBytes: rebuilt.wasmBytes,
     signature,
     canonicalModuleHashHex: rebuilt.canonicalModuleHashHex,
     signedHashHex,
+    signatureScope,
   };
 }
 
@@ -444,8 +519,9 @@ export async function signModuleArtifact(bytes, options = {}) {
  *
  * TWO SIGNED FORMS, and the artifact chooses — not the caller, not a policy:
  *
- *  - `statementDomain` PRESENT — the NODE-SIGNED form issued by the node's
- *    content-bound signing endpoint. The signature covers the domain-separated
+ *  - `statementDomain` PRESENT — the publication form, written by the node's
+ *    content-bound signing endpoint and by `signModuleArtifact` with
+ *    `signatureScope: "publication"`. The signature covers the domain-separated
  *    statement `domain || 0x00 || sha256(portable)` (see ./sigdomain.js), where
  *    `portable` is the trailer-stripped payload — the exact bytes the runtime
  *    instantiates and the node's capability policy identifies by content hash.
@@ -454,10 +530,14 @@ export async function signModuleArtifact(bytes, options = {}) {
  *    update-manifest domain, say) is REFUSED, which is what stops a signature
  *    minted for a signed update from being stapled into a module trailer.
  *
- *  - `statementDomain` ABSENT — the legacy SDK-signed form: a signature over
- *    the bare canonical module (or bundle) digest. Verification is byte-identical
- *    to what it has always been, so every artifact already published keeps
- *    verifying.
+ *  - `statementDomain` ABSENT and `signedHashAlgorithm` the bundle algorithm —
+ *    the whole-bundle form: the signature covers the canonical whole-bundle
+ *    statement (see computeModuleBundleSignatureHash).
+ *
+ * Any other signature without a statement domain is the bare module digest
+ * form, removed in 0.11.0, and is REFUSED by name (`legacy_module_signature`)
+ * before the signer is asked about: it is a property of the artifact. Such an
+ * artifact must be signed again.
  *
  * THIS MIRRORS THE NODE EXACTLY, deliberately and to the reason code, because
  * the same artifact is verified by the Go loaders
@@ -639,7 +719,23 @@ export async function verifyModuleArtifact(bytes, options = {}) {
     };
   }
 
-  // ---- legacy form: bare canonical module (or bundle) digest ---------------
+  // ---- no statement domain: the whole-bundle form, and nothing else ---------
+  const signedHashAlgorithm = trimGoWhitespace(payload.signedHashAlgorithm);
+  if (
+    signedHashAlgorithm === "" ||
+    signedHashAlgorithm === LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM
+  ) {
+    throw new ModuleSignatureError(
+      "legacy_module_signature",
+      `module signature has no statementDomain and covers the bare canonical module digest (signedHashAlgorithm ${JSON.stringify(payload.signedHashAlgorithm ?? "")}); space-data-module-sdk 0.11.0 refuses this form, sign the module again`,
+    );
+  }
+  if (signedHashAlgorithm !== BUNDLE_SIGNATURE_HASH_ALGORITHM) {
+    throw new ModuleSignatureError(
+      "unsupported_hash_algorithm",
+      `unsupported module signature hash algorithm: ${payload.signedHashAlgorithm}`,
+    );
+  }
   const canonical = await computeCanonicalModuleHash(protectedArtifact.payloadBytes);
   const recordedHash = new Uint8Array(
     protectedArtifact.mbl.canonicalModuleHash ?? [],
@@ -654,32 +750,18 @@ export async function verifyModuleArtifact(bytes, options = {}) {
     );
   }
 
-  let signedHashBytes = canonical.hashBytes;
-  let signedHashHex = canonical.hashHex;
-  let signatureScope = "module";
-  const signedHashAlgorithm = String(payload.signedHashAlgorithm ?? "");
-  if (signedHashAlgorithm === BUNDLE_SIGNATURE_HASH_ALGORITHM) {
-    const parsed = await parseSingleFileBundle(bytes);
-    const bundleHash = await computeModuleBundleSignatureHash(parsed.bundle, {
-      wasmBytes: parsed.wasmBytes,
-    });
-    signedHashBytes = bundleHash.hashBytes;
-    signedHashHex = bundleHash.hashHex;
-    signatureScope = "bundle";
-  } else if (
-    signedHashAlgorithm !== LEGACY_MODULE_SIGNATURE_HASH_ALGORITHM
-  ) {
-    throw new ModuleSignatureError(
-      "unsupported_hash_algorithm",
-      `unsupported module signature hash algorithm: ${signedHashAlgorithm}`,
-    );
-  }
+  const parsed = await parseSingleFileBundle(bytes);
+  const bundleHash = await computeModuleBundleSignatureHash(parsed.bundle, {
+    wasmBytes: parsed.wasmBytes,
+  });
+  const signedHashBytes = bundleHash.hashBytes;
+  const signedHashHex = bundleHash.hashHex;
   if (
     String(payload.signedHashHex ?? "").toLowerCase() !== signedHashHex
   ) {
     throw new ModuleSignatureError(
       "hash_mismatch",
-      "module or bundle hash does not match the signed digest",
+      "bundle hash does not match the signed digest",
     );
   }
 
@@ -703,14 +785,12 @@ export async function verifyModuleArtifact(bytes, options = {}) {
     signed: true,
     keyId: payload.keyId ?? null,
     publicKeyHex,
-    // Null, not absent: the legacy form is a POSITIVE statement that this
-    // artifact predates domain separation, which a caller may want to log.
     statementDomain: null,
     contentHashHex: bytesToHex(
       await sha256Bytes(new Uint8Array(protectedArtifact.payloadBytes)),
     ),
     canonicalModuleHashHex: canonical.hashHex,
-    signatureScope,
+    signatureScope: "bundle",
     signedHashHex,
   };
 }
