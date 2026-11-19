@@ -96,15 +96,29 @@ function hexToBytes(hex) {
   return out;
 }
 
+// A trusted key is exactly 64 hex characters (a 32-byte Ed25519 public key)
+// after trim and lowercase. Anything else that is not empty is REFUSED by
+// name: a key the operator named and the SDK silently dropped would leave a
+// policy that trusts nothing it was told to, or none at all (fail open).
 function normalizeTrustedPublicKeys(trustedPublicKeys) {
   const list = Array.isArray(trustedPublicKeys)
     ? trustedPublicKeys
     : typeof trustedPublicKeys === "string"
       ? trustedPublicKeys.split(",")
       : [];
-  return list
-    .map((key) => String(key ?? "").trim().toLowerCase())
-    .filter((key) => key.length === 64);
+  const keys = [];
+  for (const entry of list) {
+    const key = String(entry ?? "").trim().toLowerCase();
+    if (key === "") continue;
+    if (!/^[0-9a-f]{64}$/.test(key)) {
+      throw new ModuleSignatureError(
+        "invalid_trusted_key",
+        `a trusted signer key must be exactly 64 hex characters (a 32-byte Ed25519 public key, no 0x prefix); got ${key.length} characters`,
+      );
+    }
+    keys.push(key);
+  }
+  return keys;
 }
 
 function findSignatureEntry(bundle) {
@@ -459,6 +473,9 @@ export async function signModuleArtifact(bytes, options = {}) {
  */
 export async function verifyModuleArtifact(bytes, options = {}) {
   const requireSignature = options.requireSignature === true;
+  // First, before the artifact is looked at: a malformed trusted key is the
+  // caller's error (invalid_trusted_key) whatever the file holds.
+  const trusted = normalizeTrustedPublicKeys(options.trustedPublicKeys);
   const protectedArtifact = extractPublicationRecordCollection(bytes);
   const signatureEntry = protectedArtifact?.mbl
     ? findSignatureEntry(protectedArtifact.mbl)
@@ -506,7 +523,6 @@ export async function verifyModuleArtifact(bytes, options = {}) {
     );
   }
 
-  const trusted = normalizeTrustedPublicKeys(options.trustedPublicKeys);
   // resolvedStatementDomain is carried onto the thrown error so a refusal
   // reports the same (reason, domain) pair the node's ModuleSignatureStatus
   // does — including for untrusted_signer, where the domain was already
@@ -689,6 +705,18 @@ function readEnv(name) {
  * entry) leaves a file that would otherwise load as "unsigned" under a policy
  * that trusts key X. A policy, environment or global that names any trusted
  * key therefore always sets requireSignature, whatever it says about it.
+ *
+ * A MALFORMED KEY IS REFUSED, never dropped: any non-empty entry that is not
+ * exactly 64 hex characters after trim and lowercase (a `0x` prefix, a
+ * 63-character typo, a non-hex character) throws
+ * `ModuleSignatureError("invalid_trusted_key")`, so a typo can never turn the
+ * check off. An environment variable that is set but empty does not hide the
+ * global list.
+ *
+ * `verifySignature: true` uses the environment's or the global's trust. The
+ * caller asked for verification, so it always requires a signature: with no
+ * trust configured there, nothing is trusted and every load is refused by
+ * name (`missing_signature` or `untrusted_signer`), never let through.
  */
 export function resolveModuleSignaturePolicy(options = {}) {
   if (options.verifySignature === false) {
@@ -709,10 +737,13 @@ export function resolveModuleSignaturePolicy(options = {}) {
   const envRequire = readEnv("SDM_REQUIRE_MODULE_SIGNATURE");
   const globalTrusted = globalThis.__SDM_TRUSTED_MODULE_SIGNERS__;
   const globalRequire = globalThis.__SDM_REQUIRE_MODULE_SIGNATURE__;
+  const envTrustedText =
+    typeof envTrusted === "string" ? envTrusted.trim() : envTrusted;
   const trustedPublicKeys = normalizeTrustedPublicKeys(
-    envTrusted ?? globalTrusted,
+    envTrustedText || globalTrusted,
   );
   const requireSignature =
+    options.verifySignature === true ||
     trustedPublicKeys.length > 0 ||
     envRequire === "1" ||
     envRequire === "true" ||

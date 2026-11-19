@@ -31,8 +31,9 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
   `readSignedCodeManifest`, `readTrailerManifestBytes`, `readInstanceManifestBytes`, `rewriteProtectedEnvelopeTrailer`
   and `locateBoundPlgManifest`.
 - New refusals a caller can meet: `legacy_module_signature`, `legacy_bundle_signature`, `missing_signed_hash`,
-  `unsupported_hash_algorithm`, `trailer_manifest_mismatch`, `trailer_manifest_unbound`, and `missing_signature` for
-  a file whose trailer was removed under a key-naming policy.
+  `unsupported_hash_algorithm`, `trailer_manifest_mismatch`, `trailer_manifest_unbound`, `missing_signature` for
+  a file whose trailer was removed under a key-naming policy, and `invalid_trusted_key` for a malformed trusted key
+  (it was dropped without a word).
 
 - **One form remains:** Ed25519 over `"SDN-MODULE-PUBLICATION-V1" || 0x00 || sha256(portable)`, where `portable` is
   every byte before the publication trailer. `signModuleArtifact` writes it (`signatureScope: "publication"`, the
@@ -86,6 +87,15 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
   not cover its own trailer, so through 0.10.4 a file with its trailer (or only its signature entry) removed loaded as
   "unsigned" under a policy that trusted key X; it is now refused with `missing_signature`. With no key named and no
   requirement there is still no policy, and such a load is not judged at all.
+- **A malformed trusted key is refused, never dropped.** Any non-empty entry of a policy's `trustedPublicKeys`,
+  `SDM_TRUSTED_MODULE_SIGNERS`, `__SDM_TRUSTED_MODULE_SIGNERS__` or `verifyModuleArtifact`'s `trustedPublicKeys` that
+  is not exactly 64 hex characters after trim and lowercase (a `0x` prefix, a 63-character typo, a non-hex character)
+  throws `ModuleSignatureError("invalid_trusted_key")` before any artifact is read. Through 0.10.4 such an entry was
+  dropped without a word, so a policy that named only a mistyped key verified nothing at all and any file loaded. An
+  `SDM_TRUSTED_MODULE_SIGNERS` that is set but empty no longer hides `__SDM_TRUSTED_MODULE_SIGNERS__`.
+  `verifySignature: true` still takes its trust from the environment or the global, and now always requires a
+  signature: with no trust configured there, every load is refused by name (`missing_signature` or
+  `untrusted_signer`) instead of being let through unverified. `test/signature-policy-keys.test.js`.
 - **The trailer's manifest copy is never trusted.** The publication form covers the bytes before the trailer; the
   bundle writer moves the `sds.manifest` section into the trailer's `manifest` entry, which the signature does not
   cover. Every reader takes the manifest from the SIGNED code instead (an `sds.manifest` section left in the signed
