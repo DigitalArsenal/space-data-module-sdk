@@ -264,7 +264,7 @@ function printUsage() {
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --json
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --recipient-public-key <hex> --out ./dist/module.wasm.enc
   space-data-module protect --manifest ./manifest.json --wasm ./dist/module.wasm --single-file-bundle --out ./dist/module.bundle.wasm
-  space-data-module sign --wasm ./dist/module.wasm --key ./test/support/dev-module-signing-keypair.json [--scope publication|bundle] [--out ./dist/module.signed.wasm]
+  space-data-module sign --wasm ./dist/module.wasm --key ./test/support/dev-module-signing-keypair.json [--out ./dist/module.signed.wasm]
   space-data-module verify --wasm ./dist/module.wasm --trusted <pubKeyHex[,pubKeyHex...]> [--require-signature]
   space-data-module verify --wasm ./dist/module.wasm --key ./test/support/dev-module-signing-keypair.json
 `);

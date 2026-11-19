@@ -75,19 +75,31 @@ const vectorsRaw = await readFile(VECTORS_PATH);
 const vectors = JSON.parse(vectorsRaw.toString("utf8"));
 
 // Where this SDK's verdict differs from the shared file's (the node's) on
-// purpose. 0.11.0 removed the bare module digest form; the node's verifier
-// still admits it until the node changes in step. The shared file stays the
-// node's bytes, so the SDK's expectation for that one vector is stated here,
-// by name, and the file's own expectation is checked to be the node's old one
-// (so a regenerated file that already refuses it shows up here).
+// purpose. 0.11.0 removed the two forms without a statement domain (the bare
+// module digest and the whole-bundle digest); the node's verifier still admits
+// them until the node changes in step. The shared file stays the node's bytes,
+// so the SDK's expectation for those vectors is stated here, by name, and the
+// file's own expectation is checked to be the node's (so a regenerated file
+// that already refuses them shows up here). Both removed forms are refused
+// before the signer is asked about, so even the untrusted-signer and tampered
+// bundle vectors get the form's name as their reason.
+const refusedAs = (reason) => ({ verified: false, reason, statementDomain: "" });
 const SDK_EXPECTATIONS = Object.freeze({
   "legacy-bare-digest-no-domain": {
     nodeExpect: { verified: true, reason: "ok" },
-    expect: {
-      verified: false,
-      reason: "legacy_module_signature",
-      statementDomain: "",
-    },
+    expect: refusedAs("legacy_module_signature"),
+  },
+  "bundle-scope-signed-ok": {
+    nodeExpect: { verified: true, reason: "ok" },
+    expect: refusedAs("legacy_bundle_signature"),
+  },
+  "bundle-scope-untrusted-signer": {
+    nodeExpect: { verified: false, reason: "untrusted_signer" },
+    expect: refusedAs("legacy_bundle_signature"),
+  },
+  "bundle-scope-recorded-digest-tampered": {
+    nodeExpect: { verified: false, reason: "hash_mismatch" },
+    expect: refusedAs("legacy_bundle_signature"),
   },
 });
 

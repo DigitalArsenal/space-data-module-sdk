@@ -135,7 +135,7 @@ extern "C" int echo(void) {
   const signed = await signModuleArtifact(compilation.wasmBytes, {
     privateKeySeedHex: "31".repeat(32),
     keyId: "isomorphic-flow-host-test",
-    signatureScope: "bundle",
+    signatureScope: "publication",
   });
   const childSha256 = createHash("sha256")
     .update(signed.wasmBytes)
@@ -236,7 +236,7 @@ extern "C" int echo(void) {
   const signedFlow = await signModuleArtifact(compiledFlow.wasmBytes, {
     privateKeySeedHex: "32".repeat(32),
     keyId: "isomorphic-parent-flow-test",
-    signatureScope: "bundle",
+    signatureScope: "publication",
   });
 
   let extraImportReads = 0;

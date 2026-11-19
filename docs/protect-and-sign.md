@@ -68,7 +68,6 @@ Non-JSON output reports `artifactId`, `signingPublicKeyHex`, `encrypted`,
 space-data-module sign \
   --wasm ./dist/module.wasm \
   --key ./keys/module-signing-keypair.json \
-  --scope bundle \
   --out ./dist/module.signed.wasm
 ```
 
@@ -76,13 +75,13 @@ space-data-module sign \
 | --- | --- | --- |
 | `--wasm <path>` | yes | Artifact to sign |
 | `--key <path>` | yes | Keypair JSON; must contain `privateKeySeedHex` |
-| `--scope <form>` | no | `publication` (the `SDN-MODULE-PUBLICATION-V1` statement over the bytes before the trailer) or `bundle` (the whole-bundle statement); default `bundle`. `module` is refused: that form was removed in 0.11.0 |
+| `--scope <form>` | no | `publication`, the one form (the `SDN-MODULE-PUBLICATION-V1` statement over the bytes before the trailer) and the default. `module` and `bundle` are refused: those forms were removed in 0.11.0 |
 | `--out <path>` | no | Output path; otherwise the input is signed in place |
 
 The key file must carry `privateKeySeedHex` or the command refuses. Output
-reports `signed`, `keyId`, `publicKeyHex`, `signatureScope`, `statementDomain`
-(publication form), `signedHashHex` and `canonicalModuleHashHex`. Any previous
-signature entry is replaced, whatever its form. The forms are defined in
+reports `signed`, `keyId`, `publicKeyHex`, `signatureScope`, `statementDomain`,
+`signedHashHex` and `canonicalModuleHashHex`. Any previous
+signature entry is replaced, whatever its form. The form is defined in
 [the publication standard](./module-publication-standard.md).
 
 ## Verify
@@ -105,7 +104,8 @@ space-data-module verify \
 true. Output reports `verified`, `signed`, `keyId`, `publicKeyHex`,
 `signatureScope` and `statementDomain`, and the process exits non-zero unless
 verification succeeded. An artifact signed in the bare module digest form is
-refused with `legacy_module_signature`; sign it again.
+refused with `legacy_module_signature`, one in the whole-bundle form with
+`legacy_bundle_signature`; sign it again.
 
 ## Key custody
 

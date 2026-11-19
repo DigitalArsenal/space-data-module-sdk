@@ -253,7 +253,7 @@ async function signedEmptyArtifact(seedByte, keyId) {
     {
       privateKeySeedHex: seedByte.repeat(32),
       keyId,
-      signatureScope: "bundle",
+      signatureScope: "publication",
     },
   );
   return {
@@ -2990,9 +2990,15 @@ async function flowLaneAdmits(vector) {
   }
 }
 
+// Where this SDK differs from the shared file (the node's verdicts) on
+// purpose: 0.11.0 removed the whole-bundle form, which the node still admits.
+const SDK_NOT_ADMISSIBLE = new Set(["bundle-scope-signed-ok"]);
+
 for (const vector of STATEMENT_DOMAIN_VECTORS.artifacts) {
   test(`flow lane admissibility: ${vector.name}`, async () => {
-    const expected = vector.expect.flowNodeAdmissible === true;
+    const expected =
+      vector.expect.flowNodeAdmissible === true &&
+      !SDK_NOT_ADMISSIBLE.has(vector.name);
     const outcome = await flowLaneAdmits(vector);
     assert.equal(
       outcome.admitted,
@@ -3040,7 +3046,7 @@ test("a bare-digest module signature is refused by name, for composition too", a
   assert.match(outcome.message, /Isomorphic node "[^"]+": module signature has no statementDomain/);
 });
 
-for (const signatureScope of ["publication", "bundle"]) {
+for (const signatureScope of ["publication"]) {
   test(`a child signed by the SDK in the ${signatureScope} form is admitted for composition as it is`, async () => {
     const portable = Uint8Array.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
     const signed = await signModuleArtifact(portable, {

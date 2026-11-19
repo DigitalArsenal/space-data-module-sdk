@@ -85,7 +85,7 @@ toolchain, no artifact and no network — `npm run conformance:self-test`.
 ## Receipt & trust (Wave 4, not yet wired)
 
 The conformance receipt travels as a bundle `ATTESTATION` entry
-(publisher-signed under bundle scope); the graduated listing requirement
+(publisher-signed under the publication statement domain); the graduated listing requirement
 (receipt REQUIRED for `CORE`+`ANONYMOUS`, badge for `RECOMMENDED`) and the
 `SDN-CONFORMANCE-RECEIPT-V1` third-party attestor domain are W4.1/W4.2 of the
 program — see the finding §5 "Receipt & trust".

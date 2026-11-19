@@ -312,48 +312,26 @@ async function verifyIsomorphicNodeArtifacts({
         requireSignature: true,
       });
     } catch (error) {
-      if (error?.code === "legacy_module_signature") {
+      if (error?.code === "legacy_module_signature" || error?.code === "legacy_bundle_signature") {
         error.message = `Isomorphic node "${checkedNode.nodeId}": ${error.message}`;
       }
       throw error;
     }
-    // WHAT THE FLOW LANE REQUIRES OF A SIGNATURE, and why it is two forms.
-    //
-    // Composition inlines somebody else's object code into a binary this
-    // process then ships. The signature has to bind, at minimum, everything
-    // that ends up compiled in. Two signatures do that, and they are NOT the
-    // same statement:
-    //
-    //   - BUNDLE scope — binds the whole MBL: the canonical module hash, the
-    //     manifest hash, and every non-signature member around it. The widest
-    //     commitment available, and the only one that covers the surrounding
-    //     bundle metadata.
-    //
-    //   - MODULE scope UNDER THE MODULE-PUBLICATION DOMAIN — the node's own
-    //     signing endpoint (sdn-server/internal/modulesign) issues
-    //     `SDN-MODULE-PUBLICATION-V1 || 0x00 || sha256(portable)`. That covers
-    //     the ENTIRE trailer-stripped payload — the code, the embedded
-    //     manifest section, every sds.* section — which is strictly more of the
-    //     compiled artifact than the canonical hash inside a bundle signature
-    //     binds (the canonical hash strips sds.* before hashing). It does not
-    //     bind the trailer metadata around it; the flow document's own
-    //     artifact.sha256 check above already pinned the exact file bytes, so
-    //     nothing the compiler consumes is left unbound.
-    //
-    // The bare module digest form was removed in 0.11.0: verifyModuleArtifact
-    // refuses it by name (legacy_module_signature) before this line, so the
-    // check below admits exactly the two forms the SDK writes.
-    const domainSeparatedModuleScope =
-      verification.signatureScope === "module" &&
-      verification.statementDomain === DOMAIN_MODULE_PUBLICATION_V1;
+    // WHAT THE FLOW LANE REQUIRES OF A SIGNATURE: the one form, the
+    // `SDN-MODULE-PUBLICATION-V1 || 0x00 || sha256(portable)` statement, which
+    // covers the ENTIRE trailer-stripped payload (the code, every data segment,
+    // every section left in it). It does not bind the trailer around it; the
+    // flow document's own artifact.sha256 check above pins the exact file
+    // bytes, so nothing the compiler consumes is left unbound. The two forms
+    // without a statement domain were removed in 0.11.0 and verifyModuleArtifact
+    // refuses them by name before this line.
     if (
       !verification.verified ||
-      (verification.signatureScope !== "bundle" && !domainSeparatedModuleScope)
+      verification.statementDomain !== DOMAIN_MODULE_PUBLICATION_V1
     ) {
       throw new Error(
         `Isomorphic node "${checkedNode.nodeId}" artifact signature is not a verified ` +
-          `whole-bundle signature, nor a module signature under the ` +
-          `${DOMAIN_MODULE_PUBLICATION_V1} statement domain.`,
+          `signature under the ${DOMAIN_MODULE_PUBLICATION_V1} statement domain.`,
       );
     }
     verifiedByPluginId.set(checkedNode.pluginId, {

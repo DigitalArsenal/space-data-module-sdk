@@ -2,30 +2,38 @@
 
 ## 0.11.0
 
-### Breaking: the bare module digest signature is removed; every module signed in it must be signed again
+### Breaking: one signature form, the publication statement domain; every module signed by 0.10.x must be signed again
 
-- **A module signed in the bare module digest form is refused.** That form is an Ed25519 signature over the raw
-  canonical module hash with no `statementDomain` (`signedHashAlgorithm` `sha256-canonical-module-hash` or absent). It
-  was `signModuleArtifact`'s default and the CLI `sign`'s only form through 0.10.4. `verifyModuleArtifact` now refuses
-  it with the reason `legacy_module_signature` before the signer is asked about, and so does everything that calls it:
-  the Node loader and the browser harness under a signature policy, the isomorphic flow host's parent check, the flow
-  compiler's hash-bound children, and the CLI `verify`. It is refused with or without `requireSignature`: a present
-  signature in a removed form is never treated as unsigned.
-- **Every module signed by 0.10.x with its default options must be signed again** with 0.11.0. Signing again replaces
-  the signature entry and keeps the loadable wasm byte for byte; the file's sha256 changes, so every list that pins a
-  signed file by hash must be regenerated.
-- **`signatureScope: "module"` is refused** with `legacy_signature_scope`. `signModuleArtifact` writes two forms:
-  `"publication"`, the `SDN-MODULE-PUBLICATION-V1` statement over the bytes before the trailer, the same entry field
-  for field as the node's signing endpoint; and `"bundle"`, the whole-bundle statement. The default is `"bundle"`.
-  Until 0.10.4 the SDK could verify the publication form but not write it.
-- The CLI `sign` takes `--scope publication|bundle`, and `sign` and `verify` report the form they wrote or verified
-  (`signatureScope`, `statementDomain`, `signedHashHex`).
-- `signModuleArtifact` returns `signatureScope` and asserts that writing the signature leaves the bytes before the
-  trailer unchanged.
+- **One form remains:** Ed25519 over `"SDN-MODULE-PUBLICATION-V1" || 0x00 || sha256(portable)`, where `portable` is
+  every byte before the publication trailer. `signModuleArtifact` writes it (`signatureScope: "publication"`, the
+  default and the only value), with the same signature entry, field for field and in the same key order, as the
+  node's signing endpoint. Through 0.10.4 the SDK could verify this form but not write it.
+- **The two forms without a statement domain are refused by name.** `verifyModuleArtifact` refuses the bare module
+  digest (`signedHashAlgorithm` `sha256-canonical-module-hash` or absent; `signModuleArtifact`'s default and the CLI
+  `sign`'s only form through 0.10.4) with `legacy_module_signature`, and the whole-bundle digest
+  (`sha256-sdn-module-bundle-v1`; `signatureScope: "bundle"` through 0.10.4) with `legacy_bundle_signature`. Both are
+  refused before the signer is asked about, with or without `requireSignature`: a present signature in a removed form
+  is never treated as unsigned. Everything that calls the verifier refuses them: the Node loader and the browser
+  harness under a signature policy, the isomorphic flow host's parent check, the flow compiler's hash-bound children
+  (its message names the node), and the CLI `verify`.
+- **`signatureScope: "module"` and `"bundle"` are refused** with `legacy_signature_scope`.
+  `computeModuleBundleSignatureHash` is removed.
+- **The flow compiler admits a hash-bound child only in the publication form.**
+- **Every module signed by 0.10.x must be signed again** with 0.11.0. Signing again replaces the signature entry and
+  keeps the loadable wasm byte for byte; the file's sha256 changes, so every list that pins a signed file by hash must
+  be regenerated. A module signed in the publication form by 0.11.0 still verifies under earlier SDKs, which accept
+  that form.
+- The CLI `sign` takes `--scope` (only `publication`), and `sign` and `verify` report the form (`signatureScope`,
+  `statementDomain`, `signedHashHex`). `signModuleArtifact` returns `signatureScope` and asserts that writing the
+  signature leaves the bytes before the trailer unchanged.
 - The shared statement-domain vector file is unchanged and stays byte-identical to the node's copy. The node's
-  verifier still admits the bare digest vector `legacy-bare-digest-no-domain`; this SDK refuses it, and
-  `test/statement-domain-parity.test.js` states that one difference by name.
-- `test/module-signature-forms.test.js` covers both forms, the refusal by name in the verifier, the Node loader, the
+  verifier still admits the four vectors without a statement domain (`legacy-bare-digest-no-domain`,
+  `bundle-scope-signed-ok`, and, with other reasons, `bundle-scope-untrusted-signer` and
+  `bundle-scope-recorded-digest-tampered`); this SDK refuses them by the form's name, and
+  `test/statement-domain-parity.test.js` and `test/flow-compiler.test.js` state those differences by name.
+  `test/module-bundle-signing.test.js` and the bundle-vector generator `test/support/statement-domain-vectors-bundle.mjs`
+  are removed with the form; regenerating the bundle vectors needs the 0.10.4 tree.
+- `test/module-signature-forms.test.js` covers the one form, the refusal by name in the verifier, the Node loader, the
   flow compiler and the CLI, and the publication entry against the node's vector.
 
 ## 0.10.4

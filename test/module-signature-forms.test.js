@@ -67,23 +67,26 @@ async function buildBareDigestArtifact(seedHex, keyId = null) {
   return new Uint8Array(built.wasmBytes);
 }
 
-test("the writer offers exactly two forms, and the default is one of them", () => {
-  assert.deepEqual([...MODULE_SIGNATURE_SCOPES], ["publication", "bundle"]);
-  assert.ok(MODULE_SIGNATURE_SCOPES.includes(DEFAULT_MODULE_SIGNATURE_SCOPE));
+test("the writer has one form, the publication form, and it is the default", () => {
+  assert.deepEqual([...MODULE_SIGNATURE_SCOPES], ["publication"]);
+  assert.equal(DEFAULT_MODULE_SIGNATURE_SCOPE, "publication");
 });
 
-test('signatureScope "module" is refused by name', async () => {
+test('signatureScope "module" and "bundle" are refused by name', async () => {
   const keypair = await loadDevKeypair();
-  await assert.rejects(
-    signModuleArtifact(buildTestWasm(), {
-      privateKeySeedHex: keypair.privateKeySeedHex,
-      signatureScope: "module",
-    }),
-    (error) =>
-      error instanceof ModuleSignatureError &&
-      error.code === "legacy_signature_scope" &&
-      /removed in space-data-module-sdk 0\.11\.0/.test(error.message),
-  );
+  for (const signatureScope of ["module", "bundle"]) {
+    await assert.rejects(
+      signModuleArtifact(buildTestWasm(), {
+        privateKeySeedHex: keypair.privateKeySeedHex,
+        signatureScope,
+      }),
+      (error) =>
+        error instanceof ModuleSignatureError &&
+        error.code === "legacy_signature_scope" &&
+        error.message.includes(`signatureScope "${signatureScope}"`) &&
+        /removed in space-data-module-sdk 0\.11\.0/.test(error.message),
+    );
+  }
   await assert.rejects(
     signModuleArtifact(buildTestWasm(), {
       privateKeySeedHex: keypair.privateKeySeedHex,
@@ -110,14 +113,9 @@ for (const signatureScope of MODULE_SIGNATURE_SCOPES) {
     assert.equal(result.keyId, keypair.keyId);
     assert.equal(result.signedHashHex, signed.signedHashHex);
     const portable = extractPublicationRecordCollection(signed.wasmBytes).payloadBytes;
-    if (signatureScope === "publication") {
-      assert.equal(result.statementDomain, DOMAIN_MODULE_PUBLICATION_V1);
-      assert.equal(result.signatureScope, "module");
-      assert.equal(signed.signedHashHex, bytesToHex(await sha256Bytes(new Uint8Array(portable))));
-    } else {
-      assert.equal(result.statementDomain, null);
-      assert.equal(result.signatureScope, "bundle");
-    }
+    assert.equal(result.statementDomain, DOMAIN_MODULE_PUBLICATION_V1);
+    assert.equal(result.signatureScope, "module");
+    assert.equal(signed.signedHashHex, bytesToHex(await sha256Bytes(new Uint8Array(portable))));
     // The loadable wasm is the input, whatever the form.
     assert.deepEqual(
       Buffer.from(toLoadableWasmBytes(signed.wasmBytes)),
@@ -224,6 +222,23 @@ test("the bare module digest form is refused by name, before the signer is asked
   );
 });
 
+test("the whole-bundle form is refused by name, before the signer is asked about", async () => {
+  const vectors = JSON.parse(await readFile(VECTORS_PATH, "utf8"));
+  for (const name of ["bundle-scope-signed-ok", "bundle-scope-untrusted-signer", "bundle-scope-recorded-digest-tampered"]) {
+    const vector = vectors.artifacts.find((entry) => entry.name === name);
+    await assert.rejects(
+      verifyModuleArtifact(hexToBytes(vector.sdkArtifactHex), {
+        trustedPublicKeys: vector.trustedPublicKeysHex,
+      }),
+      (error) =>
+        error instanceof ModuleSignatureError &&
+        error.code === "legacy_bundle_signature" &&
+        /sign the module again/.test(error.message),
+      name,
+    );
+  }
+});
+
 test("loadModule refuses a bare module digest artifact by name", async () => {
   const keypair = await loadDevKeypair();
   const dir = await mkdtemp(path.join(tmpdir(), "sdm-forms-"));
@@ -252,9 +267,11 @@ test("the CLI signs either form, refuses scope module, and refuses a bare digest
     assert.equal(verify.status, 0, verify.stderr);
     assert.match(verify.stdout, /verified=true/);
   }
-  const refusedScope = spawnSync(process.execPath, [CLI_PATH, "sign", "--wasm", rawPath, "--key", DEV_KEYPAIR_PATH, "--scope", "module", "--out", path.join(dir, "m.wasm")], { encoding: "utf8" });
-  assert.notEqual(refusedScope.status, 0);
-  assert.match(refusedScope.stderr, /signatureScope "module"/);
+  for (const scope of ["module", "bundle"]) {
+    const refusedScope = spawnSync(process.execPath, [CLI_PATH, "sign", "--wasm", rawPath, "--key", DEV_KEYPAIR_PATH, "--scope", scope, "--out", path.join(dir, "m.wasm")], { encoding: "utf8" });
+    assert.notEqual(refusedScope.status, 0);
+    assert.match(refusedScope.stderr, new RegExp(`signatureScope "${scope}"`));
+  }
   const barePath = path.join(dir, "bare.wasm");
   await writeFile(barePath, await buildBareDigestArtifact(keypair.privateKeySeedHex));
   const refused = spawnSync(process.execPath, [CLI_PATH, "verify", "--wasm", barePath, "--key", DEV_KEYPAIR_PATH], { encoding: "utf8" });
