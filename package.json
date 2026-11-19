@@ -93,7 +93,8 @@
     "templates/"
   ],
   "scripts": {
-    "test": "node scripts/flatsql-release-e2e.mjs",
+    "test": "node scripts/flatsql-release-e2e.mjs && npm run test:signatures",
+    "test:signatures": "node --test test/module-signature-forms.test.js test/module-signature-writer.test.js test/module-signing.test.js test/signed-code-manifest.test.js test/statement-domain-parity.test.js test/loader-verified-bytes.test.js test/flow-compiler.test.js test/isomorphic-flow-host.test.js",
     "test:host-surfaces": "node --test test/node-host.test.js test/host-abi.test.js test/browser-host.test.js test/browser-module-harness.test.js test/testing-harness.test.js test/browser-owner-tls.test.js",
     "test:runtime-matrix": "SPACE_DATA_MODULE_SDK_ENABLE_RUNTIME_MATRIX=1 node --test test/runtime-matrix.test.js",
     "test:parity": "node --test test/parity-harness.test.js",

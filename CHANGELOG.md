@@ -127,6 +127,10 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
   or `trailer-manifest-unbound` as errors. The parity gate reads only the loadable bytes, which carry no trailer.
   On the modules repository's 239 signed files at 83289e693: no refusal; for 11 the trailer copy is found in the
   code, for 218 it is returned with `fromCode: false`, and `readBoundManifestBytes` binds all 239.
+- **The publish gate runs the signing tests.** `npm test` (which `prepublishOnly`, CI and the publish workflow run)
+  now also runs `npm run test:signatures`: the signature forms, the writer, module signing, the signed-code manifest,
+  the statement-domain parity, the loader's verified bytes, the flow compiler and the isomorphic flow host. Through
+  0.10.4 no signing test ran before a publish.
 
 ## 0.10.4
 
