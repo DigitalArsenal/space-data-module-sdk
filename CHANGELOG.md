@@ -91,6 +91,14 @@ bundle's recorded hashes, not the ENC or PNM records. The SDK's readers no longe
   not cover its own trailer, so through 0.10.4 a file with its trailer (or only its signature entry) removed loaded as
   "unsigned" under a policy that trusted key X; it is now refused with `missing_signature`. With no key named and no
   requirement there is still no policy, and such a load is not judged at all.
+- **The signature entry is found and read as the node reads it** (`publication_signature.go`). Every known key of
+  the entry is a string (`keyId` may also be null); an array, a number, an object, a boolean, or null for another
+  key is refused with `invalid_signature_payload` (through 0.10.4 a one-element array was read as its string and
+  admitted, which the node refuses; for null the node reads an empty string, so the reason can differ there, and the
+  verdict is a refusal on both sides wherever the SDK refuses). `signatureHex` and `publicKeyHex` are trimmed as
+  Go's `strings.TrimSpace` trims (U+0085 trimmed, U+FEFF not), not as JavaScript's `trim`. The entry is matched by
+  `entryId` or `sectionName` after a Go trim and lowercase (`"Signature"`, `"SDS.Signature"`), as the node matches
+  it. `test/signature-entry-parsing.test.js`; the shared vector file is unchanged.
 - **A malformed trusted key is refused, never dropped.** Any non-empty entry of a policy's `trustedPublicKeys`,
   `SDM_TRUSTED_MODULE_SIGNERS`, `__SDM_TRUSTED_MODULE_SIGNERS__` or `verifyModuleArtifact`'s `trustedPublicKeys` that
   is not exactly 64 hex characters after trim and lowercase (a `0x` prefix, a 63-character typo, a non-hex character)

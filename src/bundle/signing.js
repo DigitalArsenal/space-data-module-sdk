@@ -82,7 +82,8 @@ function bytesToHex(bytes) {
 }
 
 function hexToBytes(hex) {
-  const normalized = String(hex ?? "").trim().toLowerCase();
+  // Trimmed as Go's strings.TrimSpace trims, as the node trims these fields.
+  const normalized = trimGoWhitespace(hex).toLowerCase();
   if (!/^[0-9a-f]*$/.test(normalized) || normalized.length % 2 !== 0) {
     throw new ModuleSignatureError(
       "invalid_hex",
@@ -121,15 +122,21 @@ function normalizeTrustedPublicKeys(trustedPublicKeys) {
   return keys;
 }
 
+// The entry judged is the one the node judges (publication_signature.go,
+// findModuleSignatureEntry): the first whose role is SIGNATURE, or whose
+// entryId or sectionName, Go-trimmed and lowercased, is "signature" or
+// "sds.signature".
 function findSignatureEntry(bundle) {
+  const folded = (value) =>
+    typeof value === "string" ? trimGoWhitespace(value).toLowerCase() : value;
   for (const entry of bundle?.entries ?? []) {
     const role =
       typeof entry.role === "string" ? entry.role.toLowerCase() : entry.role;
     if (
       role === MODULE_SIGNATURE_ENTRY_ROLE ||
       role === ModuleBundleEntryRole.SIGNATURE ||
-      entry.entryId === "signature" ||
-      entry.sectionName === "sds.signature"
+      folded(entry.entryId) === "signature" ||
+      folded(entry.sectionName) === "sds.signature"
     ) {
       return entry;
     }
@@ -184,6 +191,21 @@ function decodeSignaturePayload(entry) {
         `module signature entry payload spells "${key}"; the wire form is the module SDK's camelCase JSON and the correct spelling is "${variant}"`,
       );
     }
+  }
+  // Every known key is a string, as the node's struct reads it (Go's
+  // json.Unmarshal refuses an array, a number, an object or a boolean for a
+  // string field). keyId may also be null: OrbPro's envelope signer and this
+  // SDK write keyId null when there is none. Without this check, String()
+  // turned a one-element array into its string and admitted what the node
+  // refuses.
+  for (const key of SIGNATURE_PAYLOAD_KEYS) {
+    if (!Object.hasOwn(parsed, key)) continue;
+    const value = parsed[key];
+    if (typeof value === "string" || (key === "keyId" && value === null)) continue;
+    throw new ModuleSignatureError(
+      "invalid_signature_payload",
+      `module signature entry payload's "${key}" is ${value === null ? "null" : Array.isArray(value) ? "an array" : typeof value}; it must be a string${key === "keyId" ? " or null" : ""}`,
+    );
   }
   return parsed;
 }
@@ -543,7 +565,7 @@ export async function verifyModuleArtifact(bytes, options = {}) {
       "module signature must not be all zeroes",
     );
   }
-  const publicKeyHex = String(payload.publicKeyHex ?? "").trim().toLowerCase();
+  const publicKeyHex = trimGoWhitespace(payload.publicKeyHex).toLowerCase();
   const publicKeyBytes = hexToBytes(publicKeyHex);
   if (publicKeyBytes.length !== 32) {
     throw new ModuleSignatureError(
