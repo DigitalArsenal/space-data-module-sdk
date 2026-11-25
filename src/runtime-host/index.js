@@ -1,7 +1,33 @@
 import { createFlatSqlRuntimeStore } from "./flatsqlRuntimeStore.js";
 import { createFlatBufferStreamIngestor } from "./flatbufferStreamIngestor.js";
-import { createRuntimeRegionStore } from "./runtimeRegionStore.js";
+import {
+  createArenaBuffer,
+  createRuntimeRegionStore,
+  isSharedBuffer,
+} from "./runtimeRegionStore.js";
 import { createModuleRegistry } from "./moduleRegistry.js";
+import {
+  SCR_GRID_STATE_FLOATS,
+  SCR_GRID_STATE_BYTES,
+  SCR_RADIUS_BAND_FLOATS,
+  SCR_RADIUS_BAND_BYTES,
+  SCR_ROLE,
+  SCR_ROLE_MASK_ALL,
+  SCR_GRID_LAYOUT_ID,
+  DEFAULT_PROPAGATOR_ID,
+  SUPPORTED_PROPAGATOR_IDS,
+  DECLARED_ORBIT_THEORIES,
+  TheoryMismatchError,
+  StaleGridLeaseError,
+  resolvePropagatorId,
+  normalizeDeclaredTheory,
+  createPropagatorRegistry,
+  routeCatalogRecordsByTheory,
+  gridCacheKey,
+  encodeScrGridFlatBuffer,
+  decodeScrGridFlatBuffer,
+  createSharedEphemerisGridManager,
+} from "./ephemerisGridStore.js";
 
 function normalizeCapabilityId(capability) {
   const normalized = String(capability ?? "").trim();
@@ -49,12 +75,46 @@ export function createRuntimeHost(options = {}) {
   const rows = options.rows ?? createFlatSqlRuntimeStore(options.rowStore);
   const regions = options.regions ?? createRuntimeRegionStore();
   const moduleRegistry = options.moduleRegistry ?? createModuleRegistry();
+  const propagators =
+    options.propagators ?? createPropagatorRegistry(options.propagatorAdapters);
+  const ephemerisGrids =
+    options.ephemerisGrids ??
+    createSharedEphemerisGridManager({ regions, propagators });
   const capabilities = createCapabilityRegistry(options.capabilities);
 
   return {
     rows,
     regions,
     moduleRegistry,
+    propagators,
+    ephemerisGrids,
+    registerPropagator(id, adapter) {
+      return propagators.registerPropagator(id, adapter);
+    },
+    listPropagators() {
+      return propagators.listPropagators();
+    },
+    populateEphemerisGrid(spec) {
+      return ephemerisGrids.populateGrid(spec);
+    },
+    getEphemerisGrid(regionId) {
+      return ephemerisGrids.getGrid(regionId);
+    },
+    attachEphemerisGrid(regionId, opts) {
+      return ephemerisGrids.attachGridModule(regionId, opts);
+    },
+    detachEphemerisGrid(lease) {
+      if (!lease || typeof lease.detach !== "function") {
+        return false;
+      }
+      return lease.detach();
+    },
+    spliceEphemerisGrid(spec) {
+      return ephemerisGrids.spliceGridObjects(spec);
+    },
+    invalidateEphemerisGrid(filter) {
+      return ephemerisGrids.invalidateGrid(filter);
+    },
     listCapabilities() {
       return Array.from(capabilities.keys()).sort();
     },
@@ -106,10 +166,32 @@ export function createRuntimeHost(options = {}) {
 }
 
 export {
+  createArenaBuffer,
   createFlatBufferStreamIngestor,
   createFlatSqlRuntimeStore,
   createModuleRegistry,
   createRuntimeRegionStore,
+  isSharedBuffer,
+  SCR_GRID_STATE_FLOATS,
+  SCR_GRID_STATE_BYTES,
+  SCR_RADIUS_BAND_FLOATS,
+  SCR_RADIUS_BAND_BYTES,
+  SCR_ROLE,
+  SCR_ROLE_MASK_ALL,
+  SCR_GRID_LAYOUT_ID,
+  DEFAULT_PROPAGATOR_ID,
+  SUPPORTED_PROPAGATOR_IDS,
+  DECLARED_ORBIT_THEORIES,
+  TheoryMismatchError,
+  StaleGridLeaseError,
+  resolvePropagatorId,
+  normalizeDeclaredTheory,
+  createPropagatorRegistry,
+  routeCatalogRecordsByTheory,
+  gridCacheKey,
+  encodeScrGridFlatBuffer,
+  decodeScrGridFlatBuffer,
+  createSharedEphemerisGridManager,
 };
 // Flow-tier validating method registry (vendored sdn-flow semantics; distinct
 // from createModuleRegistry's module-lifecycle registry).
