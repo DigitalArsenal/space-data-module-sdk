@@ -461,6 +461,38 @@ export interface RuntimeRegionDescriptor {
   recordByteLength: number;
   alignment: number;
   recordCount: number;
+  kind?: "owned" | "external" | "contiguous";
+  shared?: boolean;
+  generation?: number;
+  byteLength?: number;
+  activeConsumers?: number;
+  invalidated?: boolean;
+  metadata?: unknown;
+}
+
+export interface RuntimeRegionArena {
+  regionId: number;
+  buffer: ArrayBufferLike;
+  byteOffset: number;
+  byteLength: number;
+  bytes: Uint8Array;
+  shared: boolean;
+  alignment: number;
+  generation: number;
+  recordCount: number;
+  recordByteLength: number;
+}
+
+export interface RuntimeRegionConsumerLease {
+  readonly leaseId: number;
+  readonly regionId: number;
+  readonly consumerId: string;
+  readonly mode: "read-only";
+  readonly roleMask: number | null;
+  readonly generation: number;
+  isCurrent(): boolean;
+  assertCurrent(): boolean;
+  detach(): boolean;
 }
 
 export interface RuntimeRegionRecord {
@@ -481,6 +513,9 @@ export interface RuntimeRegionExternalRecordView {
   alignment: number;
   byteOffset?: number;
   buffer?: ArrayBufferLike;
+  shared?: boolean;
+  generation?: number;
+  bytes?: Uint8Array;
   elementType?: string;
   elementCount?: number;
   strideElements?: number;
@@ -498,6 +533,15 @@ export interface RuntimeRegionStore {
     recordByteLength: number;
     alignment?: number;
     initialRecords?: Array<Uint8Array | ArrayBuffer | ArrayBufferView | null | undefined>;
+  }): RuntimeRegionDescriptor;
+  allocateContiguousRegion(options: {
+    layoutId: string;
+    recordByteLength: number;
+    alignment?: number;
+    recordCount?: number;
+    shared?: boolean;
+    initialBytes?: Uint8Array | ArrayBuffer | ArrayBufferView | null;
+    metadata?: unknown;
   }): RuntimeRegionDescriptor;
   registerExternalRegion(options: {
     layoutId: string;
@@ -521,11 +565,341 @@ export interface RuntimeRegionStore {
   }): RuntimeRegionDescriptor;
   setRegionRecordCount(regionId: number, recordCount: number): RuntimeRegionDescriptor | null;
   describeRegion(regionId: number): RuntimeRegionDescriptor | null;
+  getRegionArena(regionId: number): RuntimeRegionArena | null;
+  updateContiguousRecord(options: {
+    regionId: number;
+    recordIndex: number;
+    bytes: Uint8Array | ArrayBuffer | ArrayBufferView | null | undefined;
+    bumpGeneration?: boolean;
+  }): {
+    regionId: number;
+    recordIndex: number;
+    generation: number;
+    byteLength: number;
+  };
+  resizeContiguousRegion(
+    regionId: number,
+    newRecordCount: number,
+    options?: { shared?: boolean },
+  ): RuntimeRegionDescriptor | null;
+  bumpRegionGeneration(regionId: number): number | null;
+  invalidateRegion(regionId: number): boolean;
+  attachRegionConsumer(
+    regionId: number,
+    options: {
+      consumerId: string;
+      mode?: "read-only";
+      roleMask?: number | null;
+    },
+  ): RuntimeRegionConsumerLease;
+  detachRegionConsumer(regionId: number, leaseId: number): boolean;
+  listRegionConsumers(regionId: number): Array<{
+    leaseId: number;
+    regionId: number;
+    consumerId: string;
+    mode: "read-only";
+    roleMask: number | null;
+    generation: number;
+    attachedAt: number;
+  }>;
   resolveRecord(options: RuntimeRegionRecordViewRequest): RuntimeRegionRecord | null;
   resolveRecordView(
     options: RuntimeRegionRecordViewRequest,
   ): RuntimeRegionRecord | RuntimeRegionExternalRecordView | null;
 }
+
+export type DeclaredOrbitTheory = "SGP4" | "SGP4XP" | "AP";
+
+export interface EphemerisCatalogRecord {
+  id?: string | number;
+  ID?: string | number;
+  OBJECT_ID?: string;
+  NORAD_CAT_ID?: number;
+  declaredTheory?: DeclaredOrbitTheory | string;
+  MEAN_ELEMENT_THEORY?: DeclaredOrbitTheory | string;
+  theory?: DeclaredOrbitTheory | string;
+  propagatorId?: string;
+  [key: string]: unknown;
+}
+
+export interface RoutedCatalogRecord {
+  index: number;
+  recordId: string;
+  declaredTheory: DeclaredOrbitTheory;
+  propagatorId: string;
+  record: EphemerisCatalogRecord;
+}
+
+export interface PropagatorGridContext {
+  records: EphemerisCatalogRecord[];
+  routedRecords: RoutedCatalogRecord[];
+  updatedIndices?: number[];
+  statesView: Float32Array;
+  bandsView: Float32Array;
+  firstStep: number;
+  stepCount: number;
+  objectCount: number;
+  windowStart: number;
+  windowEnd: number;
+  stepS: number;
+  frame: string;
+  propagatorId: string;
+}
+
+export interface PropagatorRecordContext {
+  record: EphemerisCatalogRecord;
+  objectIndex: number;
+  declaredTheory: DeclaredOrbitTheory;
+  propagatorId: string;
+  statesView: Float32Array;
+  bandsView: Float32Array;
+  firstStep: number;
+  stepCount: number;
+  objectCount: number;
+  windowStart: number;
+  windowEnd: number;
+  stepS: number;
+  frame: string;
+}
+
+export interface PropagatorAdapter {
+  supportedTheories?: Iterable<DeclaredOrbitTheory | string>;
+  strict?: boolean;
+  supportsTheory?: (theory: DeclaredOrbitTheory) => boolean;
+  propagateGrid?: (
+    context: PropagatorGridContext,
+  ) => { excludedIndices?: number[] } | void;
+  propagateRecord?: (
+    context: PropagatorRecordContext,
+  ) => { excluded?: boolean } | void;
+  [key: string]: unknown;
+}
+
+export interface RegisteredPropagatorAdapter extends PropagatorAdapter {
+  propagatorId: string;
+  supportedTheories: Set<DeclaredOrbitTheory> | null;
+  supportsTheory(theory: DeclaredOrbitTheory | string): boolean;
+}
+
+export interface PropagatorRegistry {
+  defaultPropagatorId: string;
+  supportedPropagatorIds: readonly string[];
+  registerPropagator(id: string, adapter: PropagatorAdapter): RegisteredPropagatorAdapter;
+  getPropagator(id?: string): RegisteredPropagatorAdapter | null;
+  hasPropagator(id?: string): boolean;
+  listPropagators(): string[];
+  unregisterPropagator(id: string): boolean;
+}
+
+export interface EphemerisGridDescriptor {
+  readonly regionId: number;
+  readonly roleMask: number;
+  readonly propagatorId: string;
+  readonly catalogRevision: string;
+  readonly windowStart: number;
+  readonly windowEnd: number;
+  readonly stepS: number;
+  readonly frame: string;
+  readonly firstStep: number;
+  readonly stepCount: number;
+  readonly objectCount: number;
+  readonly generation: number;
+}
+
+export interface PopulateEphemerisGridSpec {
+  propagatorId?: string;
+  catalogRevision: string | number;
+  windowStart: number;
+  windowEnd: number;
+  stepS: number;
+  frame?: string;
+  firstStep?: number;
+  stepCount?: number;
+  roleMask?: number;
+  roles?: Uint8Array | number[] | null;
+  records?: EphemerisCatalogRecord[];
+  objectCount?: number;
+  shared?: boolean;
+  allowMixedRouting?: boolean;
+  populateFn?: (
+    context: PropagatorGridContext,
+  ) => { excludedIndices?: number[] } | void;
+}
+
+export interface PopulateEphemerisGridResult {
+  descriptor: EphemerisGridDescriptor;
+  regionId: number;
+  cacheHit: boolean;
+  propagationCount: number;
+  propagatedObjectCount: number;
+  excludedIndices: number[];
+}
+
+export interface EphemerisGridStatus {
+  descriptor: EphemerisGridDescriptor;
+  regionId: number;
+  shared: boolean;
+  generation: number;
+  byteLength: number;
+  statesByteLength: number;
+  bandsByteLength: number;
+  propagationCount: number;
+  propagatedObjectCount: number;
+  spliceCount: number;
+  activeConsumers: number;
+  invalidated: boolean;
+  excludedIndices: number[];
+}
+
+export interface GridAttachLease {
+  readonly leaseId: number;
+  readonly regionId: number;
+  readonly moduleId: string;
+  readonly mode: "read-only";
+  readonly shared: boolean;
+  readonly generation: number;
+  readonly descriptor: EphemerisGridDescriptor;
+  readonly arenaBytes: Uint8Array;
+  getStatesView(): Float32Array;
+  getBandsView(): Float32Array;
+  getRolesView(): Uint8Array;
+  encodeAlignedExternalFrame(options?: {
+    portId?: string;
+    typeRef?: PayloadTypeRef;
+  }): InvokeFrame & { shared: boolean; regionId: number };
+  encodeScrGridFrame(): Uint8Array;
+  isCurrent(): boolean;
+  assertCurrent(): boolean;
+  detach(): boolean;
+}
+
+export interface SpliceEphemerisGridSpec {
+  regionId: number;
+  newCatalogRevision: string | number;
+  updatedIndices: number[];
+  records?: EphemerisCatalogRecord[];
+  excludedIndices?: number[];
+  allowMixedRouting?: boolean;
+  populateFn?: (
+    context: PropagatorGridContext & { updatedIndices: number[] },
+  ) => void;
+}
+
+export interface InvalidateEphemerisGridFilter {
+  regionId?: number;
+  propagatorId?: string;
+  catalogRevision?: string | number;
+  windowStart?: number;
+  windowEnd?: number;
+  stepS?: number;
+  frame?: string;
+  all?: boolean;
+}
+
+export interface SharedEphemerisGridManager {
+  populateGrid(spec: PopulateEphemerisGridSpec): PopulateEphemerisGridResult;
+  getGrid(regionId: number): EphemerisGridStatus | null;
+  attachGridModule(
+    regionId: number,
+    options: {
+      moduleId: string;
+      roleMask?: number;
+      roles?: Uint8Array | number[] | null;
+      mode?: "read-only";
+    },
+  ): GridAttachLease;
+  spliceGridObjects(spec: SpliceEphemerisGridSpec): {
+    descriptor: EphemerisGridDescriptor;
+    regionId: number;
+    generation: number;
+    updatedIndices: number[];
+    propagatedObjectCount: number;
+  };
+  invalidateGrid(filter: number | InvalidateEphemerisGridFilter): {
+    invalidatedRegionIds: number[];
+    count: number;
+  };
+}
+
+export const SCR_GRID_STATE_FLOATS: number;
+export const SCR_GRID_STATE_BYTES: number;
+export const SCR_RADIUS_BAND_FLOATS: number;
+export const SCR_RADIUS_BAND_BYTES: number;
+export const SCR_ROLE: Readonly<{ SECONDARY: 0; PRIMARY: 1; SKIP: 2 }>;
+export const SCR_ROLE_MASK_ALL: number;
+export const SCR_GRID_LAYOUT_ID: string;
+export const DEFAULT_PROPAGATOR_ID: string;
+export const SUPPORTED_PROPAGATOR_IDS: readonly string[];
+export const DECLARED_ORBIT_THEORIES: readonly DeclaredOrbitTheory[];
+
+export class TheoryMismatchError extends Error {
+  code: string;
+  recordId: string | null;
+  declaredTheory: string | null;
+  propagatorId: string | null;
+}
+
+export class StaleGridLeaseError extends Error {
+  code: string;
+  regionId: number | null;
+  moduleId: string | null;
+  attachedGeneration: number | null;
+  currentGeneration: number | null;
+}
+
+export function isSharedBuffer(buffer: unknown): buffer is SharedArrayBuffer;
+export function createArenaBuffer(
+  byteLength: number,
+  options?: { shared?: boolean },
+): ArrayBuffer | SharedArrayBuffer;
+export function resolvePropagatorId(id?: string): string;
+export function normalizeDeclaredTheory(
+  value: unknown,
+  recordLabel?: string,
+): DeclaredOrbitTheory;
+export function createPropagatorRegistry(
+  initialAdapters?:
+    | Map<string, PropagatorAdapter>
+    | Record<string, PropagatorAdapter>,
+): PropagatorRegistry;
+export function routeCatalogRecordsByTheory(
+  records: EphemerisCatalogRecord[],
+  options?: {
+    propagatorId?: string;
+    registry?: PropagatorRegistry | null;
+    allowMixedRouting?: boolean;
+  },
+): RoutedCatalogRecord[];
+export function gridCacheKey(spec: {
+  propagatorId?: string;
+  catalogRevision: string | number;
+  windowStart: number;
+  windowEnd: number;
+  stepS: number;
+  frame?: string;
+}): string;
+export function encodeScrGridFlatBuffer(spec: {
+  firstStep?: number;
+  stepCount: number;
+  objectCount: number;
+  frame?: string;
+  stepS?: number;
+  statesView: Float32Array;
+  bandsView: Float32Array;
+}): Uint8Array;
+export function decodeScrGridFlatBuffer(bytes: Uint8Array): {
+  firstStep: number;
+  stepCount: number;
+  objectCount: number;
+  frame: string;
+  stepS: number;
+  statesView: Float32Array;
+  bandsView: Float32Array;
+};
+export function createSharedEphemerisGridManager(options?: {
+  regions?: RuntimeRegionStore;
+  propagators?: PropagatorRegistry;
+}): SharedEphemerisGridManager;
 
 export interface InstalledRuntimeModule {
   moduleId: string;
@@ -557,6 +931,33 @@ export interface RuntimeHost {
   rows: FlatSqlRuntimeStore;
   regions: RuntimeRegionStore;
   moduleRegistry: RuntimeModuleRegistry;
+  propagators: PropagatorRegistry;
+  ephemerisGrids: SharedEphemerisGridManager;
+  registerPropagator(id: string, adapter: PropagatorAdapter): RegisteredPropagatorAdapter;
+  listPropagators(): string[];
+  populateEphemerisGrid(spec: PopulateEphemerisGridSpec): PopulateEphemerisGridResult;
+  getEphemerisGrid(regionId: number): EphemerisGridStatus | null;
+  attachEphemerisGrid(
+    regionId: number,
+    options: {
+      moduleId: string;
+      roleMask?: number;
+      roles?: Uint8Array | number[] | null;
+      mode?: "read-only";
+    },
+  ): GridAttachLease;
+  detachEphemerisGrid(lease: GridAttachLease): boolean;
+  spliceEphemerisGrid(spec: SpliceEphemerisGridSpec): {
+    descriptor: EphemerisGridDescriptor;
+    regionId: number;
+    generation: number;
+    updatedIndices: number[];
+    propagatedObjectCount: number;
+  };
+  invalidateEphemerisGrid(filter: number | InvalidateEphemerisGridFilter): {
+    invalidatedRegionIds: number[];
+    count: number;
+  };
   listCapabilities(): string[];
   listSupportedCapabilities(): string[];
   listOperations(): string[];
@@ -600,6 +1001,11 @@ export function createRuntimeHost(options?: {
   rows?: FlatSqlRuntimeStore;
   regions?: RuntimeRegionStore;
   moduleRegistry?: RuntimeModuleRegistry;
+  propagators?: PropagatorRegistry;
+  propagatorAdapters?:
+    | Map<string, PropagatorAdapter>
+    | Record<string, PropagatorAdapter>;
+  ephemerisGrids?: SharedEphemerisGridManager;
 }): RuntimeHost;
 export function getWasmExportNamesFromFile(wasmPath: string): Promise<string[]>;
 

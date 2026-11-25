@@ -1,6 +1,6 @@
 {
   "name": "space-data-module-sdk",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "license": "Apache-2.0",
   "description": "Module SDK for building, validating, signing, and deploying WebAssembly modules on the Space Data Network.",
   "type": "module",
@@ -122,6 +122,7 @@
     "generate:propagator-abi": "node scripts/generate-propagator-abi.mjs",
     "generate:vectors": "node ./examples/single-file-bundle/generate-vectors.mjs",
     "prepublishOnly": "npm test && npm run check:compliance && npm run check:generated-bindings",
+    "e2e:shared-ephemeris-grid": "node scripts/e2e/shared-ephemeris-grid.mjs",
     "playground:build": "node ./playground/build.mjs",
     "playground:serve": "node ./playground/build.mjs && node ./playground/server.mjs",
     "playground:gate": "node ./playground/build.mjs && node ./playground/test/browser-gate.mjs",
@@ -133,7 +134,7 @@
     "flatsql": "3.12.1",
     "hd-wallet-wasm": "2.2.2",
     "sdn-emception": "1.0.0",
-    "spacedatastandards.org": "1.279.0"
+    "spacedatastandards.org": "1.294.1"
   },
   "devDependencies": {
     "esbuild": "^0.28.0",
