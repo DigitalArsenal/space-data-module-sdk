@@ -1165,6 +1165,12 @@ async function main() {
     assert.throws(() => {
       leaseA.descriptor.roleMask = 0;
     }, TypeError);
+    assert.throws(() => {
+      Object.setPrototypeOf(leaseA.arenaBytes, Array.prototype);
+    }, TypeError);
+    assert.throws(() => {
+      Object.setPrototypeOf(leaseA.getStatesView(), Array.prototype);
+    }, TypeError);
 
     // Verify NaN exclusion on object 12 in shared grid.
     const statesView = leaseA.getStatesView();
@@ -1248,6 +1254,180 @@ async function main() {
       records: catalogRecords,
     });
     assert.equal(afterInv.cacheHit, false);
+
+    // Reject empty records without populateFn when updatedIndices is non-empty (BUG-3).
+    assert.throws(
+      () =>
+        host.spliceEphemerisGrid({
+          regionId: afterInv.regionId,
+          newCatalogRevision: "rev-empty-records",
+          updatedIndices: [1],
+          records: [],
+        }),
+      RangeError,
+    );
+    assert.equal(host.getEphemerisGrid(afterInv.regionId).descriptor.catalogRevision, "rev-2");
+
+    // propagateGrid-only adapter splice must update exclusions symmetrically (BUG-1).
+    host.registerPropagator("propagator/grid-only", {
+      supportedTheories: ["AP"],
+      propagateGrid({ routedRecords, statesView, bandsView, stepCount, objectCount }) {
+        const excludedIndices = [];
+        for (const routed of routedRecords) {
+          if (routed.record.excluded) {
+            excludedIndices.push(routed.index);
+            continue;
+          }
+          for (let s = 0; s < stepCount; s += 1) {
+            const base = (s * objectCount + routed.index) * SCR_GRID_STATE_FLOATS;
+            statesView[base] = 7777;
+            statesView[base + 1] = routed.index + 1;
+            statesView[base + 2] = 0;
+            statesView[base + 3] = 0.5;
+            statesView[base + 4] = 0;
+            statesView[base + 5] = 7.5;
+            statesView[base + 6] = 0;
+            statesView[base + 7] = 0;
+          }
+          const bOffset = routed.index * SCR_RADIUS_BAND_FLOATS;
+          bandsView[bOffset] = 7776;
+          bandsView[bOffset + 1] = 7778;
+        }
+        return { excludedIndices };
+      },
+    });
+    const gridOnlyPop = host.populateEphemerisGrid({
+      propagatorId: "propagator/grid-only",
+      catalogRevision: "grid-only-rev-1",
+      windowStart: 0,
+      windowEnd: 120,
+      stepS: 60,
+      records: [
+        { id: "G0", declaredTheory: "AP", excluded: false },
+        { id: "G1", declaredTheory: "AP", excluded: true },
+      ],
+    });
+    const gridOnlySplice = host.spliceEphemerisGrid({
+      regionId: gridOnlyPop.regionId,
+      newCatalogRevision: "grid-only-rev-2",
+      updatedIndices: [0, 1],
+      records: [
+        { id: "G0", declaredTheory: "AP", excluded: true },
+        { id: "G1", declaredTheory: "AP", excluded: false },
+      ],
+    });
+    assert.equal(gridOnlySplice.propagatedObjectCount, 2);
+    const gridOnlyLease = host.attachEphemerisGrid(gridOnlyPop.regionId, {
+      moduleId: "grid-only-checker",
+    });
+    assert.ok(Number.isNaN(gridOnlyLease.getStatesView()[0]), "G0 must become NaN when excluded by propagateGrid-only splice");
+    assert.ok(Number.isNaN(gridOnlyLease.getBandsView()[0]), "G0 band must become NaN when excluded");
+    assert.equal(gridOnlyLease.getStatesView()[SCR_GRID_STATE_FLOATS], 7777, "G1 must become finite when un-excluded by propagateGrid-only splice");
+    assert.equal(gridOnlyLease.getBandsView()[SCR_RADIUS_BAND_FLOATS], 7776, "G1 band must become finite when un-excluded");
+    gridOnlyLease.detach();
+
+    // populateFn splice must clear un-excluded updatedIndices and honor returned/explicit exclusions (BUG-2).
+    const popFnGrid = host.populateEphemerisGrid({
+      propagatorId: "propagator/grid-only",
+      catalogRevision: "popfn-rev-1",
+      windowStart: 0,
+      windowEnd: 60,
+      stepS: 60,
+      objectCount: 3,
+      populateFn({ statesView, bandsView, stepCount, objectCount }) {
+        for (let obj = 0; obj < 2; obj += 1) {
+          for (let s = 0; s < stepCount; s += 1) {
+            statesView[(s * objectCount + obj) * SCR_GRID_STATE_FLOATS] = 1000 + obj;
+          }
+          bandsView[obj * SCR_RADIUS_BAND_FLOATS] = 999;
+          bandsView[obj * SCR_RADIUS_BAND_FLOATS + 1] = 1001;
+        }
+        return { excludedIndices: [2] };
+      },
+    });
+    host.spliceEphemerisGrid({
+      regionId: popFnGrid.regionId,
+      newCatalogRevision: "popfn-rev-2",
+      updatedIndices: [0, 2],
+      records: [],
+      populateFn({ statesView, bandsView, stepCount, objectCount }) {
+        for (let s = 0; s < stepCount; s += 1) {
+          statesView[(s * objectCount + 0) * SCR_GRID_STATE_FLOATS] = 4444;
+          statesView[(s * objectCount + 2) * SCR_GRID_STATE_FLOATS] = 5555;
+        }
+        bandsView[2 * SCR_RADIUS_BAND_FLOATS] = 5554;
+        bandsView[2 * SCR_RADIUS_BAND_FLOATS + 1] = 5556;
+        return { excludedIndices: [0] };
+      },
+    });
+    const popFnLease = host.attachEphemerisGrid(popFnGrid.regionId, {
+      moduleId: "popfn-checker",
+    });
+    assert.ok(Number.isNaN(popFnLease.getStatesView()[0]), "Index 0 returned in populateFn excludedIndices must be NaN");
+    assert.equal(popFnLease.getStatesView()[SCR_GRID_STATE_FLOATS], 1001, "Untouched index 1 must stay intact");
+    assert.equal(popFnLease.getStatesView()[2 * SCR_GRID_STATE_FLOATS], 5555, "Un-excluded index 2 written by populateFn must remain valid");
+    assert.equal(popFnLease.getBandsView()[2 * SCR_RADIUS_BAND_FLOATS], 5554, "Un-excluded index 2 band must remain valid");
+    popFnLease.detach();
+
+    // Splicing same region with explicit excludedIndices & same revision is allowed; colliding with another active region must fail loudly.
+    assert.doesNotThrow(() =>
+      host.spliceEphemerisGrid({
+        regionId: popFnGrid.regionId,
+        newCatalogRevision: "popfn-rev-2",
+        updatedIndices: [],
+        records: [],
+        excludedIndices: [1],
+      }),
+    );
+    const popFnLease2 = host.attachEphemerisGrid(popFnGrid.regionId, {
+      moduleId: "popfn-checker-2",
+    });
+    assert.ok(Number.isNaN(popFnLease2.getStatesView()[SCR_GRID_STATE_FLOATS]), "Explicit excludedIndices=[1] must mark index 1 as NaN");
+    assert.equal(popFnLease2.getStatesView()[2 * SCR_GRID_STATE_FLOATS], 5555, "Index 2 must remain valid");
+    popFnLease2.detach();
+
+    const collidingOther = host.populateEphemerisGrid({
+      catalogRevision: "rev-collide-other",
+      windowStart: 0,
+      windowEnd: 960,
+      stepS: 120,
+      frame: "TEME",
+      records: catalogRecords,
+    });
+    assert.throws(
+      () =>
+        host.spliceEphemerisGrid({
+          regionId: afterInv.regionId,
+          newCatalogRevision: "rev-collide-other",
+          updatedIndices: [0],
+          records: [catalogRecords[0]],
+        }),
+      /already active on region/i,
+    );
+    assert.equal(host.getEphemerisGrid(collidingOther.regionId).invalidated, false);
+
+    // Direct regions.invalidateRegion(regionId) must keep ephemerisGrids cache & leases consistent.
+    const directInvLease = host.attachEphemerisGrid(collidingOther.regionId, {
+      moduleId: "direct-inv-checker",
+    });
+    assert.equal(host.regions.invalidateRegion(collidingOther.regionId), true);
+    assert.equal(host.getEphemerisGrid(collidingOther.regionId).invalidated, true);
+    assert.equal(directInvLease.isCurrent(), false);
+    assert.throws(() => directInvLease.assertCurrent(), StaleGridLeaseError);
+    assert.throws(
+      () => host.attachEphemerisGrid(collidingOther.regionId, { moduleId: "after-direct-inv" }),
+      StaleGridLeaseError,
+    );
+    const repopAfterDirectInv = host.populateEphemerisGrid({
+      catalogRevision: "rev-collide-other",
+      windowStart: 0,
+      windowEnd: 960,
+      stepS: 120,
+      frame: "TEME",
+      records: catalogRecords,
+    });
+    assert.equal(repopAfterDirectInv.cacheHit, false);
+    assert.notEqual(repopAfterDirectInv.regionId, collidingOther.regionId);
     console.log("runtime-host: populate-once cache, SAB sharing, read-only leases, declared-theory routing, splice & invalidation verified");
 
     // --- 4. Tri-Runtime Multi-Thread Parity (Browser, Native WasmEdge, Docker WasmEdge) -------

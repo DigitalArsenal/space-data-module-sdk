@@ -262,6 +262,9 @@ function createReadOnlyTypedArrayView(target, label) {
     deleteProperty() {
       throw new TypeError(`Cannot delete property on read-only ${label}.`);
     },
+    setPrototypeOf() {
+      throw new TypeError(`Cannot change prototype of read-only ${label}.`);
+    },
   });
 }
 
@@ -678,6 +681,34 @@ export function createSharedEphemerisGridManager({
   const entriesByRegionId = new Map();
   const cacheByKey = new Map();
 
+  function syncEntryWithRegion(entry) {
+    if (!entry) {
+      return null;
+    }
+    const regionDesc = regions.describeRegion(entry.regionId);
+    const arena =
+      regionDesc && !regionDesc.invalidated
+        ? regions.getRegionArena(entry.regionId)
+        : null;
+    if (!regionDesc || regionDesc.invalidated || !arena) {
+      if (!entry.invalidated) {
+        entry.invalidated = true;
+        cacheByKey.delete(entry.cacheKey);
+      }
+      if (regionDesc && typeof regionDesc.generation === "number") {
+        entry.generation = Math.max(entry.generation, regionDesc.generation);
+      }
+      return regionDesc;
+    }
+    if (
+      typeof regionDesc.generation === "number" &&
+      regionDesc.generation > entry.generation
+    ) {
+      entry.generation = regionDesc.generation;
+    }
+    return regionDesc;
+  }
+
   function buildDescriptor(entry, { roleMask } = {}) {
     return Object.freeze({
       regionId: entry.regionId,
@@ -904,6 +935,9 @@ export function createSharedEphemerisGridManager({
     });
 
     const cached = cacheByKey.get(key);
+    if (cached) {
+      syncEntryWithRegion(cached);
+    }
     if (cached && !cached.invalidated) {
       if (
         cached.firstStep !== firstStep ||
@@ -1049,7 +1083,7 @@ export function createSharedEphemerisGridManager({
     if (!entry) {
       return null;
     }
-    const regionDesc = regions.describeRegion(normalizedRegionId);
+    const regionDesc = syncEntryWithRegion(entry);
     return {
       descriptor: buildDescriptor(entry),
       regionId: entry.regionId,
@@ -1087,6 +1121,7 @@ export function createSharedEphemerisGridManager({
     if (!entry) {
       throw new Error(`Unknown ephemeris grid region ${normalizedRegionId}.`);
     }
+    syncEntryWithRegion(entry);
     if (entry.invalidated) {
       throw new StaleGridLeaseError(
         `Ephemeris grid region ${normalizedRegionId} has been invalidated.`,
@@ -1126,6 +1161,7 @@ export function createSharedEphemerisGridManager({
           },
         );
       }
+      syncEntryWithRegion(entry);
       if (entry.invalidated) {
         throw new StaleGridLeaseError(
           `Ephemeris grid region ${normalizedRegionId} was invalidated; lease for module "${normalizedModuleId}" is stale.`,
@@ -1153,6 +1189,7 @@ export function createSharedEphemerisGridManager({
     }
 
     function isCurrent() {
+      syncEntryWithRegion(entry);
       return (
         !detached &&
         !entry.invalidated &&
@@ -1313,6 +1350,7 @@ export function createSharedEphemerisGridManager({
     if (!entry) {
       throw new Error(`Unknown ephemeris grid region ${normalizedRegionId}.`);
     }
+    syncEntryWithRegion(entry);
     if (entry.invalidated) {
       throw new Error(
         `Cannot splice invalidated ephemeris grid region ${normalizedRegionId}.`,
@@ -1322,8 +1360,35 @@ export function createSharedEphemerisGridManager({
       newCatalogRevision,
       "newCatalogRevision",
     );
+    const nextCacheKey = gridCacheKey({
+      propagatorId: entry.propagatorId,
+      catalogRevision: nextRevision,
+      windowStart: entry.windowStart,
+      windowEnd: entry.windowEnd,
+      stepS: entry.stepS,
+      frame: entry.frame,
+    });
+    const colliding = cacheByKey.get(nextCacheKey);
+    if (colliding) {
+      syncEntryWithRegion(colliding);
+    }
+    if (
+      colliding &&
+      !colliding.invalidated &&
+      colliding.regionId !== entry.regionId
+    ) {
+      throw new Error(
+        `Cannot splice ephemeris grid region ${normalizedRegionId} to catalogRevision "${nextRevision}": cache key "${nextCacheKey}" is already active on region ${colliding.regionId}.`,
+      );
+    }
     if (!Array.isArray(updatedIndices)) {
       throw new TypeError("updatedIndices must be an array.");
+    }
+    if (!Array.isArray(records)) {
+      throw new TypeError("Catalog records must be an array.");
+    }
+    if (!Array.isArray(excludedIndices)) {
+      throw new TypeError("excludedIndices must be an array.");
     }
     const indices = updatedIndices.map((idx) => {
       const n = normalizeNonNegativeInteger(idx, "updatedIndex");
@@ -1338,6 +1403,15 @@ export function createSharedEphemerisGridManager({
     if (records.length > 0 && records.length !== indices.length) {
       throw new RangeError(
         `spliceGridObjects records.length (${records.length}) must match updatedIndices.length (${indices.length}).`,
+      );
+    }
+    if (
+      typeof populateFn !== "function" &&
+      indices.length > 0 &&
+      records.length === 0
+    ) {
+      throw new RangeError(
+        `spliceGridObjects requires records (length ${indices.length}) or populateFn when updatedIndices is non-empty.`,
       );
     }
 
@@ -1365,9 +1439,13 @@ export function createSharedEphemerisGridManager({
       arena.byteOffset + entry.statesByteLength,
       entry.bandsFloatCount,
     );
+    const nextExcludedIndices = new Set(entry.excludedIndices);
 
     if (typeof populateFn === "function") {
-      populateFn({
+      for (const idx of indices) {
+        nextExcludedIndices.delete(idx);
+      }
+      const outcome = populateFn({
         updatedIndices: indices,
         records,
         routedRecords: routedUpdates,
@@ -1382,6 +1460,17 @@ export function createSharedEphemerisGridManager({
         frame: entry.frame,
         propagatorId: entry.propagatorId,
       });
+      if (Array.isArray(outcome?.excludedIndices)) {
+        for (const idx of outcome.excludedIndices) {
+          const n = normalizeNonNegativeInteger(idx, "excludedIndex");
+          if (n >= entry.objectCount) {
+            throw new RangeError(
+              `excludedIndex ${n} out of bounds for objectCount ${entry.objectCount}.`,
+            );
+          }
+          nextExcludedIndices.add(n);
+        }
+      }
     } else if (indices.length > 0) {
       for (const routed of routedUpdates) {
         const adapter = propagators.getPropagator(routed.propagatorId);
@@ -1407,12 +1496,13 @@ export function createSharedEphemerisGridManager({
             frame: entry.frame,
           });
           if (res?.excluded === true) {
-            entry.excludedIndices.add(routed.index);
+            nextExcludedIndices.add(routed.index);
           } else {
-            entry.excludedIndices.delete(routed.index);
+            nextExcludedIndices.delete(routed.index);
           }
         } else if (typeof adapter.propagateGrid === "function") {
-          adapter.propagateGrid({
+          nextExcludedIndices.delete(routed.index);
+          const res = adapter.propagateGrid({
             records: [routed.record],
             routedRecords: [routed],
             updatedIndices: [routed.index],
@@ -1427,6 +1517,17 @@ export function createSharedEphemerisGridManager({
             frame: entry.frame,
             propagatorId: routed.propagatorId,
           });
+          if (Array.isArray(res?.excludedIndices)) {
+            for (const idx of res.excludedIndices) {
+              const n = normalizeNonNegativeInteger(idx, "excludedIndex");
+              if (n >= entry.objectCount) {
+                throw new RangeError(
+                  `excludedIndex ${n} out of bounds for objectCount ${entry.objectCount}.`,
+                );
+              }
+              nextExcludedIndices.add(n);
+            }
+          }
         } else {
           throw new Error(
             `Propagator "${routed.propagatorId}" must implement propagateRecord() or propagateGrid().`,
@@ -1440,15 +1541,9 @@ export function createSharedEphemerisGridManager({
       if (n >= entry.objectCount) {
         throw new RangeError(`excludedIndex ${n} out of bounds.`);
       }
-      entry.excludedIndices.add(n);
-      markExcludedObjectRows(
-        statesView,
-        bandsView,
-        entry.stepCount,
-        entry.objectCount,
-        n,
-      );
+      nextExcludedIndices.add(n);
     }
+    entry.excludedIndices = nextExcludedIndices;
     for (const idx of entry.excludedIndices) {
       markExcludedObjectRows(
         statesView,
@@ -1459,16 +1554,11 @@ export function createSharedEphemerisGridManager({
       );
     }
 
-    cacheByKey.delete(entry.cacheKey);
+    if (entry.cacheKey !== nextCacheKey) {
+      cacheByKey.delete(entry.cacheKey);
+    }
     entry.catalogRevision = nextRevision;
-    entry.cacheKey = gridCacheKey({
-      propagatorId: entry.propagatorId,
-      catalogRevision: nextRevision,
-      windowStart: entry.windowStart,
-      windowEnd: entry.windowEnd,
-      stepS: entry.stepS,
-      frame: entry.frame,
-    });
+    entry.cacheKey = nextCacheKey;
     cacheByKey.set(entry.cacheKey, entry);
 
     const nextGeneration = regions.bumpRegionGeneration(normalizedRegionId);
@@ -1527,6 +1617,7 @@ export function createSharedEphemerisGridManager({
 
     const invalidatedRegionIds = [];
     for (const entry of entriesByRegionId.values()) {
+      syncEntryWithRegion(entry);
       if (entry.invalidated) continue;
       if (!matchAll) {
         if (hasRegionId && entry.regionId !== Number(normalizedFilter.regionId)) {

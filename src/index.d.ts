@@ -782,7 +782,7 @@ export interface SpliceEphemerisGridSpec {
   allowMixedRouting?: boolean;
   populateFn?: (
     context: PropagatorGridContext & { updatedIndices: number[] },
-  ) => void;
+  ) => { excludedIndices?: number[] } | void;
 }
 
 export interface InvalidateEphemerisGridFilter {
