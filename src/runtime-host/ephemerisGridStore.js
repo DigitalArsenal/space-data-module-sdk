@@ -1006,36 +1006,48 @@ export function createSharedEphemerisGridManager({
       bandsFloatCount,
     );
 
-    const outcome = runPropagation({
-      canonicalPropagatorId,
-      routedRecords,
-      records,
-      populateFn: spec.populateFn,
-      statesView,
-      bandsView,
-      firstStep,
-      stepCount,
-      objectCount,
-      windowStart,
-      windowEnd,
-      stepS,
-      frame,
-    });
+    let excludedSet;
+    try {
+      const outcome = runPropagation({
+        canonicalPropagatorId,
+        routedRecords,
+        records,
+        populateFn: spec.populateFn,
+        statesView,
+        bandsView,
+        firstStep,
+        stepCount,
+        objectCount,
+        windowStart,
+        windowEnd,
+        stepS,
+        frame,
+      });
 
-    const excludedSet = new Set(
-      Array.isArray(outcome?.excludedIndices)
-        ? outcome.excludedIndices.map((idx) =>
-            normalizeNonNegativeInteger(idx, "excludedIndex"),
-          )
-        : [],
-    );
-    for (const idx of excludedSet) {
-      if (idx >= objectCount) {
-        throw new RangeError(
-          `excludedIndex ${idx} out of bounds for objectCount ${objectCount}.`,
+      excludedSet = new Set(
+        Array.isArray(outcome?.excludedIndices)
+          ? outcome.excludedIndices.map((idx) =>
+              normalizeNonNegativeInteger(idx, "excludedIndex"),
+            )
+          : [],
+      );
+      for (const idx of excludedSet) {
+        if (idx >= objectCount) {
+          throw new RangeError(
+            `excludedIndex ${idx} out of bounds for objectCount ${objectCount}.`,
+          );
+        }
+        markExcludedObjectRows(
+          statesView,
+          bandsView,
+          stepCount,
+          objectCount,
+          idx,
         );
       }
-      markExcludedObjectRows(statesView, bandsView, stepCount, objectCount, idx);
+    } catch (error) {
+      regions.invalidateRegion(regionDesc.regionId);
+      throw error;
     }
 
     const entry = {
@@ -1399,6 +1411,15 @@ export function createSharedEphemerisGridManager({
       }
       return n;
     });
+    const explicitExcludedIndices = excludedIndices.map((idx) => {
+      const n = normalizeNonNegativeInteger(idx, "excludedIndex");
+      if (n >= entry.objectCount) {
+        throw new RangeError(
+          `excludedIndex ${n} out of bounds for objectCount ${entry.objectCount}.`,
+        );
+      }
+      return n;
+    });
 
     if (records.length > 0 && records.length !== indices.length) {
       throw new RangeError(
@@ -1439,120 +1460,122 @@ export function createSharedEphemerisGridManager({
       arena.byteOffset + entry.statesByteLength,
       entry.bandsFloatCount,
     );
+    const arenaBackup = new Uint8Array(arena.bytes);
     const nextExcludedIndices = new Set(entry.excludedIndices);
 
-    if (typeof populateFn === "function") {
-      for (const idx of indices) {
-        nextExcludedIndices.delete(idx);
-      }
-      const outcome = populateFn({
-        updatedIndices: indices,
-        records,
-        routedRecords: routedUpdates,
-        statesView,
-        bandsView,
-        firstStep: entry.firstStep,
-        stepCount: entry.stepCount,
-        objectCount: entry.objectCount,
-        windowStart: entry.windowStart,
-        windowEnd: entry.windowEnd,
-        stepS: entry.stepS,
-        frame: entry.frame,
-        propagatorId: entry.propagatorId,
-      });
-      if (Array.isArray(outcome?.excludedIndices)) {
-        for (const idx of outcome.excludedIndices) {
-          const n = normalizeNonNegativeInteger(idx, "excludedIndex");
-          if (n >= entry.objectCount) {
-            throw new RangeError(
-              `excludedIndex ${n} out of bounds for objectCount ${entry.objectCount}.`,
+    try {
+      if (typeof populateFn === "function") {
+        for (const idx of indices) {
+          nextExcludedIndices.delete(idx);
+        }
+        const outcome = populateFn({
+          updatedIndices: indices,
+          records,
+          routedRecords: routedUpdates,
+          statesView,
+          bandsView,
+          firstStep: entry.firstStep,
+          stepCount: entry.stepCount,
+          objectCount: entry.objectCount,
+          windowStart: entry.windowStart,
+          windowEnd: entry.windowEnd,
+          stepS: entry.stepS,
+          frame: entry.frame,
+          propagatorId: entry.propagatorId,
+        });
+        if (Array.isArray(outcome?.excludedIndices)) {
+          for (const idx of outcome.excludedIndices) {
+            const n = normalizeNonNegativeInteger(idx, "excludedIndex");
+            if (n >= entry.objectCount) {
+              throw new RangeError(
+                `excludedIndex ${n} out of bounds for objectCount ${entry.objectCount}.`,
+              );
+            }
+            nextExcludedIndices.add(n);
+          }
+        }
+      } else if (indices.length > 0) {
+        for (const routed of routedUpdates) {
+          const adapter = propagators.getPropagator(routed.propagatorId);
+          if (!adapter) {
+            throw new Error(
+              `Propagator "${routed.propagatorId}" is not registered on this runtime host.`,
             );
           }
-          nextExcludedIndices.add(n);
-        }
-      }
-    } else if (indices.length > 0) {
-      for (const routed of routedUpdates) {
-        const adapter = propagators.getPropagator(routed.propagatorId);
-        if (!adapter) {
-          throw new Error(
-            `Propagator "${routed.propagatorId}" is not registered on this runtime host.`,
-          );
-        }
-        if (typeof adapter.propagateRecord === "function") {
-          const res = adapter.propagateRecord({
-            record: routed.record,
-            objectIndex: routed.index,
-            declaredTheory: routed.declaredTheory,
-            propagatorId: routed.propagatorId,
-            statesView,
-            bandsView,
-            firstStep: entry.firstStep,
-            stepCount: entry.stepCount,
-            objectCount: entry.objectCount,
-            windowStart: entry.windowStart,
-            windowEnd: entry.windowEnd,
-            stepS: entry.stepS,
-            frame: entry.frame,
-          });
-          if (res?.excluded === true) {
-            nextExcludedIndices.add(routed.index);
-          } else {
-            nextExcludedIndices.delete(routed.index);
-          }
-        } else if (typeof adapter.propagateGrid === "function") {
-          nextExcludedIndices.delete(routed.index);
-          const res = adapter.propagateGrid({
-            records: [routed.record],
-            routedRecords: [routed],
-            updatedIndices: [routed.index],
-            statesView,
-            bandsView,
-            firstStep: entry.firstStep,
-            stepCount: entry.stepCount,
-            objectCount: entry.objectCount,
-            windowStart: entry.windowStart,
-            windowEnd: entry.windowEnd,
-            stepS: entry.stepS,
-            frame: entry.frame,
-            propagatorId: routed.propagatorId,
-          });
-          if (Array.isArray(res?.excludedIndices)) {
-            for (const idx of res.excludedIndices) {
-              const n = normalizeNonNegativeInteger(idx, "excludedIndex");
-              if (n >= entry.objectCount) {
-                throw new RangeError(
-                  `excludedIndex ${n} out of bounds for objectCount ${entry.objectCount}.`,
-                );
-              }
-              nextExcludedIndices.add(n);
+          if (typeof adapter.propagateRecord === "function") {
+            const res = adapter.propagateRecord({
+              record: routed.record,
+              objectIndex: routed.index,
+              declaredTheory: routed.declaredTheory,
+              propagatorId: routed.propagatorId,
+              statesView,
+              bandsView,
+              firstStep: entry.firstStep,
+              stepCount: entry.stepCount,
+              objectCount: entry.objectCount,
+              windowStart: entry.windowStart,
+              windowEnd: entry.windowEnd,
+              stepS: entry.stepS,
+              frame: entry.frame,
+            });
+            if (res?.excluded === true) {
+              nextExcludedIndices.add(routed.index);
+            } else {
+              nextExcludedIndices.delete(routed.index);
             }
+          } else if (typeof adapter.propagateGrid === "function") {
+            nextExcludedIndices.delete(routed.index);
+            const res = adapter.propagateGrid({
+              records: [routed.record],
+              routedRecords: [routed],
+              updatedIndices: [routed.index],
+              statesView,
+              bandsView,
+              firstStep: entry.firstStep,
+              stepCount: entry.stepCount,
+              objectCount: entry.objectCount,
+              windowStart: entry.windowStart,
+              windowEnd: entry.windowEnd,
+              stepS: entry.stepS,
+              frame: entry.frame,
+              propagatorId: routed.propagatorId,
+            });
+            if (Array.isArray(res?.excludedIndices)) {
+              for (const idx of res.excludedIndices) {
+                const n = normalizeNonNegativeInteger(idx, "excludedIndex");
+                if (n >= entry.objectCount) {
+                  throw new RangeError(
+                    `excludedIndex ${n} out of bounds for objectCount ${entry.objectCount}.`,
+                  );
+                }
+                nextExcludedIndices.add(n);
+              }
+            }
+          } else {
+            throw new Error(
+              `Propagator "${routed.propagatorId}" must implement propagateRecord() or propagateGrid().`,
+            );
           }
-        } else {
-          throw new Error(
-            `Propagator "${routed.propagatorId}" must implement propagateRecord() or propagateGrid().`,
-          );
         }
       }
-    }
 
-    for (const idx of excludedIndices) {
-      const n = normalizeNonNegativeInteger(idx, "excludedIndex");
-      if (n >= entry.objectCount) {
-        throw new RangeError(`excludedIndex ${n} out of bounds.`);
+      for (const n of explicitExcludedIndices) {
+        nextExcludedIndices.add(n);
       }
-      nextExcludedIndices.add(n);
+      for (const idx of nextExcludedIndices) {
+        markExcludedObjectRows(
+          statesView,
+          bandsView,
+          entry.stepCount,
+          entry.objectCount,
+          idx,
+        );
+      }
+    } catch (error) {
+      arena.bytes.set(arenaBackup);
+      throw error;
     }
     entry.excludedIndices = nextExcludedIndices;
-    for (const idx of entry.excludedIndices) {
-      markExcludedObjectRows(
-        statesView,
-        bandsView,
-        entry.stepCount,
-        entry.objectCount,
-        idx,
-      );
-    }
 
     if (entry.cacheKey !== nextCacheKey) {
       cacheByKey.delete(entry.cacheKey);

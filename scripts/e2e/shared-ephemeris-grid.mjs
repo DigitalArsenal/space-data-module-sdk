@@ -1428,6 +1428,133 @@ async function main() {
     });
     assert.equal(repopAfterDirectInv.cacheHit, false);
     assert.notEqual(repopAfterDirectInv.regionId, collidingOther.regionId);
+
+    // Atomic SharedArrayBuffer rollback on failed spliceEphemerisGrid (BUG-4).
+    host.registerPropagator("propagator/rollback-probe", {
+      supportedTheories: ["AP"],
+      propagateRecord({
+        record,
+        objectIndex,
+        statesView,
+        bandsView,
+        stepCount,
+        objectCount,
+      }) {
+        if (record.shouldThrow) {
+          throw new Error(`Simulated mid-splice failure on ${record.id}`);
+        }
+        for (let s = 0; s < stepCount; s += 1) {
+          const base = (s * objectCount + objectIndex) * SCR_GRID_STATE_FLOATS;
+          statesView[base] = record.val;
+          statesView[base + 1] = objectIndex + 1;
+          statesView[base + 2] = s;
+          statesView[base + 3] = 0.25;
+          statesView[base + 4] = 0;
+          statesView[base + 5] = 7.5;
+          statesView[base + 6] = 0;
+          statesView[base + 7] = 0;
+        }
+        const bOffset = objectIndex * SCR_RADIUS_BAND_FLOATS;
+        bandsView[bOffset] = record.val - 1;
+        bandsView[bOffset + 1] = record.val + 1;
+        return { excluded: Boolean(record.excluded) };
+      },
+    });
+    const rbPop = host.populateEphemerisGrid({
+      propagatorId: "propagator/rollback-probe",
+      catalogRevision: "rev-rb-1",
+      windowStart: 0,
+      windowEnd: 120,
+      stepS: 60,
+      records: [
+        { id: "RB0", declaredTheory: "AP", val: 100 },
+        { id: "RB1", declaredTheory: "AP", val: 200 },
+      ],
+    });
+    const rbLease = host.attachEphemerisGrid(rbPop.regionId, {
+      moduleId: "rollback-checker",
+    });
+    const preArenaBytes = Uint8Array.from(rbLease.arenaBytes);
+    const preStates = Array.from(rbLease.getStatesView());
+    const preBands = Array.from(rbLease.getBandsView());
+    const preGeneration = rbLease.generation;
+
+    const assertRollbackPreserved = (label) => {
+      assert.equal(rbLease.isCurrent(), true, `${label}: lease must remain current`);
+      assert.equal(rbLease.assertCurrent(), true, `${label}: assertCurrent must succeed`);
+      const info = host.getEphemerisGrid(rbPop.regionId);
+      assert.equal(info.generation, preGeneration, `${label}: generation must stay unchanged`);
+      assert.equal(info.descriptor.catalogRevision, "rev-rb-1", `${label}: catalogRevision must stay unchanged`);
+      assert.deepEqual(info.excludedIndices, [], `${label}: excludedIndices must stay unchanged`);
+      assert.equal(
+        Buffer.compare(Buffer.from(rbLease.arenaBytes), Buffer.from(preArenaBytes)),
+        0,
+        `${label}: SharedArrayBuffer arena bytes must remain bit-exact`,
+      );
+      assert.deepEqual(
+        Array.from(rbLease.getStatesView()),
+        preStates,
+        `${label}: statesView must match pre-splice snapshot`,
+      );
+      assert.deepEqual(
+        Array.from(rbLease.getBandsView()),
+        preBands,
+        `${label}: bandsView must match pre-splice snapshot`,
+      );
+    };
+
+    // 1. Explicit out-of-bounds excludedIndices parameter.
+    assert.throws(
+      () =>
+        host.spliceEphemerisGrid({
+          regionId: rbPop.regionId,
+          newCatalogRevision: "rev-rb-bad-explicit",
+          updatedIndices: [0],
+          records: [{ id: "RB0", declaredTheory: "AP", val: 6666 }],
+          excludedIndices: [99],
+        }),
+      RangeError,
+    );
+    assertRollbackPreserved("explicit-oob-excludedIndices");
+
+    // 2. populateFn writing new values then returning out-of-bounds excludedIndices.
+    assert.throws(
+      () =>
+        host.spliceEphemerisGrid({
+          regionId: rbPop.regionId,
+          newCatalogRevision: "rev-rb-bad-popfn",
+          updatedIndices: [0, 1],
+          records: [],
+          populateFn({ statesView, bandsView, stepCount, objectCount }) {
+            for (let s = 0; s < stepCount; s += 1) {
+              statesView[(s * objectCount + 0) * SCR_GRID_STATE_FLOATS] = 8888;
+              statesView[(s * objectCount + 1) * SCR_GRID_STATE_FLOATS] = 8889;
+            }
+            bandsView[0] = 8887;
+            bandsView[1] = 8889;
+            return { excludedIndices: [99] };
+          },
+        }),
+      RangeError,
+    );
+    assertRollbackPreserved("populateFn-oob-excludedIndices");
+
+    // 3. Mid-splice propagateRecord throwing on 2nd of 2 objects after writing 1st object.
+    assert.throws(
+      () =>
+        host.spliceEphemerisGrid({
+          regionId: rbPop.regionId,
+          newCatalogRevision: "rev-rb-mid-throw",
+          updatedIndices: [0, 1],
+          records: [
+            { id: "RB0", declaredTheory: "AP", val: 9999 },
+            { id: "RB1", declaredTheory: "AP", val: 1111, shouldThrow: true },
+          ],
+        }),
+      /Simulated mid-splice failure/,
+    );
+    assertRollbackPreserved("mid-splice-propagateRecord-throw");
+    rbLease.detach();
     console.log("runtime-host: populate-once cache, SAB sharing, read-only leases, declared-theory routing, splice & invalidation verified");
 
     // --- 4. Tri-Runtime Multi-Thread Parity (Browser, Native WasmEdge, Docker WasmEdge) -------
