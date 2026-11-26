@@ -10,9 +10,9 @@
     "clock",
     {
       "capability": "gpu_compute",
-      "scope": "webgpu.v1",
+      "scope": "webgpu.v2",
       "required": false,
-      "description": "Optional WebGPU/Dawn compute acceleration."
+      "description": "Optional WebGPU/Dawn compute acceleration with shared host-owned device and buffer handles."
     }
   ],
   "methods": [
