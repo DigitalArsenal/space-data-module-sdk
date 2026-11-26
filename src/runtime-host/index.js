@@ -7,6 +7,23 @@ import {
 } from "./runtimeRegionStore.js";
 import { createModuleRegistry } from "./moduleRegistry.js";
 import {
+  SDN_GPU_ABI_VERSION,
+  SDN_GPU_CAPABILITY_ID,
+  SDN_GPU_CAPABILITY_SCOPE_V1,
+  SDN_GPU_CAPABILITY_SCOPE_V2,
+  SDN_GPU_STATUS,
+  SDN_GPU_BACKEND,
+  SDN_GPU_BUFFER_ROLE,
+  SDN_GPU_SCALAR_FORMAT,
+  packF64Bits,
+  unpackF64Bits,
+  f64ArrayToU32Pairs,
+  u32PairsToF64Array,
+  detectWebGpu,
+  createSharedGpuContext,
+  createGpuCapabilityAdapter,
+} from "./gpuComputeContext.js";
+import {
   SCR_GRID_STATE_FLOATS,
   SCR_GRID_STATE_BYTES,
   SCR_RADIUS_BAND_FLOATS,
@@ -192,6 +209,21 @@ export {
   encodeScrGridFlatBuffer,
   decodeScrGridFlatBuffer,
   createSharedEphemerisGridManager,
+  SDN_GPU_ABI_VERSION,
+  SDN_GPU_CAPABILITY_ID,
+  SDN_GPU_CAPABILITY_SCOPE_V1,
+  SDN_GPU_CAPABILITY_SCOPE_V2,
+  SDN_GPU_STATUS,
+  SDN_GPU_BACKEND,
+  SDN_GPU_BUFFER_ROLE,
+  SDN_GPU_SCALAR_FORMAT,
+  packF64Bits,
+  unpackF64Bits,
+  f64ArrayToU32Pairs,
+  u32PairsToF64Array,
+  detectWebGpu,
+  createSharedGpuContext,
+  createGpuCapabilityAdapter,
 };
 // Flow-tier validating method registry (vendored sdn-flow semantics; distinct
 // from createModuleRegistry's module-lifecycle registry).

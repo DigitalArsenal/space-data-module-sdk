@@ -109,11 +109,11 @@
 <p>GPU-capable modules declare the coarse capability id:</p>
 <div class="codeblock"><div class="codeblock-head">json</div><pre><code>{
   &quot;capability&quot;: &quot;gpu_compute&quot;,
-  &quot;scope&quot;: &quot;webgpu.v1&quot;,
+  &quot;scope&quot;: &quot;webgpu.v2&quot;,
   &quot;required&quot;: false,
-  &quot;description&quot;: &quot;Optional WebGPU/Dawn compute acceleration.&quot;
+  &quot;description&quot;: &quot;Optional WebGPU/Dawn compute acceleration with shared host-owned device and buffer handles.&quot;
 }</code></pre></div>
-<p>Use <code>required: false</code> unless the module has no correct CPU path. A missing GPU adapter must degrade to the module's CPU implementation, not to an incomplete result.</p>
+<p>Use <code>scope: &quot;webgpu.v1&quot;</code> for single-module byte-returning dispatch or <code>scope: &quot;webgpu.v2&quot;</code> when exchanging opaque shared <code>GPUBuffer</code> handles on a host-owned <code>GPUDevice</code>. Use <code>required: false</code> unless the module has no correct CPU path. A missing GPU adapter must degrade to the module's CPU implementation, not to an incomplete result.</p>
 <p>The <code>gpu_compute</code> id is part of the SDK recommended capability vocabulary. The typed PLG <code>HOST_CAPABILITIES</code> enum cannot carry a dedicated GPU enum value until the canonical standards schema adds one. Until that SDS change lands, module manifests should use the string/object capability form above and avoid claiming a typed PLG host capability enum for GPU.</p>
 <h2 id="artifact-layout"><a class="anchor" href="#artifact-layout" aria-hidden="true">#</a>Artifact Layout</h2>
 <p>The canonical portable artifact remains:</p>
@@ -137,10 +137,17 @@ dist/wasmedge/gpu-host.{so,dylib,dll}</code></pre></div>
 <li>packed dispatch/result descriptors</li>
 </ul>
 <p>All multi-byte fields are little-endian in serialized buffers. Structs in the header are fixed-width and intentionally avoid owning pointers. Pointers are runtime-local implementation details and must not appear in durable manifests, publication metadata, or cross-process descriptors.</p>
-<h3 id="2-host-dispatch-abi"><a class="anchor" href="#2-host-dispatch-abi" aria-hidden="true">#</a>2. Host Dispatch ABI</h3>
-<p>The canonical operation is:</p>
-<div class="codeblock"><div class="codeblock-head">text</div><pre><code>gpu_compute.dispatch.v1</code></pre></div>
-<p>The host adapter receives:</p>
+<h3 id="2-host-dispatch-shared-buffer-abi-v2"><a class="anchor" href="#2-host-dispatch-shared-buffer-abi-v2" aria-hidden="true">#</a>2. Host Dispatch &amp; Shared Buffer ABI (v2)</h3>
+<p>The canonical operations are:</p>
+<div class="codeblock"><div class="codeblock-head">text</div><pre><code>gpu_compute.device.info.v1
+gpu_compute.buffer.create.v1
+gpu_compute.buffer.describe.v1
+gpu_compute.buffer.read.v1
+gpu_compute.buffer.release.v1
+gpu_compute.dispatch.v1</code></pre></div>
+<p>In ABI v2 (<code>SDN_GPU_ABI_VERSION = 2</code>, scope <code>webgpu.v2</code>), the host owns ONE shared <code>GPUDevice</code> (<code>createSharedGpuContext</code> in <code>space-data-module-sdk/runtime-host</code>) and assigns opaque integer buffer handles (<code>SdnGpuBufferHandle { handle_id, device_id, byte_length, role, scalar_format, record_stride, flags }</code>). Independent modules (for example a propagator such as <code>propagator/sdn-ap</code> and a screener such as <code>analysis/conjunction-assessment</code>) pass handles on the same <code>device_id</code> directly into compute bind groups without copying buffers back through CPU memory.</p>
+<p><code>detectWebGpu()</code> probes host GPU availability without throwing and returns <code>backendKind: &quot;cpu-fallback&quot;</code> when no WebGPU/Dawn adapter is present.</p>
+<p>The host dispatch adapter receives:</p>
 <ul>
 <li>an ABI version</li>
 <li>a stable kernel id</li>
@@ -174,7 +181,10 @@ dist/wasmedge/gpu-host.{so,dylib,dll}</code></pre></div>
 <p>WasmEdge deployments that need GPU acceleration should use a native host extension linked against Dawn. The native host implements the same <code>gpu_compute.dispatch.v1</code> operation and uses the same C/C++ layout header.</p>
 <p>The shared module artifact should still be loadable without that extension. A pure <code>[&quot;wasmedge&quot;]</code> artifact may choose a higher-capability native host profile, but a <code>[&quot;browser&quot;, &quot;wasmedge&quot;]</code> artifact must retain the portable fallback contract documented in <code>docs/browser-wasmedge-isomorphic.md</code>.</p>
 <h2 id="numerical-rules"><a class="anchor" href="#numerical-rules" aria-hidden="true">#</a>Numerical Rules</h2>
-<p>GPU kernels that need double-like position precision should use split high/low <code>f32</code> values:</p>
+<p>GPU kernels that need full 64-bit IEEE-754 precision (bit-for-bit identical to WASM <code>f64</code>, 0 ULP) MUST use <code>SDN_GPU_SCALAR_FORMAT_IEEE754_F64_U32X2</code> (<code>vec2&lt;u32&gt;</code> little-endian <code>(lo, hi)</code> pairs) with exact IEEE-754 round-to-nearest-even software arithmetic in WGSL:</p>
+<div class="codeblock"><div class="codeblock-head">c</div><pre><code>SdnGpuF64Bits x = sdn_gpu_pack_f64(value);
+double back = sdn_gpu_unpack_f64(x);</code></pre></div>
+<p>GPU broadphase kernels that only need ~48-bit position precision may continue to use split high/low <code>f32</code> values (<code>SDN_GPU_SCALAR_FORMAT_SPLIT_F64</code>):</p>
 <div class="codeblock"><div class="codeblock-head">c</div><pre><code>SdnGpuSplitF64 x = sdn_gpu_split_f64(x_km);</code></pre></div>
 <p>For orbital screening, store position components in kilometers unless a module contract states otherwise. The high component is the nearest <code>f32</code>; the low component is the residual:</p>
 <div class="codeblock"><div class="codeblock-head">text</div><pre><code>hi = f32(value)
@@ -202,7 +212,7 @@ lo = f32(value - f64(hi))</code></pre></div>
 <li><a class="depth-2" href="#artifact-layout">Artifact Layout</a></li>
 <li><a class="depth-2" href="#abi-layers">ABI Layers</a></li>
 <li><a class="depth-3" href="#1-data-layout-abi">1. Data Layout ABI</a></li>
-<li><a class="depth-3" href="#2-host-dispatch-abi">2. Host Dispatch ABI</a></li>
+<li><a class="depth-3" href="#2-host-dispatch-shared-buffer-abi-v2">2. Host Dispatch &amp; Shared Buffer ABI (v2)</a></li>
 <li><a class="depth-3" href="#3-module-level-api">3. Module-Level API</a></li>
 <li><a class="depth-2" href="#browser-backend">Browser Backend</a></li>
 <li><a class="depth-2" href="#wasmedge-backend">WasmEdge Backend</a></li>

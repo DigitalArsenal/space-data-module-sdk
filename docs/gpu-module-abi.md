@@ -25,15 +25,13 @@ GPU-capable modules declare the coarse capability id:
 ```json
 {
   "capability": "gpu_compute",
-  "scope": "webgpu.v1",
+  "scope": "webgpu.v2",
   "required": false,
-  "description": "Optional WebGPU/Dawn compute acceleration."
+  "description": "Optional WebGPU/Dawn compute acceleration with shared host-owned device and buffer handles."
 }
 ```
 
-Use `required: false` unless the module has no correct CPU path. A missing GPU
-adapter must degrade to the module's CPU implementation, not to an incomplete
-result.
+Use `scope: "webgpu.v1"` for single-module byte-returning dispatch or `scope: "webgpu.v2"` when exchanging opaque shared `GPUBuffer` handles on a host-owned `GPUDevice`. Use `required: false` unless the module has no correct CPU path. A missing GPU adapter must degrade to the module's CPU implementation, not to an incomplete result.
 
 The `gpu_compute` id is part of the SDK recommended capability vocabulary. The
 typed PLG `HOST_CAPABILITIES` enum cannot carry a dedicated GPU enum value
@@ -86,15 +84,31 @@ header are fixed-width and intentionally avoid owning pointers. Pointers are
 runtime-local implementation details and must not appear in durable manifests,
 publication metadata, or cross-process descriptors.
 
-### 2. Host Dispatch ABI
+### 2. Host Dispatch & Shared Buffer ABI (v2)
 
-The canonical operation is:
+The canonical operations are:
 
 ```text
+gpu_compute.device.info.v1
+gpu_compute.buffer.create.v1
+gpu_compute.buffer.describe.v1
+gpu_compute.buffer.read.v1
+gpu_compute.buffer.release.v1
 gpu_compute.dispatch.v1
 ```
 
-The host adapter receives:
+In ABI v2 (`SDN_GPU_ABI_VERSION = 2`, scope `webgpu.v2`), the host owns ONE shared
+`GPUDevice` (`createSharedGpuContext` in `space-data-module-sdk/runtime-host`) and
+assigns opaque integer buffer handles (`SdnGpuBufferHandle { handle_id, device_id,
+byte_length, role, scalar_format, record_stride, flags }`). Independent modules
+(for example a propagator such as `propagator/sdn-ap` and a screener such as
+`analysis/conjunction-assessment`) pass handles on the same `device_id` directly
+into compute bind groups without copying buffers back through CPU memory.
+
+`detectWebGpu()` probes host GPU availability without throwing and returns
+`backendKind: "cpu-fallback"` when no WebGPU/Dawn adapter is present.
+
+The host dispatch adapter receives:
 
 - an ABI version
 - a stable kernel id
@@ -153,8 +167,18 @@ contract documented in `docs/browser-wasmedge-isomorphic.md`.
 
 ## Numerical Rules
 
-GPU kernels that need double-like position precision should use split high/low
-`f32` values:
+GPU kernels that need full 64-bit IEEE-754 precision (bit-for-bit identical to
+WASM `f64`, 0 ULP) MUST use `SDN_GPU_SCALAR_FORMAT_IEEE754_F64_U32X2` (`vec2<u32>`
+little-endian `(lo, hi)` pairs) with exact IEEE-754 round-to-nearest-even software
+arithmetic in WGSL:
+
+```c
+SdnGpuF64Bits x = sdn_gpu_pack_f64(value);
+double back = sdn_gpu_unpack_f64(x);
+```
+
+GPU broadphase kernels that only need ~48-bit position precision may continue to
+use split high/low `f32` values (`SDN_GPU_SCALAR_FORMAT_SPLIT_F64`):
 
 ```c
 SdnGpuSplitF64 x = sdn_gpu_split_f64(x_km);
